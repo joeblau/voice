@@ -95,4 +95,8 @@ public struct FeedingTranscriptRecorder: TurnTranscriptRecording {
     public func flush() async throws {
         try await base.flush()
     }
+
+    public func repliesDeferredChanged(_ deferred: Bool, in conversation: ConversationID) async {
+        await base.repliesDeferredChanged(deferred, in: conversation)
+    }
 }

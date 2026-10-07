@@ -110,7 +110,9 @@ private struct ChatFinishedRows: View {
             // another one is on screen they don't apply.
             recorded: isLiveConversation ? model.recorded : [:],
             excluding: isLiveConversation ? model.liveAgentIDs : [],
-            interrupted: isLiveConversation ? model.interruptedAgentIDs : [])
+            interrupted: isLiveConversation ? model.interruptedAgentIDs : [],
+            waiting: isLiveConversation ? model.waitingUserIDs : [],
+            notSent: isLiveConversation ? model.unsentUserIDs : [])
         ForEach(rows) { row in
             ChatRowView(row: row)
         }
@@ -147,17 +149,22 @@ struct ChatRowView: View {
     var body: some View {
         // The element, and what the long-press lifts, is the text itself;
         // the frames around it only place it.
-        text
-            .multilineTextAlignment(textAlignment)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(speakerLabel)
-            .accessibilityValue(accessibilityValue)
-            .accessibilityIdentifier(accessibilityIdentifier)
-            .modifier(ChatRowMenu(row: row))
-            .containerRelativeFrame(.horizontal, alignment: frameAlignment) { length, _ in
-                row.role == .system ? length : length * ChatTranscriptLayout.maxWidthFraction
+        VStack(alignment: .trailing, spacing: 2) {
+            text
+                .multilineTextAlignment(textAlignment)
+            if row.role == .user, row.delivery != .sent {
+                ChatDeliveryNote(delivery: row.delivery)
             }
-            .frame(maxWidth: .infinity, alignment: frameAlignment)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(speakerLabel)
+        .accessibilityValue(accessibilityValue)
+        .accessibilityIdentifier(accessibilityIdentifier)
+        .modifier(ChatRowMenu(row: row))
+        .containerRelativeFrame(.horizontal, alignment: frameAlignment) { length, _ in
+            row.role == .system ? length : length * ChatTranscriptLayout.maxWidthFraction
+        }
+        .frame(maxWidth: .infinity, alignment: frameAlignment)
     }
 
     @ViewBuilder
@@ -210,9 +217,11 @@ struct ChatRowView: View {
     }
 
     private var accessibilityValue: Text {
-        switch (row.kind, row.isInterrupted) {
-        case (.partial, _): Text("\(row.text), still speaking")
-        case (_, true): Text("\(row.text), interrupted")
+        switch (row.kind, row.isInterrupted, row.delivery) {
+        case (.partial, _, _): Text("\(row.text), still speaking")
+        case (_, true, _): Text("\(row.text), interrupted")
+        case (_, _, .waiting): Text("\(row.text), waiting to send")
+        case (_, _, .notSent): Text("\(row.text), not sent")
         default: Text(verbatim: row.text)
         }
     }
@@ -262,6 +271,26 @@ private struct ChatRowText: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+/// Under a user row that hasn't reached Grok (#80): "Waiting to send" while
+/// offline, "Not sent" once discarded. Part of the row's accessibility value,
+/// so hidden from VoiceOver here.
+private struct ChatDeliveryNote: View {
+    let delivery: ChatRow.Delivery
+
+    var body: some View {
+        Group {
+            switch delivery {
+            case .waiting: Label("Waiting to send", systemImage: "clock")
+            case .notSent: Label("Not sent", systemImage: "xmark.circle")
+            case .sent: EmptyView()
+            }
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
     }
 }
 

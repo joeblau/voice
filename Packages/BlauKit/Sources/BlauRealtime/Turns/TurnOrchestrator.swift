@@ -105,6 +105,12 @@ public actor TurnOrchestrator: RealtimeService {
         public var responseCreateHoldLimit: Duration
         /// Session renewal, resumption and reseeding (#39).
         public var continuity: SessionContinuityConfiguration
+        /// After the client gives up reconnecting (its retries ran out on a
+        /// failure that may pass, such as an xAI outage), the orchestrator
+        /// tries again this often while the network is reachable (#80).
+        /// `nil` waits for ``TurnOrchestrator/connect()`` or for the network
+        /// to come back.
+        public var retryAfterGivingUp: Duration?
 
         public init(
             mergeWindow: Duration = .milliseconds(400),
@@ -113,7 +119,8 @@ public actor TurnOrchestrator: RealtimeService {
             outputSampleRate: Int = 24_000,
             playbackDrainSlack: Duration = .seconds(2),
             responseCreateHoldLimit: Duration = .seconds(2),
-            continuity: SessionContinuityConfiguration = .standard
+            continuity: SessionContinuityConfiguration = .standard,
+            retryAfterGivingUp: Duration? = .seconds(30)
         ) {
             self.mergeWindow = mergeWindow
             self.responseTimeout = responseTimeout
@@ -122,6 +129,7 @@ public actor TurnOrchestrator: RealtimeService {
             self.playbackDrainSlack = playbackDrainSlack
             self.responseCreateHoldLimit = responseCreateHoldLimit
             self.continuity = continuity
+            self.retryAfterGivingUp = retryAfterGivingUp
         }
 
         public static let standard = Configuration()
@@ -211,8 +219,18 @@ public actor TurnOrchestrator: RealtimeService {
     private var truncatedItems: [String: AgentItem] = [:]
     /// Stored agent utterances cut short by the user, this conversation.
     private var interruptedAgentUtterances: Set<UUID> = []
+    /// User utterances discarded while waiting for the connection.
+    var discardedUtterances: Set<UUID> = []
     private var bargeIns = 0
     private var lastBargeIn: BargeInRecord?
+
+    // Offline (#80)
+    /// The network as last reported by ``networkReachabilityChanged(_:)``.
+    private var network: NetworkReachability = .unknown
+    /// Whether the transcript was last told that replies are deferred.
+    private var repliesDeferred = false
+    /// Tries the connection again after the client gave up.
+    private var retryTask: Task<Void, Never>?
 
     // Continuity (#39): see TurnOrchestrator+Continuity.swift
     /// The conversation as stored, for reseeding a new server session.
@@ -306,6 +324,7 @@ public actor TurnOrchestrator: RealtimeService {
         drainTask?.cancel()
         responseTimeoutTask?.cancel()
         holdTask?.cancel()
+        retryTask?.cancel()
         rolloverTask?.cancel()
         rolloverDeadlineTask?.cancel()
         tokenRefreshTask?.cancel()
@@ -431,6 +450,8 @@ public actor TurnOrchestrator: RealtimeService {
         queued.removeAll()
         conversationID = nil
         userPartial = nil
+        repliesDeferred = false
+        cancelRetry()
         cancelTimers()
         cancelContinuityTasks()
         settingsTask?.cancel()
@@ -541,6 +562,7 @@ public actor TurnOrchestrator: RealtimeService {
         if conversationID == nil {
             try await start()
         } else {
+            cancelRetry()
             await forgetStaleServerConversation()
             do {
                 try await client.connect()
@@ -567,6 +589,122 @@ public actor TurnOrchestrator: RealtimeService {
             } catch {
                 Log.realtime.error("Couldn't flush the transcript: \(String(describing: error), privacy: .public)")
             }
+        }
+    }
+
+    // MARK: Offline (#80)
+
+    /// Tells the orchestrator whether the device has an internet connection
+    /// (the app's `NWPathMonitor`).
+    ///
+    /// While unreachable, the snapshot reports ``ConversationConnectivity/offline``
+    /// and what the user says is stored and queued as usual. When the
+    /// network comes back and the client had given up reconnecting, the
+    /// orchestrator reconnects at once, so the queued utterances go out
+    /// (one turn, after the session is resumed or reseeded) without waiting
+    /// for a retry timer or a tap.
+    public func networkReachabilityChanged(_ reachable: Bool) {
+        let previous = network
+        network = reachable ? .reachable : .unreachable
+        guard network != previous else { return }
+        Log.realtime.notice("Network \(reachable ? "reachable" : "unreachable", privacy: .public)")
+        if reachable {
+            if case .disconnected(let error?) = connection, conversationID != nil, error != .cancelled,
+                !error.requiresUserAction
+            {
+                Log.realtime.notice("Network is back; reconnecting")
+                reconnectNow()
+            }
+        } else {
+            // Nothing to retry until the network is back.
+            cancelRetry()
+        }
+        publish()
+    }
+
+    /// Follows a stream of reachability reports (``networkReachabilityChanged(_:)``)
+    /// until it finishes or the task is cancelled.
+    public func follow(network reachability: AsyncStream<Bool>) async {
+        for await reachable in reachability {
+            networkReachabilityChanged(reachable)
+        }
+    }
+
+    /// Drops the utterances waiting for the connection: the user chose not
+    /// to wait for Grok's answer. They stay in the transcript (they were
+    /// said) and are marked in ``TurnSnapshot/discardedUtteranceIDs``; Grok
+    /// never sees them, so a reconnect doesn't answer them, and a later
+    /// reseed (which only sends stored exchanges) leaves them out too.
+    ///
+    /// - Returns: How many utterances were discarded.
+    @discardableResult
+    public func discardQueued() -> Int {
+        guard conversationID != nil, !queued.isEmpty else { return 0 }
+        let discarded = queued
+        queued.removeAll()
+        discardedUtterances.formUnion(discarded.map(\.user.id))
+        Log.realtime.notice("Discarded \(discarded.count, privacy: .public) queued utterance(s)")
+        publish()
+        return discarded.count
+    }
+
+    /// Reconnects in the background (``connect()``), unless a connection is
+    /// already being opened.
+    private func reconnectNow() {
+        cancelRetry()
+        guard conversationID != nil else { return }
+        connectTask?.cancel()
+        connectTask = Task { [weak self] in
+            try? await self?.connect()
+        }
+    }
+
+    /// The client gave up: try again later if the failure may pass by
+    /// itself and the network is there.
+    private func scheduleRetry(after error: RealtimeClientError) {
+        cancelRetry()
+        guard let interval = configuration.retryAfterGivingUp, conversationID != nil, error.isRetryable,
+            network != .unreachable
+        else { return }
+        Log.realtime.notice(
+            "Trying the connection again in \(interval.timeInterval, format: .fixed(precision: 0), privacy: .public) s"
+        )
+        let clock = clock
+        retryTask = Task { [weak self] in
+            do {
+                try await clock.sleep(for: interval)
+            } catch {
+                return
+            }
+            await self?.retryFired()
+        }
+    }
+
+    private func retryFired() {
+        retryTask = nil
+        guard conversationID != nil, case .disconnected(_?) = connection, network != .unreachable else { return }
+        Log.realtime.notice("Retrying the realtime connection")
+        reconnectNow()
+    }
+
+    private func cancelRetry() {
+        retryTask?.cancel()
+        retryTask = nil
+    }
+
+    /// Tells the transcript when replies start or stop waiting for the
+    /// connection, in order with the utterances it records, so the topic
+    /// lifecycle can keep segmenting what the user says while no replies
+    /// come (#80).
+    private func updateReplyDeferral(_ snapshot: TurnSnapshot) {
+        guard let id = conversationID else { return }
+        let deferred = snapshot.connectivity.defersReplies
+        guard deferred != repliesDeferred else { return }
+        repliesDeferred = deferred
+        Log.realtime.notice("Replies \(deferred ? "deferred" : "resumed", privacy: .public)")
+        let transcript = transcript
+        recorder.enqueue {
+            await transcript.repliesDeferredChanged(deferred, in: id)
         }
     }
 
@@ -861,6 +999,7 @@ public actor TurnOrchestrator: RealtimeService {
         }
         switch newState {
         case .connected:
+            cancelRetry()
             let session = epoch.advance()
             isSessionReady = false
             // A new connection: nothing sent on the old one will answer.
@@ -896,6 +1035,7 @@ public actor TurnOrchestrator: RealtimeService {
             sessionLost(newState)
             if case .disconnected(let error?) = newState, !retryFreshAfterRefusedResume(error) {
                 fail(TurnFailure(connectionError: error))
+                scheduleRetry(after: error)
             }
         }
         publish()
@@ -1071,7 +1211,7 @@ public actor TurnOrchestrator: RealtimeService {
         endIntervals(of: turn, message: "rejected")
         current = nil
         cancelTimers()
-        fail(TurnFailure(kind: .response, message: error.message ?? "Grok couldn't answer"))
+        fail(TurnFailure(kind: .response, message: error.message ?? "Grok couldn't answer", issue: error.issue))
     }
 
     private func audioDelta(_ delta: RealtimeServerEvent.AudioDelta) {
@@ -1148,12 +1288,16 @@ public actor TurnOrchestrator: RealtimeService {
             // Its `response.created` never came: the turn's slot is answered.
             awaitingResponse.removeAll { $0.turn == turn.number }
         }
-        finishResponse(of: turn, status: response.status?.rawValue ?? "completed", output: response.output ?? [])
+        finishResponse(
+            of: turn, status: response.status?.rawValue ?? "completed", output: response.output ?? [],
+            failure: RealtimeErrorDetail(statusDetails: response.statusDetails))
     }
 
     /// Ends `turn`'s response: finishes its audio, writes the agent
     /// utterances, ends the signposts and waits for playback to drain.
-    private func finishResponse(of turn: Turn, status: String, output: [RealtimeItem]) {
+    private func finishResponse(
+        of turn: Turn, status: String, output: [RealtimeItem], failure: RealtimeErrorDetail? = nil
+    ) {
         var turn = turn
         // Fill in transcripts the deltas didn't deliver.
         for case .message(let message) in output where message.role == .assistant {
@@ -1187,7 +1331,7 @@ public actor TurnOrchestrator: RealtimeService {
 
         if status == RealtimeResponseStatus.failed.rawValue {
             current = nil
-            fail(TurnFailure(kind: .response, message: "Grok couldn't answer"))
+            fail(TurnFailure(kind: .response, message: "Grok couldn't answer", issue: failure?.issue))
             return
         }
         guard let firstAudioAt = turn.firstAudioAt else {
@@ -1405,7 +1549,7 @@ public actor TurnOrchestrator: RealtimeService {
         // slot (marked abandoned): the next turn's `response.create` waits
         // for it, up to ``Configuration/responseCreateHoldLimit``.
         abandon(turn, reason: .timedOut)
-        fail(TurnFailure(kind: .response, message: "Grok didn't respond"))
+        fail(TurnFailure(kind: .response, message: "Grok didn't respond", issue: UserFacingIssue(.replyTimedOut)))
     }
 
     func cancelTimers() {
@@ -1494,7 +1638,9 @@ public actor TurnOrchestrator: RealtimeService {
     }
 
     func publish() {
-        broadcaster.publish(makeSnapshot())
+        let snapshot = makeSnapshot()
+        updateReplyDeferral(snapshot)
+        broadcaster.publish(snapshot)
     }
 
     private func makeSnapshot() -> TurnSnapshot {
@@ -1505,6 +1651,9 @@ public actor TurnOrchestrator: RealtimeService {
             userPartial: userPartial,
             agentText: current?.agentItems.map(\.transcript).joined(separator: " ") ?? "",
             queuedUtterances: queued.count,
+            queuedUtteranceIDs: queued.map(\.user.id),
+            discardedUtteranceIDs: discardedUtterances,
+            network: network,
             completedTurns: completedTurns,
             latency: latency,
             usage: usage,
@@ -1532,6 +1681,8 @@ public actor TurnOrchestrator: RealtimeService {
         rowOfFinal.removeAll()
         truncatedItems.removeAll()
         interruptedAgentUtterances.removeAll()
+        discardedUtterances.removeAll()
+        repliesDeferred = false
         bargeIns = 0
         lastBargeIn = nil
         usage = RealtimeUsageTotals()
@@ -1697,7 +1848,9 @@ extension TurnOrchestrator {
 
 extension TurnFailure {
     init(connectionError error: RealtimeClientError) {
-        self.init(kind: .connection, message: error.description, requiresUserAction: error.requiresUserAction)
+        self.init(
+            kind: .connection, message: error.description, requiresUserAction: error.requiresUserAction,
+            issue: error.issue)
     }
 }
 

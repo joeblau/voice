@@ -30,10 +30,23 @@ public struct ChatRow: Identifiable, Hashable, Sendable {
     /// An agent reply the user cut off: only what was heard is shown, with
     /// a marker.
     public var isInterrupted: Bool
+    /// Whether a user utterance reached Grok (#80).
+    public var delivery: Delivery
+
+    /// Whether a user utterance has gone to Grok.
+    public enum Delivery: Hashable, Sendable {
+        /// Sent (or not the user's, or from an earlier session).
+        case sent
+        /// Stored and waiting for the connection: Grok answers once it is
+        /// back.
+        case waiting
+        /// The user discarded it while it waited: stored, never sent.
+        case notSent
+    }
 
     public init(
         id: UUID, role: UtteranceRole, text: String, startedAt: Date, kind: Kind = .final,
-        isInterrupted: Bool = false
+        isInterrupted: Bool = false, delivery: Delivery = .sent
     ) {
         self.id = id
         self.role = role
@@ -41,6 +54,7 @@ public struct ChatRow: Identifiable, Hashable, Sendable {
         self.startedAt = startedAt
         self.kind = kind
         self.isInterrupted = isInterrupted
+        self.delivery = delivery
     }
 
     /// The row id of the user's speech in progress. There is at most one.
@@ -67,11 +81,18 @@ public enum ChatTranscript {
     /// utterance started before the reply ended
     /// (``isInterrupted(_:before:)``), which also holds after a relaunch and
     /// on other devices.
+    ///
+    /// A user row in `waiting` (queued for the connection,
+    /// `TurnSnapshot.queuedUtteranceIDs`) or `notSent` (discarded,
+    /// `TurnSnapshot.discardedUtteranceIDs`) carries that ``ChatRow/delivery``
+    /// (#80).
     public static func rows(
         stored: [ChatLine],
         recorded: [UUID: ChatLine] = [:],
         excluding excluded: Set<UUID> = [],
-        interrupted: Set<UUID> = []
+        interrupted: Set<UUID> = [],
+        waiting: Set<UUID> = [],
+        notSent: Set<UUID> = []
     ) -> [ChatRow] {
         var lines: [ChatLine]
         if recorded.isEmpty {
@@ -94,7 +115,8 @@ public enum ChatTranscript {
                     ChatRow(
                         id: line.id, role: line.role, text: line.text, startedAt: line.startedAt,
                         isInterrupted: line.role == .agent
-                            && (interrupted.contains(line.id) || isInterrupted(line, before: nextUser))))
+                            && (interrupted.contains(line.id) || isInterrupted(line, before: nextUser)),
+                        delivery: delivery(of: line, waiting: waiting, notSent: notSent)))
             }
             if line.role == .user {
                 nextUser = line
@@ -150,6 +172,13 @@ public enum ChatTranscript {
             end -= 1
         }
         return String(characters[..<end])
+    }
+
+    private static func delivery(of line: ChatLine, waiting: Set<UUID>, notSent: Set<UUID>) -> ChatRow.Delivery {
+        guard line.role == .user else { return .sent }
+        if waiting.contains(line.id) { return .waiting }
+        if notSent.contains(line.id) { return .notSent }
+        return .sent
     }
 
     /// The order lines are shown in: by start time; at the same instant

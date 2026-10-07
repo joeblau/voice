@@ -68,4 +68,12 @@ struct TopicTrackingTranscript: TurnTranscriptRecording {
     func flush() async throws {
         try await base.flush()
     }
+
+    /// While Grok's replies wait for the connection (#80), the lifecycle
+    /// scores each of the user's utterances on its own, so topics keep
+    /// segmenting offline.
+    func repliesDeferredChanged(_ deferred: Bool, in conversation: ConversationID) async {
+        await base.repliesDeferredChanged(deferred, in: conversation)
+        await topics.setRepliesDeferred(deferred, in: conversation)
+    }
 }

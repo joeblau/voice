@@ -212,7 +212,9 @@ extension TurnOrchestrator {
         let limits = configuration.continuity.reseed
         // A queued turn whose items a resumption already delivered has no
         // texts left, so its words come from the history instead.
-        let excluded = Set(queued.filter { !$0.texts.isEmpty }.map(\.user.id))
+        // Discarded utterances (#80) were never answered and the user chose
+        // not to ask again: Grok doesn't get them either.
+        let excluded = Set(queued.filter { !$0.texts.isEmpty }.map(\.user.id)).union(discardedUtterances)
         let entries = history.recent(
             exchanges: limits.maximumExchanges, characters: limits.maximumCharacters, excluding: excluded)
         continuityCounts.reseeds += 1

@@ -68,11 +68,16 @@ public struct TurnFailure: Error, Sendable, Hashable, CustomStringConvertible {
     /// Whether the user has to do something (add or fix their xAI key)
     /// before trying again.
     public var requiresUserAction: Bool
+    /// What to tell the user and what they can do (the error catalog, #80).
+    public var issue: UserFacingIssue
 
-    public init(kind: Kind, message: String, requiresUserAction: Bool = false) {
+    /// - Parameter issue: The catalog entry. By default the one for `kind`
+    ///   (a failed connection, a failed reply, a failed transcript write).
+    public init(kind: Kind, message: String, requiresUserAction: Bool = false, issue: UserFacingIssue? = nil) {
         self.kind = kind
         self.message = message
         self.requiresUserAction = requiresUserAction
+        self.issue = issue ?? kind.defaultIssue
     }
 
     public var description: String { "\(kind.rawValue): \(message)" }
@@ -121,6 +126,15 @@ public struct TurnSnapshot: Sendable, Equatable {
     public var agentText: String
     /// Committed utterances waiting for the connection to come back.
     public var queuedUtterances: Int
+    /// The stored user utterances (`Utterance.id`) waiting to be sent, in
+    /// order, so the transcript can mark them "waiting to send" (#80).
+    public var queuedUtteranceIDs: [UUID]
+    /// The user utterances discarded while waiting (``TurnOrchestrator/discardQueued()``)
+    /// this conversation: stored, but never sent to Grok.
+    public var discardedUtteranceIDs: Set<UUID>
+    /// Whether the device has an internet connection, as last reported
+    /// (``TurnOrchestrator/networkReachabilityChanged(_:)``).
+    public var network: NetworkReachability
     /// Turns that got a complete reply.
     public var completedTurns: Int
     /// End of utterance → first audio, and whole-turn durations.
@@ -152,6 +166,9 @@ public struct TurnSnapshot: Sendable, Equatable {
         userPartial: String? = nil,
         agentText: String = "",
         queuedUtterances: Int = 0,
+        queuedUtteranceIDs: [UUID] = [],
+        discardedUtteranceIDs: Set<UUID> = [],
+        network: NetworkReachability = .unknown,
         completedTurns: Int = 0,
         latency: TurnLatencyStatistics = TurnLatencyStatistics(),
         usage: RealtimeUsageTotals = RealtimeUsageTotals(),
@@ -167,6 +184,9 @@ public struct TurnSnapshot: Sendable, Equatable {
         self.userPartial = userPartial
         self.agentText = agentText
         self.queuedUtterances = queuedUtterances
+        self.queuedUtteranceIDs = queuedUtteranceIDs
+        self.discardedUtteranceIDs = discardedUtteranceIDs
+        self.network = network
         self.completedTurns = completedTurns
         self.latency = latency
         self.usage = usage

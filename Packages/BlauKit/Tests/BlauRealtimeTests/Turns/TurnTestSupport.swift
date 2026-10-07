@@ -106,6 +106,7 @@ final class RecordingTranscript: TurnTranscriptRecording {
         case record(Utterance)
         case finish(ConversationID)
         case flush
+        case repliesDeferred(Bool)
     }
 
     private let state = Mutex<[Call]>([])
@@ -145,6 +146,17 @@ final class RecordingTranscript: TurnTranscriptRecording {
     func flush() async throws {
         state.withLock { $0.append(.flush) }
     }
+
+    func repliesDeferredChanged(_ deferred: Bool, in conversation: ConversationID) async {
+        state.withLock { $0.append(.repliesDeferred(deferred)) }
+    }
+
+    /// The deferral changes reported, in order.
+    var deferrals: [Bool] {
+        calls.compactMap { call in
+            if case .repliesDeferred(let deferred) = call { deferred } else { nil }
+        }
+    }
 }
 
 // MARK: - Harness
@@ -172,19 +184,26 @@ struct TurnHarness {
     ///   at 110 minutes, #39) run. Off by default: they are always asleep on
     ///   the manual clock, which would confuse tests that wait for "the"
     ///   sleeper (a response timeout, a reconnect backoff).
+    /// - Parameter retriesAfterGivingUp: Whether the orchestrator tries the
+    ///   connection again after the client gave up (#80). Off by default for
+    ///   the same reason.
     init(
         connector: FakeConnector = FakeConnector(),
         transcript: (any TurnTranscriptRecording)? = nil,
         configuration: TurnOrchestrator.Configuration = .standard,
         reseedContext: any RealtimeReseedContextProviding = NoRealtimeReseedContext(),
         tokens: FakeTokenProvider = FakeTokenProvider(),
-        sessionTimers: Bool = false
+        sessionTimers: Bool = false,
+        retriesAfterGivingUp: Bool = false
     ) {
         self.connector = connector
         self.tokens = tokens
         var configuration = configuration
         if !sessionTimers {
             configuration.continuity.rolloverAfter = nil
+        }
+        if !retriesAfterGivingUp {
+            configuration.retryAfterGivingUp = nil
         }
         client = RealtimeClient(
             endpoint: .realtimeTest, tokenProvider: tokens, connector: connector, clock: clock,
