@@ -1,59 +1,106 @@
+import BlauCore
 import BlauRealtime
 import BlauTranscription
 import SwiftUI
 
-/// Top-level view hosted by the app's window: the (still empty) main screen
-/// in a navigation stack. The main screen scaffold (#40) fills it in.
+/// Top-level view hosted by the app's window: the main screen (#40).
 ///
-/// It already offers the two xAI key entry points (#33): Settings (the gear,
-/// bottom-left) and, while no usable key is stored (none, or an unreadable
-/// one), the onboarding step. Until onboarding (#44) exists it also shows the
-/// speech-model setup card while the required models aren't ready; Settings
-/// links to the speech-model settings. DEBUG builds add a button to the top
-/// bar that opens the debug menu (feature flags, environment, lifecycle). UI
-/// and launch tests anchor on `accessibilityIdentifier`.
+/// The layout is fixed by the product: Settings bottom-left, Record
+/// bottom-right. Both live in the navigation stack's bottom bar
+/// (`ToolbarItem(placement: .bottomBar)`) with a flexible `ToolbarSpacer`
+/// between them, so the system lays them out, gives them Liquid Glass, keeps
+/// them clear of the home indicator on every iPhone size and in landscape, and
+/// lets the conversation scroll under the bar. DEBUG builds add the debug menu
+/// button to the top bar.
+///
+/// It also hosts the xAI key entry points (#33): Settings and, while no usable
+/// key is stored (none, or an unreadable one), the onboarding step. UI and
+/// launch tests anchor on the identifiers in `MainScreenAccessibility`.
 struct RootView: View {
     nonisolated static let accessibilityIdentifier = "blau.root"
 
+    @Environment(AppEnvironment.self) private var environment
+
+    var body: some View {
+        MainScreenScaffold(audio: environment.audio)
+    }
+}
+
+/// The navigation stack, its toolbars and the sheets they present. Separate
+/// from `RootView` so it can own the `RecordingController` built from the
+/// environment's audio service.
+struct MainScreenScaffold: View {
     @Environment(ModelManager.self) private var models
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var recording: RecordingController
     @State private var isShowingSettings = false
     @State private var isShowingKeyOnboarding = false
+
+    init(audio: any AudioService) {
+        // Evaluated on every init but only kept the first time; building a
+        // controller has no side effects.
+        _recording = State(initialValue: RecordingController(audio: audio))
+    }
 
     var body: some View {
         NavigationStack {
             MainScreen(onConnectAccount: { isShowingKeyOnboarding = true })
-                .overlay(alignment: .bottomLeading) {
-                    Button {
-                        isShowingSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                            .font(.title2)
-                            .padding()
-                    }
-                    .accessibilityLabel("Settings")
-                    .accessibilityIdentifier(XAIKeyIdentifiers.openSettings)
-                }
                 .toolbar {
                     #if DEBUG
                         ToolbarItem(placement: .topBarTrailing) {
                             DebugMenuButton()
                         }
                     #endif
+                    ToolbarItem(placement: .bottomBar) {
+                        SettingsButton { isShowingSettings = true }
+                    }
+                    ToolbarSpacer(.flexible, placement: .bottomBar)
+                    ToolbarItem(placement: .bottomBar) {
+                        RecordButton(phase: recording.phase) {
+                            Task { await recording.toggle() }
+                        }
+                    }
                 }
                 .voiceLoopHUD()
+                // Inside the stack, after the toolbar, so the card is inset
+                // above the bottom bar instead of drawn over Settings and
+                // Record while the speech models download.
+                .safeAreaInset(edge: .bottom) {
+                    // Hidden while checking, so an offline launch with every
+                    // model installed doesn't flash the card.
+                    if !models.isReady && models.setupStatus.phase != .checking {
+                        SpeechModelSetupView()
+                            .padding()
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .animation(.default, value: models.isReady)
         }
-        // Outside the gear's overlay, so the card takes its own space below
-        // the content and the gear sits above it instead of under it.
-        .safeAreaInset(edge: .bottom) {
-            // Hidden while checking, so an offline launch with every
-            // model installed doesn't flash the card.
-            if !models.isReady && models.setupStatus.phase != .checking {
-                SpeechModelSetupView()
-                    .padding()
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+        .task {
+            await recording.synchronize()
+        }
+        // Capture can stop without the button: the Live Activity's Stop
+        // (`AppEnvironment.stopConversation()`) or an audio interruption
+        // (`AudioSessionKeeper` is then not `.live`). Both happen while Blau is
+        // in the background or inactive, so re-read the audio on every return
+        // to the foreground. Observing the keeper's status directly is #41.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                Task { await recording.synchronize() }
             }
         }
-        .animation(.default, value: models.isReady)
+        .alert(
+            recording.failure?.title ?? "",
+            isPresented: Binding(
+                get: { recording.failure != nil },
+                set: { if !$0 { recording.failure = nil } }
+            ),
+            presenting: recording.failure
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { failure in
+            Text(failure.message)
+        }
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
         }
@@ -65,8 +112,14 @@ struct RootView: View {
     }
 }
 
-/// The empty main screen, plus the xAI onboarding button while no usable key
-/// is stored.
+/// The main screen's content: the area the conversation (#42) and topic
+/// timeline (#56) fill. Until they land it shows the app name and, while no
+/// usable xAI key is stored, the onboarding button.
+///
+/// It is a scroll view that runs under the bottom bar's glass, anchored to the
+/// bottom like a conversation. The empty state is at least as tall as the
+/// area between the bars so it stays centered, and scrolls instead of clipping
+/// when Dynamic Type makes it taller than the screen.
 struct MainScreen: View {
     /// Opens the xAI key onboarding step.
     var onConnectAccount: () -> Void = {}
@@ -74,19 +127,31 @@ struct MainScreen: View {
     @Environment(XAIAccount.self) private var account
 
     var body: some View {
-        VStack(spacing: 24) {
-            Text("Blau")
-                .font(.largeTitle)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier(RootView.accessibilityIdentifier)
+        // The reader's size is the area between the bars (it respects the
+        // safe area); the scroll view inside still runs under them.
+        GeometryReader { visible in
+            ScrollView {
+                VStack(spacing: 24) {
+                    Text("Blau")
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
 
-            if account.needsKeyEntry {
-                Button("Connect Your xAI Account", action: onConnectAccount)
-                    .buttonStyle(.borderedProminent)
-                    .accessibilityIdentifier(XAIKeyIdentifiers.openOnboarding)
+                    if account.needsKeyEntry {
+                        Button("Connect Your xAI Account", action: onConnectAccount)
+                            .buttonStyle(.borderedProminent)
+                            .accessibilityIdentifier(XAIKeyIdentifiers.openOnboarding)
+                    }
+                }
+                .multilineTextAlignment(.center)
+                .padding()
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(MainScreenAccessibility.emptyState)
+                .frame(maxWidth: .infinity, minHeight: visible.size.height)
             }
+            .defaultScrollAnchor(.bottom)
+            .scrollBounceBehavior(.basedOnSize)
+            .accessibilityIdentifier(MainScreenAccessibility.content)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -96,4 +161,13 @@ struct MainScreen: View {
         .appEnvironment(environment)
         .environment(AppDiagnostics(store: nil))
         .task { await environment.speechModels.start() }
+}
+
+#Preview("Main screen, largest text") {
+    let environment = AppEnvironment.preview()
+    RootView()
+        .appEnvironment(environment)
+        .environment(AppDiagnostics(store: nil))
+        .task { await environment.speechModels.start() }
+        .dynamicTypeSize(.accessibility5)
 }

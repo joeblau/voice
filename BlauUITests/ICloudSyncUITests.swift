@@ -22,10 +22,15 @@ final class ICloudSyncUITests: XCTestCase {
     /// Opens Settings and returns the iCloud status row.
     private func openICloudStatus(in app: XCUIApplication) -> XCUIElement {
         XCTAssertTrue(app.descendants(matching: .any)["blau.root"].waitForExistence(timeout: 10))
-        // RootView's gear button (XAIKeyIdentifiers.openSettings).
+        // The main screen's Settings button (XAIKeyIdentifiers.openSettings).
         app.buttons["blau.settings.open"].tap()
+        // The Settings Form is lazy and iCloud sits below xAI Account and
+        // Voice, so on a small iPhone the row only exists once scrolled to.
+        let form = app.collectionViews.firstMatch
+        XCTAssertTrue(form.waitForExistence(timeout: 10), "Settings did not open")
         let status = app.descendants(matching: .any)["settings.icloud.status"]
-        XCTAssertTrue(status.waitForExistence(timeout: 5), "iCloud status row missing from Settings")
+        scrollTo(status, in: form)
+        XCTAssertTrue(status.exists, "iCloud status row missing from Settings")
         return status
     }
 

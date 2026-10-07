@@ -12,11 +12,11 @@ final class SpeechModelSetupUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    /// Main screen gear → Settings → Speech Models.
+    /// Main screen Settings button (bottom bar) → Settings → Speech Models.
     private func openSpeechModelSettings(in app: XCUIApplication) {
-        let gear = app.buttons["blau.settings.open"]
-        XCTAssertTrue(gear.waitForExistence(timeout: 10), "Settings gear missing")
-        gear.tap()
+        let settings = app.buttons["blau.settings.open"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 10), "Settings button missing")
+        settings.tap()
         // The Settings Form is lazy and Speech Models sits below xAI Account,
         // Voice and iCloud, so the link may only exist once scrolled to.
         let form = app.collectionViews.firstMatch
@@ -37,12 +37,14 @@ final class SpeechModelSetupUITests: XCTestCase {
         let progress = app.descendants(matching: .any)["blau.models.progress"]
         XCTAssertTrue(progress.waitForExistence(timeout: 15), "Download progress should be visible")
 
-        // The card sits below the Settings gear, never on top of it.
-        let gear = app.buttons["blau.settings.open"]
-        XCTAssertTrue(gear.exists)
-        XCTAssertTrue(gear.isHittable)
+        // The card sits above the bottom bar's Settings button, never on top
+        // of it.
+        let settings = app.buttons["blau.settings.open"]
+        XCTAssertTrue(settings.exists)
+        XCTAssertTrue(settings.isHittable)
         XCTAssertFalse(
-            gear.frame.intersects(setup.frame), "The setup card covers the Settings gear: \(gear.frame) \(setup.frame)")
+            settings.frame.intersects(setup.frame),
+            "The setup card covers the Settings button: \(settings.frame) \(setup.frame)")
 
         XCTAssertTrue(setup.waitForNonExistence(timeout: 120), "The setup card should go away once models are ready")
 
@@ -52,7 +54,10 @@ final class SpeechModelSetupUITests: XCTestCase {
             XCTAssertTrue(status.waitForExistence(timeout: 10), "\(id) row is missing")
             XCTAssertTrue(status.label.hasPrefix("Ready"), "\(id): \(status.label)")
         }
-        XCTAssertTrue(app.staticTexts["blau.models.settings.total"].exists)
+        // The total row is below the model rows, off screen on an iPhone SE.
+        let total = app.staticTexts["blau.models.settings.total"]
+        scrollTo(total, in: app.collectionViews.firstMatch)
+        XCTAssertTrue(total.exists)
     }
 
     func testDeletingAModelFromSettings() throws {
