@@ -54,7 +54,15 @@ test-kit: ## Run the BlauKit package tests on the macOS host
 
 .PHONY: perf
 perf: generate ## Run performance tests (Blau-Perf scheme, Release)
-	$(XCODEBUILD) test -scheme Blau-Perf -testPlan BlauPerf -destination '$(DESTINATION)' $(SIM_FLAGS)
+	$(XCODEBUILD) test -scheme Blau-Perf -testPlan BlauPerf -destination '$(DESTINATION)' $(SIM_FLAGS) XAI_DEV_API_KEY=
+
+.PHONY: secrets
+secrets: ## Create Config/Secrets.xcconfig from the example (kept if it exists)
+	scripts/write-secrets-xcconfig.sh
+
+.PHONY: test-scripts
+test-scripts: ## Test the secrets build scripts
+	scripts/tests/test-secrets-scripts.sh
 
 .PHONY: clean
 clean: ## Remove the generated project, plists and DerivedData

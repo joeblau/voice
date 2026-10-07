@@ -1,0 +1,17 @@
+// Release.xcconfig: project-level settings for the Release configuration
+// (TestFlight, App Store, and the Blau-Perf scheme).
+
+#include "Base.xcconfig"
+
+// Included so a Release build can SEE a developer key and refuse to build,
+// rather than silently ignoring it. Optional: a fresh clone builds without it.
+#include? "Secrets.xcconfig"
+
+// Settings below come after Secrets.xcconfig so it cannot override them.
+BLAU_ENVIRONMENT = release
+
+// Never embed the developer key in a release binary...
+BLAU_INFO_XAI_DEV_API_KEY =
+
+// ...and fail the build if one is configured or found in the built app.
+BLAU_FORBID_EMBEDDED_SECRETS = YES

@@ -17,6 +17,12 @@ options:
   groupSortPosition: top
   generateEmptyDirectories: true
 
+# Project-level xcconfig files: non-secret defaults plus the optional,
+# gitignored Config/Secrets.xcconfig. See docs/configuration.md.
+configFiles:
+  Debug: Config/Debug.xcconfig
+  Release: Config/Release.xcconfig
+
 settings:
   base:
     # Swift 6 language mode with complete strict concurrency checking.
@@ -84,6 +90,22 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        # Build configuration from Config/*.xcconfig, read by AppConfig.
+        BlauEnvironment: $(BLAU_ENVIRONMENT)
+        BlauXAIAPIHost: $(XAI_API_HOST)
+        BlauXAIRealtimeModel: $(XAI_REALTIME_MODEL)
+        # Empty except in Debug with a key in Config/Secrets.xcconfig.
+        BlauXAIDevAPIKey: $(BLAU_INFO_XAI_DEV_API_KEY)
+    postBuildScripts:
+      # Release only (BLAU_FORBID_EMBEDDED_SECRETS): fail if XAI_DEV_API_KEY
+      # is set or an xAI key is found in the built executable or Info.plist.
+      - name: Check for embedded secrets
+        script: /bin/sh "${SCRIPT_INPUT_FILE_0}" "${SCRIPT_INPUT_FILE_1}" "${SCRIPT_INPUT_FILE_2}"
+        inputFiles:
+          - $(SRCROOT)/scripts/check-embedded-secrets.sh
+          - $(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)
+          - $(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)
+        basedOnDependencyAnalysis: false
     entitlements:
       path: Blau/Supporting/Blau.entitlements
       properties:
