@@ -5,10 +5,12 @@ import SwiftUI
 /// device (hangs, memory, stability, launch time, Blau's signposts) and an
 /// export of all of them through the share sheet.
 ///
-/// Belongs in the Developer section of the settings sheet (#43). Until that
-/// exists, `RootView` opens it from a long press on the title.
+/// Pushed from Settings → Developer → Diagnostics, so it has no navigation
+/// stack of its own; present it inside one.
 struct DiagnosticsView: View {
     enum Identifier {
+        /// The Settings row that opens this screen.
+        static let open = "settings.developer.diagnostics"
         static let view = "diagnostics.view"
         static let export = "diagnostics.export"
         static let addSamples = "diagnostics.addSamples"
@@ -20,45 +22,37 @@ struct DiagnosticsView: View {
     }
 
     @Environment(AppDiagnostics.self) private var diagnostics
-    @Environment(\.dismiss) private var dismiss
     @State private var confirmingDelete = false
 
     var body: some View {
-        NavigationStack {
-            List {
-                if diagnostics.overview.isEmpty {
-                    emptySection
-                }
-                payloadSection
-                if !diagnostics.overview.isEmpty {
-                    hangSection
-                    memorySection
-                    stabilitySection
-                    launchSection
-                    signpostSection
-                    recentSection
-                }
-                actionSection
+        List {
+            if diagnostics.overview.isEmpty {
+                emptySection
             }
-            .accessibilityIdentifier(Identifier.view)
-            .navigationTitle("Diagnostics")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
+            payloadSection
+            if !diagnostics.overview.isEmpty {
+                hangSection
+                memorySection
+                stabilitySection
+                launchSection
+                signpostSection
+                recentSection
             }
-            .task { await diagnostics.refresh() }
-            .refreshable { await diagnostics.refresh() }
-            .confirmationDialog(
-                "Delete all stored MetricKit payloads?", isPresented: $confirmingDelete, titleVisibility: .visible
-            ) {
-                Button("Delete Payloads", role: .destructive) {
-                    Task { await diagnostics.removeAll() }
-                }
-            } message: {
-                Text("Export them first if you still need them. MetricKit won't deliver them again.")
+            actionSection
+        }
+        .accessibilityIdentifier(Identifier.view)
+        .navigationTitle("Diagnostics")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await diagnostics.refresh() }
+        .refreshable { await diagnostics.refresh() }
+        .confirmationDialog(
+            "Delete all stored MetricKit payloads?", isPresented: $confirmingDelete, titleVisibility: .visible
+        ) {
+            Button("Delete Payloads", role: .destructive) {
+                Task { await diagnostics.removeAll() }
             }
+        } message: {
+            Text("Export them first if you still need them. MetricKit won't deliver them again.")
         }
     }
 
@@ -285,13 +279,17 @@ struct DiagnosticsView: View {
         let diagnostics = AppDiagnostics(
             store: FileDiagnosticsStore(
                 directory: URL.temporaryDirectory.appending(path: "DiagnosticsPreview-\(UUID().uuidString)")))
-        DiagnosticsView()
-            .environment(diagnostics)
-            .task { await diagnostics.addSamplePayloads() }
+        NavigationStack {
+            DiagnosticsView()
+        }
+        .environment(diagnostics)
+        .task { await diagnostics.addSamplePayloads() }
     }
 
     #Preview("Empty") {
-        DiagnosticsView()
-            .environment(AppDiagnostics(store: nil))
+        NavigationStack {
+            DiagnosticsView()
+        }
+        .environment(AppDiagnostics(store: nil))
     }
 #endif

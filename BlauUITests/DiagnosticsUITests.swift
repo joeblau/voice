@@ -1,8 +1,11 @@
 import XCTest
 
-/// The Developer diagnostics screen: open it, fill it with sample payloads
-/// (Debug builds; the Simulator never receives MetricKit payloads) and export
-/// through the share sheet.
+/// The Developer diagnostics screen: open it from Settings → Developer, fill
+/// it with sample payloads (Debug builds; the Simulator never receives
+/// MetricKit payloads) and export through the share sheet.
+///
+/// Launches with the xAI DEBUG stub (`BLAU_UI_TEST_XAI`) so the app uses an
+/// in-memory key store and never touches the Keychain or the network.
 @MainActor
 final class DiagnosticsUITests: XCTestCase {
     override func setUp() async throws {
@@ -11,11 +14,17 @@ final class DiagnosticsUITests: XCTestCase {
 
     func testSamplePayloadsShowUpAndExportOpensTheShareSheet() throws {
         let app = XCUIApplication()
+        app.launchEnvironment["BLAU_UI_TEST_XAI"] = "offline"
         app.launch()
 
-        let root = app.descendants(matching: .any)["blau.root"]
-        XCTAssertTrue(root.waitForExistence(timeout: 10))
-        root.press(forDuration: 1.2)
+        let settings = app.buttons["blau.settings.open"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 10), "Settings button missing")
+        settings.tap()
+
+        let diagnostics = app.descendants(matching: .any)["settings.developer.diagnostics"]
+        XCTAssertTrue(diagnostics.waitForExistence(timeout: 5), "Settings has no Developer → Diagnostics row")
+        scrollTo(diagnostics, in: app.collectionViews.firstMatch)
+        diagnostics.tap()
 
         let screen = app.descendants(matching: .any)["diagnostics.view"]
         XCTAssertTrue(screen.waitForExistence(timeout: 5), "Diagnostics screen did not open")

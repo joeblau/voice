@@ -400,12 +400,12 @@ raw payload and only leaves the device in an export the user starts.
 many came from TestFlight, hang reports and the longest hang, hangs in the
 daily metrics, peak and suspended memory, memory terminations, crashes by
 signal or exception, CPU and disk-write exceptions, time to first draw and
-the MetricKit signposts below. It belongs in the Developer section of the
-settings sheet (#43); until that exists, **long-press the Blau title** (or
-use the VoiceOver action "Diagnostics") to open it. Debug builds add **Add
-Sample Payloads**, which stores made-up payloads (`DiagnosticsSamples`,
-marked `"blauSample": true`) so the screen and the export can be tried in the
-Simulator.
+the MetricKit signposts below. Open it from **Settings > Developer >
+Diagnostics** (the gear on the main screen). It is in every build,
+TestFlight included, since that is where real payloads arrive. Debug builds
+add **Add Sample Payloads**, which stores made-up payloads
+(`DiagnosticsSamples`, marked `"blauSample": true`) so the screen and the
+export can be tried in the Simulator.
 
 **Export Diagnostics** opens the share sheet with one JSON file,
 `Blau-Diagnostics-<yyyyMMdd-HHmmss>.json` (UTC):
@@ -470,8 +470,8 @@ which intervals reach MetricKit. Delivery itself needs a device:
 1. Install a TestFlight build (or run on a device from Xcode) and use the app.
 2. In Xcode, **Debug > Simulate MetricKit Payloads**, or wait a day for a
    real payload.
-3. Open Diagnostics: the payload counts go up and "From TestFlight" counts
-   TestFlight payloads.
+3. Open **Settings > Developer > Diagnostics**: the payload counts go up
+   and "From TestFlight" counts TestFlight payloads.
 4. Export Diagnostics, save to Files or AirDrop to a Mac, and check the file
    with `jq .overview`.
 
