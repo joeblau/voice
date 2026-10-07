@@ -151,9 +151,13 @@ interval.
 
 ### Instruments
 
-1. Profile the app with **Product > Profile** (a Release build) and pick the
-   **Logging** template, or any template plus the **os_signpost**
-   instrument.
+Use the **Blau** template (see [Instruments template](#instruments-template)
+below): it records the signposts together with audio, hangs, memory, the
+on-device models, the network and thermal state.
+
+1. Profile the app with **Product > Profile** (a Release build) and pick
+   **Blau** under Custom. Without the template, any template plus the
+   **os_signpost** instrument shows the intervals too.
 2. Record a conversation, then select the os_signpost track and filter by
    subsystem `com.joeblau.blau`. Intervals are grouped by category
    (`audio`, `asr`, ...) and named as in the table above. The summary view
@@ -162,8 +166,10 @@ interval.
 From the command line:
 
 ```sh
-xcrun xctrace record --template Logging --device <device> --attach Blau --output blau.trace
-open blau.trace
+make trace TRACE_DEVICE=<device name or UDID>
+# which runs:
+xcrun xctrace record --template Tools/Instruments/Blau.tracetemplate \
+    --device <device> --attach Blau --output .build/traces/
 ```
 
 ### Checking the pipeline from the Mac
@@ -190,10 +196,111 @@ log stream --predicate 'subsystem == "com.joeblau.blau" && category == "realtime
 Private values show as `<private>` unless the device has a logging profile
 that reveals them; that is intended.
 
+## Instruments template
+
+[`Tools/Instruments/Blau.tracetemplate`](../Tools/Instruments/Blau.tracetemplate)
+is a one-click profiling setup for Blau. It has these instruments, in track
+order:
+
+| Instrument          | Why                                                                 |
+| ------------------- | ------------------------------------------------------------------- |
+| os_signpost         | Every canonical interval and event under `com.joeblau.blau`         |
+| os_log              | BlauTelemetry's `Log.*` messages, on the same timeline              |
+| Points of Interest  | `.pointsOfInterest` signposts from the app and system frameworks    |
+| Audio Client        | Audio System Trace: Blau's I/O cycles, IOProc time and cycle load   |
+| Audio Server        | Audio System Trace: the audio HAL's I/O cycles and timestamp jitter |
+| Audio Statistics    | Audio System Trace: audio statistics alongside the two above        |
+| Hangs               | Main run loop iterations of 100 ms or more (potential hangs)        |
+| Allocations         | Heap and VM allocations; growth over a long session                 |
+| Core ML             | Model loads and predictions (Silero VAD, Parakeet, WeSpeaker)       |
+| Neural Engine       | Neural Engine activity, to see whether those models ran on it (#26) |
+| Foundation Models   | On-device topic confirmation and titles (#53)                       |
+| HTTP Traffic        | The xAI client-secret request and other URLSession traffic          |
+| Network Connections | The connections, including the realtime WebSocket                   |
+| Thermal State       | Thermal pressure during long sessions (#75)                         |
+
+The os_signpost instrument also turns on dynamic tracing for
+`com.joeblau.blau` (its "Dynamic Subsystems" recording option). Signposts
+sent to an `OSLog` in that subsystem whose category is `.dynamicTracing`
+(or `.dynamicStackTracing`) are disabled by default and only recorded when
+a tool enables them, as this template does. That is the place for any
+future per-frame signposts that are too frequent to leave on. The canonical
+intervals use ordinary categories and are always recorded.
+
+The Audio System Trace template's kernel instruments (thread states,
+system calls, virtual memory) are left out: they need deferred kernel
+tracing with high overhead and huge traces over an hour-long conversation.
+Use Apple's **Audio System Trace** template when you need thread
+scheduling around an audio glitch, and add **Time Profiler** from the
+library when a hang needs call stacks.
+
+### Using it
+
+1. Install it once so it shows up in Instruments' template chooser (under
+   Custom) and in `xcrun xctrace list templates` (under User Templates):
+
+   ```sh
+   make install-instruments-template
+   ```
+
+   This copies the template to `~/Library/Application Support/Instruments/Templates/`.
+   Run it again after the template changes.
+2. In Xcode, **Product > Profile** (⌘I) builds Release and opens
+   Instruments. Pick **Blau**, press Record and hold a conversation.
+3. Or record from the command line with `make trace TRACE_DEVICE=<device>`
+   (the app must be running on the device; see `xcrun xctrace list devices`).
+   The trace lands in `.build/traces/`.
+
+Allocations has to attach to the app, so profile a build signed for
+development (what Xcode's Profile action does). An App Store or TestFlight
+build can't be attached to.
+
+### Changing it
+
+The template is a binary NSKeyedArchiver file that only Instruments
+writes, so don't edit it by hand:
+
+1. Edit [`Tools/Instruments/instruments.txt`](../Tools/Instruments/instruments.txt)
+   (instrument names as `xcrun xctrace list instruments` prints them) or
+   [`recording-options.json`](../Tools/Instruments/recording-options.json)
+   (options as `xcrun xctrace record --instrument <name> --show-recording-options`
+   prints them).
+2. `make instruments-template` runs `scripts/make-instruments-template.sh`.
+   It records a two-second trace of a stand-in process on the Mac with those
+   instruments and options, takes the template xctrace stores inside the
+   trace (`form.template`, the same thing **File > Save as Template**
+   writes) and strips the recorded run from it.
+3. `make verify-instruments` and `make test-scripts`, then commit the three
+   files together.
+
+### Checking it from the Mac
+
+`scripts/verify-instruments-template.sh` (`make verify-instruments`) checks
+that the template opens and captures every Blau interval, without a device.
+It records a trace with the committed template while `SignpostSmokeTests`
+emits every canonical interval, then fails unless:
+
+- the run used every instrument in `instruments.txt` with no run errors,
+- os_signpost had dynamic tracing on for `com.joeblau.blau`, and
+- every interval in the [canonical table](#canonical-intervals) appears
+  under `com.joeblau.blau` with its documented category.
+
+There is no Blau process on the Mac, so the script launches a stand-in
+target (`scripts/lib/trace-target.c`, signed with `get-task-allow` so
+Allocations can attach) and, for that recording only, sets os_signpost's
+"record all processes" option so it also sees the `swift test` process that
+emits the intervals. Pass `--keep` to keep the trace. The Xcode 27.2 beta's
+xctrace sometimes crashes while saving a recording, whatever the template;
+the script retries the recording once when that happens.
+
+`scripts/tests/test-instruments-template.sh` (part of `make test-scripts`)
+is the quick, hermetic check: the committed template has exactly the listed
+instruments and Blau's os_signpost options, carries no recorded run or local
+paths, and loads in xctrace.
+
 ## What comes next
 
 The rest of the performance epic (#11) builds on these names: MetricKit and
 diagnostics export (#72), the XCTest performance suite with
 `XCTOSSignpostMetric` baselines (#73), the end-to-end latency budget (#74),
-thermal adaptation (#75), the soak test (#76), the debug HUD (#71) and a
-custom Instruments template (#77).
+thermal adaptation (#75), the soak test (#76) and the debug HUD (#71).

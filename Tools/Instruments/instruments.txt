@@ -1,0 +1,34 @@
+# Instruments in Tools/Instruments/Blau.tracetemplate, one per line, by the
+# name `xcrun xctrace list instruments` prints. scripts/make-instruments-template.sh
+# builds the template from this list and scripts/verify-instruments-template.sh
+# checks a recording with the template contains each of them.
+#
+# Order is the track order in Instruments.
+
+# BlauTelemetry: every canonical interval and event (subsystem com.joeblau.blau),
+# and the Logger messages around them.
+os_signpost
+os_log
+Points of Interest
+
+# Audio System Trace: client I/O cycles, the audio server and device statistics.
+Audio Client
+Audio Server
+Audio Statistics
+
+# Main-thread responsiveness and memory.
+Hangs
+Allocations
+
+# On-device models: Parakeet ASR, Silero VAD and WeSpeaker run through Core ML
+# on the Neural Engine; topic labels come from Foundation Models.
+Core ML
+Neural Engine
+Foundation Models
+
+# xAI: token minting (HTTP) and the realtime WebSocket.
+HTTP Traffic
+Network Connections
+
+# Thermal pressure during long sessions.
+Thermal State

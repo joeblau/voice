@@ -36,7 +36,11 @@ configured. See [docs/configuration.md](docs/configuration.md).
 | `make test-kit`  | Run the `BlauKit` package tests on the macOS host (`swift test`) |
 | `make perf`      | Run `BlauPerfTests` (`Blau-Perf` scheme, Release build)          |
 | `make secrets`   | Create `Config/Secrets.xcconfig` from the example                |
-| `make test-scripts` | Test the secrets build scripts                                |
+| `make test-scripts` | Test the secrets and Instruments template scripts             |
+| `make install-instruments-template` | Add the Blau template to Instruments' chooser ([docs](docs/performance.md#instruments-template)) |
+| `make trace`     | Record Blau on `TRACE_DEVICE` with the Blau Instruments template |
+| `make instruments-template` | Regenerate `Tools/Instruments/Blau.tracetemplate`     |
+| `make verify-instruments` | Record with the template on the Mac and check every interval is captured |
 | `make clean`     | Delete the generated project, plists and DerivedData             |
 | `make format`    | Format all Swift sources in place with swift-format              |
 | `make lint`      | Lint all Swift sources with swift-format (fails on any finding)  |
@@ -63,7 +67,8 @@ Formatting, branch naming, commit and pull request conventions are in
 | `BlauPerfTests/` | Performance tests (XCTest UI-testing bundle, launch metrics)    |
 | `TestPlans/`     | `Blau.xctestplan` (unit + UI, coverage) and `BlauPerf.xctestplan` |
 | `Config/`        | xcconfig files; `Secrets.xcconfig` is gitignored ([docs](docs/configuration.md)) |
-| `scripts/`       | `swift-format.sh` (behind `make format` and `make lint`), git hooks, embedded-secrets check, `Secrets.xcconfig` writer and `verify-signposts.sh` (see [`docs/performance.md`](docs/performance.md)) |
+| `scripts/`       | `swift-format.sh` (behind `make format` and `make lint`), git hooks, embedded-secrets check, `Secrets.xcconfig` writer, `verify-signposts.sh` and the Instruments template scripts (see [`docs/performance.md`](docs/performance.md)) |
+| `Tools/Instruments/` | `Blau.tracetemplate`, the Instruments template for profiling Blau, and the instrument list and options it is generated from |
 | `docs/`          | Developer documentation                                         |
 | `.github/`       | Pull request and issue templates                                |
 

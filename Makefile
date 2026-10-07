@@ -61,8 +61,36 @@ secrets: ## Create Config/Secrets.xcconfig from the example (kept if it exists)
 	env -u XAI_DEV_API_KEY scripts/write-secrets-xcconfig.sh
 
 .PHONY: test-scripts
-test-scripts: ## Test the secrets build scripts
+test-scripts: ## Test the secrets and Instruments template scripts
 	scripts/tests/test-secrets-scripts.sh
+	scripts/tests/test-instruments-template.sh
+
+# Instruments template (Tools/Instruments; see docs/performance.md).
+#   TRACE_DEVICE  device name or UDID for `make trace`
+
+INSTRUMENTS_TEMPLATE      := Tools/Instruments/Blau.tracetemplate
+INSTRUMENTS_TEMPLATES_DIR ?= $(HOME)/Library/Application Support/Instruments/Templates
+TRACE_DEVICE              ?=
+
+.PHONY: instruments-template
+instruments-template: ## Regenerate the Blau Instruments template from Tools/Instruments
+	scripts/make-instruments-template.sh
+
+.PHONY: verify-instruments
+verify-instruments: ## Record with the Blau template on the Mac and check every interval is captured
+	scripts/verify-instruments-template.sh
+
+.PHONY: install-instruments-template
+install-instruments-template: ## Add the Blau template to Instruments' template chooser
+	mkdir -p "$(INSTRUMENTS_TEMPLATES_DIR)"
+	cp $(INSTRUMENTS_TEMPLATE) "$(INSTRUMENTS_TEMPLATES_DIR)/Blau.tracetemplate"
+
+.PHONY: trace
+trace: ## Record the running Blau app on TRACE_DEVICE with the Blau template
+	@test -n "$(TRACE_DEVICE)" || { echo "Set TRACE_DEVICE to a device name or UDID (xcrun xctrace list devices)"; exit 1; }
+	mkdir -p .build/traces
+	xcrun xctrace record --template $(INSTRUMENTS_TEMPLATE) --device '$(TRACE_DEVICE)' \
+		--attach Blau --output .build/traces/
 
 .PHONY: clean
 clean: ## Remove the generated project, plists and DerivedData
