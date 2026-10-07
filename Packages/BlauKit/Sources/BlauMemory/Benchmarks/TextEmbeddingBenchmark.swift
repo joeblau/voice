@@ -14,7 +14,22 @@ public protocol TokenEmbeddingModel: Sendable {
     var maximumSequenceLength: Int { get async }
     /// The model's full-width embedding for `tokenIDs`.
     func embed(tokenIDs: [Int32]) async throws -> [Float]
+    /// The embeddings of several sequences, in order. The default embeds
+    /// them one after another.
+    func embed(batch: [[Int32]]) async throws -> [[Float]]
     func unload() async
+}
+
+extension TokenEmbeddingModel {
+    public func embed(batch: [[Int32]]) async throws -> [[Float]] {
+        var outputs: [[Float]] = []
+        outputs.reserveCapacity(batch.count)
+        for tokenIDs in batch {
+            try Task.checkCancellation()
+            outputs.append(try await embed(tokenIDs: tokenIDs))
+        }
+        return outputs
+    }
 }
 
 /// Measures a Matryoshka text-embedding model the way the memory indexer

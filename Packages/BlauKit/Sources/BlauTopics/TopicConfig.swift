@@ -108,6 +108,19 @@ public struct TopicConfig: Hashable, Sendable {
     /// similarities sit in a narrow band so their depths are much smaller.
     public static let contextualEmbedding = TopicConfig(minimumDepth: 0.02)
 
+    /// The defaults with a minimum depth for the shared retrieval embedding
+    /// model (#60: EmbeddingGemma, or Qwen3-Embedding as #59's fallback,
+    /// 256-d int8 through BlauMemory's `SharedTextEmbedder`).
+    ///
+    /// Retrieval models separate topics sharply: on the scripted transcripts
+    /// Qwen3-Embedding put every labelled boundary at a depth of 0.92 or
+    /// more and every within-topic dip at 0.44 or less, so the floor sits
+    /// between them (at 0.02, like `contextualEmbedding`, it split the
+    /// single-topic transcript). Calibrated on Qwen3 because EmbeddingGemma's
+    /// weights are gated (#59); re-check with `RealModelTopicSegmentationTests`
+    /// and `BLAU_TOPIC_MINIMUM_DEPTH` when the model changes (docs/topics.md).
+    public static let sharedEmbedding = TopicConfig(minimumDepth: 0.5)
+
     /// Phrases that usually announce a new topic in English conversation.
     public static let defaultCuePhrases: [String] = [
         "switch gears",

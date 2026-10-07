@@ -22,12 +22,16 @@ What it does:
    and drags the whole graph with it. Without it, 100% of the operations
    are planned on the Neural Engine. So the model takes `inputs_embeds`
    (`[1, L, H]` fp16) and `attention_mask` (`[1, L]` fp16, 1 for real
-   tokens, right padded), and the table ships next to it as
-   `<name>.token-embeddings.f16`: raw little-endian float16, one row of H
-   values per token id, any embedding scale already applied. The app
+   tokens, right padded), and the table ships next to it, one row of H
+   values per token id, any embedding scale already applied: as int8 with
+   a float32 scale per row, `<name>.token-embeddings.i8` (the default
+   since #60, half the size), or as raw float16 with `--table float16`
+   (`<name>.token-embeddings.f16`); see token_table.py. The app
    memory-maps it and copies the rows of each input
-   (`TokenEmbeddingTable` in BlauMemory). `--no-split` keeps the table
-   inside (`input_ids` and `attention_mask`, int32), for comparison.
+   (`TokenEmbeddingTable` in BlauMemory). Verification feeds the model
+   the rows exactly as the app will (dequantized int8). `--no-split` keeps
+   the table inside (`input_ids` and `attention_mask`, int32), for
+   comparison.
 
    A single `--lengths` value (the default, 128) gives a fully static graph,
    which the Neural Engine compiler wants; several give enumerated shapes.
@@ -64,6 +68,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from candidates import CANDIDATES, Candidate  # noqa: E402
+from token_table import dequantize_rows, quantize_rows, write_int8  # noqa: E402
 from evalset import EvalSet, evaluate_rankings, load_eval_set, matryoshka, quantize_int8, vector_rankings  # noqa: E402
 
 MODEL_NAMES = {
@@ -422,6 +427,7 @@ def package_for_hosting(
     subprocess.run(["xcrun", "coremlcompiler", "compile", str(package), str(hosting)], check=True, capture_output=True)
     if table_path:
         shutil.copy(table_path, hosting / table_path.name)
+    table_dtype = "int8" if table_path and table_path.name.endswith(".i8") else "float16"
     for file in ("tokenizer.json", "tokenizer_config.json", "special_tokens_map.json", "tokenizer.model"):
         if (source / file).exists():
             shutil.copy(source / file, hosting / file)
@@ -433,12 +439,15 @@ def package_for_hosting(
             "Gemma is provided under and subject to the Gemma Terms of Use found at ai.google.dev/gemma/terms\n"
         )
     metadata = {
+        # TextEmbeddingModelSpec.id: the app checks the prompts and widths
+        # below against its own spec for this model.
+        "spec": candidate.key,
         "name": name,
         "source": {"repo": candidate.repo, "revision": candidate.revision, "license": candidate.license},
         "model": f"{name}.mlmodelc",
         "inputs": ["inputs_embeds", "attention_mask"] if table_path else ["input_ids", "attention_mask"],
         "tokenEmbeddings": (
-            {"file": table_path.name, "dtype": "float16", "vocabularySize": wrapped.vocab_size, "width": wrapped.hidden_size}
+            {"file": table_path.name, "dtype": table_dtype, "vocabularySize": wrapped.vocab_size, "width": wrapped.hidden_size}
             if table_path
             else None
         ),
@@ -451,6 +460,7 @@ def package_for_hosting(
         "documentPrompt": candidate.document_prompt,
         "computePrecision": args.precision,
         "weights": args.weights,
+        "tokenizer": "tokenizer.json",
     }
     (hosting / "blau-embedding.json").write_text(json.dumps(metadata, indent=2) + "\n")
     files = sorted(p for p in hosting.rglob("*") if p.is_file())
@@ -466,6 +476,9 @@ def main() -> int:
     parser.add_argument("--precision", choices=["fp16", "fp32"], default="fp16", help="Core ML compute precision")
     parser.add_argument("--weights", choices=["none", "int8", "int4"], default="none", help="weight compression")
     parser.add_argument("--no-split", action="store_true", help="keep the token-embedding table inside the model")
+    parser.add_argument(
+        "--table", choices=["int8", "float16"], default="int8", help="split token table format (int8: per-row scale)"
+    )
     parser.add_argument("--units", default="CPU_ONLY,CPU_AND_NE", help="compute units to verify on")
     parser.add_argument("--output", type=Path, default=Path(".build/Embeddings"))
     parser.add_argument("--skip-hosting", action="store_true")
@@ -476,7 +489,12 @@ def main() -> int:
     candidate = CANDIDATES[args.model]
     lengths = sorted(int(n) for n in args.lengths.split(","))
     split = not args.no_split
-    suffix = f"-{args.precision}" + ("" if args.weights == "none" else f"-w{args.weights}") + ("" if split else "-nosplit")
+    suffix = (
+        f"-{args.precision}"
+        + ("" if args.weights == "none" else f"-w{args.weights}")
+        + ("-tf16" if split and args.table == "float16" else "")
+        + ("" if split else "-nosplit")
+    )
     name = MODEL_NAMES[args.model]
     out = args.output / f"{name}{suffix}"
     out.mkdir(parents=True, exist_ok=True)
@@ -511,7 +529,12 @@ def main() -> int:
     model.save(str(package))
     table = token_table(wrapped) if split else None
     table_path = None
-    if table is not None:
+    if table is not None and args.table == "int8":
+        table_path = out / f"{name}.token-embeddings.i8"
+        write_int8(table, table_path)
+        # Verify with the rows the app will feed the model.
+        table = dequantize_rows(*quantize_rows(table))
+    elif table is not None:
         table_path = out / f"{name}.token-embeddings.f16"
         table.astype("<f2").tofile(table_path)
     convert_seconds = time.perf_counter() - start
@@ -529,6 +552,7 @@ def main() -> int:
             "computePrecision": args.precision,
             "weights": args.weights,
             "splitTokenEmbeddings": split,
+            "tokenTable": args.table if split else None,
             "sequenceLengths": lengths,
             "packageBytes": size,
             "tokenTableBytes": table_bytes,

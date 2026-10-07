@@ -1,0 +1,5604 @@
+{
+  "version": "1.0",
+  "truncation": null,
+  "padding": null,
+  "added_tokens": [
+    {
+      "id": 0,
+      "content": "<pad>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 1,
+      "content": "<eos>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 2,
+      "content": "<bos>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 3,
+      "content": "<unk>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 4,
+      "content": "<0x00>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 5,
+      "content": "<0x01>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 6,
+      "content": "<0x02>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 7,
+      "content": "<0x03>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 8,
+      "content": "<0x04>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 9,
+      "content": "<0x05>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 10,
+      "content": "<0x06>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 11,
+      "content": "<0x07>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 12,
+      "content": "<0x08>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 13,
+      "content": "<0x09>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 14,
+      "content": "<0x0A>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 15,
+      "content": "<0x0B>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 16,
+      "content": "<0x0C>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 17,
+      "content": "<0x0D>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 18,
+      "content": "<0x0E>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 19,
+      "content": "<0x0F>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 20,
+      "content": "<0x10>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 21,
+      "content": "<0x11>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 22,
+      "content": "<0x12>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 23,
+      "content": "<0x13>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 24,
+      "content": "<0x14>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 25,
+      "content": "<0x15>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 26,
+      "content": "<0x16>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 27,
+      "content": "<0x17>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 28,
+      "content": "<0x18>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 29,
+      "content": "<0x19>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 30,
+      "content": "<0x1A>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 31,
+      "content": "<0x1B>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 32,
+      "content": "<0x1C>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 33,
+      "content": "<0x1D>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 34,
+      "content": "<0x1E>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 35,
+      "content": "<0x1F>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 36,
+      "content": "<0x20>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 37,
+      "content": "<0x21>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 38,
+      "content": "<0x22>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 39,
+      "content": "<0x23>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 40,
+      "content": "<0x24>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 41,
+      "content": "<0x25>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 42,
+      "content": "<0x26>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 43,
+      "content": "<0x27>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 44,
+      "content": "<0x28>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 45,
+      "content": "<0x29>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 46,
+      "content": "<0x2A>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 47,
+      "content": "<0x2B>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 48,
+      "content": "<0x2C>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 49,
+      "content": "<0x2D>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 50,
+      "content": "<0x2E>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 51,
+      "content": "<0x2F>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 52,
+      "content": "<0x30>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 53,
+      "content": "<0x31>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 54,
+      "content": "<0x32>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 55,
+      "content": "<0x33>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 56,
+      "content": "<0x34>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 57,
+      "content": "<0x35>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 58,
+      "content": "<0x36>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 59,
+      "content": "<0x37>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 60,
+      "content": "<0x38>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 61,
+      "content": "<0x39>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 62,
+      "content": "<0x3A>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 63,
+      "content": "<0x3B>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 64,
+      "content": "<0x3C>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 65,
+      "content": "<0x3D>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 66,
+      "content": "<0x3E>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 67,
+      "content": "<0x3F>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 68,
+      "content": "<0x40>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 69,
+      "content": "<0x41>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 70,
+      "content": "<0x42>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 71,
+      "content": "<0x43>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 72,
+      "content": "<0x44>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 73,
+      "content": "<0x45>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 74,
+      "content": "<0x46>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 75,
+      "content": "<0x47>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 76,
+      "content": "<0x48>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 77,
+      "content": "<0x49>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 78,
+      "content": "<0x4A>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 79,
+      "content": "<0x4B>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 80,
+      "content": "<0x4C>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 81,
+      "content": "<0x4D>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 82,
+      "content": "<0x4E>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 83,
+      "content": "<0x4F>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 84,
+      "content": "<0x50>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 85,
+      "content": "<0x51>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 86,
+      "content": "<0x52>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 87,
+      "content": "<0x53>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 88,
+      "content": "<0x54>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 89,
+      "content": "<0x55>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 90,
+      "content": "<0x56>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 91,
+      "content": "<0x57>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 92,
+      "content": "<0x58>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 93,
+      "content": "<0x59>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 94,
+      "content": "<0x5A>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 95,
+      "content": "<0x5B>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 96,
+      "content": "<0x5C>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 97,
+      "content": "<0x5D>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 98,
+      "content": "<0x5E>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 99,
+      "content": "<0x5F>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 100,
+      "content": "<0x60>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 101,
+      "content": "<0x61>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 102,
+      "content": "<0x62>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 103,
+      "content": "<0x63>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 104,
+      "content": "<0x64>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 105,
+      "content": "<0x65>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 106,
+      "content": "<0x66>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 107,
+      "content": "<0x67>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 108,
+      "content": "<0x68>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 109,
+      "content": "<0x69>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 110,
+      "content": "<0x6A>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 111,
+      "content": "<0x6B>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 112,
+      "content": "<0x6C>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 113,
+      "content": "<0x6D>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 114,
+      "content": "<0x6E>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 115,
+      "content": "<0x6F>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 116,
+      "content": "<0x70>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 117,
+      "content": "<0x71>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 118,
+      "content": "<0x72>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 119,
+      "content": "<0x73>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 120,
+      "content": "<0x74>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 121,
+      "content": "<0x75>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 122,
+      "content": "<0x76>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 123,
+      "content": "<0x77>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 124,
+      "content": "<0x78>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 125,
+      "content": "<0x79>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 126,
+      "content": "<0x7A>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 127,
+      "content": "<0x7B>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 128,
+      "content": "<0x7C>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 129,
+      "content": "<0x7D>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 130,
+      "content": "<0x7E>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 131,
+      "content": "<0x7F>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 132,
+      "content": "<0x80>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 133,
+      "content": "<0x81>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 134,
+      "content": "<0x82>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 135,
+      "content": "<0x83>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 136,
+      "content": "<0x84>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 137,
+      "content": "<0x85>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 138,
+      "content": "<0x86>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 139,
+      "content": "<0x87>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 140,
+      "content": "<0x88>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 141,
+      "content": "<0x89>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 142,
+      "content": "<0x8A>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 143,
+      "content": "<0x8B>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 144,
+      "content": "<0x8C>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 145,
+      "content": "<0x8D>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 146,
+      "content": "<0x8E>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 147,
+      "content": "<0x8F>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 148,
+      "content": "<0x90>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 149,
+      "content": "<0x91>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 150,
+      "content": "<0x92>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 151,
+      "content": "<0x93>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 152,
+      "content": "<0x94>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 153,
+      "content": "<0x95>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 154,
+      "content": "<0x96>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 155,
+      "content": "<0x97>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 156,
+      "content": "<0x98>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 157,
+      "content": "<0x99>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 158,
+      "content": "<0x9A>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 159,
+      "content": "<0x9B>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 160,
+      "content": "<0x9C>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 161,
+      "content": "<0x9D>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 162,
+      "content": "<0x9E>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 163,
+      "content": "<0x9F>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 164,
+      "content": "<0xA0>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 165,
+      "content": "<0xA1>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 166,
+      "content": "<0xA2>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 167,
+      "content": "<0xA3>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 168,
+      "content": "<0xA4>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 169,
+      "content": "<0xA5>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 170,
+      "content": "<0xA6>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 171,
+      "content": "<0xA7>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 172,
+      "content": "<0xA8>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 173,
+      "content": "<0xA9>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 174,
+      "content": "<0xAA>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 175,
+      "content": "<0xAB>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 176,
+      "content": "<0xAC>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 177,
+      "content": "<0xAD>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 178,
+      "content": "<0xAE>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 179,
+      "content": "<0xAF>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 180,
+      "content": "<0xB0>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 181,
+      "content": "<0xB1>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 182,
+      "content": "<0xB2>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 183,
+      "content": "<0xB3>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 184,
+      "content": "<0xB4>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 185,
+      "content": "<0xB5>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 186,
+      "content": "<0xB6>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 187,
+      "content": "<0xB7>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 188,
+      "content": "<0xB8>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 189,
+      "content": "<0xB9>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 190,
+      "content": "<0xBA>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 191,
+      "content": "<0xBB>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 192,
+      "content": "<0xBC>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 193,
+      "content": "<0xBD>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 194,
+      "content": "<0xBE>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 195,
+      "content": "<0xBF>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 196,
+      "content": "<0xC0>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 197,
+      "content": "<0xC1>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 198,
+      "content": "<0xC2>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 199,
+      "content": "<0xC3>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 200,
+      "content": "<0xC4>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 201,
+      "content": "<0xC5>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 202,
+      "content": "<0xC6>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 203,
+      "content": "<0xC7>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 204,
+      "content": "<0xC8>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 205,
+      "content": "<0xC9>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 206,
+      "content": "<0xCA>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 207,
+      "content": "<0xCB>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 208,
+      "content": "<0xCC>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 209,
+      "content": "<0xCD>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 210,
+      "content": "<0xCE>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 211,
+      "content": "<0xCF>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 212,
+      "content": "<0xD0>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 213,
+      "content": "<0xD1>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 214,
+      "content": "<0xD2>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 215,
+      "content": "<0xD3>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 216,
+      "content": "<0xD4>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 217,
+      "content": "<0xD5>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 218,
+      "content": "<0xD6>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 219,
+      "content": "<0xD7>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 220,
+      "content": "<0xD8>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 221,
+      "content": "<0xD9>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 222,
+      "content": "<0xDA>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 223,
+      "content": "<0xDB>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 224,
+      "content": "<0xDC>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 225,
+      "content": "<0xDD>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 226,
+      "content": "<0xDE>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 227,
+      "content": "<0xDF>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 228,
+      "content": "<0xE0>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 229,
+      "content": "<0xE1>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 230,
+      "content": "<0xE2>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 231,
+      "content": "<0xE3>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 232,
+      "content": "<0xE4>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 233,
+      "content": "<0xE5>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 234,
+      "content": "<0xE6>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 235,
+      "content": "<0xE7>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 236,
+      "content": "<0xE8>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 237,
+      "content": "<0xE9>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 238,
+      "content": "<0xEA>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 239,
+      "content": "<0xEB>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 240,
+      "content": "<0xEC>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 241,
+      "content": "<0xED>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 242,
+      "content": "<0xEE>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 243,
+      "content": "<0xEF>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 244,
+      "content": "<0xF0>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 245,
+      "content": "<0xF1>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 246,
+      "content": "<0xF2>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 247,
+      "content": "<0xF3>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 248,
+      "content": "<0xF4>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 249,
+      "content": "<0xF5>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 250,
+      "content": "<0xF6>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 251,
+      "content": "<0xF7>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 252,
+      "content": "<0xF8>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 253,
+      "content": "<0xF9>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 254,
+      "content": "<0xFA>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 255,
+      "content": "<0xFB>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 256,
+      "content": "<0xFC>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 257,
+      "content": "<0xFD>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 258,
+      "content": "<0xFE>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 259,
+      "content": "<0xFF>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 900,
+      "content": "<mask>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": false
+    },
+    {
+      "id": 901,
+      "content": "<unused0>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": false
+    }
+  ],
+  "normalizer": {
+    "type": "Replace",
+    "pattern": {
+      "String": " "
+    },
+    "content": "▁"
+  },
+  "pre_tokenizer": {
+    "type": "Split",
+    "pattern": {
+      "String": " "
+    },
+    "behavior": "MergedWithPrevious",
+    "invert": false
+  },
+  "post_processor": {
+    "type": "TemplateProcessing",
+    "single": [
+      {
+        "SpecialToken": {
+          "id": "<bos>",
+          "type_id": 0
+        }
+      },
+      {
+        "Sequence": {
+          "id": "A",
+          "type_id": 0
+        }
+      },
+      {
+        "SpecialToken": {
+          "id": "<eos>",
+          "type_id": 0
+        }
+      }
+    ],
+    "pair": [
+      {
+        "Sequence": {
+          "id": "A",
+          "type_id": 0
+        }
+      },
+      {
+        "Sequence": {
+          "id": "B",
+          "type_id": 1
+        }
+      }
+    ],
+    "special_tokens": {
+      "<bos>": {
+        "id": "<bos>",
+        "ids": [
+          2
+        ],
+        "tokens": [
+          "<bos>"
+        ]
+      },
+      "<eos>": {
+        "id": "<eos>",
+        "ids": [
+          1
+        ],
+        "tokens": [
+          "<eos>"
+        ]
+      }
+    }
+  },
+  "decoder": null,
+  "model": {
+    "type": "BPE",
+    "dropout": null,
+    "unk_token": "<unk>",
+    "continuing_subword_prefix": null,
+    "end_of_word_suffix": null,
+    "fuse_unk": true,
+    "byte_fallback": true,
+    "ignore_merges": false,
+    "vocab": {
+      "<pad>": 0,
+      "<eos>": 1,
+      "<bos>": 2,
+      "<unk>": 3,
+      "<0x00>": 4,
+      "<0x01>": 5,
+      "<0x02>": 6,
+      "<0x03>": 7,
+      "<0x04>": 8,
+      "<0x05>": 9,
+      "<0x06>": 10,
+      "<0x07>": 11,
+      "<0x08>": 12,
+      "<0x09>": 13,
+      "<0x0A>": 14,
+      "<0x0B>": 15,
+      "<0x0C>": 16,
+      "<0x0D>": 17,
+      "<0x0E>": 18,
+      "<0x0F>": 19,
+      "<0x10>": 20,
+      "<0x11>": 21,
+      "<0x12>": 22,
+      "<0x13>": 23,
+      "<0x14>": 24,
+      "<0x15>": 25,
+      "<0x16>": 26,
+      "<0x17>": 27,
+      "<0x18>": 28,
+      "<0x19>": 29,
+      "<0x1A>": 30,
+      "<0x1B>": 31,
+      "<0x1C>": 32,
+      "<0x1D>": 33,
+      "<0x1E>": 34,
+      "<0x1F>": 35,
+      "<0x20>": 36,
+      "<0x21>": 37,
+      "<0x22>": 38,
+      "<0x23>": 39,
+      "<0x24>": 40,
+      "<0x25>": 41,
+      "<0x26>": 42,
+      "<0x27>": 43,
+      "<0x28>": 44,
+      "<0x29>": 45,
+      "<0x2A>": 46,
+      "<0x2B>": 47,
+      "<0x2C>": 48,
+      "<0x2D>": 49,
+      "<0x2E>": 50,
+      "<0x2F>": 51,
+      "<0x30>": 52,
+      "<0x31>": 53,
+      "<0x32>": 54,
+      "<0x33>": 55,
+      "<0x34>": 56,
+      "<0x35>": 57,
+      "<0x36>": 58,
+      "<0x37>": 59,
+      "<0x38>": 60,
+      "<0x39>": 61,
+      "<0x3A>": 62,
+      "<0x3B>": 63,
+      "<0x3C>": 64,
+      "<0x3D>": 65,
+      "<0x3E>": 66,
+      "<0x3F>": 67,
+      "<0x40>": 68,
+      "<0x41>": 69,
+      "<0x42>": 70,
+      "<0x43>": 71,
+      "<0x44>": 72,
+      "<0x45>": 73,
+      "<0x46>": 74,
+      "<0x47>": 75,
+      "<0x48>": 76,
+      "<0x49>": 77,
+      "<0x4A>": 78,
+      "<0x4B>": 79,
+      "<0x4C>": 80,
+      "<0x4D>": 81,
+      "<0x4E>": 82,
+      "<0x4F>": 83,
+      "<0x50>": 84,
+      "<0x51>": 85,
+      "<0x52>": 86,
+      "<0x53>": 87,
+      "<0x54>": 88,
+      "<0x55>": 89,
+      "<0x56>": 90,
+      "<0x57>": 91,
+      "<0x58>": 92,
+      "<0x59>": 93,
+      "<0x5A>": 94,
+      "<0x5B>": 95,
+      "<0x5C>": 96,
+      "<0x5D>": 97,
+      "<0x5E>": 98,
+      "<0x5F>": 99,
+      "<0x60>": 100,
+      "<0x61>": 101,
+      "<0x62>": 102,
+      "<0x63>": 103,
+      "<0x64>": 104,
+      "<0x65>": 105,
+      "<0x66>": 106,
+      "<0x67>": 107,
+      "<0x68>": 108,
+      "<0x69>": 109,
+      "<0x6A>": 110,
+      "<0x6B>": 111,
+      "<0x6C>": 112,
+      "<0x6D>": 113,
+      "<0x6E>": 114,
+      "<0x6F>": 115,
+      "<0x70>": 116,
+      "<0x71>": 117,
+      "<0x72>": 118,
+      "<0x73>": 119,
+      "<0x74>": 120,
+      "<0x75>": 121,
+      "<0x76>": 122,
+      "<0x77>": 123,
+      "<0x78>": 124,
+      "<0x79>": 125,
+      "<0x7A>": 126,
+      "<0x7B>": 127,
+      "<0x7C>": 128,
+      "<0x7D>": 129,
+      "<0x7E>": 130,
+      "<0x7F>": 131,
+      "<0x80>": 132,
+      "<0x81>": 133,
+      "<0x82>": 134,
+      "<0x83>": 135,
+      "<0x84>": 136,
+      "<0x85>": 137,
+      "<0x86>": 138,
+      "<0x87>": 139,
+      "<0x88>": 140,
+      "<0x89>": 141,
+      "<0x8A>": 142,
+      "<0x8B>": 143,
+      "<0x8C>": 144,
+      "<0x8D>": 145,
+      "<0x8E>": 146,
+      "<0x8F>": 147,
+      "<0x90>": 148,
+      "<0x91>": 149,
+      "<0x92>": 150,
+      "<0x93>": 151,
+      "<0x94>": 152,
+      "<0x95>": 153,
+      "<0x96>": 154,
+      "<0x97>": 155,
+      "<0x98>": 156,
+      "<0x99>": 157,
+      "<0x9A>": 158,
+      "<0x9B>": 159,
+      "<0x9C>": 160,
+      "<0x9D>": 161,
+      "<0x9E>": 162,
+      "<0x9F>": 163,
+      "<0xA0>": 164,
+      "<0xA1>": 165,
+      "<0xA2>": 166,
+      "<0xA3>": 167,
+      "<0xA4>": 168,
+      "<0xA5>": 169,
+      "<0xA6>": 170,
+      "<0xA7>": 171,
+      "<0xA8>": 172,
+      "<0xA9>": 173,
+      "<0xAA>": 174,
+      "<0xAB>": 175,
+      "<0xAC>": 176,
+      "<0xAD>": 177,
+      "<0xAE>": 178,
+      "<0xAF>": 179,
+      "<0xB0>": 180,
+      "<0xB1>": 181,
+      "<0xB2>": 182,
+      "<0xB3>": 183,
+      "<0xB4>": 184,
+      "<0xB5>": 185,
+      "<0xB6>": 186,
+      "<0xB7>": 187,
+      "<0xB8>": 188,
+      "<0xB9>": 189,
+      "<0xBA>": 190,
+      "<0xBB>": 191,
+      "<0xBC>": 192,
+      "<0xBD>": 193,
+      "<0xBE>": 194,
+      "<0xBF>": 195,
+      "<0xC0>": 196,
+      "<0xC1>": 197,
+      "<0xC2>": 198,
+      "<0xC3>": 199,
+      "<0xC4>": 200,
+      "<0xC5>": 201,
+      "<0xC6>": 202,
+      "<0xC7>": 203,
+      "<0xC8>": 204,
+      "<0xC9>": 205,
+      "<0xCA>": 206,
+      "<0xCB>": 207,
+      "<0xCC>": 208,
+      "<0xCD>": 209,
+      "<0xCE>": 210,
+      "<0xCF>": 211,
+      "<0xD0>": 212,
+      "<0xD1>": 213,
+      "<0xD2>": 214,
+      "<0xD3>": 215,
+      "<0xD4>": 216,
+      "<0xD5>": 217,
+      "<0xD6>": 218,
+      "<0xD7>": 219,
+      "<0xD8>": 220,
+      "<0xD9>": 221,
+      "<0xDA>": 222,
+      "<0xDB>": 223,
+      "<0xDC>": 224,
+      "<0xDD>": 225,
+      "<0xDE>": 226,
+      "<0xDF>": 227,
+      "<0xE0>": 228,
+      "<0xE1>": 229,
+      "<0xE2>": 230,
+      "<0xE3>": 231,
+      "<0xE4>": 232,
+      "<0xE5>": 233,
+      "<0xE6>": 234,
+      "<0xE7>": 235,
+      "<0xE8>": 236,
+      "<0xE9>": 237,
+      "<0xEA>": 238,
+      "<0xEB>": 239,
+      "<0xEC>": 240,
+      "<0xED>": 241,
+      "<0xEE>": 242,
+      "<0xEF>": 243,
+      "<0xF0>": 244,
+      "<0xF1>": 245,
+      "<0xF2>": 246,
+      "<0xF3>": 247,
+      "<0xF4>": 248,
+      "<0xF5>": 249,
+      "<0xF6>": 250,
+      "<0xF7>": 251,
+      "<0xF8>": 252,
+      "<0xF9>": 253,
+      "<0xFA>": 254,
+      "<0xFB>": 255,
+      "<0xFC>": 256,
+      "<0xFD>": 257,
+      "<0xFE>": 258,
+      "<0xFF>": 259,
+      "#": 260,
+      "$": 261,
+      "%": 262,
+      "&": 263,
+      "'": 264,
+      "(": 265,
+      ")": 266,
+      ",": 267,
+      "-": 268,
+      ".": 269,
+      "0": 270,
+      "1": 271,
+      "2": 272,
+      "3": 273,
+      "4": 274,
+      "5": 275,
+      "6": 276,
+      "7": 277,
+      "8": 278,
+      "9": 279,
+      ":": 280,
+      ";": 281,
+      "?": 282,
+      "A": 283,
+      "B": 284,
+      "C": 285,
+      "D": 286,
+      "E": 287,
+      "F": 288,
+      "G": 289,
+      "H": 290,
+      "I": 291,
+      "J": 292,
+      "K": 293,
+      "L": 294,
+      "M": 295,
+      "N": 296,
+      "O": 297,
+      "P": 298,
+      "Q": 299,
+      "R": 300,
+      "S": 301,
+      "T": 302,
+      "U": 303,
+      "V": 304,
+      "W": 305,
+      "X": 306,
+      "Y": 307,
+      "a": 308,
+      "b": 309,
+      "c": 310,
+      "d": 311,
+      "e": 312,
+      "f": 313,
+      "g": 314,
+      "h": 315,
+      "i": 316,
+      "j": 317,
+      "k": 318,
+      "l": 319,
+      "m": 320,
+      "n": 321,
+      "o": 322,
+      "p": 323,
+      "q": 324,
+      "r": 325,
+      "s": 326,
+      "t": 327,
+      "u": 328,
+      "v": 329,
+      "w": 330,
+      "x": 331,
+      "y": 332,
+      "z": 333,
+      "á": 334,
+      "í": 335,
+      "▁": 336,
+      "e▁": 337,
+      "s▁": 338,
+      "an": 339,
+      "th": 340,
+      "t▁": 341,
+      "in": 342,
+      "er": 343,
+      "d▁": 344,
+      "on": 345,
+      "y▁": 346,
+      "ou": 347,
+      "o▁": 348,
+      "or": 349,
+      "re": 350,
+      ":▁": 351,
+      "a▁": 352,
+      ",▁": 353,
+      "the▁": 354,
+      "st": 355,
+      "en": 356,
+      "ar": 357,
+      "and▁": 358,
+      ".▁": 359,
+      "ing": 360,
+      "al": 361,
+      "au": 362,
+      "er▁": 363,
+      "ic": 364,
+      "in▁": 365,
+      "to▁": 366,
+      "on▁": 367,
+      "at": 368,
+      "ing▁": 369,
+      "ed▁": 370,
+      "om": 371,
+      "is▁": 372,
+      "at▁": 373,
+      "ch": 374,
+      "or▁": 375,
+      "an▁": 376,
+      "es▁": 377,
+      "it": 378,
+      "st▁": 379,
+      "ee": 380,
+      "sh": 381,
+      "ser": 382,
+      "of": 383,
+      "you": 384,
+      "ow": 385,
+      "ran": 386,
+      "il": 387,
+      "el": 388,
+      "lau": 389,
+      "▁w": 390,
+      "ac": 391,
+      "Blau": 392,
+      "User": 393,
+      "ts▁": 394,
+      "stau": 395,
+      "Blau:▁": 396,
+      "User:▁": 397,
+      "stauran": 398,
+      "restauran": 399,
+      "r▁": 400,
+      "un": 401,
+      "th▁": 402,
+      "s,▁": 403,
+      "Th": 404,
+      "for▁": 405,
+      "ly▁": 406,
+      "da": 407,
+      "'s▁": 408,
+      ".▁Blau:▁": 409,
+      "k▁": 410,
+      "le": 411,
+      "ri": 412,
+      "lo": 413,
+      "te": 414,
+      "ab": 415,
+      "ro": 416,
+      "out▁": 417,
+      "en▁": 418,
+      "of▁": 419,
+      "00": 420,
+      "?▁": 421,
+      "be": 422,
+      "de": 423,
+      "ve▁": 424,
+      "as▁": 425,
+      "p▁": 426,
+      "ad": 427,
+      "am": 428,
+      "▁p": 429,
+      "mon": 430,
+      "as": 431,
+      "it▁": 432,
+      "ti": 433,
+      "ver": 434,
+      "ak": 435,
+      "cu": 436,
+      "fi": 437,
+      "s.": 438,
+      "wh": 439,
+      "ice▁": 440,
+      "you▁": 441,
+      "co": 442,
+      "li": 443,
+      "se": 444,
+      "A:▁": 445,
+      "Q:▁": 446,
+      "l▁": 447,
+      "si": 448,
+      "bo": 449,
+      "fr": 450,
+      "ge": 451,
+      "ith▁": 452,
+      "ord": 453,
+      "about▁": 454,
+      "em": 455,
+      "ati": 456,
+      "eek": 457,
+      "?▁A:▁": 458,
+      "ap": 459,
+      "gh": 460,
+      "is": 461,
+      "ne": 462,
+      "Jord": 463,
+      "tw": 464,
+      "vo": 465,
+      "mo": 466,
+      "om▁": 467,
+      "af": 468,
+      "al▁": 469,
+      "The▁": 470,
+      "ers▁": 471,
+      "from▁": 472,
+      "ld▁": 473,
+      "su": 474,
+      "pr": 475,
+      "week": 476,
+      "one▁": 477,
+      "di": 478,
+      "ur": 479,
+      "pl": 480,
+      "invo": 481,
+      "gr": 482,
+      "ore▁": 483,
+      "are▁": 484,
+      "restaurants▁": 485,
+      "20": 486,
+      "Wh": 487,
+      "ay": 488,
+      "ear": 489,
+      "oo": 490,
+      "oun": 491,
+      ",▁and▁": 492,
+      "ow▁": 493,
+      "es": 494,
+      "so▁": 495,
+      "with▁": 496,
+      "ard": 497,
+      "own": 498,
+      "%▁": 499,
+      "that▁": 500,
+      "ent": 501,
+      "our▁": 502,
+      "ent▁": 503,
+      "Jordan▁": 504,
+      "ey▁": 505,
+      "no": 506,
+      "run": 507,
+      "ter▁": 508,
+      "ould▁": 509,
+      "day": 510,
+      "day▁": 511,
+      "month": 512,
+      "two▁": 513,
+      "I▁": 514,
+      "op": 515,
+      "s.▁": 516,
+      "Q:▁Wh": 517,
+      "202": 518,
+      "com": 519,
+      "f▁": 520,
+      "se▁": 521,
+      "tr": 522,
+      "stom": 523,
+      "ch▁": 524,
+      "restaurant▁": 525,
+      "ation▁": 526,
+      ";▁": 527,
+      "bu": 528,
+      "ce▁": 529,
+      "can▁": 530,
+      "ha": 531,
+      "custom": 532,
+      "0▁": 533,
+      "We▁": 534,
+      "ag": 535,
+      "con": 536,
+      "has▁": 537,
+      "me": 538,
+      "mar": 539,
+      "year": 540,
+      "enu": 541,
+      "all": 542,
+      "your▁": 543,
+      "ell": 544,
+      "ea": 545,
+      "to": 546,
+      "we▁": 547,
+      "very▁": 548,
+      "by▁": 549,
+      "du": 550,
+      "ds▁": 551,
+      "ei": 552,
+      "fore▁": 553,
+      "pe": 554,
+      "wor": 555,
+      "ree▁": 556,
+      "loc": 557,
+      "fir": 558,
+      "invoic": 559,
+      "le▁": 560,
+      "in▁the▁": 561,
+      "ake▁": 562,
+      "dro": 563,
+      "e.": 564,
+      "fe": 565,
+      "sc": 566,
+      "w▁": 567,
+      "ya▁": 568,
+      "ate▁": 569,
+      "restaurant": 570,
+      "before▁": 571,
+      "ation": 572,
+      "have▁": 573,
+      "Lard": 574,
+      "Pri": 575,
+      "ay▁": 576,
+      "do▁": 577,
+      "ex": 578,
+      "id▁": 579,
+      "ok": 580,
+      "up▁": 581,
+      "ver▁": 582,
+      "x▁": 583,
+      "three▁": 584,
+      "at's▁": 585,
+      "after▁": 586,
+      "Larder": 587,
+      "Priya▁": 588,
+      "e,▁": 589,
+      "est": 590,
+      "fin": 591,
+      "g▁": 592,
+      "igh": 593,
+      "pp": 594,
+      "ten▁": 595,
+      "venu": 596,
+      "xt▁": 597,
+      "them": 598,
+      "ough": 599,
+      "end▁": 600,
+      "is▁a▁": 601,
+      "00▁": 602,
+      ",00": 603,
+      "Ale": 604,
+      "S▁": 605,
+      "ci": 606,
+      "ed": 607,
+      "every▁": 608,
+      "ho": 609,
+      "lin": 610,
+      "n▁": 611,
+      "sp": 612,
+      "ves▁": 613,
+      "and": 614,
+      "thing▁": 615,
+      "than▁": 616,
+      "ere▁": 617,
+      "our": 618,
+      "ally▁": 619,
+      "s,▁and▁": 620,
+      ".▁Blau:▁Th": 621,
+      "ood▁": 622,
+      "bi": 623,
+      "ber▁": 624,
+      "et▁": 625,
+      "king▁": 626,
+      "me▁": 627,
+      "my▁": 628,
+      "mil": 629,
+      "qu": 630,
+      "sa": 631,
+      "us▁": 632,
+      "ant▁": 633,
+      "ther▁": 634,
+      "thei": 635,
+      "read": 636,
+      "the▁p": 637,
+      "end": 638,
+      "at▁the▁": 639,
+      "chan": 640,
+      "itch": 641,
+      "sh▁": 642,
+      "User:▁The▁": 643,
+      "cost": 644,
+      "price▁": 645,
+      "their▁": 646,
+      "No": 647,
+      "ad▁": 648,
+      "coun": 649,
+      "de▁": 650,
+      "im": 651,
+      "min": 652,
+      "▁to▁": 653,
+      "s▁and▁": 654,
+      "an's▁": 655,
+      "a▁s": 656,
+      "ated▁": 657,
+      "off": 658,
+      "▁with▁": 659,
+      "ace▁": 660,
+      "dep": 661,
+      "Jordan's▁": 662,
+      "invoice▁": 663,
+      "Larderly▁": 664,
+      "venue▁": 665,
+      "del": 666,
+      "ge▁": 667,
+      "h▁": 668,
+      "m▁": 669,
+      "ned▁": 670,
+      "ot▁": 671,
+      "ps▁": 672,
+      "ra": 673,
+      "wi": 674,
+      "▁and▁": 675,
+      "this▁": 676,
+      "a▁p": 677,
+      "art": 678,
+      "all▁": 679,
+      "on▁the▁": 680,
+      "ill▁": 681,
+      "acti": 682,
+      "rodu": 683,
+      "?▁Blau:▁": 684,
+      "month▁": 685,
+      "cost▁": 686,
+      "get▁": 687,
+      "supp": 688,
+      "grou": 689,
+      "2026": 690,
+      "comp": 691,
+      "first▁": 692,
+      "invoices▁": 693,
+      "$1": 694,
+      "An": 695,
+      "Oak": 696,
+      "OS▁": 697,
+      "ast": 698,
+      "ast▁": 699,
+      "bac": 700,
+      "call": 701,
+      "ks▁": 702,
+      "ked▁": 703,
+      "kee": 704,
+      "lon": 705,
+      "mu": 706,
+      "more▁": 707,
+      "no▁": 708,
+      "per▁": 709,
+      "ry▁": 710,
+      "rit": 711,
+      "tri": 712,
+      "was▁": 713,
+      ",▁wh": 714,
+      "and▁the▁": 715,
+      ".▁A": 716,
+      "shi": 717,
+      "ily▁": 718,
+      "und": 719,
+      "of▁the▁": 720,
+      "Q:▁H": 721,
+      "new▁": 722,
+      "most▁": 723,
+      "customer▁": 724,
+      "marg": 725,
+      ",000▁": 726,
+      "Alex": 727,
+      "minu": 728,
+      "Oakl": 729,
+      "$3": 730,
+      "M▁": 731,
+      "ct": 732,
+      "do": 733,
+      "for": 734,
+      "foun": 735,
+      "gi": 736,
+      "id": 737,
+      "mall▁": 738,
+      "rough": 739,
+      "sy": 740,
+      "ss▁": 741,
+      "s.▁Blau:▁": 742,
+      "ust▁": 743,
+      "they▁": 744,
+      "indep": 745,
+      "er.": 746,
+      "er,▁": 747,
+      "onbo": 748,
+      "ort▁": 749,
+      "revenue▁": 750,
+      ",▁so▁": 751,
+      "eng": 752,
+      "ard▁": 753,
+      "in▁S": 754,
+      "▁wor": 755,
+      "act": 756,
+      "User:▁I": 757,
+      "five▁": 758,
+      "six▁": 759,
+      "Q:▁What▁": 760,
+      ".▁Blau:▁That's▁": 761,
+      "suppli": 762,
+      "more▁than▁": 763,
+      "margin▁": 764,
+      "independ": 765,
+      "'t▁": 766,
+      "Ro": 767,
+      "ces": 768,
+      "d.▁": 769,
+      "ec": 770,
+      "et": 771,
+      "kitch": 772,
+      "pay": 773,
+      "re▁": 774,
+      "sal": 775,
+      "ine": 776,
+      "the▁s": 777,
+      "ar▁": 778,
+      "ary▁": 779,
+      "ical▁": 780,
+      "ich▁": 781,
+      "to▁the▁": 782,
+      "il▁": 783,
+      "ell▁": 784,
+      "▁pay": 785,
+      "sig": 786,
+      "book": 787,
+      "pric": 788,
+      "not▁": 789,
+      "buil": 790,
+      "customers▁": 791,
+      "location▁": 792,
+      "line▁": 793,
+      "ant▁to▁": 794,
+      "Andro": 795,
+      "Q:▁How▁": 796,
+      "onboard": 797,
+      "$4": 798,
+      "'ve▁": 799,
+      "Bis": 800,
+      "Pr": 801,
+      "ain▁": 802,
+      "ev": 803,
+      "e.▁": 804,
+      "es,▁": 805,
+      "fu": 806,
+      "fam": 807,
+      "hour": 808,
+      "lar": 809,
+      "mor": 810,
+      "mee": 811,
+      "ning▁": 812,
+      "nigh": 813,
+      "o-": 814,
+      "other▁": 815,
+      "per": 816,
+      "so": 817,
+      "s?▁A:▁": 818,
+      "ta": 819,
+      "tal": 820,
+      "vi": 821,
+      "s▁of▁": 822,
+      "any▁": 823,
+      "ref": 824,
+      "a▁c": 825,
+      ",▁a▁": 826,
+      "ents▁": 827,
+      "ic▁": 828,
+      "in▁a▁": 829,
+      "in▁Oakl": 830,
+      "ome": 831,
+      "it's▁": 832,
+      "sho": 833,
+      "shell": 834,
+      "ill": 835,
+      "ilot▁": 836,
+      "te:▁": 837,
+      "text▁": 838,
+      "been▁": 839,
+      "money▁": 840,
+      "tion▁": 841,
+      "who▁": 842,
+      "what▁": 843,
+      "lik": 844,
+      "seed▁": 845,
+      "ember▁": 846,
+      "app": 847,
+      "next▁": 848,
+      "model": 849,
+      "days▁": 850,
+      "conver": 851,
+      "each▁": 852,
+      "location": 853,
+      "scan": 854,
+      "them▁": 855,
+      "ready▁": 856,
+      "Note:▁": 857,
+      "rais": 858,
+      "with": 859,
+      "long▁": 860,
+      "under▁": 861,
+      "engine": 862,
+      "Biscu": 863,
+      "$2": 864,
+      "12": 865,
+      "40": 866,
+      "50": 867,
+      "9▁": 868,
+      "Fer": 869,
+      "Hal": 870,
+      "In": 871,
+      "Jap": 872,
+      "Mon": 873,
+      "Mar": 874,
+      "Ou": 875,
+      "Tom": 876,
+      "aw": 877,
+      "br": 878,
+      "cl": 879,
+      "cau": 880,
+      "cces": 881,
+      "don": 882,
+      "e-": 883,
+      "eas": 884,
+      "fl": 885,
+      "go▁": 886,
+      "gge": 887,
+      "her▁": 888,
+      "if▁": 889,
+      "ly": 890,
+      "make▁": 891,
+      "ok▁": 892,
+      "ram": 893,
+      "ted▁": 894,
+      "tle▁": 895,
+      "us": 896,
+      "vis": 897,
+      "writ": 898,
+      "yo": 899
+    },
+    "merges": [
+      [
+        "e",
+        "▁"
+      ],
+      [
+        "s",
+        "▁"
+      ],
+      [
+        "a",
+        "n"
+      ],
+      [
+        "t",
+        "h"
+      ],
+      [
+        "t",
+        "▁"
+      ],
+      [
+        "i",
+        "n"
+      ],
+      [
+        "e",
+        "r"
+      ],
+      [
+        "d",
+        "▁"
+      ],
+      [
+        "o",
+        "n"
+      ],
+      [
+        "y",
+        "▁"
+      ],
+      [
+        "o",
+        "u"
+      ],
+      [
+        "o",
+        "▁"
+      ],
+      [
+        "o",
+        "r"
+      ],
+      [
+        "r",
+        "e"
+      ],
+      [
+        ":",
+        "▁"
+      ],
+      [
+        "a",
+        "▁"
+      ],
+      [
+        ",",
+        "▁"
+      ],
+      [
+        "th",
+        "e▁"
+      ],
+      [
+        "s",
+        "t"
+      ],
+      [
+        "e",
+        "n"
+      ],
+      [
+        "a",
+        "r"
+      ],
+      [
+        "an",
+        "d▁"
+      ],
+      [
+        ".",
+        "▁"
+      ],
+      [
+        "in",
+        "g"
+      ],
+      [
+        "a",
+        "l"
+      ],
+      [
+        "a",
+        "u"
+      ],
+      [
+        "er",
+        "▁"
+      ],
+      [
+        "i",
+        "c"
+      ],
+      [
+        "in",
+        "▁"
+      ],
+      [
+        "t",
+        "o▁"
+      ],
+      [
+        "on",
+        "▁"
+      ],
+      [
+        "a",
+        "t"
+      ],
+      [
+        "ing",
+        "▁"
+      ],
+      [
+        "e",
+        "d▁"
+      ],
+      [
+        "o",
+        "m"
+      ],
+      [
+        "i",
+        "s▁"
+      ],
+      [
+        "a",
+        "t▁"
+      ],
+      [
+        "c",
+        "h"
+      ],
+      [
+        "or",
+        "▁"
+      ],
+      [
+        "an",
+        "▁"
+      ],
+      [
+        "e",
+        "s▁"
+      ],
+      [
+        "i",
+        "t"
+      ],
+      [
+        "s",
+        "t▁"
+      ],
+      [
+        "e",
+        "e"
+      ],
+      [
+        "s",
+        "h"
+      ],
+      [
+        "s",
+        "er"
+      ],
+      [
+        "o",
+        "f"
+      ],
+      [
+        "y",
+        "ou"
+      ],
+      [
+        "o",
+        "w"
+      ],
+      [
+        "r",
+        "an"
+      ],
+      [
+        "i",
+        "l"
+      ],
+      [
+        "e",
+        "l"
+      ],
+      [
+        "l",
+        "au"
+      ],
+      [
+        "▁",
+        "w"
+      ],
+      [
+        "a",
+        "c"
+      ],
+      [
+        "B",
+        "lau"
+      ],
+      [
+        "U",
+        "ser"
+      ],
+      [
+        "t",
+        "s▁"
+      ],
+      [
+        "st",
+        "au"
+      ],
+      [
+        "Blau",
+        ":▁"
+      ],
+      [
+        "User",
+        ":▁"
+      ],
+      [
+        "stau",
+        "ran"
+      ],
+      [
+        "re",
+        "stauran"
+      ],
+      [
+        "r",
+        "▁"
+      ],
+      [
+        "u",
+        "n"
+      ],
+      [
+        "th",
+        "▁"
+      ],
+      [
+        "s",
+        ",▁"
+      ],
+      [
+        "T",
+        "h"
+      ],
+      [
+        "f",
+        "or▁"
+      ],
+      [
+        "l",
+        "y▁"
+      ],
+      [
+        "d",
+        "a"
+      ],
+      [
+        "'",
+        "s▁"
+      ],
+      [
+        ".▁",
+        "Blau:▁"
+      ],
+      [
+        "k",
+        "▁"
+      ],
+      [
+        "l",
+        "e"
+      ],
+      [
+        "r",
+        "i"
+      ],
+      [
+        "l",
+        "o"
+      ],
+      [
+        "t",
+        "e"
+      ],
+      [
+        "a",
+        "b"
+      ],
+      [
+        "r",
+        "o"
+      ],
+      [
+        "ou",
+        "t▁"
+      ],
+      [
+        "en",
+        "▁"
+      ],
+      [
+        "of",
+        "▁"
+      ],
+      [
+        "0",
+        "0"
+      ],
+      [
+        "?",
+        "▁"
+      ],
+      [
+        "b",
+        "e"
+      ],
+      [
+        "d",
+        "e"
+      ],
+      [
+        "v",
+        "e▁"
+      ],
+      [
+        "a",
+        "s▁"
+      ],
+      [
+        "p",
+        "▁"
+      ],
+      [
+        "a",
+        "d"
+      ],
+      [
+        "a",
+        "m"
+      ],
+      [
+        "▁",
+        "p"
+      ],
+      [
+        "m",
+        "on"
+      ],
+      [
+        "a",
+        "s"
+      ],
+      [
+        "i",
+        "t▁"
+      ],
+      [
+        "t",
+        "i"
+      ],
+      [
+        "v",
+        "er"
+      ],
+      [
+        "a",
+        "k"
+      ],
+      [
+        "c",
+        "u"
+      ],
+      [
+        "f",
+        "i"
+      ],
+      [
+        "s",
+        "."
+      ],
+      [
+        "w",
+        "h"
+      ],
+      [
+        "ic",
+        "e▁"
+      ],
+      [
+        "you",
+        "▁"
+      ],
+      [
+        "c",
+        "o"
+      ],
+      [
+        "l",
+        "i"
+      ],
+      [
+        "s",
+        "e"
+      ],
+      [
+        "A",
+        ":▁"
+      ],
+      [
+        "Q",
+        ":▁"
+      ],
+      [
+        "l",
+        "▁"
+      ],
+      [
+        "s",
+        "i"
+      ],
+      [
+        "b",
+        "o"
+      ],
+      [
+        "f",
+        "r"
+      ],
+      [
+        "g",
+        "e"
+      ],
+      [
+        "i",
+        "th▁"
+      ],
+      [
+        "or",
+        "d"
+      ],
+      [
+        "ab",
+        "out▁"
+      ],
+      [
+        "e",
+        "m"
+      ],
+      [
+        "at",
+        "i"
+      ],
+      [
+        "ee",
+        "k"
+      ],
+      [
+        "?▁",
+        "A:▁"
+      ],
+      [
+        "a",
+        "p"
+      ],
+      [
+        "g",
+        "h"
+      ],
+      [
+        "i",
+        "s"
+      ],
+      [
+        "n",
+        "e"
+      ],
+      [
+        "J",
+        "ord"
+      ],
+      [
+        "t",
+        "w"
+      ],
+      [
+        "v",
+        "o"
+      ],
+      [
+        "m",
+        "o"
+      ],
+      [
+        "om",
+        "▁"
+      ],
+      [
+        "a",
+        "f"
+      ],
+      [
+        "al",
+        "▁"
+      ],
+      [
+        "Th",
+        "e▁"
+      ],
+      [
+        "er",
+        "s▁"
+      ],
+      [
+        "fr",
+        "om▁"
+      ],
+      [
+        "l",
+        "d▁"
+      ],
+      [
+        "s",
+        "u"
+      ],
+      [
+        "p",
+        "r"
+      ],
+      [
+        "w",
+        "eek"
+      ],
+      [
+        "on",
+        "e▁"
+      ],
+      [
+        "d",
+        "i"
+      ],
+      [
+        "u",
+        "r"
+      ],
+      [
+        "p",
+        "l"
+      ],
+      [
+        "in",
+        "vo"
+      ],
+      [
+        "g",
+        "r"
+      ],
+      [
+        "or",
+        "e▁"
+      ],
+      [
+        "ar",
+        "e▁"
+      ],
+      [
+        "restauran",
+        "ts▁"
+      ],
+      [
+        "2",
+        "0"
+      ],
+      [
+        "W",
+        "h"
+      ],
+      [
+        "a",
+        "y"
+      ],
+      [
+        "e",
+        "ar"
+      ],
+      [
+        "o",
+        "o"
+      ],
+      [
+        "ou",
+        "n"
+      ],
+      [
+        ",▁",
+        "and▁"
+      ],
+      [
+        "ow",
+        "▁"
+      ],
+      [
+        "e",
+        "s"
+      ],
+      [
+        "s",
+        "o▁"
+      ],
+      [
+        "w",
+        "ith▁"
+      ],
+      [
+        "ar",
+        "d"
+      ],
+      [
+        "ow",
+        "n"
+      ],
+      [
+        "%",
+        "▁"
+      ],
+      [
+        "th",
+        "at▁"
+      ],
+      [
+        "en",
+        "t"
+      ],
+      [
+        "ou",
+        "r▁"
+      ],
+      [
+        "en",
+        "t▁"
+      ],
+      [
+        "Jord",
+        "an▁"
+      ],
+      [
+        "e",
+        "y▁"
+      ],
+      [
+        "n",
+        "o"
+      ],
+      [
+        "r",
+        "un"
+      ],
+      [
+        "t",
+        "er▁"
+      ],
+      [
+        "ou",
+        "ld▁"
+      ],
+      [
+        "da",
+        "y"
+      ],
+      [
+        "da",
+        "y▁"
+      ],
+      [
+        "mon",
+        "th"
+      ],
+      [
+        "tw",
+        "o▁"
+      ],
+      [
+        "I",
+        "▁"
+      ],
+      [
+        "o",
+        "p"
+      ],
+      [
+        "s",
+        ".▁"
+      ],
+      [
+        "Q:▁",
+        "Wh"
+      ],
+      [
+        "20",
+        "2"
+      ],
+      [
+        "c",
+        "om"
+      ],
+      [
+        "f",
+        "▁"
+      ],
+      [
+        "s",
+        "e▁"
+      ],
+      [
+        "t",
+        "r"
+      ],
+      [
+        "st",
+        "om"
+      ],
+      [
+        "ch",
+        "▁"
+      ],
+      [
+        "restauran",
+        "t▁"
+      ],
+      [
+        "ati",
+        "on▁"
+      ],
+      [
+        ";",
+        "▁"
+      ],
+      [
+        "b",
+        "u"
+      ],
+      [
+        "c",
+        "e▁"
+      ],
+      [
+        "c",
+        "an▁"
+      ],
+      [
+        "h",
+        "a"
+      ],
+      [
+        "cu",
+        "stom"
+      ],
+      [
+        "0",
+        "▁"
+      ],
+      [
+        "W",
+        "e▁"
+      ],
+      [
+        "a",
+        "g"
+      ],
+      [
+        "c",
+        "on"
+      ],
+      [
+        "h",
+        "as▁"
+      ],
+      [
+        "m",
+        "e"
+      ],
+      [
+        "m",
+        "ar"
+      ],
+      [
+        "y",
+        "ear"
+      ],
+      [
+        "en",
+        "u"
+      ],
+      [
+        "al",
+        "l"
+      ],
+      [
+        "you",
+        "r▁"
+      ],
+      [
+        "el",
+        "l"
+      ],
+      [
+        "e",
+        "a"
+      ],
+      [
+        "t",
+        "o"
+      ],
+      [
+        "w",
+        "e▁"
+      ],
+      [
+        "ver",
+        "y▁"
+      ],
+      [
+        "b",
+        "y▁"
+      ],
+      [
+        "d",
+        "u"
+      ],
+      [
+        "d",
+        "s▁"
+      ],
+      [
+        "e",
+        "i"
+      ],
+      [
+        "f",
+        "ore▁"
+      ],
+      [
+        "p",
+        "e"
+      ],
+      [
+        "w",
+        "or"
+      ],
+      [
+        "re",
+        "e▁"
+      ],
+      [
+        "lo",
+        "c"
+      ],
+      [
+        "fi",
+        "r"
+      ],
+      [
+        "invo",
+        "ic"
+      ],
+      [
+        "l",
+        "e▁"
+      ],
+      [
+        "in▁",
+        "the▁"
+      ],
+      [
+        "ak",
+        "e▁"
+      ],
+      [
+        "d",
+        "ro"
+      ],
+      [
+        "e",
+        "."
+      ],
+      [
+        "f",
+        "e"
+      ],
+      [
+        "s",
+        "c"
+      ],
+      [
+        "w",
+        "▁"
+      ],
+      [
+        "y",
+        "a▁"
+      ],
+      [
+        "at",
+        "e▁"
+      ],
+      [
+        "restauran",
+        "t"
+      ],
+      [
+        "be",
+        "fore▁"
+      ],
+      [
+        "ati",
+        "on"
+      ],
+      [
+        "ha",
+        "ve▁"
+      ],
+      [
+        "L",
+        "ard"
+      ],
+      [
+        "P",
+        "ri"
+      ],
+      [
+        "a",
+        "y▁"
+      ],
+      [
+        "d",
+        "o▁"
+      ],
+      [
+        "e",
+        "x"
+      ],
+      [
+        "i",
+        "d▁"
+      ],
+      [
+        "o",
+        "k"
+      ],
+      [
+        "u",
+        "p▁"
+      ],
+      [
+        "v",
+        "er▁"
+      ],
+      [
+        "x",
+        "▁"
+      ],
+      [
+        "th",
+        "ree▁"
+      ],
+      [
+        "at",
+        "'s▁"
+      ],
+      [
+        "af",
+        "ter▁"
+      ],
+      [
+        "Lard",
+        "er"
+      ],
+      [
+        "Pri",
+        "ya▁"
+      ],
+      [
+        "e",
+        ",▁"
+      ],
+      [
+        "e",
+        "st"
+      ],
+      [
+        "f",
+        "in"
+      ],
+      [
+        "g",
+        "▁"
+      ],
+      [
+        "i",
+        "gh"
+      ],
+      [
+        "p",
+        "p"
+      ],
+      [
+        "t",
+        "en▁"
+      ],
+      [
+        "v",
+        "enu"
+      ],
+      [
+        "x",
+        "t▁"
+      ],
+      [
+        "th",
+        "em"
+      ],
+      [
+        "ou",
+        "gh"
+      ],
+      [
+        "en",
+        "d▁"
+      ],
+      [
+        "is▁",
+        "a▁"
+      ],
+      [
+        "00",
+        "▁"
+      ],
+      [
+        ",",
+        "00"
+      ],
+      [
+        "A",
+        "le"
+      ],
+      [
+        "S",
+        "▁"
+      ],
+      [
+        "c",
+        "i"
+      ],
+      [
+        "e",
+        "d"
+      ],
+      [
+        "e",
+        "very▁"
+      ],
+      [
+        "h",
+        "o"
+      ],
+      [
+        "l",
+        "in"
+      ],
+      [
+        "n",
+        "▁"
+      ],
+      [
+        "s",
+        "p"
+      ],
+      [
+        "v",
+        "es▁"
+      ],
+      [
+        "an",
+        "d"
+      ],
+      [
+        "th",
+        "ing▁"
+      ],
+      [
+        "th",
+        "an▁"
+      ],
+      [
+        "er",
+        "e▁"
+      ],
+      [
+        "ou",
+        "r"
+      ],
+      [
+        "al",
+        "ly▁"
+      ],
+      [
+        "s,▁",
+        "and▁"
+      ],
+      [
+        ".▁Blau:▁",
+        "Th"
+      ],
+      [
+        "oo",
+        "d▁"
+      ],
+      [
+        "b",
+        "i"
+      ],
+      [
+        "b",
+        "er▁"
+      ],
+      [
+        "e",
+        "t▁"
+      ],
+      [
+        "k",
+        "ing▁"
+      ],
+      [
+        "m",
+        "e▁"
+      ],
+      [
+        "m",
+        "y▁"
+      ],
+      [
+        "m",
+        "il"
+      ],
+      [
+        "q",
+        "u"
+      ],
+      [
+        "s",
+        "a"
+      ],
+      [
+        "u",
+        "s▁"
+      ],
+      [
+        "an",
+        "t▁"
+      ],
+      [
+        "th",
+        "er▁"
+      ],
+      [
+        "th",
+        "ei"
+      ],
+      [
+        "re",
+        "ad"
+      ],
+      [
+        "the▁",
+        "p"
+      ],
+      [
+        "en",
+        "d"
+      ],
+      [
+        "at▁",
+        "the▁"
+      ],
+      [
+        "ch",
+        "an"
+      ],
+      [
+        "it",
+        "ch"
+      ],
+      [
+        "sh",
+        "▁"
+      ],
+      [
+        "User:▁",
+        "The▁"
+      ],
+      [
+        "co",
+        "st"
+      ],
+      [
+        "pr",
+        "ice▁"
+      ],
+      [
+        "thei",
+        "r▁"
+      ],
+      [
+        "N",
+        "o"
+      ],
+      [
+        "a",
+        "d▁"
+      ],
+      [
+        "c",
+        "oun"
+      ],
+      [
+        "d",
+        "e▁"
+      ],
+      [
+        "i",
+        "m"
+      ],
+      [
+        "m",
+        "in"
+      ],
+      [
+        "▁",
+        "to▁"
+      ],
+      [
+        "s▁",
+        "and▁"
+      ],
+      [
+        "an",
+        "'s▁"
+      ],
+      [
+        "a▁",
+        "s"
+      ],
+      [
+        "at",
+        "ed▁"
+      ],
+      [
+        "of",
+        "f"
+      ],
+      [
+        "▁w",
+        "ith▁"
+      ],
+      [
+        "ac",
+        "e▁"
+      ],
+      [
+        "de",
+        "p"
+      ],
+      [
+        "Jord",
+        "an's▁"
+      ],
+      [
+        "invo",
+        "ice▁"
+      ],
+      [
+        "Larder",
+        "ly▁"
+      ],
+      [
+        "venu",
+        "e▁"
+      ],
+      [
+        "d",
+        "el"
+      ],
+      [
+        "g",
+        "e▁"
+      ],
+      [
+        "h",
+        "▁"
+      ],
+      [
+        "m",
+        "▁"
+      ],
+      [
+        "n",
+        "ed▁"
+      ],
+      [
+        "o",
+        "t▁"
+      ],
+      [
+        "p",
+        "s▁"
+      ],
+      [
+        "r",
+        "a"
+      ],
+      [
+        "w",
+        "i"
+      ],
+      [
+        "▁",
+        "and▁"
+      ],
+      [
+        "th",
+        "is▁"
+      ],
+      [
+        "a▁",
+        "p"
+      ],
+      [
+        "ar",
+        "t"
+      ],
+      [
+        "al",
+        "l▁"
+      ],
+      [
+        "on▁",
+        "the▁"
+      ],
+      [
+        "il",
+        "l▁"
+      ],
+      [
+        "ac",
+        "ti"
+      ],
+      [
+        "ro",
+        "du"
+      ],
+      [
+        "?▁",
+        "Blau:▁"
+      ],
+      [
+        "mon",
+        "th▁"
+      ],
+      [
+        "co",
+        "st▁"
+      ],
+      [
+        "ge",
+        "t▁"
+      ],
+      [
+        "su",
+        "pp"
+      ],
+      [
+        "gr",
+        "ou"
+      ],
+      [
+        "202",
+        "6"
+      ],
+      [
+        "com",
+        "p"
+      ],
+      [
+        "fir",
+        "st▁"
+      ],
+      [
+        "invoic",
+        "es▁"
+      ],
+      [
+        "$",
+        "1"
+      ],
+      [
+        "A",
+        "n"
+      ],
+      [
+        "O",
+        "ak"
+      ],
+      [
+        "O",
+        "S▁"
+      ],
+      [
+        "a",
+        "st"
+      ],
+      [
+        "a",
+        "st▁"
+      ],
+      [
+        "b",
+        "ac"
+      ],
+      [
+        "c",
+        "all"
+      ],
+      [
+        "k",
+        "s▁"
+      ],
+      [
+        "k",
+        "ed▁"
+      ],
+      [
+        "k",
+        "ee"
+      ],
+      [
+        "l",
+        "on"
+      ],
+      [
+        "m",
+        "u"
+      ],
+      [
+        "m",
+        "ore▁"
+      ],
+      [
+        "n",
+        "o▁"
+      ],
+      [
+        "p",
+        "er▁"
+      ],
+      [
+        "r",
+        "y▁"
+      ],
+      [
+        "r",
+        "it"
+      ],
+      [
+        "t",
+        "ri"
+      ],
+      [
+        "w",
+        "as▁"
+      ],
+      [
+        ",▁",
+        "wh"
+      ],
+      [
+        "and▁",
+        "the▁"
+      ],
+      [
+        ".▁",
+        "A"
+      ],
+      [
+        "sh",
+        "i"
+      ],
+      [
+        "il",
+        "y▁"
+      ],
+      [
+        "un",
+        "d"
+      ],
+      [
+        "of▁",
+        "the▁"
+      ],
+      [
+        "Q:▁",
+        "H"
+      ],
+      [
+        "ne",
+        "w▁"
+      ],
+      [
+        "mo",
+        "st▁"
+      ],
+      [
+        "custom",
+        "er▁"
+      ],
+      [
+        "mar",
+        "g"
+      ],
+      [
+        ",00",
+        "0▁"
+      ],
+      [
+        "Ale",
+        "x"
+      ],
+      [
+        "min",
+        "u"
+      ],
+      [
+        "Oak",
+        "l"
+      ],
+      [
+        "$",
+        "3"
+      ],
+      [
+        "M",
+        "▁"
+      ],
+      [
+        "c",
+        "t"
+      ],
+      [
+        "d",
+        "o"
+      ],
+      [
+        "f",
+        "or"
+      ],
+      [
+        "f",
+        "oun"
+      ],
+      [
+        "g",
+        "i"
+      ],
+      [
+        "i",
+        "d"
+      ],
+      [
+        "m",
+        "all▁"
+      ],
+      [
+        "r",
+        "ough"
+      ],
+      [
+        "s",
+        "y"
+      ],
+      [
+        "s",
+        "s▁"
+      ],
+      [
+        "s",
+        ".▁Blau:▁"
+      ],
+      [
+        "u",
+        "st▁"
+      ],
+      [
+        "th",
+        "ey▁"
+      ],
+      [
+        "in",
+        "dep"
+      ],
+      [
+        "er",
+        "."
+      ],
+      [
+        "er",
+        ",▁"
+      ],
+      [
+        "on",
+        "bo"
+      ],
+      [
+        "or",
+        "t▁"
+      ],
+      [
+        "re",
+        "venue▁"
+      ],
+      [
+        ",▁",
+        "so▁"
+      ],
+      [
+        "en",
+        "g"
+      ],
+      [
+        "ar",
+        "d▁"
+      ],
+      [
+        "in▁",
+        "S"
+      ],
+      [
+        "▁w",
+        "or"
+      ],
+      [
+        "ac",
+        "t"
+      ],
+      [
+        "User:▁",
+        "I"
+      ],
+      [
+        "fi",
+        "ve▁"
+      ],
+      [
+        "si",
+        "x▁"
+      ],
+      [
+        "Q:▁Wh",
+        "at▁"
+      ],
+      [
+        ".▁Blau:▁Th",
+        "at's▁"
+      ],
+      [
+        "supp",
+        "li"
+      ],
+      [
+        "more▁",
+        "than▁"
+      ],
+      [
+        "marg",
+        "in▁"
+      ],
+      [
+        "indep",
+        "end"
+      ],
+      [
+        "'",
+        "t▁"
+      ],
+      [
+        "R",
+        "o"
+      ],
+      [
+        "c",
+        "es"
+      ],
+      [
+        "d",
+        ".▁"
+      ],
+      [
+        "e",
+        "c"
+      ],
+      [
+        "e",
+        "t"
+      ],
+      [
+        "k",
+        "itch"
+      ],
+      [
+        "p",
+        "ay"
+      ],
+      [
+        "r",
+        "e▁"
+      ],
+      [
+        "s",
+        "al"
+      ],
+      [
+        "in",
+        "e"
+      ],
+      [
+        "the▁",
+        "s"
+      ],
+      [
+        "ar",
+        "▁"
+      ],
+      [
+        "ar",
+        "y▁"
+      ],
+      [
+        "ic",
+        "al▁"
+      ],
+      [
+        "ic",
+        "h▁"
+      ],
+      [
+        "to▁",
+        "the▁"
+      ],
+      [
+        "il",
+        "▁"
+      ],
+      [
+        "el",
+        "l▁"
+      ],
+      [
+        "▁p",
+        "ay"
+      ],
+      [
+        "si",
+        "g"
+      ],
+      [
+        "bo",
+        "ok"
+      ],
+      [
+        "pr",
+        "ic"
+      ],
+      [
+        "no",
+        "t▁"
+      ],
+      [
+        "bu",
+        "il"
+      ],
+      [
+        "custom",
+        "ers▁"
+      ],
+      [
+        "loc",
+        "ation▁"
+      ],
+      [
+        "lin",
+        "e▁"
+      ],
+      [
+        "ant▁",
+        "to▁"
+      ],
+      [
+        "An",
+        "dro"
+      ],
+      [
+        "Q:▁H",
+        "ow▁"
+      ],
+      [
+        "onbo",
+        "ard"
+      ],
+      [
+        "$",
+        "4"
+      ],
+      [
+        "'",
+        "ve▁"
+      ],
+      [
+        "B",
+        "is"
+      ],
+      [
+        "P",
+        "r"
+      ],
+      [
+        "a",
+        "in▁"
+      ],
+      [
+        "e",
+        "v"
+      ],
+      [
+        "e",
+        ".▁"
+      ],
+      [
+        "e",
+        "s,▁"
+      ],
+      [
+        "f",
+        "u"
+      ],
+      [
+        "f",
+        "am"
+      ],
+      [
+        "h",
+        "our"
+      ],
+      [
+        "l",
+        "ar"
+      ],
+      [
+        "m",
+        "or"
+      ],
+      [
+        "m",
+        "ee"
+      ],
+      [
+        "n",
+        "ing▁"
+      ],
+      [
+        "n",
+        "igh"
+      ],
+      [
+        "o",
+        "-"
+      ],
+      [
+        "o",
+        "ther▁"
+      ],
+      [
+        "p",
+        "er"
+      ],
+      [
+        "s",
+        "o"
+      ],
+      [
+        "s",
+        "?▁A:▁"
+      ],
+      [
+        "t",
+        "a"
+      ],
+      [
+        "t",
+        "al"
+      ],
+      [
+        "v",
+        "i"
+      ],
+      [
+        "s▁",
+        "of▁"
+      ],
+      [
+        "an",
+        "y▁"
+      ],
+      [
+        "re",
+        "f"
+      ],
+      [
+        "a▁",
+        "c"
+      ],
+      [
+        ",▁",
+        "a▁"
+      ],
+      [
+        "en",
+        "ts▁"
+      ],
+      [
+        "ic",
+        "▁"
+      ],
+      [
+        "in▁",
+        "a▁"
+      ],
+      [
+        "in▁",
+        "Oakl"
+      ],
+      [
+        "om",
+        "e"
+      ],
+      [
+        "it",
+        "'s▁"
+      ],
+      [
+        "sh",
+        "o"
+      ],
+      [
+        "sh",
+        "ell"
+      ],
+      [
+        "il",
+        "l"
+      ],
+      [
+        "il",
+        "ot▁"
+      ],
+      [
+        "te",
+        ":▁"
+      ],
+      [
+        "te",
+        "xt▁"
+      ],
+      [
+        "be",
+        "en▁"
+      ],
+      [
+        "mon",
+        "ey▁"
+      ],
+      [
+        "ti",
+        "on▁"
+      ],
+      [
+        "wh",
+        "o▁"
+      ],
+      [
+        "wh",
+        "at▁"
+      ],
+      [
+        "li",
+        "k"
+      ],
+      [
+        "se",
+        "ed▁"
+      ],
+      [
+        "em",
+        "ber▁"
+      ],
+      [
+        "ap",
+        "p"
+      ],
+      [
+        "ne",
+        "xt▁"
+      ],
+      [
+        "mo",
+        "del"
+      ],
+      [
+        "day",
+        "s▁"
+      ],
+      [
+        "con",
+        "ver"
+      ],
+      [
+        "ea",
+        "ch▁"
+      ],
+      [
+        "loc",
+        "ation"
+      ],
+      [
+        "sc",
+        "an"
+      ],
+      [
+        "them",
+        "▁"
+      ],
+      [
+        "read",
+        "y▁"
+      ],
+      [
+        "No",
+        "te:▁"
+      ],
+      [
+        "ra",
+        "is"
+      ],
+      [
+        "wi",
+        "th"
+      ],
+      [
+        "lon",
+        "g▁"
+      ],
+      [
+        "und",
+        "er▁"
+      ],
+      [
+        "eng",
+        "ine"
+      ],
+      [
+        "Bis",
+        "cu"
+      ],
+      [
+        "$",
+        "2"
+      ],
+      [
+        "1",
+        "2"
+      ],
+      [
+        "4",
+        "0"
+      ],
+      [
+        "5",
+        "0"
+      ],
+      [
+        "9",
+        "▁"
+      ],
+      [
+        "F",
+        "er"
+      ],
+      [
+        "H",
+        "al"
+      ],
+      [
+        "I",
+        "n"
+      ],
+      [
+        "J",
+        "ap"
+      ],
+      [
+        "M",
+        "on"
+      ],
+      [
+        "M",
+        "ar"
+      ],
+      [
+        "O",
+        "u"
+      ],
+      [
+        "T",
+        "om"
+      ],
+      [
+        "a",
+        "w"
+      ],
+      [
+        "b",
+        "r"
+      ],
+      [
+        "c",
+        "l"
+      ],
+      [
+        "c",
+        "au"
+      ],
+      [
+        "c",
+        "ces"
+      ],
+      [
+        "d",
+        "on"
+      ],
+      [
+        "e",
+        "-"
+      ],
+      [
+        "e",
+        "as"
+      ],
+      [
+        "f",
+        "l"
+      ],
+      [
+        "g",
+        "o▁"
+      ],
+      [
+        "g",
+        "ge"
+      ],
+      [
+        "h",
+        "er▁"
+      ],
+      [
+        "i",
+        "f▁"
+      ],
+      [
+        "l",
+        "y"
+      ],
+      [
+        "m",
+        "ake▁"
+      ],
+      [
+        "o",
+        "k▁"
+      ],
+      [
+        "r",
+        "am"
+      ],
+      [
+        "t",
+        "ed▁"
+      ],
+      [
+        "t",
+        "le▁"
+      ],
+      [
+        "u",
+        "s"
+      ],
+      [
+        "v",
+        "is"
+      ],
+      [
+        "w",
+        "rit"
+      ],
+      [
+        "y",
+        "o"
+      ]
+    ]
+  }
+}

@@ -1,5 +1,6 @@
 import BlauAudio
 import BlauCore
+import BlauMemory
 import BlauPersistence
 import BlauRealtime
 import BlauTelemetry
@@ -67,6 +68,11 @@ final class AppEnvironment {
     /// so no preview or test ever starts a real download.
     let speechModels: ModelManager
 
+    /// The shared text embedding service (#60) behind memory search and
+    /// topic segmentation, over the model `speechModels` installs as
+    /// `.textEmbedding` (see `TextEmbeddings`). Never installed on fakes.
+    let textEmbeddings: TextEmbeddingService
+
     /// The realtime session configuration (#35): the voice settings Settings
     /// edits and the configurator that builds each `session.update`. Live
     /// launches keep the settings in `UserDefaults`; every other kind keeps
@@ -114,7 +120,8 @@ final class AppEnvironment {
         speechModels: ModelManager,
         realtimeSession: RealtimeSessionServices,
         conversationAudio: ConversationAudio? = nil,
-        backgroundInference: BackgroundInferenceMonitor = BackgroundInferenceMonitor()
+        backgroundInference: BackgroundInferenceMonitor = BackgroundInferenceMonitor(),
+        textEmbeddings: TextEmbeddingService = TextEmbeddings.unavailable()
     ) {
         self.kind = kind
         self.config = config
@@ -129,6 +136,7 @@ final class AppEnvironment {
         self.memory = memory
         self.xai = xai
         self.speechModels = speechModels
+        self.textEmbeddings = textEmbeddings
         self.realtimeSession = realtimeSession
         self.conversationAudio = conversationAudio
         self.backgroundInference = backgroundInference
@@ -238,6 +246,9 @@ extension AppEnvironment {
         // (#23), kept alive off screen with a lock-screen indicator (#26).
         // Nothing touches the microphone until `audio.startCapture()`.
         let conversationAudio = ConversationAudio.live(indicator: LiveActivityRecordingIndicator())
+        // #27: the on-device model download manager, which also installs the
+        // shared text embedding model (#60).
+        let models = speechModels ?? SpeechModels.makeManager()
         return AppEnvironment(
             kind: .live,
             config: config,
@@ -262,10 +273,10 @@ extension AppEnvironment {
             // #62 - #68: memory and its tools.
             memory: UnavailableService(subsystem: "memory"),
             xai: xai ?? XAIServices.make(config: config),
-            // #27: the on-device speech model download manager.
-            speechModels: speechModels ?? SpeechModels.makeManager(),
+            speechModels: models,
             realtimeSession: RealtimeSessionServices.make(),
-            conversationAudio: conversationAudio
+            conversationAudio: conversationAudio,
+            textEmbeddings: TextEmbeddings.make(models: models)
         )
     }
 

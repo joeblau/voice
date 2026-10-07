@@ -65,7 +65,10 @@ enum SpeechModels {
         delayPerChunk: Duration = .milliseconds(15)
     ) -> ModelManager {
         try? FileManager.default.removeItem(at: root)
-        let manifest = ModelFixtures.manifest(bytesPerFile: 512 * 1024)
+        // The models the real manifest has, so fixture launches look like
+        // production (the text embedding model isn't pinned yet, #60).
+        let manifest = ModelFixtures.manifest(
+            bytesPerFile: 512 * 1024, ids: ModelManifest.pinned.models.map(\.id))
         return ModelManager(
             manifest: manifest,
             store: ModelStore(root: root),

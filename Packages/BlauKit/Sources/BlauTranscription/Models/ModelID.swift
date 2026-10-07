@@ -14,6 +14,12 @@ public enum ModelID: String, CaseIterable, Codable, Hashable, Sendable {
     /// Parakeet TDT 0.6B v3: the second pass that adds punctuation and
     /// accuracy. Optional; Blau transcribes without it.
     case parakeetTDTv3
+    /// The shared text embedding model (EmbeddingGemma-300M, 256-d int8;
+    /// #59, #60) behind memory search and topic segmentation, loaded by
+    /// BlauMemory's `TextEmbeddingService`. Optional: Blau listens without
+    /// it, and topics fall back to Apple's contextual embedding. Not in the
+    /// pinned manifest until the converted model is hosted (docs/models.md).
+    case textEmbedding
 
     /// Short name for Settings and onboarding.
     public var displayName: String {
@@ -22,6 +28,7 @@ public enum ModelID: String, CaseIterable, Codable, Hashable, Sendable {
         case .speakerEmbedding: "Voice ID"
         case .parakeetRealtimeEOU: "Live transcription"
         case .parakeetTDTv3: "High-accuracy transcription"
+        case .textEmbedding: "Memory search"
         }
     }
 
@@ -32,6 +39,7 @@ public enum ModelID: String, CaseIterable, Codable, Hashable, Sendable {
         case .speakerEmbedding: "Recognizes your voice so Blau only answers you (WeSpeaker)."
         case .parakeetRealtimeEOU: "Turns speech into text as you talk (Parakeet realtime)."
         case .parakeetTDTv3: "Adds punctuation and fixes words after each sentence (Parakeet TDT v3)."
+        case .textEmbedding: "Finds what you talked about before and notices topic changes (EmbeddingGemma)."
         }
     }
 
@@ -40,7 +48,27 @@ public enum ModelID: String, CaseIterable, Codable, Hashable, Sendable {
     public var isRequired: Bool {
         switch self {
         case .sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU: true
-        case .parakeetTDTv3: false
+        case .parakeetTDTv3, .textEmbedding: false
+        }
+    }
+
+    /// Whether the model downloads only while
+    /// `ModelPreferences.downloadsOptionalModels` ("Download High-Accuracy
+    /// Model") is on. Other optional models download after the required ones
+    /// either way.
+    public var followsOptionalModelsPreference: Bool {
+        self == .parakeetTDTv3
+    }
+
+    /// What the user loses by deleting the model, for the confirmation.
+    public var deletionNote: String {
+        switch self {
+        case .sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU:
+            "Blau can't listen without this model. It downloads again before your next conversation."
+        case .parakeetTDTv3:
+            "Transcripts won't get the high-accuracy second pass until you download it again."
+        case .textEmbedding:
+            "Blau can't search past conversations until it downloads again."
         }
     }
 }

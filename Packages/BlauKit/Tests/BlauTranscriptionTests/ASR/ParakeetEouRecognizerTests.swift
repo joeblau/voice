@@ -22,9 +22,9 @@ struct ParakeetEouRecognizerTests {
         #expect(size.rawValue == "ms" + fluid.modelSubdirectory.replacingOccurrences(of: "ms", with: ""))
     }
 
-    @Test func the320MillisecondExportIsTheInstalledModel() {
+    @Test func the320MillisecondExportIsTheInstalledModel() throws {
         // `ModelID.parakeetRealtimeEOU` pins FluidAudio's 320 ms repository.
-        let upstream = FluidAudioModels.upstream(for: .parakeetRealtimeEOU)
+        let upstream = try #require(FluidAudioModels.upstream(for: .parakeetRealtimeEOU))
         #expect(upstream.directory == ASRChunkSize.ms320.fluidAudio.modelSubdirectory)
         #expect(ASRChunkSize.ms320.shift == .milliseconds(320))
         #expect(ASRChunkSize.ms320.window == .milliseconds(630))

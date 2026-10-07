@@ -31,9 +31,13 @@ public enum FluidAudioModels {
     /// The WeSpeaker embedding bundle FluidAudio's diarizer uses.
     public static let speakerEmbeddingBundle = ModelNames.Diarizer.embeddingFile
 
+    /// The models FluidAudio loads. (`.textEmbedding` is Blau's own Core
+    /// ML model, loaded by BlauMemory.)
+    public static let models: [ModelID] = [.sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU, .parakeetTDTv3]
+
     /// The top-level files and bundles FluidAudio's local loaders read from
     /// a model's directory. The pinned manifest must provide all of them
-    /// (a test checks).
+    /// (a test checks). Empty for a model FluidAudio doesn't load.
     public static func requiredEntries(for id: ModelID) -> Set<String> {
         switch id {
         case .sileroVAD:
@@ -44,18 +48,22 @@ public enum FluidAudioModels {
             ModelNames.ASR.requiredModelsV3(precision: .int8).union([ModelNames.ASR.vocabularyFile])
         case .speakerEmbedding:
             [ModelNames.Diarizer.embeddingFile]
+        case .textEmbedding:
+            []
         }
     }
 
     /// The upstream repository, directory and FluidAudio's own pinned
-    /// revision (`main` when FluidAudio doesn't pin one) for `id`.
-    public static func upstream(for id: ModelID) -> (repository: String, directory: String, revision: String) {
+    /// revision (`main` when FluidAudio doesn't pin one) for `id`, or `nil`
+    /// for a model FluidAudio doesn't load.
+    public static func upstream(for id: ModelID) -> (repository: String, directory: String, revision: String)? {
         let repo: Repo
         switch id {
         case .sileroVAD: repo = .vad
         case .parakeetRealtimeEOU: repo = .parakeetEou320
         case .parakeetTDTv3: repo = .parakeetV3
         case .speakerEmbedding: repo = .diarizer
+        case .textEmbedding: return nil
         }
         return (repo.remotePath, repo.subPath ?? "", repo.revision)
     }

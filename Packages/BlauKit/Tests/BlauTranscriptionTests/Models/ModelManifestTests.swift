@@ -45,7 +45,7 @@ struct ModelManifestTests {
 
     /// FluidAudio's local loaders read fixed file names; the manifest must
     /// ship each one.
-    @Test(arguments: ModelID.allCases)
+    @Test(arguments: FluidAudioModels.models)
     func providesWhatFluidAudioLoads(id: ModelID) throws {
         let descriptor = try #require(manifest[id])
         let topLevel = Set(descriptor.files.compactMap { $0.path.split(separator: "/").first.map(String.init) })
@@ -53,10 +53,10 @@ struct ModelManifestTests {
         #expect(missing.isEmpty, "\(id) is missing \(missing.sorted())")
     }
 
-    @Test(arguments: ModelID.allCases)
+    @Test(arguments: FluidAudioModels.models)
     func comesFromTheRepositoryFluidAudioUses(id: ModelID) throws {
         let descriptor = try #require(manifest[id])
-        let upstream = FluidAudioModels.upstream(for: id)
+        let upstream = try #require(FluidAudioModels.upstream(for: id))
         #expect(descriptor.repository == upstream.repository)
         #expect(descriptor.remoteDirectory == upstream.directory)
         if upstream.revision != "main" {
@@ -97,7 +97,10 @@ struct ModelManifestTests {
 
     @Test func manifestOrdersRequiredModelsFirst() {
         let shuffled = ModelManifest(models: ModelFixtures.manifest().models.reversed())
-        #expect(shuffled.models.map(\.id) == [.sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU, .parakeetTDTv3])
+        #expect(
+            shuffled.models.map(\.id) == [
+                .sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU, .parakeetTDTv3, .textEmbedding,
+            ])
     }
 
     @Test func descriptorsSortFilesAndFindBundles() {
@@ -115,10 +118,21 @@ struct ModelManifestTests {
 
     @Test func requiredModelsAreTheOnesBlauCannotListenWithout() {
         #expect(ModelID.allCases.filter(\.isRequired) == [.sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU])
+        #expect(ModelID.allCases.filter(\.followsOptionalModelsPreference) == [.parakeetTDTv3])
         for id in ModelID.allCases {
             #expect(!id.displayName.isEmpty)
             #expect(!id.summary.isEmpty)
+            #expect(!id.deletionNote.isEmpty)
         }
+    }
+
+    /// Blau's own text embedding model (#60) is pinned here once the
+    /// converted model is hosted; FluidAudio never loads it.
+    @Test func theTextEmbeddingModelIsNotAFluidAudioModel() {
+        #expect(!FluidAudioModels.models.contains(.textEmbedding))
+        #expect(FluidAudioModels.upstream(for: .textEmbedding) == nil)
+        #expect(FluidAudioModels.requiredEntries(for: .textEmbedding).isEmpty)
+        #expect(Set(FluidAudioModels.models).isSubset(of: Set(manifest.models.map(\.id))))
     }
 
     @Test func warmUpUsesFluidAudiosComputeUnits() {

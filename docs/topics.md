@@ -18,8 +18,9 @@ is unit-tested on the Mac.
 | ---- | ------------ |
 | `TopicUnit` | One finalized exchange: the user's utterance(s) and the agent's reply, with its time range on the audio timeline |
 | `ExchangeAssembler` | Groups the `Utterance` stream into `TopicUnit`s. A user utterance after agent speech closes the exchange; call `flush()` on `response.done` or at session end |
-| `TextEmbedder` (BlauCore) | `embed(_:) async throws -> [Float]`. Lives in BlauCore so BlauMemory's shared EmbeddingGemma service (#60) can implement it and the composition root can pass it in |
-| `NLContextualTextEmbedder` | Apple's on-device `NLContextualEmbedding`, mean-pooled over its subword token vectors. The production embedder until #60. Never downloads assets itself: call `prepare(allowAssetDownload: true)` where a download is acceptable |
+| `TextEmbedder` (BlauCore) | `embed(_:) async throws -> [Float]`. Lives in BlauCore so BlauMemory's shared embedding service (#60) implements it (`SharedTextEmbedder`) and the composition root passes it in |
+| `TopicEmbedding` | Which embedder a conversation's segmenter runs on, with its tuned `TopicConfig`: the shared embedding service ([embeddings.md](embeddings.md)), else `NLContextualTextEmbedder` if its assets are on the device, else `LexicalTextEmbedder`. Chosen once per conversation (`AppEnvironment.topicEmbedding()`) |
+| `NLContextualTextEmbedder` | Apple's on-device `NLContextualEmbedding`, mean-pooled over its subword token vectors. The fallback while the shared model isn't installed (it was the production embedder until #60). Never downloads assets itself: call `prepare(allowAssetDownload: true)` where a download is acceptable |
 | `LexicalTextEmbedder` | Hashed bag of stemmed content words (the signal the original TextTiling used). Needs no model, gives identical vectors everywhere. The reference embedder for tests and the fallback while contextual assets are missing |
 | `TopicSegmenter` | The engine: units and embeddings in, events out |
 | `StreamingTopicSegmenter` | Actor that embeds each unit, runs the engine inside the `topics.segment` signpost interval and logs decisions under `Log.topics` |
@@ -27,7 +28,8 @@ is unit-tested on the Mac.
 | `SegmentationMetrics` | Pk and WindowDiff, for evaluating against labelled transcripts |
 
 ```swift
-let segmenter = StreamingTopicSegmenter(embedder: embedder, config: .contextualEmbedding)
+// The shared embedding service (#60) when installed, else a fallback:
+let segmenter = StreamingTopicSegmenter(embedding: await environment.topicEmbedding())
 var exchanges = ExchangeAssembler()
 
 if let unit = exchanges.add(utterance) {
@@ -100,7 +102,7 @@ exactly one `.confirmed` or `.rejected` event.
 | `leftWindow` | 3 | Units averaged before a gap |
 | `rightWindow` | 2 | Units averaged after a gap |
 | `thresholdSigmas` | 1.0 | `k` in `μ + kσ` |
-| `minimumDepth` | 0.1 (0.02 in `.contextualEmbedding`) | Floor for the threshold; depends on the embedder's similarity scale |
+| `minimumDepth` | 0.1 (0.02 in `.contextualEmbedding`, 0.5 in `.sharedEmbedding`) | Floor for the threshold; depends on the embedder's similarity scale |
 | `minimumSamples` | 5 | Settled depths needed before the statistics are trusted |
 | `sustainUnits` | 2 | Units after the dip before confirming |
 | `minimumTopicUnits` | 4 | Shortest topic, in exchanges |
@@ -111,8 +113,10 @@ exactly one `.confirmed` or `.rejected` event.
 | `cuePhrases` | `TopicConfig.defaultCuePhrases` | Phrases that announce a topic change |
 | `peakSearchLimit` | 32 | Cap on the depth climb, in gaps |
 
-Use `TopicConfig.contextualEmbedding` with `NLContextualTextEmbedder` and
-`TopicConfig.default` with `LexicalTextEmbedder`.
+Use `TopicConfig.sharedEmbedding` with the shared embedding service,
+`TopicConfig.contextualEmbedding` with `NLContextualTextEmbedder` and
+`TopicConfig.default` with `LexicalTextEmbedder` (`TopicEmbedding` pairs
+them).
 
 ## Evaluation
 
@@ -124,14 +128,14 @@ the single-topic transcript is never split, and that the brief digression
 doesn't flap. `SyntheticConversationTests` adds 60 seeded generated
 conversations (about 2,600 exchanges, 240 boundaries, 101 digressions).
 
-| Transcript | Exchanges | Reference | Lexical: found, Pk / WindowDiff | Contextual (macOS 27.2): found, Pk |
-| ---------- | --------- | --------- | ------------------------------- | ---------------------------------- |
-| `threeTopics` | 18 | 6, 12 | 6, 12 — 0 / 0 | 6, 12 — 0 |
-| `briefDigression` | 18 | 12 (digression at 6–7) | 12 — 0 / 0 | none — 0.38 |
-| `explicitCues` | 15 | 5, 10 | 5, 10 — 0 / 0 | 5, 10 — 0 |
-| `singleTopic` | 14 | none | none — 0 / 0 | none — 0 |
-| `fourTopics` | 24 | 7, 12, 18 | 7, 12, 18 — 0 / 0 | 6, 12, 18 — 0.10 |
-| 60 synthetic conversations | ~2,600 | 240 | mean Pk 0.030 / WindowDiff 0.031; 6 of 101 digressions split | n/a |
+| Transcript | Exchanges | Reference | Lexical: found, Pk / WindowDiff | Contextual (macOS 27.2): found, Pk | Shared service, Qwen3-Embedding 256-d int8: found, Pk |
+| ---------- | --------- | --------- | ------------------------------- | ---------------------------------- | ----------------------------------------------------- |
+| `threeTopics` | 18 | 6, 12 | 6, 12 — 0 / 0 | 6, 12 — 0 | 6, 12 — 0 |
+| `briefDigression` | 18 | 12 (digression at 6–7) | 12 — 0 / 0 | none — 0.38 | 12 — 0 |
+| `explicitCues` | 15 | 5, 10 | 5, 10 — 0 / 0 | 5, 10 — 0 | 5, 10 — 0 |
+| `singleTopic` | 14 | none | none — 0 / 0 | none — 0 | none — 0 |
+| `fourTopics` | 24 | 7, 12, 18 | 7, 12, 18 — 0 / 0 | 6, 12, 18 — 0.10 | 7, 12, 18 — 0 |
+| 60 synthetic conversations | ~2,600 | 240 | mean Pk 0.030 / WindowDiff 0.031; 6 of 101 digressions split | n/a | n/a |
 
 The contextual column comes from the opt-in
 `NLContextualTextEmbedderTests` (`BLAU_DEVICE_TESTS=1 swift test --filter
@@ -141,6 +145,30 @@ vectors are a weaker topic signal than lexical overlap on these short,
 keyword-dense transcripts (it missed the Japan boundary after the digression);
 EmbeddingGemma (#59, #60) is expected to replace it. Neither embedder ever
 split the digression.
+
+The shared-service column (#60) comes from the opt-in
+`RealModelTopicSegmentationTests` in `BlauKitIntegrationTests`
+(`BLAU_TEXT_EMBEDDING_BUNDLE=<hosting folder> swift test --filter
+RealModelTopicSegmentationTests`), run on Qwen3-Embedding-0.6B, #59's
+fallback, because EmbeddingGemma's weights are gated: the full production
+path (document prompt, Swift tokenizer, int8 token table, Core ML on the
+Neural Engine, 256-d int8, dequantized) with `TopicConfig.sharedEmbedding`.
+A retrieval model separates topics far more sharply than the contextual
+embedding: every labelled boundary scored a depth of 0.92 to 1.45, every
+other gap 0.44 or less (the digression's dip, rejected by the hysteresis).
+With `.contextualEmbedding`'s floor of 0.02 the single-topic transcript was
+split at a 0.21 dip; `.sharedEmbedding` puts the floor at 0.5, between the
+two groups. **EmbeddingGemma's column is pending**: rerun the test on its
+bundle, and `BLAU_TOPIC_MINIMUM_DEPTH` tries another floor without a code
+change. The synthetic conversations are bags of topic keywords, which a
+sentence model doesn't read the way it reads speech, so they stay a
+lexical-only check.
+
+`SharedEmbedderTopicSegmentationTests` (hermetic, in the same target) runs
+the scripted transcripts through the shared service with the lexical
+embedder behind it and requires exactly the reference boundaries, so the
+service's own steps (prompt, int8 quantization, dequantization) can't
+change a topic decision.
 
 ## Performance
 

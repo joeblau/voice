@@ -47,6 +47,14 @@ final class EmbeddingBenchmarks: BenchmarkTestCase {
         let directories = [Self.assetsDirectory].compactMap { $0 }
         try await measure(TextEmbeddingBenchmark.embeddingGemma(searching: directories))
     }
+
+    /// The shared embedding service on a batch of 32 full-length chunks
+    /// (#60's acceptance criterion): a hosting folder from
+    /// `convert_coreml.py` (with `blau-embedding.json`) in `Assets/`.
+    func testSharedTextEmbeddingBatch32() async throws {
+        let directories = [Self.assetsDirectory].compactMap { $0 }
+        try await measure(TextEmbeddingBatchBenchmark.installed(searching: directories))
+    }
 }
 
 /// On-device Foundation Models for topic labels.

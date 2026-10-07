@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import dataclasses
 import importlib.util
+import json
 import sys
 import tempfile
 import unittest
@@ -25,6 +26,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import evalset  # noqa: E402
+import token_table  # noqa: E402
 from candidates import CANDIDATES  # noqa: E402
 
 
@@ -78,6 +80,43 @@ class EvalSetTests(unittest.TestCase):
             if not c.gated:
                 self.assertRegex(c.revision, r"^[0-9a-f]{40}$", c.key)
             self.assertIn(256, c.dimensions, c.key)
+
+
+class TokenTableTests(unittest.TestCase):
+    """The int8 table format `TokenEmbeddingTable` (Swift) reads (#60)."""
+
+    def test_int8_rows_round_trip(self):
+        rng = np.random.default_rng(60)
+        table = (rng.normal(size=(50, 24)) * 0.05).astype(np.float16)
+        table[7] = 0  # an all-zero row keeps a zero scale
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "Tiny.token-embeddings.i8"
+            token_table.write_int8(table, path)
+            self.assertEqual(path.stat().st_size, 50 * (24 + 4))
+            raw = np.fromfile(path, dtype=np.uint8).reshape(50, 28)
+            # Row layout: float32 little-endian scale, then the codes.
+            scale = raw[3, :4].copy().view("<f4")[0]
+            self.assertAlmostEqual(float(scale), float(np.abs(table[3].astype(np.float32)).max() / 127), places=6)
+            self.assertEqual(int(np.abs(raw[3, 4:].copy().view(np.int8)).max()), 127)
+            back = token_table.read_int8(path, 24)
+            self.assertTrue((back[7] == 0).all())
+            error = np.abs(back.astype(np.float32) - table.astype(np.float32)).max(axis=1)
+            bound = np.abs(table.astype(np.float32)).max(axis=1) / 127
+            self.assertTrue((error <= bound * 0.5 + 1e-3).all())
+
+    def test_hosting_folder_conversion_rewrites_the_metadata(self):
+        table = np.arange(12, dtype=np.float16).reshape(3, 4)
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            table.astype("<f2").tofile(folder / "M.token-embeddings.f16")
+            metadata = {"tokenEmbeddings": {"file": "M.token-embeddings.f16", "dtype": "float16", "vocabularySize": 3, "width": 4}}
+            (folder / "blau-embedding.json").write_text(json.dumps(metadata))
+            token_table.convert_hosting(folder)
+            updated = json.loads((folder / "blau-embedding.json").read_text())["tokenEmbeddings"]
+            self.assertEqual(updated["file"], "M.token-embeddings.i8")
+            self.assertEqual(updated["dtype"], "int8")
+            self.assertFalse((folder / "M.token-embeddings.f16").exists())
+            np.testing.assert_allclose(token_table.read_int8(folder / updated["file"], 4), table, atol=0.05)
 
 
 HAVE_CONVERSION_STACK = all(

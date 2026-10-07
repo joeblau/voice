@@ -55,11 +55,7 @@ struct SpeechModelSettingsView: View {
                 Task { await models.delete(id) }
             }
         } message: { id in
-            if id.isRequired {
-                Text("Blau can't listen without this model. It downloads again before your next conversation.")
-            } else {
-                Text("Transcripts won't get the high-accuracy second pass until you download it again.")
-            }
+            Text(id.deletionNote)
         }
     }
 

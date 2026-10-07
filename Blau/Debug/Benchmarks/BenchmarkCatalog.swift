@@ -12,9 +12,10 @@
     /// the `BLAU_BENCHMARKS` condition); see docs/benchmarks.md.
     enum BenchmarkCatalog {
         /// `Documents/Benchmarks`: drop an optional `benchmark-speech.wav`
-        /// recording and `Models/EmbeddingGemma*.mlmodelc` here (for example
-        /// with `xcrun devicectl device copy to`); reports are written to
-        /// `Reports/`.
+        /// recording, `Models/EmbeddingGemma*.mlmodelc` and a text embedding
+        /// hosting folder (`Models/<name>/blau-embedding.json`, #60) here
+        /// (for example with `xcrun devicectl device copy to`); reports are
+        /// written to `Reports/`.
         static var directory: URL {
             URL.documentsDirectory.appendingPathComponent("Benchmarks", isDirectory: true)
         }
@@ -36,6 +37,7 @@
                 SpeakerEmbeddingBenchmarkCase.weSpeaker(audio: audio),
                 SpeakerEmbeddingBenchmarkCase.camPlusPlus(audio: audio),
                 TextEmbeddingBenchmark.embeddingGemma(searching: [modelsDirectory, directory]),
+                TextEmbeddingBatchBenchmark.installed(searching: [modelsDirectory, directory]),
                 TopicLabelBenchmark(generator: FoundationModelsLabelBenchmarkGenerator()),
             ]
         }
