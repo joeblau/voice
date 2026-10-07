@@ -21,9 +21,13 @@ final class DiagnosticsUITests: XCTestCase {
         XCTAssertTrue(settings.waitForExistence(timeout: 10), "Settings button missing")
         settings.tap()
 
+        // Developer is the last section and the Form is lazy, so the row may
+        // only exist once it has been scrolled into view.
+        let form = app.collectionViews.firstMatch
+        XCTAssertTrue(form.waitForExistence(timeout: 5), "Settings did not open")
         let diagnostics = app.descendants(matching: .any)["settings.developer.diagnostics"]
-        XCTAssertTrue(diagnostics.waitForExistence(timeout: 5), "Settings has no Developer → Diagnostics row")
-        scrollTo(diagnostics, in: app.collectionViews.firstMatch)
+        scrollTo(diagnostics, in: form)
+        XCTAssertTrue(diagnostics.exists, "Settings has no Developer → Diagnostics row")
         diagnostics.tap()
 
         let screen = app.descendants(matching: .any)["diagnostics.view"]
