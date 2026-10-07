@@ -37,6 +37,14 @@ public struct ChatLiveState: Sendable, Equatable {
     /// orchestrator reported them (`TurnSnapshot.interruptedAgentUtterances`).
     /// Kept after the conversation ends, while its rows stay on screen.
     public private(set) var interruptedAgentIDs: Set<UUID> = []
+    /// The user's utterances in ``conversationID`` waiting for the
+    /// connection (`TurnSnapshot.queuedUtteranceIDs`, #80).
+    public private(set) var waitingUserIDs: Set<UUID> = []
+    /// The user's utterances in ``conversationID`` discarded while they
+    /// waited, or still waiting when the conversation stopped: stored but
+    /// never sent. Kept after the conversation ends, like
+    /// ``interruptedAgentIDs``.
+    public private(set) var unsentUserIDs: Set<UUID> = []
     /// How long a cleared partial is kept waiting for its final text.
     public var holdDuration: TimeInterval
 
@@ -75,7 +83,12 @@ public struct ChatLiveState: Sendable, Equatable {
         // stay with the conversation still on screen.
         if snapshot.conversationID != nil {
             interruptedAgentIDs.formUnion(snapshot.interruptedAgentUtterances)
+            unsentUserIDs.formUnion(snapshot.discardedUtteranceIDs)
+        } else {
+            // The conversation stopped: what still waited is never sent.
+            unsentUserIDs.formUnion(waitingUserIDs)
         }
+        waitingUserIDs = Set(snapshot.queuedUtteranceIDs)
     }
 
     /// Takes in one of the transcript feed's events.
@@ -122,6 +135,8 @@ public struct ChatLiveState: Sendable, Equatable {
         heldPartial = nil
         agentSpeech = []
         interruptedAgentIDs.removeAll()
+        waitingUserIDs.removeAll()
+        unsentUserIDs.removeAll()
     }
 
     // MARK: Output

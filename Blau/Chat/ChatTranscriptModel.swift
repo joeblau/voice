@@ -35,6 +35,11 @@ final class ChatTranscriptModel {
     private(set) var liveAgentIDs: Set<UUID> = []
     /// Stored replies the user cut short in the running conversation.
     private(set) var interruptedAgentIDs: Set<UUID> = []
+    /// The user's utterances waiting for the connection (#80).
+    private(set) var waitingUserIDs: Set<UUID> = []
+    /// The user's utterances that were discarded, or still waiting when the
+    /// conversation stopped: never sent (#80).
+    private(set) var unsentUserIDs: Set<UUID> = []
     /// Grok's reply as it plays, then the user's speech in progress.
     private(set) var liveRows: [ChatRow] = []
 
@@ -154,6 +159,12 @@ final class ChatTranscriptModel {
         let interrupted = state.interruptedAgentIDs
         if interruptedAgentIDs != interrupted {
             interruptedAgentIDs = interrupted
+        }
+        if waitingUserIDs != state.waitingUserIDs {
+            waitingUserIDs = state.waitingUserIDs
+        }
+        if unsentUserIDs != state.unsentUserIDs {
+            unsentUserIDs = state.unsentUserIDs
         }
         let rows = state.liveRows(now: clock.now)
         if liveRows != rows {

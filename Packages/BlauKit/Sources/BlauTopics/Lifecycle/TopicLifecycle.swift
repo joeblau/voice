@@ -123,6 +123,9 @@ public actor TopicLifecycle: TopicService {
     private var tail: Task<Void, Never>?
     private var settleTask: Task<Void, Never>?
     private var settleGeneration = 0
+    /// The conversation whose replies wait for the connection (offline,
+    /// #80): each of the user's utterances is an exchange of its own.
+    private var deferredConversation: ConversationID?
 
     /// - Parameters:
     ///   - store: Where topics are read and written; the same store that
@@ -206,6 +209,28 @@ public actor TopicLifecycle: TopicService {
         }
     }
 
+    /// Grok's replies in `id` started (`true`) or stopped (`false`) waiting
+    /// for the connection (#80).
+    ///
+    /// While they wait, nothing will answer what the user says, so the
+    /// lifecycle doesn't wait for a reply to close an exchange: each user
+    /// utterance closes the user-only exchange before it and is scored on
+    /// its own once ``Configuration/exchangeSettleDelay`` passes. Topics
+    /// keep opening and getting titles offline (on-device labeling); the
+    /// replies that arrive once the connection is back join the
+    /// conversation as exchanges of their own.
+    public func setRepliesDeferred(_ deferred: Bool, in id: ConversationID) {
+        enqueue { lifecycle in
+            if deferred {
+                lifecycle.deferredConversation = id
+                Log.topics.notice("Replies deferred: scoring the user's utterances on their own")
+            } else if lifecycle.deferredConversation == id {
+                lifecycle.deferredConversation = nil
+                Log.topics.notice("Replies resumed")
+            }
+        }
+    }
+
     // MARK: Manual edits
 
     /// Renames a topic. The title is final: no labeler overwrites it. It is
@@ -285,6 +310,9 @@ public actor TopicLifecycle: TopicService {
             if previous.id == id { return }
             await finish(previous)
         }
+        if deferredConversation != id {
+            deferredConversation = nil
+        }
         let pipeline = TopicPipeline(segmenter: await makeSegmenter(), labeling: labeling)
         let conversation = LiveConversation(id: id, startedAt: date, pipeline: pipeline)
         live = conversation
@@ -320,13 +348,28 @@ public actor TopicLifecycle: TopicService {
         // Already scored: a refined or truncated copy changes nothing the
         // segmenter needs.
         guard conversation.unitOfUtterance[utterance.id] == nil else { return }
+        let repliesDeferred = deferredConversation == conversation.id
+        if repliesDeferred, utterance.speaker == .user, !utterance.isBlank,
+            conversation.exchanges.isAwaitingReply, !conversation.exchanges.contains(utterance.id)
+        {
+            // No reply is coming: the user's previous words are an exchange
+            // of their own.
+            cancelSettle()
+            if let unit = conversation.exchanges.flush() {
+                await score(unit, in: conversation)
+            }
+        }
         if let unit = conversation.exchanges.add(utterance) {
             await score(unit, in: conversation)
         }
         if utterance.speaker == .agent, !utterance.isBlank {
             scheduleSettle()
         } else if utterance.speaker == .user {
-            cancelSettle()
+            if repliesDeferred, !utterance.isBlank {
+                scheduleSettle()
+            } else {
+                cancelSettle()
+            }
         }
     }
 

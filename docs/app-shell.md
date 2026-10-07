@@ -19,6 +19,7 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `Blau/XAI/XAIServices.swift` | The xAI services (#33): `make(config:)` for the app, `hermetic(config:)` for previews and tests |
 | `Blau/VoiceLoop/` | `VoiceLoop` (the spoken conversation: the live audio pipeline feeding the `TurnOrchestrator`, #36), the SwiftData transcript recorder, the HUD rows and the DEBUG Voice Loop screen |
 | `Blau/Debug/` | The DEBUG menu and the reusable feature flag toggles |
+| `Blau/Issues/` | `IssueCenter` (the current issue of the conversation, the audio and iCloud, fed to the banner; the network path fed to the orchestrator) and `IssueBanner`, the banner above the conversation with the recovery actions ([errors.md](errors.md), #80) |
 | `BlauCore/Services/` | The service protocols and `UnavailableService` |
 | `BlauCore/Fakes/` | Fakes for previews and tests, `TranscriptScript` |
 | `BlauCore/FeatureFlags/` | `FeatureFlag`, `FeatureFlags` and their storage |
@@ -49,6 +50,7 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `transcriptionSettings` | `TranscriptionSettings` | `UserDefaults` (`blau.transcription.engine`); the `blau.uitests` suite in DEBUG UI tests | in memory, Apple's engine reported installed |
 | `markdownExport` | `MarkdownExportController` | Markdown files in iCloud Drive → Blau (#78, [export.md](export.md)); settings in `UserDefaults`, the `blau.uitests` suite in DEBUG UI tests; `start()` runs its automatic export, leaving the foreground flushes it | a temporary folder and in-memory settings (`MarkdownExportController.local`) |
 | `xai` | `XAIServices` | Keychain + network (`XAIServices.make`); the `BLAU_UI_TEST_XAI` stub in DEBUG UI tests | in-memory key store + stub transport (`XAIServices.hermetic`) |
+| `issues` | `IssueCenter` | follows the orchestrator, the conversation audio's keeper and the store's sync state; feeds `NWPathMonitor` (`SystemNetworkMonitor`) to the orchestrator for offline mode | the store's sync state only; `-BlauIssueFixture <code>` shows one catalog entry in UI tests |
 | `lifecycle` | `AppLifecycleCoordinator` | | |
 
 Views read it with `@Environment(AppEnvironment.self)`. The

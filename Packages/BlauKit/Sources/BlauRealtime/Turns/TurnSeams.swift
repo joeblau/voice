@@ -59,6 +59,18 @@ public protocol TurnTranscriptRecording: Sendable {
     /// Writes whatever is waiting, e.g. when the app moves to the
     /// background.
     func flush() async throws
+
+    /// Grok's replies started (`true`) or stopped (`false`) waiting for the
+    /// connection in `conversation` (#80): offline, reconnecting, or given
+    /// up. Called in order with ``record(_:)``, so every utterance recorded
+    /// in between was said while no reply could come. The topic lifecycle
+    /// uses it to keep segmenting user-only exchanges. Does nothing by
+    /// default.
+    func repliesDeferredChanged(_ deferred: Bool, in conversation: ConversationID) async
+}
+
+extension TurnTranscriptRecording {
+    public func repliesDeferredChanged(_ deferred: Bool, in conversation: ConversationID) async {}
 }
 
 extension ConversationStore: TurnTranscriptRecording {

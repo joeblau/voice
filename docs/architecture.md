@@ -180,3 +180,7 @@ The complete list of declared edges:
 - [export.md](export.md): the Markdown export of conversations and topics
   to iCloud Drive → Blau (format, idempotent re-export, automatic export,
   the iCloud Drive entitlements and the manual test plan).
+- [errors.md](errors.md): the error catalog (every user-facing problem,
+  its message, severity and recovery actions), offline mode (queued turns,
+  reconnecting when the network returns, topics segmenting without replies)
+  and the realtime decoder fuzz tests (#80).

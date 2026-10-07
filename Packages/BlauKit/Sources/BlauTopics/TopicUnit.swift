@@ -89,6 +89,17 @@ public struct ExchangeAssembler: Sendable {
     /// Whether an exchange is being assembled.
     public var hasPendingExchange: Bool { !pending.isEmpty }
 
+    /// Whether the exchange being assembled has the user's words but no
+    /// reply yet.
+    public var isAwaitingReply: Bool {
+        !pending.isEmpty && !pending.contains { $0.speaker == .agent }
+    }
+
+    /// Whether the exchange being assembled holds the utterance `id`.
+    public func contains(_ id: UUID) -> Bool {
+        pending.contains { $0.id == id }
+    }
+
     /// Adds the next finalized utterance.
     ///
     /// An utterance with the `id` of one already in the exchange being

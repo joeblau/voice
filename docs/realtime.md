@@ -512,6 +512,15 @@ the same cut on *speech start* (VAD), with the echo guard, is
   background (the voice loop uses it so the user can start talking while the
   secret is minted). A connection that gives up moves the state to
   `error(.connection)`; `connect()` tries again.
+- **Offline (#80).** `networkReachabilityChanged(_:)` (the app feeds it
+  `NWPathMonitor` through `follow(network:)`) makes the snapshot's
+  `connectivity` `.offline`; when the path comes back and the client had
+  given up, the orchestrator reconnects at once. After a give-up on a
+  failure that may pass (an outage, timeouts) it also tries again every
+  `retryAfterGivingUp` (30 s) while the path is up; key problems wait for
+  the user. `discardQueued()` drops what waits (stored, never sent, left
+  out of reseeds). `TurnSnapshot.issue` is the catalog entry the banner
+  shows, with the number of messages waiting. See [errors.md](errors.md).
 
 ### Latency and the HUD
 

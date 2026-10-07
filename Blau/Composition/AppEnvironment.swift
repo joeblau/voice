@@ -159,6 +159,12 @@ final class AppEnvironment {
     /// DEBUG triple-tap or the `perfHUD` flag; reads the voice loop.
     let performanceHUD: PerformanceHUDController
 
+    /// What the main screen's issue banner shows (#80, docs/errors.md): the
+    /// conversation's, the audio's and iCloud's current problems, with
+    /// their recovery actions. In the live app it also feeds the network
+    /// path to the turn orchestrator (offline mode).
+    let issues: IssueCenter
+
     /// The xAI key refresh started by the latest return to `active`, so tests
     /// can wait for it.
     @ObservationIgnored var xaiRefresh: Task<Void, Never>?
@@ -189,7 +195,8 @@ final class AppEnvironment {
         performance: PerformancePolicy = PerformancePolicy(source: ManualDeviceConditionsSource()),
         topicLifecycle: TopicLifecycle? = nil,
         transcriptFeed: TranscriptFeed = TranscriptFeed(),
-        markdownExport: MarkdownExportController? = nil
+        markdownExport: MarkdownExportController? = nil,
+        networkMonitor: (any NetworkMonitor)? = nil
     ) {
         self.kind = kind
         self.config = config
@@ -231,6 +238,8 @@ final class AppEnvironment {
                 readings.performance = performance.snapshot
                 return readings
             })
+        self.issues = IssueCenter(
+            realtime: realtime, keeper: conversationAudio?.keeper, persistence: persistence, network: networkMonitor)
         self.lifecycle = AppLifecycleCoordinator(
             participants: Self.lifecycleOrder(
                 persistence: persistence, audio: audio, transcriber: transcriber,
@@ -251,6 +260,8 @@ final class AppEnvironment {
     func start() async {
         startBackgroundServices()
         startPerformancePolicy()
+        // #80: the issue banner's sources; UI tests can show a catalog entry.
+        issues.start(fixture: kind == .live ? nil : IssueCenter.fixtureCode())
         // #63: indexes the store once `PersistenceGate` has opened it.
         memoryIndexing.start()
         // Previews and UI tests only: a canned conversation (#42).
@@ -418,7 +429,9 @@ extension AppEnvironment {
             topicLifecycle: topics,
             transcriptFeed: transcriptFeed,
             // #78: Markdown files in iCloud Drive → Blau.
-            markdownExport: .live(persistence: persistence)
+            markdownExport: .live(persistence: persistence),
+            // #80: offline mode follows the network path.
+            networkMonitor: SystemNetworkMonitor()
         )
     }
 

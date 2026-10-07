@@ -319,7 +319,10 @@ struct TurnOrchestratorResponseMatchingTests {
         try await waitForError(harness)
         #expect(
             await harness.orchestrator.state
-                == .error(TurnFailure(kind: .response, message: "Invalid response")))
+                == .error(
+                    TurnFailure(
+                        kind: .response, message: "Invalid response",
+                        issue: UserFacingIssue(.replyFailed, detail: "Invalid response"))))
         #expect(harness.signposts.endMessages(of: "realtime.turn") == ["rejected"])
         #expect(responseCreates(socket) == 1)
 

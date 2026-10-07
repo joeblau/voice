@@ -58,7 +58,15 @@ struct MainScreenScaffold: View {
                 // Shown only while the device is hot or short on power (#75).
                 // An inset, not an overlay, so the conversation scrolls
                 // beneath it like it does beneath the bars.
-                .safeAreaInset(edge: .top, spacing: 0) { PerformanceIndicator() }
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    VStack(spacing: 0) {
+                        PerformanceIndicator()
+                        // #80: offline, reconnecting, key, audio and iCloud
+                        // problems with their recovery actions.
+                        IssueBannerSlot { isShowingKeyOnboarding = true }
+                    }
+                    .animation(.default, value: environment.issues.primary)
+                }
                 .toolbar {
                     #if DEBUG
                         ToolbarItem(placement: .topBarTrailing) {
