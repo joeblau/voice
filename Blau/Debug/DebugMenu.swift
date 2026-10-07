@@ -37,6 +37,7 @@
                     flagsSection
                     environmentSection
                     lifecycleSection
+                    VoiceIDThresholdsSection(config: .calibrated)
                     modulesSection
                 }
                 .navigationTitle("Debug")

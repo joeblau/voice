@@ -4,7 +4,8 @@ Blau only answers the enrolled speaker. `BlauVoiceID` turns speech into
 speaker embeddings, compares them with the enrolled voiceprint and decides
 accept, reject or uncertain per speech segment (issue #5). This document
 covers the embedding extractor (#45); enrollment (#46), the verification
-gate (#47) and threshold calibration (#48) build on it.
+gate (#47) and threshold calibration (#48, [voice-id-eval.md](voice-id-eval.md))
+build on it.
 
 ## Speaker embeddings
 
@@ -51,8 +52,10 @@ let embeddings = try await embedder.embed(segment, windows: SpeakerEmbeddingWind
 L2-normalized `[Float]` of 256 values, so cosine similarity is a dot
 product. On the fixture set, same-speaker pairs score at least 0.57 (mean
 0.67 at 1.5 s, 0.76 at 3 s) and different speakers at most 0.37 (mean
-0.07); see [benchmarks.md](benchmarks.md). The gate's thresholds are
-calibrated in #48.
+0.07); see [benchmarks.md](benchmarks.md). The gate's thresholds
+(`VoiceIDConfig.calibrated`) are calibrated on a cross-session set with
+simulated rooms and noise, where scores run lower; see
+[voice-id-eval.md](voice-id-eval.md).
 
 Store `SpeakerEmbedding.modelIdentifier` with every vector
 (`VoiceProfile.embeddingModelVersion`). Vectors from different models or
