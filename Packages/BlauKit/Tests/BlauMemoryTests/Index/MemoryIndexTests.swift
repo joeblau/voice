@@ -122,6 +122,49 @@ struct MemoryIndexTests {
         #expect(try await index.keywordSearch("budget", limit: 10, filter: MemorySearchFilter(kinds: [])).isEmpty)
     }
 
+    @Test func filteredSearchesFindCommonWordsWhenTheRareOneIsOutsideTheFilter() async throws {
+        let index = try MemoryIndex.inMemory()
+        let day: TimeInterval = 86_400
+        let cutoff = MemoryIndex.commonTermDocuments(chunkCount: 0)
+        // "fundraising" and "update" are common; "Sequoia" is rare, and only
+        // in an old document.
+        let updates = (0..<(cutoff + 44)).map { Self.chunk("Fundraising update number \($0) for the board.") }
+        let sequoia = Self.chunk("Sequoia partner meeting recap.")
+        let closed = Self.chunk(
+            "Fundraising closed with the new lead.", kind: .fact, at: Support.t0.addingTimeInterval(30 * day))
+        try await index.replace((updates + [sequoia, closed]).map { Self.source([$0]) })
+
+        // Unfiltered, the rare word alone decides which chunks match.
+        #expect(try await index.keywordSearch("Sequoia fundraising", limit: 10).map(\.chunkID) == [sequoia.id])
+
+        // Filtered to where "Sequoia" isn't, the common word still matches.
+        let window = MemorySearchFilter(
+            createdAt: Support.t0.addingTimeInterval(29 * day)..<Support.t0.addingTimeInterval(31 * day))
+        let facts = MemorySearchFilter(kinds: [.fact])
+        for filter in [window, facts] {
+            #expect(
+                try await index.keywordSearch("fundraising", limit: 10, filter: filter).map(\.chunkID) == [closed.id])
+            #expect(
+                try await index.keywordSearch("Sequoia fundraising", limit: 10, filter: filter).map(\.chunkID)
+                    == [closed.id])
+            // Only common words, not all of them in the filtered chunk.
+            #expect(
+                try await index.keywordSearch("fundraising update", limit: 10, filter: filter).map(\.chunkID)
+                    == [closed.id])
+            #expect(try await index.keywordSearch("Sequoia zanzibar", limit: 10, filter: filter).isEmpty)
+        }
+
+        // When the rare word fills the limit inside the filter, it still decides.
+        let documents = MemorySearchFilter(kinds: [.document])
+        #expect(
+            try await index.keywordSearch("Sequoia fundraising", limit: 1, filter: documents).map(\.chunkID)
+                == [sequoia.id])
+        // Short of the limit, chunks with the common word follow the rare one.
+        let more = try await index.keywordSearch("Sequoia fundraising", limit: 5, filter: documents)
+        #expect(more.count == 5)
+        #expect(more.first?.chunkID == sequoia.id)
+    }
+
     @Test func replacingASourceKeepsVectorsOfUnchangedChunksOnly() async throws {
         let index = try MemoryIndex.inMemory()
         let embedder = Support.HashingEmbedder()

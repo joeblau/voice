@@ -451,14 +451,26 @@ public final class MemoryIndex: Sendable {
     /// within budget; on a smaller index every word counts and the ranking
     /// is exact BM25. A query made only of common words matches chunks
     /// that contain all of them.
+    ///
+    /// Which words are common is decided over the whole index, so with a
+    /// filter the narrowed pattern can miss: the rare word may only occur
+    /// outside the filter while a common word matches inside it. A filtered
+    /// search that finds fewer than `limit` chunks with the narrowed pattern
+    /// therefore searches again with every word OR'ed and returns that exact
+    /// BM25 ranking instead. Only those searches pay for walking every chunk
+    /// that holds a common word.
     public func keywordSearch(_ query: String, limit: Int, filter: MemorySearchFilter = .none) async throws
         -> [MemoryIndexHit]
     {
         guard limit > 0, let keywords = KeywordQuery(query) else { return [] }
         if let kinds = filter.kinds, kinds.isEmpty { return [] }
         return try await database.read { db in
-            guard let pattern = try Self.matchPattern(for: keywords, db: db) else { return [] }
-            return try Self.keywordHits(pattern: pattern, limit: limit, filter: filter, db: db)
+            guard let patterns = try Self.matchPatterns(for: keywords, db: db) else { return [] }
+            let hits = try Self.keywordHits(pattern: patterns.narrowed, limit: limit, filter: filter, db: db)
+            guard !filter.isUnrestricted, hits.count < limit, patterns.complete != patterns.narrowed else {
+                return hits
+            }
+            return try Self.keywordHits(pattern: patterns.complete, limit: limit, filter: filter, db: db)
         }
     }
 
@@ -468,9 +480,17 @@ public final class MemoryIndex: Sendable {
         max(256, chunkCount / 200)
     }
 
-    /// The MATCH pattern for `query`: its rare words OR'ed, or, if every
-    /// word is common, all of them AND'ed. `nil` if no word is in the index.
-    static func matchPattern(for query: KeywordQuery, db: Database) throws -> String? {
+    /// The FTS5 MATCH patterns for a keyword query.
+    struct MatchPatterns: Equatable {
+        /// The query's rare words OR'ed, or, if every word is common, all of
+        /// them AND'ed (rarest first).
+        var narrowed: String
+        /// Every word of the query found in the index, OR'ed: exact BM25.
+        var complete: String
+    }
+
+    /// The MATCH patterns for `query`. `nil` if no word is in the index.
+    static func matchPatterns(for query: KeywordQuery, db: Database) throws -> MatchPatterns? {
         // The index's own tokenizer gives the stems the vocabulary holds.
         let tokenizer = try db.makeTokenizer(.porter(wrapping: .unicode61(diacritics: .remove)))
         var stems: [String: [String]] = [:]
@@ -492,11 +512,16 @@ public final class MemoryIndex: Sendable {
         let frequency = query.terms.map { term in
             (term, stems[term]?.map { documents[$0] ?? 0 }.min() ?? 0)
         }
+        let present = frequency.filter { $0.1 > 0 }
+        guard !present.isEmpty else { return nil }
+        let complete = KeywordQuery.pattern(present.map(\.0), joinedBy: " OR ")
         let cutoff = commonTermDocuments(chunkCount: try chunkCount(db))
-        let rare = frequency.filter { $0.1 > 0 && $0.1 <= cutoff }.map(\.0)
-        if !rare.isEmpty { return KeywordQuery.pattern(rare, joinedBy: " OR ") }
-        let common = frequency.filter { $0.1 > cutoff }.sorted { $0.1 < $1.1 }.map(\.0)
-        return common.isEmpty ? nil : KeywordQuery.pattern(common, joinedBy: " ")
+        let rare = present.filter { $0.1 <= cutoff }.map(\.0)
+        if !rare.isEmpty {
+            return MatchPatterns(narrowed: KeywordQuery.pattern(rare, joinedBy: " OR "), complete: complete)
+        }
+        let common = present.sorted { $0.1 < $1.1 }.map(\.0)
+        return MatchPatterns(narrowed: KeywordQuery.pattern(common, joinedBy: " "), complete: complete)
     }
 
     /// Rows in the index (FTS5 keeps the total for BM25 in its averages

@@ -182,6 +182,16 @@ any index of a few hundred chunks), the ranking is exact BM25. Without filters t
 table is ranked alone and only the top rows are looked up; with filters it
 is joined with `chunk`.
 
+Which words are common is decided over the whole index, not within the
+filter, so a filtered search could otherwise come back empty: in "Sequoia
+fundraising" filtered to last week, "Sequoia" may only occur in older chunks
+while last week's chunks only say "fundraising". A filtered search that
+finds fewer than `limit` chunks with the narrowed pattern therefore runs
+again with every query word `OR`'ed and returns that exact BM25 ranking.
+That second pass walks every chunk holding a common word, so it costs more;
+only filtered searches that came up short pay for it. Unfiltered searches
+keep the cutoff, since a rare word in the index always matches something.
+
 Scores: BM25 (negated `bm25()`, higher is better) and cosine. They are only
 comparable within one search; #64 fuses ranks, not scores.
 
@@ -233,7 +243,7 @@ never logged. The fused search will be one `memory.search` interval (#64,
 | --- | --- |
 | Chunking (`swift test`) | `ExchangeChunkingTests`, `DocumentChunkingTests`, `MemoryChunkIdentityTests`, `KeywordQueryTests` |
 | Matrix (`swift test`) | `VectorMatrixTests`: agrees with brute-force `cosineSimilarity` across Accelerate blocks, swap-remove, filters, zero and mismatched vectors, top-K |
-| Index (`swift test`) | `MemoryIndexTests`: round trip, BM25 with stemming, the common-word cutoff, FTS syntax in queries, filters, vector reuse, matrix updates on write, model-version isolation, persistence, corrupt and old-schema files, searching while writing |
+| Index (`swift test`) | `MemoryIndexTests`: round trip, BM25 with stemming, the common-word cutoff (with and without filters), FTS syntax in queries, filters, vector reuse, matrix updates on write, model-version isolation, persistence, corrupt and old-schema files, searching while writing |
 | Rebuild (`swift test`) | `MemoryIndexRebuilderTests` (reuse, changes, deletions, new model, keyword-only fallback, cancellation) and `SwiftDataRebuildTests` (the acceptance criterion, CloudKit duplicates) |
 | BM25 quality (`swift test`) | `KeywordRetrievalEvalTests`: BM25 alone on #59's eval set finds every keyword-style query in the top 5 |
 | 50k benchmark on the Mac (opt-in) | `BLAU_INDEX_BENCHMARK=1 swift test -Xswiftc -O --scratch-path .build/optimized --filter MemoryIndexSearchBenchmarkTests` |
