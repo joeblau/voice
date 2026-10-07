@@ -25,3 +25,6 @@ Secrets.xcconfig
 # Optional benchmark model and recording (see BlauBenchmarks/Assets/README.md)
 BlauBenchmarks/Assets/*
 !BlauBenchmarks/Assets/README.md
+
+# Python bytecode (scripts/embeddings)
+__pycache__/

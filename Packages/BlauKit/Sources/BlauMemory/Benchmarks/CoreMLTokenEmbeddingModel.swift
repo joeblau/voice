@@ -18,16 +18,32 @@ import Foundation
 ///
 /// Fixed-shape models are padded to their length; flexible ones get exactly
 /// the tokens (or the nearest enumerated length).
+///
+/// Models converted by `scripts/embeddings/convert_coreml.py` take
+/// `inputs_embeds` (`[1, L, H]` float16) instead of token IDs, so that the
+/// Neural Engine can run them (#59): the rows come from a
+/// `TokenEmbeddingTable`, by default the `<name>.token-embeddings.f16` file
+/// next to the model.
 public actor CoreMLTokenEmbeddingModel: TokenEmbeddingModel {
     public nonisolated let url: URL
     private let computeUnits: MLComputeUnits
+    private let tokenEmbeddingsURL: URL?
     private var model: MLModel?
     private var layout: Layout?
+    private var table: TokenEmbeddingTable?
     private var compiledCopy: URL?
 
     struct Layout {
-        var tokenInput: String
-        var tokenType: MLMultiArrayDataType
+        /// What the model's token input is.
+        enum Tokens {
+            /// Integer token IDs, `[1, L]`.
+            case ids(name: String, type: MLMultiArrayDataType)
+            /// Input embeddings, `[1, L, width]`, looked up in a
+            /// `TokenEmbeddingTable`.
+            case embeddings(name: String, type: MLMultiArrayDataType, width: Int)
+        }
+
+        var tokens: Tokens
         var maskInput: String?
         var maskType: MLMultiArrayDataType
         var sequence: SequenceShape
@@ -62,12 +78,18 @@ public actor CoreMLTokenEmbeddingModel: TokenEmbeddingModel {
         }
     }
 
-    /// - Parameter url: A compiled `.mlmodelc`, or an `.mlpackage` /
-    ///   `.mlmodel` that `load()` compiles on device (the compile is part of
-    ///   the measured load time).
-    public init(url: URL, computeUnits: MLComputeUnits = .cpuAndNeuralEngine) {
+    /// - Parameters:
+    ///   - url: A compiled `.mlmodelc`, or an `.mlpackage` / `.mlmodel` that
+    ///     `load()` compiles on device (the compile is part of the measured
+    ///     load time).
+    ///   - computeUnits: Where Core ML may run the model.
+    ///   - tokenEmbeddings: The `TokenEmbeddingTable` file for a model that
+    ///     takes `inputs_embeds`. `nil` looks for
+    ///     `TokenEmbeddingTable.sibling(of: url)`.
+    public init(url: URL, computeUnits: MLComputeUnits = .cpuAndNeuralEngine, tokenEmbeddings: URL? = nil) {
         self.url = url
         self.computeUnits = computeUnits
+        self.tokenEmbeddingsURL = tokenEmbeddings
     }
 
     /// The first `.mlmodelc`, `.mlpackage` or `.mlmodel` whose name starts with
@@ -100,7 +122,14 @@ public actor CoreMLTokenEmbeddingModel: TokenEmbeddingModel {
         let configuration = MLModelConfiguration()
         configuration.computeUnits = computeUnits
         let model = try await MLModel.load(contentsOf: compiled, configuration: configuration)
-        layout = try Self.layout(of: model.modelDescription)
+        let layout = try Self.layout(of: model.modelDescription)
+        if case .embeddings(let name, _, let width) = layout.tokens {
+            guard let tableURL = tokenEmbeddingsURL ?? TokenEmbeddingTable.sibling(of: url) else {
+                throw CoreMLEmbeddingError.missingTokenEmbeddings(name)
+            }
+            table = try TokenEmbeddingTable(url: tableURL, width: width)
+        }
+        self.layout = layout
         self.model = model
     }
 
@@ -112,11 +141,18 @@ public actor CoreMLTokenEmbeddingModel: TokenEmbeddingModel {
         let realTokens = tokenIDs.count
 
         var features: [String: MLFeatureValue] = [:]
-        let ids = try MLMultiArray(shape: [1, NSNumber(value: length)], dataType: layout.tokenType)
-        for index in 0..<length {
-            ids[index] = NSNumber(value: index < realTokens ? tokenIDs[index] : 0)
+        switch layout.tokens {
+        case .ids(let name, let type):
+            let ids = try MLMultiArray(shape: [1, NSNumber(value: length)], dataType: type)
+            for index in 0..<length {
+                ids[index] = NSNumber(value: index < realTokens ? tokenIDs[index] : 0)
+            }
+            features[name] = MLFeatureValue(multiArray: ids)
+        case .embeddings(let name, let type, let width):
+            guard let table else { throw CoreMLEmbeddingError.missingTokenEmbeddings(name) }
+            features[name] = MLFeatureValue(
+                multiArray: try Self.embeddings(tokenIDs, length: length, width: width, type: type, table: table))
         }
-        features[layout.tokenInput] = MLFeatureValue(multiArray: ids)
         if let maskInput = layout.maskInput {
             let mask = try MLMultiArray(shape: [1, NSNumber(value: length)], dataType: layout.maskType)
             for index in 0..<length {
@@ -132,9 +168,34 @@ public actor CoreMLTokenEmbeddingModel: TokenEmbeddingModel {
         return Self.pooled(array, realTokens: realTokens)
     }
 
+    /// `[1, length, width]` input embeddings for `tokenIDs`, zero-padded.
+    static func embeddings(
+        _ tokenIDs: [Int32], length: Int, width: Int, type: MLMultiArrayDataType, table: TokenEmbeddingTable
+    ) throws -> MLMultiArray {
+        guard type == .float16 else { throw CoreMLEmbeddingError.unsupportedInputs(["inputs_embeds of \(type)"]) }
+        guard table.width == width else {
+            throw CoreMLEmbeddingError.tableWidthMismatch(table: table.width, model: width)
+        }
+        let array = try MLMultiArray(
+            shape: [1, NSNumber(value: length), NSNumber(value: width)], dataType: .float16)
+        let contiguous = array.strides.map(\.intValue) == [length * width, width, 1]
+        guard contiguous else { throw CoreMLEmbeddingError.unsupportedInputs(["non-contiguous inputs_embeds"]) }
+        var failure: TokenEmbeddingTable.Failure?
+        array.withUnsafeMutableBytes { buffer, _ in
+            do throws(TokenEmbeddingTable.Failure) {
+                try table.copyRows(tokenIDs, length: length, into: buffer)
+            } catch {
+                failure = error
+            }
+        }
+        if let failure { throw failure }
+        return array
+    }
+
     public func unload() async {
         model = nil
         layout = nil
+        table = nil
         if let compiledCopy {
             try? FileManager.default.removeItem(at: compiledCopy)
         }
@@ -145,8 +206,11 @@ public actor CoreMLTokenEmbeddingModel: TokenEmbeddingModel {
 
     static func layout(of description: MLModelDescription) throws -> Layout {
         let arrays = description.inputDescriptionsByName.filter { $0.value.type == .multiArray }
+        let maskEntry = arrays.first { name, _ in name.lowercased().contains("mask") }
+        let embedsEntry = arrays.first { name, _ in name.lowercased().contains("embeds") }
         let tokenEntry =
-            arrays.first { name, _ in
+            embedsEntry
+            ?? arrays.first { name, _ in
                 let lower = name.lowercased()
                 return (lower.contains("ids") || lower.contains("token")) && !lower.contains("mask")
             } ?? (arrays.count == 1 ? arrays.first : nil)
@@ -155,7 +219,23 @@ public actor CoreMLTokenEmbeddingModel: TokenEmbeddingModel {
         else {
             throw CoreMLEmbeddingError.unsupportedInputs(description.inputDescriptionsByName.keys.sorted())
         }
-        let maskEntry = arrays.first { name, _ in name.lowercased().contains("mask") }
+
+        // Input embeddings are [1, L, H]: the sequence is the middle
+        // dimension, so read it from the mask when there is one.
+        let tokens: Layout.Tokens
+        let sequenceConstraint: MLMultiArrayConstraint
+        if embedsEntry != nil {
+            guard let width = tokenConstraint.shape.last?.intValue, width > 0,
+                let maskConstraint = maskEntry?.value.multiArrayConstraint
+            else {
+                throw CoreMLEmbeddingError.unsupportedInputs([tokenName])
+            }
+            tokens = .embeddings(name: tokenName, type: tokenConstraint.dataType, width: width)
+            sequenceConstraint = maskConstraint
+        } else {
+            tokens = .ids(name: tokenName, type: tokenConstraint.dataType)
+            sequenceConstraint = tokenConstraint
+        }
 
         let outputs = description.outputDescriptionsByName.filter { $0.value.type == .multiArray }
         let preferred = ["sentence_embedding", "embedding", "embeddings", "text_embeds", "pooler_output"]
@@ -165,12 +245,11 @@ public actor CoreMLTokenEmbeddingModel: TokenEmbeddingModel {
             throw CoreMLEmbeddingError.missingOutput("a multi-array output")
         }
 
-        guard let sequence = sequenceShape(tokenConstraint) else {
+        guard let sequence = sequenceShape(sequenceConstraint) else {
             throw CoreMLEmbeddingError.unsupportedInputs([tokenName])
         }
         return Layout(
-            tokenInput: tokenName,
-            tokenType: tokenConstraint.dataType,
+            tokens: tokens,
             maskInput: maskEntry?.key,
             maskType: maskEntry?.value.multiArrayConstraint?.dataType ?? tokenConstraint.dataType,
             sequence: sequence,
@@ -223,6 +302,9 @@ enum CoreMLEmbeddingError: Error, CustomStringConvertible {
     case unsupportedInputs([String])
     case missingOutput(String)
     case sequenceTooLong(Int, maximum: Int)
+    /// The model takes input embeddings and no `TokenEmbeddingTable` was found.
+    case missingTokenEmbeddings(String)
+    case tableWidthMismatch(table: Int, model: Int)
 
     var description: String {
         switch self {
@@ -230,6 +312,9 @@ enum CoreMLEmbeddingError: Error, CustomStringConvertible {
         case .unsupportedInputs(let names): "Could not find a token-ID input among \(names)"
         case .missingOutput(let name): "The model has no output \(name)"
         case .sequenceTooLong(let count, let maximum): "\(count) tokens exceed the model's maximum of \(maximum)"
+        case .missingTokenEmbeddings(let input):
+            "The model takes \(input) but there is no <name>.token-embeddings.f16 next to it"
+        case .tableWidthMismatch(let table, let model): "The token table is \(table) wide but the model takes \(model)"
         }
     }
 }

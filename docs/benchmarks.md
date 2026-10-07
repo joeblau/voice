@@ -124,15 +124,16 @@ an iPhone; they validate the harness and catch gross regressions.
   report says so; it underestimates the ASR decoder's cost because it
   decodes few tokens.
 - **EmbeddingGemma.** No Swift package ships EmbeddingGemma-300M for Core ML,
-  so the case is skipped until a model is supplied. Convert
-  `google/embeddinggemma-300m` with coremltools (inputs `input_ids` and
-  `attention_mask`, int32, shape `[1, 256]` or a range; output the pooled
-  `[1, 768]` embedding), name it `EmbeddingGemma*.mlpackage` or
-  `.mlmodelc`, and put it in `BlauBenchmarks/Assets/` (XCTest; gitignored)
-  or copy it to the app's `Documents/Benchmarks/Models/` with
-  `xcrun devicectl device copy to`. A `.mlpackage` is compiled on the device
-  and the compile counts toward `load`. #59 owns the model choice and the
-  conversion.
+  so the case is skipped until a model is supplied. Convert it with
+  `scripts/embeddings/convert_coreml.py --model embeddinggemma-300m` (see
+  [Text embedding model](#text-embedding-model-59)): that writes
+  `EmbeddingGemma300M.mlpackage` and its token table
+  `EmbeddingGemma300M.token-embeddings.f16`. Put **both** in
+  `BlauBenchmarks/Assets/` (XCTest; gitignored) or copy them to the app's
+  `Documents/Benchmarks/Models/` with `xcrun devicectl device copy to`. A
+  `.mlpackage` is compiled on the device and the compile counts toward
+  `load`. The same case measures any other converted candidate: name it
+  `EmbeddingGemma*` or pass its URL to `CoreMLTokenEmbeddingModel`.
 
 ## Methodology
 
@@ -232,6 +233,8 @@ go/no-go below.
 | CAM++ | `embed.1.5s` / `embed.3s` p50 | pending | pending | pending |
 | EmbeddingGemma 256-d int8 | `embed.128tok` p50 / p95 | pending (needs model) | pending (needs model) | pending (needs model) |
 | | `memory.footprintGrowth` | pending | pending | pending |
+| Qwen3-Embedding-0.6B 256-d int8 (fallback, #59) | `embed.128tok` p50 / p95 | pending | pending | pending |
+| | `memory.neuralGrowth` | pending | pending | pending |
 | Foundation Models | `label.cold` | pending | pending | pending |
 | | `label` / `label.prewarmed` p50 | pending | pending | pending |
 | Background probe (iOS 27) | verdict / mitigation | pending | pending | pending |
@@ -533,6 +536,253 @@ three windows. The hardest different-speaker pairs are the two female
 speakers (`clb`/`slt`). The gate's thresholds are calibrated on a larger,
 cross-session set with simulated rooms and noise in
 [voice-id-eval.md](voice-id-eval.md) (#48).
+
+## Text embedding model (#59)
+
+Which model embeds text for memory search (#60, #62) and topic
+segmentation (#52). Candidates from #59: EmbeddingGemma-300M (the
+architecture's default in #1), Qwen3-Embedding-0.6B, Model2Vec
+potion-retrieval-32M (fallback) and Apple's `NLContextualEmbedding`
+(baseline).
+
+**Status (2026-10-07).** Measured on this Mac: retrieval quality of every
+candidate except EmbeddingGemma, and a full Core ML conversion of
+Qwen3-Embedding-0.6B (numerics, Neural Engine placement, latency, size,
+retrieval through Blau's Swift path). **EmbeddingGemma's own numbers are
+pending**: `google/embeddinggemma-300m` is gated behind the Gemma Terms of
+Use, which the repository owner has to accept on Hugging Face (an agent
+must not accept a license on someone's behalf). Its conversion path is
+built and tested on a randomly initialized model with the same layout, so
+finishing is two commands (below). **No model is hosted yet** (see
+[Hosting](#hosting-the-model)). iPhone latencies are pending, as for #22.
+
+### Decision
+
+1. **Model: EmbeddingGemma-300M stays the provisional choice**, at 256-d
+   Matryoshka, int8 (`TextEmbeddingModelSpec.chosen`), pending its own
+   numbers. The rule that confirms or overturns it is code,
+   `EmbeddingModelSelection` in BlauMemory: a candidate qualifies with **no
+   non-finite vectors on the Neural Engine, an iPhone `embed.128tok` p95 ≤
+   50 ms and a download ≤ 400 MB**; among qualifying candidates the
+   smallest download within **0.03 Recall@5** of the best wins. Over what
+   was measured (`EmbeddingModelSelection.measured`) it returns
+   `.pending(provisional: "embeddinggemma-300m", ...)`.
+2. **Fallback: Qwen3-Embedding-0.6B**, if EmbeddingGemma fails the rule. It
+   is the strongest model measured here (Recall@5 0.809 at 256-d int8),
+   converts cleanly to fp16 with no NaN on the Neural Engine, and runs a
+   128-token chunk in 12 ms on the M3 Max's Neural Engine. Its cost is
+   size: twice EmbeddingGemma's parameters, so even with int8 weights
+   (442 MB, Recall@5 0.797) and an int8 token table (155 MB) it is about
+   600 MB, over the 400 MB budget; int4 weights didn't stay on the Neural
+   Engine (below). Falling back to it means raising the budget, which is
+   the owner's call. EmbeddingGemma is about 100M transformer parameters
+   plus a 201M-parameter table, roughly 300 MB at int8 for both.
+3. **Not Apple's `NLContextualEmbedding`** for memory: Recall@5 0.325, below
+   plain BM25 (0.517). It is not trained for retrieval. (It stays the topic
+   segmenter's embedder until #60 lands.)
+4. **potion-retrieval-32M only as a CPU fallback**: 0.620 Recall@5 is far
+   behind the transformers, but it needs no Core ML model, costs
+   microseconds on the CPU and is an option for #26 if the Neural Engine is
+   unavailable off screen.
+5. **Ship the transformer as a split Core ML model**: `inputs_embeds` plus
+   a memory-mapped token table, not token IDs (next section). This is what
+   puts the model on the Neural Engine at all, and it applies to
+   EmbeddingGemma's 262k-row table even more than to Qwen3's.
+
+Also for the follow-ups:
+
+- **256-d costs 4 points of Recall@5 against 512-d** for Qwen3 (0.809 vs
+  0.851; 128-d: 0.770). #1 fixes 256-d; at personal scale (~100k chunks)
+  512-d int8 is 51 MB, so #62 may want to revisit. int8 storage itself is
+  free (identical metrics to float32 at every width).
+- **Equal-weight RRF with BM25 hurts a strong dense model on this set**
+  (Qwen3 256-d: Recall@5 0.809 alone, 0.704 fused). BM25 wins every
+  `keyword` query (names, numbers) and loses most paraphrases. #64 should
+  weight the two rankings (or gate BM25 by query type) and tune it on this
+  eval set rather than use plain RRF.
+- **Chunk length.** The longest eval text is 72 tokens with Qwen3's
+  tokenizer (prompt included), so the fixed 128-token model fits it. Long
+  exchanges will need 256 (a second fixed-length model, or truncation);
+  #60 decides.
+
+### The eval set
+
+`Packages/BlauKit/Tests/BlauMemoryTests/Fixtures/RetrievalEval/`: **200
+queries over 216 documents** about one fictional user (Jordan Hale, founder
+of a restaurant-software startup, "Larderly"), one JSON file per
+category:
+
+| Category | Queries | Documents | What it stores |
+| --- | --- | --- | --- |
+| `company` | 55 | 55 company facts | Metrics by month, team, pricing, fundraising, policies (#65's company knowledge) |
+| `yc` | 45 | 45 collection items | YC interview questions with the user's prepared answers (#65, #69) |
+| `conversation` | 65 | 76 exchanges | Past voice conversations as exchange-level chunks, `User: … Blau: …` (#62) |
+| `profile` | 35 | 40 facts and notes | Extracted facts and notes about the user's life (#66) |
+
+Queries are phrased the way the user (or Grok, through `search_memory`)
+would ask, mostly paraphrases with little word overlap (191 `paraphrase`,
+9 `keyword`). Distractors are deliberate: MRR for three different months,
+several running or apartment exchanges, YC answers that restate company
+facts. Where a fact appears both as a company fact and as a YC answer,
+both are relevant. Metrics: **Recall@5** (share of relevant documents in
+the top 5), **Hit@5** (any relevant in the top 5), **MRR@10**, nDCG@10;
+`RetrievalMetrics` (Swift) and `evalset.py` (Python) implement the same
+definitions. Prompts are each model card's (`TextEmbeddingModelSpec`,
+`candidates.py`); Qwen3's query instruction is Blau's own ("Given a
+question about the user's life, work or past conversations, retrieve the
+memory that answers it").
+
+### Retrieval quality
+
+Reference models (PyTorch fp32, sentence-transformers / model2vec), int8
+vectors ranked by cosine, as the index stores them. 2026-10-07,
+`eval_retrieval.py`.
+
+| Model | Width | Recall@5 | Hit@5 | Hit@1 | MRR@10 | + BM25 (RRF) Recall@5 |
+| --- | --- | --- | --- | --- | --- | --- |
+| BM25 alone (k1 1.2, b 0.75) | n/a | 0.517 | 0.570 | 0.355 | 0.443 | n/a |
+| Apple `NLContextualEmbedding`, mean-pooled (Swift, OS model) | 512 | 0.325 | 0.350 | 0.175 | 0.255 | n/a |
+| potion-retrieval-32M | 512 | 0.645 | 0.670 | 0.420 | 0.525 | 0.582 |
+| potion-retrieval-32M | **256** | 0.620 | 0.650 | 0.400 | 0.502 | 0.589 |
+| Qwen3-Embedding-0.6B | 1024 | 0.843 | 0.880 | 0.680 | 0.770 | 0.704 |
+| Qwen3-Embedding-0.6B | 512 | 0.851 | 0.885 | 0.670 | 0.760 | 0.702 |
+| Qwen3-Embedding-0.6B | **256** | 0.809 | 0.845 | 0.610 | 0.714 | 0.704 |
+| Qwen3-Embedding-0.6B | 128 | 0.770 | 0.795 | 0.590 | 0.680 | 0.694 |
+| EmbeddingGemma-300M | 768 / 256 / 128 | pending (gated) | | | | |
+
+By category, Recall@5 at 256-d int8:
+
+| Model | company | yc | conversation | profile |
+| --- | --- | --- | --- | --- |
+| BM25 | 0.491 | 0.496 | 0.638 | 0.357 |
+| NLContextualEmbedding | 0.209 | 0.178 | 0.615 | 0.157 |
+| potion-retrieval-32M | 0.673 | 0.311 | 0.808 | 0.586 |
+| Qwen3-Embedding-0.6B | 0.809 | 0.552 | 0.900 | 0.971 |
+
+YC answers are the hardest slice for every model: interview questions
+("what's your secret insight about this market") share little with the
+stored answer, and many answers restate each other. #69's practice mode
+should match on the stored *question* as well as the answer.
+
+### Core ML conversion and the Neural Engine
+
+`scripts/embeddings/convert_coreml.py` converts a candidate and verifies
+it against the PyTorch reference on every eval text. What it found on
+Qwen3-Embedding-0.6B (EmbeddingGemma shares every issue but the last):
+
+- **The token-embedding lookup keeps the whole model off the Neural
+  Engine.** Converted as usual (token IDs in), Core ML's compute plan put
+  all 1,914 operations on the CPU, with enumerated or fixed shapes. The
+  same 28 layers fed `inputs_embeds` were planned 100% on the Neural
+  Engine; the gather over the 151,669 × 1,024 table is what blocks it
+  (bisected: `ids + bias` → 0% Neural Engine, `embeds + bias` → 100%).
+  EmbeddingGemma's table is 262,144 × 768. So the converted model starts
+  at `inputs_embeds`, and the table ships beside it as raw float16
+  (`<name>.token-embeddings.f16`) that the app memory-maps
+  (`TokenEmbeddingTable`); `CoreMLTokenEmbeddingModel` fills
+  `inputs_embeds` from it. Only the rows of tokens actually used become
+  resident.
+- **Masks and pooling are float arithmetic.** transformers builds its
+  attention masks with `vmap`, which `torch.jit.trace` can't record, and
+  coremltools mis-converted a first attempt built from `torch.where` and a
+  `gather` (float index). The wrapper builds the additive masks (causal for Qwen3;
+  bidirectional with a sliding window for Gemma3) and the pooling
+  (masked mean; one-hot last token) from float ops only, using −1e4 rather
+  than −inf so fp16 never produces an all-−inf softmax row. It is checked
+  against sentence-transformers before every conversion (min cosine
+  1.000000, padded and unpadded).
+- **A fixed sequence length** (128 by default) makes the graph fully
+  static, which the Neural Engine compiler wants.
+- **fp16 numerics: stable for Qwen3** (no NaN or infinity on any of the 416
+  eval texts, on CPU or Neural Engine). The EmbeddingGemma model card warns
+  that its activations don't support float16, so this is the first thing
+  to check for it: `nonFiniteOutputs` in the verification report, and
+  `--precision fp32` (CPU/GPU only) as the comparison.
+
+Qwen3-Embedding-0.6B, fixed 128 tokens, M3 Max (macOS 27.2, Xcode 27.2),
+`coremltools` predictions; Recall@5 at 256-d int8 from the Core ML outputs
+(reference: 0.809). The machine was shared with other builds (load average
+25 to 130), so latencies are upper bounds.
+
+| Variant | Neural Engine ops (plan) | Non-finite | Min cosine to fp32 (256-d) | Recall@5 (ANE) | `cpuAndNeuralEngine` p50 / p95 | `cpuOnly` p50 | Model + table |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| IDs in, table inside (fp16, enumerated 64/128/256) | 0% | 0 | 0.99967 | 0.809 (ran on CPU) | 342 / 374 ms | 227 ms | 1,192 MB |
+| **Split, fp16 weights** | **100%** | 0 | 0.99967 | **0.809** | **11.9 / 12.0 ms** | 54.7 ms | 882 + 311 MB |
+| Split, int8 weights (per channel) | 100% | 0 | 0.99678 | 0.797 | 16.9 / 17.0 ms | 191 ms | 442 + 311 MB |
+| Split, int4 weights (block 32) | 45% of ops, 2% of estimated cost | 0 | 0.85285 | 0.804 | 44.6 / 47.5 ms | 45.0 ms | 249 + 311 MB |
+
+Neural Engine share counts compute operations only (constants and the
+`constexpr` weight decompression are excluded). int8 weights halve the
+model for 0.012 Recall@5 and stay on the Neural Engine. Block-wise int4
+does not on this M3 Max: Core ML planned 96% of the cost on the CPU, so
+it ran no faster than `cpuOnly`, and individual vectors drifted badly (min
+cosine 0.85, although Recall@5 held at 0.804). Newer Neural Engines (A17
+Pro, M4) are documented to accelerate block-wise int4; that and 4-bit
+palettization are for #60 to measure on an iPhone, not assumed here.
+
+Through Blau's Swift path (`CoreMLTokenEmbeddingModel` with the token
+table, `PretokenizedTextEmbedder`, `EmbeddingRetrievalEvaluator`; debug
+build, `cpuAndNeuralEngine`): Recall@5 **0.809**, MRR@10 0.713, zero
+non-finite vectors, `embed.128tok` p50 / p95 16.2 / 25.5 ms including the
+table lookup, Matryoshka truncation and int8 quantization; first load
+(compile included) 15.7 s, `memory.neuralGrowth` 846 MB for the fp16
+weights.
+
+The token table is the larger download once the weights are compressed.
+Stored as int8 with a scale per row it would halve (Qwen3: 155 MB;
+EmbeddingGemma: about 200 MB); #60 should do that and dequantize rows into
+`inputs_embeds` as it copies them.
+
+### Finishing EmbeddingGemma
+
+After accepting the Gemma Terms of Use at
+[huggingface.co/google/embeddinggemma-300m](https://huggingface.co/google/embeddinggemma-300m)
+with the account in `hf auth login`:
+
+```sh
+uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r scripts/embeddings/requirements.txt
+.venv/bin/python scripts/embeddings/eval_retrieval.py --only embeddinggemma-300m --output .build/eval.json
+.venv/bin/python scripts/embeddings/convert_coreml.py --model embeddinggemma-300m            # fp16, split, 128
+.venv/bin/python scripts/embeddings/convert_coreml.py --model embeddinggemma-300m --weights int8
+```
+
+Then pin `revision` in `candidates.py` to the commit you evaluated, fill
+the EmbeddingGemma rows above, run `make bench` with
+`EmbeddingGemma300M.mlpackage` and its `.token-embeddings.f16` in
+`BlauBenchmarks/Assets/` on two iPhones, and feed the numbers to
+`EmbeddingModelSelection().evaluate(_:)`. If fp16 produces non-finite
+vectors, compare `--precision fp32` (it can't use the Neural Engine) and
+record both; the rule then picks Qwen3.
+
+### Hosting the model
+
+Not done: hosting publishes model weights under an account (the Gemma
+terms require passing their notice along; Qwen3 is Apache-2.0), which is
+the owner's call. `convert_coreml.py` prepares everything: a `hosting/`
+folder with the compiled `.mlmodelc`, the token table, the tokenizer files,
+`blau-embedding.json` (prompts, widths, sequence length, source revision)
+and the license notice, plus `<name>.hosting-manifest.json` with every
+file's size and SHA-256. To publish:
+
+```sh
+hf repo create <owner>/blau-embeddinggemma-300m-coreml --type model
+hf upload <owner>/blau-embeddinggemma-300m-coreml .build/Embeddings/EmbeddingGemma300M-fp16-wint8/hosting .
+```
+
+then pin the resulting commit SHA like every other model
+(`scripts/update-model-manifest.py`, [models.md](models.md)); #60 adds the
+`ModelID` and loads it through `ModelManager`.
+
+### Reproducing
+
+| What | Command |
+| --- | --- |
+| Python environment | `uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r scripts/embeddings/requirements.txt` |
+| Reference retrieval eval (all candidates, BM25, hybrid) | `.venv/bin/python scripts/embeddings/eval_retrieval.py --output .build/eval.json` |
+| Convert and verify | `.venv/bin/python scripts/embeddings/convert_coreml.py --model qwen3-embedding-0.6b [--weights int8\|int4] [--lengths 256] [--no-split]` |
+| Script tests (tiny random Gemma3 and Qwen3 models through the real conversion) | `.venv/bin/python scripts/embeddings/test_embeddings.py` |
+| `NLContextualEmbedding` baseline (Swift) | `BLAU_DEVICE_TESTS=1 swift test --filter RealModelEmbeddingEvalTests` in `Packages/BlauKit` |
+| A converted model through the Swift path | add `BLAU_EMBEDDING_MODEL=<dir>/<name>.mlpackage BLAU_EMBEDDING_TOKENS=<dir>/<name>.eval-tokens.json BLAU_EMBEDDING_SPEC=<spec id>` (and optionally `BLAU_EMBEDDING_COMPUTE_UNITS=cpuOnly`) |
 
 ## After the numbers land
 

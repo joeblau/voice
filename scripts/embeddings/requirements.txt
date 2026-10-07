@@ -1,0 +1,11 @@
+# Python 3.12 (coremltools 9.0 has no wheels for 3.14). The versions the #59
+# numbers were produced with; see docs/benchmarks.md.
+#
+#   uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r scripts/embeddings/requirements.txt
+numpy==2.2.6
+torch==2.7.1
+transformers==4.57.1
+sentence-transformers==5.1.2
+model2vec==0.7.0
+coremltools==9.0
+huggingface_hub>=0.34
