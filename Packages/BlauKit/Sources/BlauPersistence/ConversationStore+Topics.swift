@@ -82,7 +82,9 @@ public struct TopicSnapshot: Identifiable, Hashable, Sendable {
 /// write a title: the lifecycle only writes over a provisional title
 /// (`applyTopicLabel`), and a manual rename (`renameTopic`) makes it final.
 /// So a manual title is never overwritten. A title refined when the topic
-/// closed is final too, so it isn't refined twice.
+/// closed is final too, so it isn't refined twice. The one exception is
+/// offline re-segmentation (#55), which re-titles a topic it merged or split
+/// with `replaceTopicLabel`, a compare-and-swap on the title it wrote.
 extension ConversationStore {
     // MARK: Reading
 
@@ -348,6 +350,37 @@ extension ConversationStore {
         return appliedTitle
     }
 
+    /// Replaces a topic's title, provisional or final, but only while it is
+    /// still `expectedTitle`: for offline re-segmentation (#55), which
+    /// re-titles a topic it merged or split after that topic's title was
+    /// refined. The caller passes the title it wrote itself, so a manual
+    /// title, including one the user typed while the labeler was running,
+    /// is never overwritten. The title becomes final. The summary is always
+    /// written, as in `applyTopicLabel`.
+    ///
+    /// - Returns: Whether the title was written.
+    /// - Throws: `ConversationStoreError.topicNotFound`.
+    @discardableResult
+    public func replaceTopicLabel(
+        _ topicID: UUID, expectedTitle: String, title: String, summary: String?
+    ) throws -> Bool {
+        let topic = try topic(topicID)
+        var appliedTitle = false
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty, topic.title == expectedTitle {
+            if topic.title != title { topic.title = title }
+            if topic.titleIsProvisional { topic.titleIsProvisional = false }
+            appliedTitle = true
+        }
+        if let summary = summary?.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty,
+            topic.summary != summary
+        {
+            topic.summary = summary
+        }
+        noteChanges()
+        return appliedTitle
+    }
+
     /// The user renames a topic. The title becomes final, so the lifecycle
     /// never overwrites it, and is saved at once (and from there synced).
     ///
@@ -365,7 +398,63 @@ extension ConversationStore {
         try save()
     }
 
+    // MARK: Compare-and-swap edits
+
+    /// `splitTopic(_:at:title:)`, but only while every topic in `expected`
+    /// still has the title and span its snapshot shows: for offline
+    /// re-segmentation (#55), which decides on a snapshot and must never
+    /// split a topic the user renamed after that snapshot was read (a
+    /// rename isn't queued behind the lifecycle).
+    ///
+    /// - Throws: `ConversationStoreError.topicChanged` (nothing is written),
+    ///   or what `splitTopic(_:at:title:)` throws.
+    @discardableResult
+    public func splitTopic(
+        _ topicID: UUID, at date: Date, title: String, ifUnchanged expected: [TopicSnapshot]
+    ) throws -> UUID {
+        try requireUnchanged(expected)
+        return try splitTopic(topicID, at: date, title: title)
+    }
+
+    /// `moveTopicStart(_:to:)`, but only while every topic in `expected`
+    /// is unchanged (see `splitTopic(_:at:title:ifUnchanged:)`).
+    ///
+    /// - Throws: `ConversationStoreError.topicChanged` (nothing is written),
+    ///   or what `moveTopicStart(_:to:)` throws.
+    public func moveTopicStart(_ topicID: UUID, to date: Date, ifUnchanged expected: [TopicSnapshot]) throws {
+        try requireUnchanged(expected)
+        try moveTopicStart(topicID, to: date)
+    }
+
+    /// `mergeTopicWithPrevious(_:)`, but only while every topic in
+    /// `expected` is unchanged (see `splitTopic(_:at:title:ifUnchanged:)`).
+    ///
+    /// - Throws: `ConversationStoreError.topicChanged` (nothing is written),
+    ///   or what `mergeTopicWithPrevious(_:)` throws.
+    @discardableResult
+    public func mergeTopicWithPrevious(_ topicID: UUID, ifUnchanged expected: [TopicSnapshot]) throws -> UUID {
+        try requireUnchanged(expected)
+        return try mergeTopicWithPrevious(topicID)
+    }
+
     // MARK: Helpers
+
+    /// Throws `topicChanged` unless each topic still has the title, title
+    /// state and span of its snapshot. Summaries and utterance counts may
+    /// differ: a late transcript or a labeler's summary doesn't change who
+    /// owns the topic or where it is.
+    private func requireUnchanged(_ expected: [TopicSnapshot]) throws {
+        for snapshot in expected {
+            let topic = try topic(snapshot.id)
+            guard !topic.isDeleted, topic.title == snapshot.title,
+                topic.titleIsProvisional == snapshot.titleIsProvisional,
+                topic.startedAt == snapshot.startedAt, topic.endedAt == snapshot.endedAt
+            else {
+                Log.data.info("Refused an edit of topic \(snapshot.id, privacy: .public): it changed")
+                throw ConversationStoreError.topicChanged(snapshot.id)
+            }
+        }
+    }
 
     /// The conversation's topics in timeline order, without ones deleted
     /// since the last save (the relationship still lists them until then).

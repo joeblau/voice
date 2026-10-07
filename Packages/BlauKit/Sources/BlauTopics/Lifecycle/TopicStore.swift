@@ -15,8 +15,16 @@ public protocol TopicStore: Sendable {
     func splitTopic(_ topicID: UUID, at date: Date, title: String) async throws -> UUID
     func moveTopicStart(_ topicID: UUID, to date: Date) async throws
     func mergeTopicWithPrevious(_ topicID: UUID) async throws -> UUID
+    /// Compare-and-swap variants of the three edits above: each throws
+    /// `ConversationStoreError.topicChanged` and writes nothing unless every
+    /// topic in `expected` still has its snapshot's title and span.
+    func splitTopic(_ topicID: UUID, at date: Date, title: String, ifUnchanged expected: [TopicSnapshot])
+        async throws -> UUID
+    func moveTopicStart(_ topicID: UUID, to date: Date, ifUnchanged expected: [TopicSnapshot]) async throws
+    func mergeTopicWithPrevious(_ topicID: UUID, ifUnchanged expected: [TopicSnapshot]) async throws -> UUID
     func removeTopicIfEmpty(_ topicID: UUID) async throws -> Bool
     func applyTopicLabel(_ topicID: UUID, title: String?, summary: String?, finalizesTitle: Bool) async throws -> Bool
+    func replaceTopicLabel(_ topicID: UUID, expectedTitle: String, title: String, summary: String?) async throws -> Bool
     func renameTopic(_ topicID: UUID, to title: String) async throws
     func topicSnapshot(_ topicID: UUID) async throws -> TopicSnapshot
     func topicSnapshots(in conversationID: ConversationID) async throws -> [TopicSnapshot]
@@ -53,6 +61,20 @@ public struct DeferredTopicStore: TopicStore {
         try await store().mergeTopicWithPrevious(topicID)
     }
 
+    public func splitTopic(
+        _ topicID: UUID, at date: Date, title: String, ifUnchanged expected: [TopicSnapshot]
+    ) async throws -> UUID {
+        try await store().splitTopic(topicID, at: date, title: title, ifUnchanged: expected)
+    }
+
+    public func moveTopicStart(_ topicID: UUID, to date: Date, ifUnchanged expected: [TopicSnapshot]) async throws {
+        try await store().moveTopicStart(topicID, to: date, ifUnchanged: expected)
+    }
+
+    public func mergeTopicWithPrevious(_ topicID: UUID, ifUnchanged expected: [TopicSnapshot]) async throws -> UUID {
+        try await store().mergeTopicWithPrevious(topicID, ifUnchanged: expected)
+    }
+
     public func removeTopicIfEmpty(_ topicID: UUID) async throws -> Bool {
         try await store().removeTopicIfEmpty(topicID)
     }
@@ -61,6 +83,12 @@ public struct DeferredTopicStore: TopicStore {
         _ topicID: UUID, title: String?, summary: String?, finalizesTitle: Bool
     ) async throws -> Bool {
         try await store().applyTopicLabel(topicID, title: title, summary: summary, finalizesTitle: finalizesTitle)
+    }
+
+    public func replaceTopicLabel(
+        _ topicID: UUID, expectedTitle: String, title: String, summary: String?
+    ) async throws -> Bool {
+        try await store().replaceTopicLabel(topicID, expectedTitle: expectedTitle, title: title, summary: summary)
     }
 
     public func renameTopic(_ topicID: UUID, to title: String) async throws {

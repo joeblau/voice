@@ -51,8 +51,9 @@ public struct TopicSegmenter: Sendable {
 
     /// Every unit appended so far, in order.
     public private(set) var units: [TopicUnit] = []
-    /// Unit-length embeddings, parallel to `units`.
-    private var embeddings: [[Float]] = []
+    /// Unit-length embeddings, parallel to `units`. Offline
+    /// re-segmentation (#55) reads them when the conversation ends.
+    public private(set) var embeddings: [[Float]] = []
     /// Whether each unit's user text contains an explicit cue.
     private var cues: [Bool] = []
     /// Units inside a rejected digression. Similarity windows computed

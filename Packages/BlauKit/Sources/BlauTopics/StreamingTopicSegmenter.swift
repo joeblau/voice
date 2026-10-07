@@ -47,6 +47,9 @@ public actor StreamingTopicSegmenter {
     /// Every unit appended so far.
     public var units: [TopicUnit] { segmenter.units }
 
+    /// The unit-length embedding of every unit, parallel to `units`.
+    public var embeddings: [[Float]] { segmenter.embeddings }
+
     /// Every confirmed boundary so far.
     public var boundaries: [TopicBoundary] { segmenter.boundaries }
 
