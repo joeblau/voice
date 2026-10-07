@@ -143,6 +143,53 @@ Each inverse is declared once, on the to-many side, with
 `@Relationship(inverse:)`. SwiftData links the other side, and the Core Data
 check confirms both ends have an inverse.
 
+## Writing from the pipeline: `ConversationStore`
+
+The live pipeline writes through one actor, `ConversationStore`
+(`Sources/BlauPersistence/ConversationStore.swift`). The UI reads with
+`@Query` on the main context and never writes pipeline data itself.
+
+| Call                                      | Does                                                                                         | Saves                 |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------- | --------------------- |
+| `startConversation(id:at:title:)`         | Inserts a conversation, or reopens an existing one with that id (relaunch); ends any other active one | at once               |
+| `appendPartial(utteranceID:text:)`        | Keeps the latest streaming ASR hypothesis **in memory only**                                 | never                 |
+| `discardPartial(utteranceID:)`            | Forgets a partial (for example speech the voice ID gate rejected)                            | never                 |
+| `commitUtterance(_:source:asrConfidence:voiceScore:)` | Stores a final `BlauCore.Utterance` in its conversation and the open topic; re-committing the same id (second pass) updates it; blank text is skipped | batched |
+| `openTopic(at:title:)`                    | Opens the next topic; closes the previous one at `at` and moves its utterances from `at` on   | batched               |
+| `closeTopic(_:title:summary:at:)`         | Closes a topic with the labeler's final title (non-provisional) and summary                  | batched               |
+| `retitle(_:to:isProvisional:)`            | Renames a topic (provisional guess or manual edit)                                           | batched               |
+| `endConversation(_:at:)`                  | Closes the open topic and the conversation, drops partials                                   | at once               |
+| `flush()`                                 | Saves whatever is waiting. Call it when the app goes to the background                       | at once               |
+
+**Partials are never persisted.** Only committed utterances are, always with
+`isFinal == true`.
+
+**Batched saves.** Every save is a SQLite transaction and, with CloudKit on,
+an export, so `ConversationStoreSavePolicy.coalesced` (the default) saves a
+change at most 2 s after it was made, or at once when 500 changes are
+waiting. `.immediate` saves every change; it exists for comparison and is
+several times slower per utterance (see docs/performance.md). Each save is a
+`db.save` signpost interval and is counted in `statistics`.
+
+**Never on the main thread.** The issue sketched `@ModelActor actor
+ConversationStore`, but the macro's `DefaultSerialModelExecutor` runs a job
+on whichever thread enqueues it. Measured with the iOS 27 / macOS 27 SDKs:
+every call into such an actor from `@MainActor` code runs, and saves, on the
+main thread. `ConversationStore` therefore conforms to `ModelActor` by hand
+and uses `DispatchQueueModelExecutor`, which runs every job on a private
+serial queue (at the calling task's priority, never below `.utility`) and
+creates its `ModelContext` there with autosave off. Each save also checks
+the thread: a main-thread save is counted in
+`statistics.mainThreadSaveCount`, logged as a fault and stops a debug build
+at an assertion. Use `DispatchQueueModelExecutor` for any other model actor
+(the memory indexer, for example).
+
+**Cost grows with conversation size.** Linking an utterance to its
+conversation makes SwiftData update the inverse to-many
+(`Conversation.utterances`), which costs more as the conversation grows.
+A 2-hour session (1,000 to 2,000 utterances) is cheap; one 10,000-utterance
+conversation is roughly twice as expensive per utterance as ten of 1,000.
+
 ## Versioning and migration
 
 `BlauMigrationPlan` lists every shipped schema, oldest first, and has existed
