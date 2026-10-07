@@ -1,3 +1,4 @@
+import BlauPersistence
 import BlauRealtime
 import SwiftUI
 
@@ -54,5 +55,6 @@ struct RootView: View {
     #Preview {
         RootView()
             .environment(XAIAccount.preview())
+            .environment(PersistenceController.preview())
     }
 #endif

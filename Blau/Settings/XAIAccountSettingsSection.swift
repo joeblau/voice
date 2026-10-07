@@ -1,3 +1,4 @@
+import BlauPersistence
 import BlauRealtime
 import SwiftUI
 
@@ -106,6 +107,7 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 XAIAccountSettingsSection()
+                ICloudSettingsSection()
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -122,5 +124,6 @@ struct SettingsView: View {
     #Preview("No key") {
         SettingsView()
             .environment(XAIAccount.preview())
+            .environment(PersistenceController.preview())
     }
 #endif

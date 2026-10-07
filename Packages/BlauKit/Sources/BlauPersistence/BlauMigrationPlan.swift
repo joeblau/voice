@@ -20,8 +20,9 @@ public enum BlauMigrationPlan: SchemaMigrationPlan {
 /// Builds `ModelContainer`s for Blau's schema.
 ///
 /// Always opens stores with the current schema and `BlauMigrationPlan`, so no
-/// call site can forget the migration plan. The CloudKit-backed store the app
-/// uses is configured in the composition root (#20).
+/// call site can forget the migration plan. The app's CloudKit-backed store
+/// is opened by `PersistenceController` (see `syncedConfiguration(for:location:)`
+/// and docs/sync.md).
 public enum BlauModelContainer {
     /// The current schema, built from `CurrentSchema`.
     public static var schema: Schema {

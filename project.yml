@@ -96,6 +96,10 @@ targets:
         BlauXAIRealtimeModel: $(XAI_REALTIME_MODEL)
         # Empty except in Debug with a key in Config/Secrets.xcconfig.
         BlauXAIDevAPIKey: $(BLAU_INFO_XAI_DEV_API_KEY)
+        # YES only when the app is signed, i.e. carries the iCloud
+        # entitlement. Unsigned simulator / CI builds (CODE_SIGNING_ALLOWED=NO)
+        # stay local-only instead of crashing in CKContainer. See docs/sync.md.
+        BlauCloudKitEnabled: $(CODE_SIGNING_ALLOWED)
     postBuildScripts:
       # Release only (BLAU_FORBID_EMBEDDED_SECRETS): fail if XAI_DEV_API_KEY
       # is set or an xAI key is found in the built executable or Info.plist.
