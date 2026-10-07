@@ -428,10 +428,18 @@ public actor ParakeetStreamingTranscriber: Transcriber {
             // the next utterance's.
             position = min(open.fedEnd, open.audioStart + open.decodedSamples)
         } else if reason != .recognizerFailure {
+            // On silence the recognizer has been fed `silenceCommitDelay`
+            // past the end of speech. If speech resumed in that time and VAD
+            // confirms it only after this commit, the next utterance decodes
+            // it from its onset, so this one keeps only the words up to the
+            // end of speech (and one encoder frame, for a word the model
+            // emits on the frame after VAD's end).
+            let frame = Int64(recognizer.chunkSize.frameSamples)
+            let cutoff = reason == .silence ? open.speechEnd.map { $0 - open.audioStart + frame } : nil
             do {
-                let output = try await recognizer.finish()
+                let output = try await recognizer.finish(keepingTokensThrough: cutoff)
                 open.transcript = output.transcript
-                open.lastTokenEnd = output.lastTokenEnd ?? open.lastTokenEnd
+                open.lastTokenEnd = cutoff == nil ? output.lastTokenEnd ?? open.lastTokenEnd : output.lastTokenEnd
                 record {
                     $0.chunksProcessed += Int64(output.chunks)
                     $0.modelTime += output.modelTime

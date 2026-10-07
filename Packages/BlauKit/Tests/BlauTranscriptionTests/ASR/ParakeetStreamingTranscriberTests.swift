@@ -119,6 +119,41 @@ struct ParakeetStreamingTranscriberTests {
         #expect(utterance.timeRange == range(8_000..<48_000))
     }
 
+    /// A short pause where VAD confirms the resumed speech only after the
+    /// fallback committed: the flush decodes audio past the end of speech
+    /// (up to `silenceCommitDelay` after it), which holds the start of the
+    /// resumed speech, and the next utterance decodes that audio again from
+    /// its onset. The flush keeps only the words up to the end of speech, so
+    /// every word lands in exactly one utterance.
+    @Test(arguments: [0.35, 0.4, 0.45, 0.5, 0.6], [0.25, 0.4, 0.55])
+    func speechConfirmedAfterTheFallbackIsNeitherRepeatedNorLost(pause: Double, onsetDelay: Double) async throws {
+        let first = "I would like"
+        let second = "a coffee please"
+        let resumeAt = 1.5 + pause
+        let scenario = Scenario(seconds: 6)
+            .speech(first, from: 0.5, to: 1.5, endsUtterance: false, onsetConfirmedAfter: onsetDelay)
+            .speech(second, from: resumeAt, to: resumeAt + 0.9, endsUtterance: true, onsetConfirmedAfter: onsetDelay)
+        let recognizer = SimulatedEouRecognizer(words: scenario.words)
+        let source = FixtureAudioSource(block: scenario.samples)
+        let replay = await TranscriptionReplay.run(
+            makeTranscriber(recognizer, source: source), source: source, vadEvents: scenario.events, vadLag: 320)
+
+        let finals = replay.finals.map(\.text)
+        #expect(finals.joined(separator: " ") == "\(first) \(second)", "\(finals)")
+        // Whether the pause splits the speech depends on whether VAD confirms
+        // the resumed onset before the fallback fires (0.9 s after the end of
+        // speech; both events reach the transcriber 20 ms late). Too close to
+        // call within a frame, either outcome is right.
+        let race = (pause + onsetDelay) - 0.9
+        if race > 0.03 {
+            #expect(finals == [first, second])
+            #expect(replay.statistics.commits[.silence] == 2)
+        } else if race < -0.03 {
+            #expect(finals == ["\(first) \(second)"])
+        }
+        #expect(await recognizer.discontinuities == 0)
+    }
+
     @Test func aLongPauseSplitsTheSpeechIntoTwoUtterances() async throws {
         let scenario = Scenario(seconds: 7)
             .speech("I would like", from: 0.5, to: 1.5, endsUtterance: false)
@@ -464,8 +499,8 @@ struct ParakeetStreamingTranscriberTests {
 // MARK: - Scenario
 
 /// Synthetic speech for the simulated recognizer: where each stretch of
-/// words is, and VAD's events for it (onset confirmed 300 ms in, end
-/// decided 400 ms after the speech).
+/// words is, and VAD's events for it (onset confirmed 300 ms in unless
+/// stated, end decided 400 ms after the speech).
 struct Scenario {
     let seconds: Double
     var words: [ScriptedWord] = []
@@ -482,7 +517,8 @@ struct Scenario {
     }
 
     func speech(
-        _ text: String, from start: Double, to end: Double, endsUtterance: Bool, vadSplitAt splits: [Double] = []
+        _ text: String, from start: Double, to end: Double, endsUtterance: Bool, vadSplitAt splits: [Double] = [],
+        onsetConfirmedAfter onsetDelay: Double = 0.3
     ) -> Scenario {
         var scenario = self
         let startOffset = Int64(start * 16_000)
@@ -503,7 +539,7 @@ struct Scenario {
                 .speechStarted(
                     SpeechOnset(
                         segmentID: id, startOffset: segmentStart, sampleRate: 16_000, isContinuation: isContinuation,
-                        detectedAt: isContinuation ? segmentStart : segmentStart + 4_800)))
+                        detectedAt: isContinuation ? segmentStart : segmentStart + Int64(onsetDelay * 16_000))))
             scenario.events.append(
                 .speechEnded(
                     SpeechSegment(

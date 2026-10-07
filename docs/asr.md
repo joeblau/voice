@@ -64,7 +64,7 @@ flowchart LR
 | Rule | Default | Commit |
 | --- | --- | --- |
 | The model confirms the end of utterance | EOU token + 640 ms debounce (`ParakeetEouRecognizer.defaultEndOfUtteranceDebounce`) | At the model's decision; audio after it belongs to the next utterance |
-| **VAD fallback**: VAD reported the end of speech and no new speech followed | `silenceCommitDelay` 0.9 s after the end of the speech | Flush (FluidAudio's `finish()`), then reset |
+| **VAD fallback**: VAD reported the end of speech and no new speech followed | `silenceCommitDelay` 0.9 s after the end of the speech | Flush up to the end of speech (words after it are dropped), then reset |
 | The utterance is too long | `maximumUtteranceDuration` 30 s | Flush and reset; if speech goes on, the next utterance starts at the cut |
 | The audio stream ends, or `stop()` | | Flush and reset |
 | The recognizer throws | | What was decoded so far; the failing audio is skipped |
@@ -73,7 +73,12 @@ Speech that resumes before the fallback fires (VAD reports a new onset)
 stays in the same utterance, so a short pause to think doesn't split a
 sentence. When VAD confirms resumed speech only after the fallback already
 committed (the onset is 250–550 ms old by then), the next utterance still
-starts at the onset, never inside the previous utterance's speech.
+starts at the onset, never inside the previous utterance's speech. The
+fallback's flush has by then decoded up to 0.9 s past the end of speech,
+which can hold the start of the resumed speech, so it keeps only the tokens
+timestamped up to VAD's end of speech plus one encoder frame (80 ms): each
+word lands in exactly one utterance
+(`speechConfirmedAfterTheFallbackIsNeitherRepeatedNorLost`).
 
 ### Why the VAD fallback, and not the model, sets the latency
 
@@ -94,16 +99,28 @@ model's detector still ends utterances that VAD can't (steady noise that
 keeps a segment open), and its debounce of two chunks (640 ms) keeps a
 stray EOU token from cutting a sentence.
 
-### `finish()` and `reset()` after every utterance
+### The flush and `reset()` after every utterance
 
 FluidAudio keeps every token since its last `reset()` and decodes all of
 them again for each partial, so without a reset the work per chunk grows
-for the whole conversation. Its `finish()` decodes the buffered audio and
-clears the tokens, but keeps the confirmed end-of-utterance flag (no later
-end would ever fire) and the encoder caches. The transcriber therefore
-calls `finish()` only when it needs the buffered audio decoded (every rule
-except the model's own end of utterance, where the audio after the decision
-belongs to the next utterance) and **`reset()` after every commit**.
+for the whole conversation. The transcriber flushes the recognizer
+(`finish(keepingTokensThrough:)`) only when it needs the buffered audio
+decoded (every rule except the model's own end of utterance, where the
+audio after the decision belongs to the next utterance) and calls
+**`reset()` after every commit**.
+
+The flush doesn't use FluidAudio's `finish()`: that clears the token
+timestamps before it returns (so the tokens can't be cut at the end of
+speech), decodes only one chunk's output span (320 ms) of the padded
+buffer, dropping the rest when more is buffered (a `stop()` within 630 ms
+of an onset), and keeps the confirmed end-of-utterance flag and the encoder
+caches. `ParakeetEouRecognizer` instead pads the buffer with
+`injectSilence` one chunk at a time and runs `processBufferedAudio()` until
+the audio up to the cutoff (or all of it) is decoded, then rebuilds the text
+from `getRawTokenStrings()` for the tokens whose `getTokenTimestampsMs()`
+value is within the cutoff, as FluidAudio's tokenizer does (pieces joined,
+U+2581 to a space, trimmed). On a silence commit at 320 ms chunks the audio
+up to the cutoff is already decoded, so the flush runs no extra chunk.
 `TranscriberSoakTests` checks over an hour that the recognizer's history
 never exceeds the longest sentence.
 

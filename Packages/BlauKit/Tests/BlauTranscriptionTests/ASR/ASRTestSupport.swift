@@ -224,22 +224,39 @@ actor SimulatedEouRecognizer: StreamingSpeechRecognizer {
         return output
     }
 
-    func finish() -> RecognizerOutput {
+    /// `ParakeetEouRecognizer.finish(keepingTokensThrough:)`: pads the
+    /// buffer with silence one chunk at a time until the buffered audio the
+    /// transcript needs (all of it, or up to `cutoff`) is decoded, then keeps
+    /// the words that end by the cutoff. Each padded chunk decodes only its
+    /// output span (`shiftSamples`), as in FluidAudio.
+    func finish(keepingTokensThrough cutoff: Int64?) -> RecognizerOutput {
         finishes += 1
         var output = RecognizerOutput()
-        if buffered > 0, let streamStart {
-            let before = history.count
-            _ = decodeWords(upTo: streamStart + decoded + Int64(buffered))
-            decoded += Int64(buffered)
-            output.chunks = 1
-            output.modelTime = chunkTime
-            output.hasNewText = history.count > before
-            chunksRun += 1
+        let before = transcript
+        if let streamStart {
+            let undecoded = Int64(buffered)
+            let needed = cutoff.map { min(max($0 - decoded, 0), undecoded) } ?? undecoded
+            let shift = Int64(chunkSize.shiftSamples)
+            let chunks = Int((needed + shift - 1) / shift)
+            // Only real audio holds words; the padding is silence.
+            let fedEnd = streamStart + decoded + undecoded
+            for _ in 0..<chunks {
+                _ = decodeWords(upTo: min(streamStart + decoded + shift, fedEnd))
+                decoded += shift
+                chunksRun += 1
+            }
+            decoded = min(decoded, fedEnd - streamStart)
+            output.chunks = chunks
+            output.modelTime = chunkTime * chunks
         }
-        buffered = 0
+        if let cutoff, let streamStart {
+            history.removeAll { $0.end - streamStart > cutoff }
+        }
+        output.hasNewText = transcript != before
         output.transcript = transcript
         output.decodedSamples = decoded
         output.lastTokenEnd = history.last.map { $0.end - (streamStart ?? 0) }
+        buffered = 0
         history.removeAll()
         return output
     }

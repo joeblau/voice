@@ -8,6 +8,7 @@ import BlauTelemetry
 import FluidAudio
 import Foundation
 import Synchronization
+import os
 
 /// Parakeet realtime EOU 120M through FluidAudio's `StreamingEouAsrManager`:
 /// streaming partials and a built-in end-of-utterance detector, on the
@@ -175,30 +176,47 @@ public actor ParakeetEouRecognizer: StreamingSpeechRecognizer {
         return output
     }
 
-    public func finish() async throws -> RecognizerOutput {
+    /// Decodes the buffered audio up to `cutoff` and keeps the tokens
+    /// timestamped at or before it.
+    ///
+    /// FluidAudio's own `finish()` can't do this: it clears the token
+    /// timestamps before it returns, and it decodes only one chunk's output
+    /// span (`shiftSamples`) of the padded audio, dropping the rest when more
+    /// than that is buffered. Instead the recognizer pads the buffer with
+    /// silence (`injectSilence`) one chunk at a time and runs it
+    /// (`processBufferedAudio`) until the audio it needs is decoded, then
+    /// rebuilds the text from the kept tokens' raw pieces the way
+    /// FluidAudio's tokenizer does. The manager keeps those tokens until
+    /// `reset()`, which the transcriber calls after every commit.
+    public func finish(keepingTokensThrough cutoff: Int64?) async throws -> RecognizerOutput {
         var output = RecognizerOutput()
         let started = clock.uptime
-        let text: String
-        if buffered > 0 {
-            // FluidAudio pads the rest to a whole chunk and decodes it.
-            text = try await signposter.withInterval(.asrChunk) { try await manager.finish() }
-            output.chunks = 1
-            decodedSamples += Int64(buffered)
-        } else {
-            text = try await manager.finish()
+
+        // The buffered audio after `decodedSamples` hasn't been decoded yet
+        // (it was the window's lookahead). Decode what the transcript needs.
+        let undecoded = Int64(buffered)
+        let needed = cutoff.map { min(max($0 - decodedSamples, 0), undecoded) } ?? undecoded
+        let shift = Int64(chunkSize.shiftSamples)
+        let chunks = Int((needed + shift - 1) / shift)
+        for _ in 0..<chunks {
+            // Silence up to a whole window, so the manager runs one chunk.
+            let padding = chunkSize.windowSamples - buffered
+            // `injectSilence` truncates `seconds × 16 000`; the half sample
+            // keeps a rounding error from dropping one.
+            await manager.injectSilence((Double(padding) + 0.5) / Double(AudioFrame.captureSampleRate))
+            try await signposter.withInterval(.asrChunk) { try await manager.processBufferedAudio() }
+            buffered = chunkSize.windowSamples - chunkSize.shiftSamples
         }
         callbacks.clear()
+        output.chunks = chunks
         output.modelTime = clock.uptime - started
-        buffered = 0
-        if text != transcript {
-            // `finish()` clears FluidAudio's token timestamps along with the
-            // tokens, so the new words can only be placed at the end of the
-            // decoded audio.
-            output.hasNewText = true
-            lastTokenEnd = decodedSamples
-        }
-        transcript = text
-        output.transcript = text
+        decodedSamples += min(Int64(chunks) * shift, undecoded)
+
+        let tokens = await keptTokens(through: cutoff)
+        output.hasNewText = tokens.text != transcript
+        lastTokenEnd = tokens.lastTimestampMs.map(samples(atMilliseconds:))
+        transcript = tokens.text
+        output.transcript = tokens.text
         output.decodedSamples = decodedSamples
         output.lastTokenEnd = lastTokenEnd
         return output
@@ -222,9 +240,53 @@ public actor ParakeetEouRecognizer: StreamingSpeechRecognizer {
 
     /// The end of the newest token, in samples since the last reset.
     private func tokenEnd() async -> Int64? {
-        guard let lastMs = await manager.getTokenTimestampsMs().last else { return nil }
-        let rate = Int64(AudioFrame.captureSampleRate)
-        return Int64(lastMs) * rate / 1_000 + Int64(chunkSize.frameSamples)
+        await manager.getTokenTimestampsMs().last.map(samples(atMilliseconds:))
+    }
+
+    /// The end of a token timestamped `milliseconds` after the last reset, in
+    /// samples (a timestamp is the start of its encoder frame).
+    private func samples(atMilliseconds milliseconds: Int) -> Int64 {
+        Int64(milliseconds) * Int64(AudioFrame.captureSampleRate) / 1_000 + Int64(chunkSize.frameSamples)
+    }
+
+    /// The decoded tokens timestamped at or before `cutoff` (samples since
+    /// the last reset), as text.
+    private func keptTokens(through cutoff: Int64?) async -> (text: String, lastTimestampMs: Int?) {
+        let timestamps = await manager.getTokenTimestampsMs()
+        let pieces = await manager.getRawTokenStrings()
+        guard pieces.count == timestamps.count else {
+            // Not expected: FluidAudio appends both for every decoded token.
+            // Keep everything rather than guess which tokens to drop.
+            Log.asr.error(
+                """
+                Parakeet token timestamps don't line up with the tokens \
+                (\(timestamps.count, privacy: .public) vs \(pieces.count, privacy: .public)): no cutoff
+                """
+            )
+            return (await manager.getPartialTranscript(), timestamps.last)
+        }
+        let cutoffMs = cutoff.map { $0 * 1_000 / Int64(AudioFrame.captureSampleRate) }
+        return Self.transcript(pieces: pieces, timestampsMs: timestamps, throughMilliseconds: cutoffMs)
+    }
+
+    /// The text of the tokens timestamped at or before `cutoff` (all of them
+    /// when it is `nil`), joined the way FluidAudio's `Tokenizer.decode`
+    /// does: the SentencePiece pieces concatenated, the word-boundary marker
+    /// U+2581 turned into a space, trimmed. FluidAudio records an id missing
+    /// from the vocabulary as `<id:N>`, which `decode` skips.
+    static func transcript(
+        pieces: [String], timestampsMs: [Int], throughMilliseconds cutoff: Int64?
+    ) -> (text: String, lastTimestampMs: Int?) {
+        var text = ""
+        var last: Int?
+        for (piece, timestamp) in zip(pieces, timestampsMs) {
+            if let cutoff, Int64(timestamp) > cutoff { break }
+            last = timestamp
+            guard !(piece.hasPrefix("<id:") && piece.hasSuffix(">")) else { continue }
+            text += piece
+        }
+        let decoded = text.replacingOccurrences(of: "\u{2581}", with: " ").trimmingCharacters(in: .whitespaces)
+        return (decoded, last)
     }
 
     /// The samples as a 16 kHz mono `AVAudioPCMBuffer`. Built inside an
