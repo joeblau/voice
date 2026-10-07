@@ -1,7 +1,8 @@
 # Configuration and secrets
 
 Blau has no backend. The user's own xAI API key lives in the Keychain and the
-app mints short-lived realtime tokens on device (issue #33). So **no API key is
+app mints short-lived realtime tokens on device (issue #33,
+[xai-auth.md](xai-auth.md)). So **no API key is
 ever committed to git or shipped in a release binary**. Build-time
 configuration only carries non-secret values, plus an optional developer key
 that is honoured in Debug builds alone.
@@ -52,8 +53,9 @@ Info.plist keys.
   launches.
 - `developmentAPIKey` is `nil` unless the binary was compiled with `DEBUG`
   **and** a non-empty key was configured. Callers treat `nil` as "ask the
-  user". The DEBUG-only Keychain pre-fill on first launch belongs to
-  `APIKeyStore` (#33) and reads this property.
+  user". The DEBUG-only Keychain pre-fill on first launch
+  (`DevelopmentKeySeeder`, called from `Blau/XAI/XAIServices.swift`) reads
+  this property; see [xai-auth.md](xai-auth.md#debug-pre-fill).
 - `description`, `debugDescription` and `dump()` redact the key.
 
 `AppConfig` is plain Foundation with no app dependencies, so it moves into
