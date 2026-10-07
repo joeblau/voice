@@ -1,5 +1,6 @@
 # CI for Blau: lint, BlauKit package tests and app tests on every pull request
-# and every push to main, plus a nightly performance run and ASR evaluation.
+# and every push to main, plus a nightly performance run, ASR evaluation and
+# memory evaluation.
 # See docs/ci.md.
 #
 # Secrets: none. Tests are hermetic and never call xAI, and this workflow
@@ -12,6 +13,8 @@
 #   BLAU_CI_RUNNER         runner label (default xcode-27)
 #   BLAU_CI_XCODE_VERSION  pin an Xcode, e.g. "27.2" (default: newest release on the image)
 #   BLAU_CI_SIMULATOR      simulator model for app and perf tests (default "iPhone 17")
+#   BLAU_CI_MEMORY_EVAL_READER          memory-eval answer reader (default auto)
+#   BLAU_CI_MEMORY_EVAL_REQUIRE_ANSWERS 1 fails memory-eval when no reader can run
 
 name: CI
 
@@ -31,6 +34,10 @@ on:
         default: false
       asr_eval:
         description: Also run the ASR evaluation (downloads the models)
+        type: boolean
+        default: false
+      memory_eval:
+        description: Also run the memory retrieval and answer evaluation
         type: boolean
         default: false
 
@@ -305,5 +312,61 @@ jobs:
         with:
           name: asr-eval-report-${{ github.run_attempt }}
           path: .build/results/asr-eval/
+          if-no-files-found: warn
+          retention-days: 90
+
+  # Nightly (and on demand) memory evaluation (#70): Recall@k and MRR of hybrid
+  # retrieval on the memory eval set (text only, recorded vectors, no model
+  # download), failing on the regression gate in docs/memory-eval/thresholds.json.
+  # Answer accuracy (an LLM reader and judge) runs where Apple's on-device
+  # model is available. Hosted macOS VMs usually lack it, so there the report
+  # says the answers were skipped; set BLAU_CI_MEMORY_EVAL_REQUIRE_ANSWERS=1
+  # for a runner with Apple Intelligence to make that a failure. See
+  # docs/memory-eval.md.
+  memory-eval:
+    name: memory-eval
+    if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.memory_eval) }}
+    runs-on: ${{ vars.BLAU_CI_RUNNER || 'xcode-27' }}
+    timeout-minutes: 45
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode
+        id: xcode
+        run: scripts/ci/select-xcode.sh
+
+      # The same cache as package-tests: the evaluation runs in the package's
+      # debug build.
+      - name: Cache SwiftPM build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: Packages/BlauKit/.build
+          key: kit-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/BlauKit/Package.swift', 'Packages/BlauKit/Package.resolved') }}
+          restore-keys: |
+            kit-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.build }}-
+
+      - name: Evaluate
+        env:
+          MEMORY_EVAL_OUTPUT: .build/results/memory-eval
+          MEMORY_EVAL_READER: ${{ vars.BLAU_CI_MEMORY_EVAL_READER || 'auto' }}
+          MEMORY_EVAL_REQUIRE_ANSWERS: ${{ vars.BLAU_CI_MEMORY_EVAL_REQUIRE_ANSWERS || '0' }}
+        run: make eval-memory
+
+      - name: Job summary
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -f .build/results/memory-eval/report.md ]; then
+            cat .build/results/memory-eval/report.md >>"$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: memory-eval-report-${{ github.run_attempt }}
+          path: .build/results/memory-eval/
           if-no-files-found: warn
           retention-days: 90

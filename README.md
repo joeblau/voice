@@ -44,6 +44,7 @@ configured. See [docs/configuration.md](docs/configuration.md).
 | `make bench-kit` | Run the model benchmarks on this Mac (reference numbers, downloads models) |
 | `make eval-noise` | Compare noise suppressors (DeepFilterNet3, Apple voice isolation) on the ASR fixtures: WER and cost (downloads models, [docs](docs/noise-suppression.md)) |
 | `make eval-asr`  | Evaluate the ASR engines on the fixtures: a WER, latency and RTF table per engine (downloads models, [docs](docs/asr-eval.md)) |
+| `make eval-memory` | Evaluate memory retrieval (Recall@k, MRR) and LLM-judged answers on the memory eval set, with the regression gate ([docs](docs/memory-eval.md)) |
 | `make icon-previews` | Render the app icon in every appearance into `.build/AppIcon` ([docs](docs/branding.md)) |
 | `make secrets`   | Create `Config/Secrets.xcconfig` from the example                |
 | `make test-scripts` | Test the secrets, CI and Instruments template scripts         |
@@ -68,8 +69,8 @@ Formatting, branch naming, commit and pull request conventions are in
 ## Continuous integration
 
 GitHub Actions runs `lint`, `package-tests` and `app-tests` on every pull
-request and push to `main`, and the performance suite and the ASR evaluation
-nightly. Each job calls
+request and push to `main`, and the performance suite, the ASR evaluation and
+the memory evaluation nightly. Each job calls
 the same `make` targets as above. See [docs/ci.md](docs/ci.md).
 
 ## Project layout
@@ -87,11 +88,11 @@ the same `make` targets as above. See [docs/ci.md](docs/ci.md).
 | `BlauBenchmarks/` | On-device model benchmarks (XCTest, not hosted in the app; [docs](docs/benchmarks.md)) |
 | `TestPlans/`     | `Blau.xctestplan` (unit + UI, coverage), `BlauPerf.xctestplan` and `BlauBenchmarks.xctestplan` |
 | `Config/`        | xcconfig files; `Secrets.xcconfig` is gitignored ([docs](docs/configuration.md)) |
-| `scripts/`       | `swift-format.sh` (behind `make format` and `make lint`), git hooks, embedded-secrets check, `Secrets.xcconfig` writer, `verify-signposts.sh`, `verify-hud.sh` and the Instruments template scripts (see [`docs/performance.md`](docs/performance.md)), `update-model-manifest.py` (see [`docs/models.md`](docs/models.md)), `make-vad-fixtures.py` (see [`docs/vad.md`](docs/vad.md)), `make-asr-fixtures.py` and `eval-asr.sh` (the ASR evaluation, see [`docs/asr-eval.md`](docs/asr-eval.md)), `fetch-deepfilternet3.sh` and `eval-noise-suppression.sh` (the noise suppression spike, see [`docs/noise-suppression.md`](docs/noise-suppression.md)), `voice-id-eval-librispeech.py` (the voice ID calibration set, see [`docs/voice-id-eval.md`](docs/voice-id-eval.md)), `embeddings/` (the text-embedding retrieval eval and Core ML conversion, see [`docs/benchmarks.md`](docs/benchmarks.md#text-embedding-model-59); the int8 token table, tokenizer parity and tokenizer fixtures, see [`docs/embeddings.md`](docs/embeddings.md)), and the CI helpers in `scripts/ci/` ([`docs/ci.md`](docs/ci.md)) |
+| `scripts/`       | `swift-format.sh` (behind `make format` and `make lint`), git hooks, embedded-secrets check, `Secrets.xcconfig` writer, `verify-signposts.sh`, `verify-hud.sh` and the Instruments template scripts (see [`docs/performance.md`](docs/performance.md)), `update-model-manifest.py` (see [`docs/models.md`](docs/models.md)), `make-vad-fixtures.py` (see [`docs/vad.md`](docs/vad.md)), `make-asr-fixtures.py` and `eval-asr.sh` (the ASR evaluation, see [`docs/asr-eval.md`](docs/asr-eval.md)), `eval-memory.sh` (the memory evaluation, see [`docs/memory-eval.md`](docs/memory-eval.md)), `fetch-deepfilternet3.sh` and `eval-noise-suppression.sh` (the noise suppression spike, see [`docs/noise-suppression.md`](docs/noise-suppression.md)), `voice-id-eval-librispeech.py` (the voice ID calibration set, see [`docs/voice-id-eval.md`](docs/voice-id-eval.md)), `embeddings/` (the text-embedding retrieval eval and Core ML conversion, see [`docs/benchmarks.md`](docs/benchmarks.md#text-embedding-model-59); the int8 token table, tokenizer parity and tokenizer fixtures, see [`docs/embeddings.md`](docs/embeddings.md); the memory eval vectors, see [`docs/memory-eval.md`](docs/memory-eval.md#recording-vectors)), and the CI helpers in `scripts/ci/` ([`docs/ci.md`](docs/ci.md)) |
 | `Datasets/voice-id/` | The owner's voice ID evaluation recordings, stored with consent in LFS (see its README and [`docs/voice-id-eval.md`](docs/voice-id-eval.md)) |
 | `Datasets/asr/` | The owner's ASR evaluation recordings, stored with consent in LFS (see its README and [`docs/asr-eval.md`](docs/asr-eval.md)) |
 | `Tools/Instruments/` | `Blau.tracetemplate`, the Instruments template for profiling Blau, and the instrument list and options it is generated from |
-| `docs/`          | Developer documentation, including [on-device models](docs/models.md), [text embeddings](docs/embeddings.md), the [memory search index](docs/memory-index.md), its [incremental indexer](docs/memory-indexer.md) and [hybrid memory search](docs/memory-search.md) |
+| `docs/`          | Developer documentation, including [on-device models](docs/models.md), [text embeddings](docs/embeddings.md), the [memory search index](docs/memory-index.md), its [incremental indexer](docs/memory-indexer.md), [hybrid memory search](docs/memory-search.md) and the [memory evaluation](docs/memory-eval.md) |
 | `.github/`       | CI workflow ([docs](docs/ci.md)), pull request and issue templates |
 
 ### Targets and schemes

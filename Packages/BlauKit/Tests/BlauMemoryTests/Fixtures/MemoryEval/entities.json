@@ -1,0 +1,28 @@
+{
+  "entities": [
+    { "id": "alex", "name": "Alex Moreno", "aliases": ["Alex"], "type": "person" },
+    { "id": "biscuit", "name": "Biscuit", "type": "other" },
+    { "id": "mei", "name": "Mei Hale", "aliases": ["Mei"], "type": "person" },
+    { "id": "wen", "name": "Wen Hale", "aliases": ["Dad"], "type": "person" },
+    { "id": "linda", "name": "Linda Hale", "aliases": ["Mom"], "type": "person" },
+    { "id": "sam", "name": "Sam Okoye", "aliases": ["Sam"], "type": "person" },
+    { "id": "priya", "name": "Priya Raman", "aliases": ["Priya"], "type": "person" },
+    { "id": "tomas", "name": "Tomás Ferreira", "aliases": ["Tomás"], "type": "person" },
+    { "id": "ines", "name": "Ines Kowal", "aliases": ["Ines"], "type": "person" },
+    { "id": "dana", "name": "Dana Whitfield", "aliases": ["Dana"], "type": "person" },
+    { "id": "marcus", "name": "Marcus Lee", "aliases": ["Marcus"], "type": "person" },
+    { "id": "keisha", "name": "Keisha", "type": "person" },
+    { "id": "rosa", "name": "Rosa", "type": "person" },
+    { "id": "lucia", "name": "Lucía", "type": "person" },
+    { "id": "sofia", "name": "Sofia Lindqvist", "aliases": ["Sofia"], "type": "person" },
+    { "id": "okafor", "name": "Dr. Okafor", "aliases": ["Okafor"], "type": "person" },
+    { "id": "larderly", "name": "Larderly", "type": "organization" },
+    { "id": "northgate", "name": "Northgate Ventures", "aliases": ["Northgate"], "type": "organization" },
+    { "id": "bayline", "name": "Bayline Capital", "aliases": ["Bayline"], "type": "organization" },
+    { "id": "little-fern", "name": "Little Fern", "type": "organization" },
+    { "id": "casa-verde", "name": "Casa Verde", "type": "organization" },
+    { "id": "saffron-lane", "name": "Saffron Lane", "type": "organization" },
+    { "id": "hollow-pine", "name": "Hollow Pine Diner", "aliases": ["Hollow Pine"], "type": "organization" },
+    { "id": "brasa", "name": "Brasa", "type": "organization" }
+  ]
+}

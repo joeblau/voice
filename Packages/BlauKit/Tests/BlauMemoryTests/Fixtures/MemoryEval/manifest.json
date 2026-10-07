@@ -1,0 +1,10 @@
+{
+  "name": "blau-memory-eval",
+  "version": 1,
+  "description": "A LongMemEval-style personal memory set (#70): about five months of a fictional user's conversations with Blau, knowledge-base notes, company documents, a YC practice collection, entities and validity-dated facts, with questions of five types (single-fact recall, temporal reasoning, knowledge updates, multi-hop through entities, abstention). The corpus extends #59's retrieval eval set (the same persona) with later sessions that update or contradict earlier ones.",
+  "consent": "Synthetic. Written for Blau's evaluation; the user (Jordan Hale), the people and the companies are fictional.",
+  "userName": "Jordan",
+  "now": "2026-10-07T12:00:00Z",
+  "timeZone": "UTC",
+  "firstWeekday": 2
+}

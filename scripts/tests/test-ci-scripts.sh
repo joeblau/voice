@@ -243,7 +243,7 @@ else
     echo "$unpinned" | sed 's/^/       /'
 fi
 
-for job in lint package-tests app-tests perf asr-eval; do
+for job in lint package-tests app-tests perf asr-eval memory-eval; do
     if grep -Eq "^  $job:" "$workflow"; then
         pass "ci.yml defines the $job job"
     else

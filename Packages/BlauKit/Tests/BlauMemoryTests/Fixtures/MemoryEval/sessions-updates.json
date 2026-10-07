@@ -1,0 +1,139 @@
+{
+  "sessions": [
+    {
+      "id": "s-2026-09-14-tempo-run",
+      "startedAt": "2026-09-14T07:45:00Z",
+      "topic": "Half marathon training",
+      "turns": [
+        {
+          "id": "n-001",
+          "user": "Tempo run this morning went great, I held 8:45 per mile for four miles.",
+          "assistant": "That's faster than your 9:09 goal pace, a good sign. Keep this weekend's long run easy so you recover."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-15-alex-new-job",
+      "startedAt": "2026-09-15T19:00:00Z",
+      "topic": "Alex's new job",
+      "turns": [
+        {
+          "id": "n-003",
+          "user": "Alex started the new job today, senior park designer with the City of Oakland's parks department.",
+          "assistant": "Congratulations to Alex! Designing public parks is a big step up from private gardens. Ask how the first week goes."
+        },
+        {
+          "id": "n-004",
+          "user": "The office is downtown at Frank Ogawa Plaza, so Alex is taking BART now instead of biking to Emeryville.",
+          "assistant": "Then living near a BART station matters for both of you, which makes Rockridge an even better fit."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-21-apartment",
+      "startedAt": "2026-09-21T20:00:00Z",
+      "topic": "Apartment lease",
+      "turns": [
+        {
+          "id": "n-002",
+          "user": "We're leaning toward the Lawton place, even without laundry.",
+          "assistant": "If you go for it, ask whether they'd allow a stacked washer-dryer. Some landlords agree if you pay for the install."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-22-dad-birthday",
+      "startedAt": "2026-09-22T19:15:00Z",
+      "topic": "Dad's 70th birthday",
+      "turns": [
+        {
+          "id": "n-013",
+          "user": "Mom says Dad's favorite restaurant in Sacramento is a Cantonese place called Golden Lotus. Let's book the birthday dinner there.",
+          "assistant": "Book a private room for December 12th now. Milestone dinners close to the holidays fill up early."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-29-lunch-with-sam",
+      "startedAt": "2026-09-29T13:30:00Z",
+      "topic": "Lunch with Sam",
+      "turns": [
+        {
+          "id": "n-012",
+          "user": "Had lunch with Sam at his restaurant, Brasa on Valencia Street. He wants to try Larderly in his kitchen.",
+          "assistant": "A chef who is also your best friend will give you honest feedback. Start him on Basic and see whether the price alerts stick."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-30-spanish-lessons",
+      "startedAt": "2026-09-30T21:00:00Z",
+      "topic": "Learning Spanish",
+      "turns": [
+        {
+          "id": "n-005",
+          "user": "Lucía is moving our lessons to Thursdays at 6 pm starting this week. She took a teaching job on Tuesday nights.",
+          "assistant": "Got it, Thursdays at 6 pm with Lucía from now on. It still leaves your Thursday morning run free."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-10-02-biscuit-vet",
+      "startedAt": "2026-10-02T17:00:00Z",
+      "topic": "Biscuit",
+      "turns": [
+        {
+          "id": "n-006",
+          "user": "Biscuit got his vaccines today at Dr. Okafor's. He's up to 35 pounds.",
+          "assistant": "Three pounds since spring. Cut the treats a little and add ten minutes to the evening walk; at his size a few pounds matter."
+        },
+        {
+          "id": "n-007",
+          "user": "Dr. Okafor also said his ears look completely clear now.",
+          "assistant": "Good, the drops worked. Keep drying his ears after baths, since moisture is what brings the yeast back."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-10-05-hiring",
+      "startedAt": "2026-10-05T10:00:00Z",
+      "topic": "Hiring customer success",
+      "turns": [
+        {
+          "id": "n-008",
+          "user": "Keisha accepted! $104,000 base and 0.4% equity, and she starts November 2nd.",
+          "assistant": "That's great news, and right in the range we talked about. Plan her first week around shadowing onboarding calls with the pilot restaurants."
+        },
+        {
+          "id": "n-009",
+          "user": "Dana convinced me we can afford her before the seed. The second iOS engineer waits until after the raise.",
+          "assistant": "With 13 months of runway that still leaves you over ten months after her salary. Update the hiring plan so Priya knows the iOS hire moved."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-10-05-yc-application",
+      "startedAt": "2026-10-05T21:00:00Z",
+      "topic": "Seed round",
+      "turns": [
+        {
+          "id": "n-010",
+          "user": "Priya and I decided to apply to YC for the winter batch. We'll submit by October 10th and hold off on the seed round until after demo day.",
+          "assistant": "That follows Dana's advice. Reuse the YC answers you've been practicing; the growth and churn answers are your strongest."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-10-06-easy-run",
+      "startedAt": "2026-10-06T07:30:00Z",
+      "topic": "Half marathon training",
+      "turns": [
+        {
+          "id": "n-011",
+          "user": "Easy four miles this morning and the knee felt fine. The race is about a month away.",
+          "assistant": "Right on track. Keep this weekend's long run at ten miles, then start the taper."
+        }
+      ]
+    }
+  ]
+}
