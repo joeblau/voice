@@ -1,0 +1,874 @@
+{
+  "sessions": [
+    {
+      "id": "s-2026-07-06-half-marathon-training",
+      "startedAt": "2026-07-06T07:40:00Z",
+      "topic": "Half marathon training",
+      "turns": [
+        {
+          "id": "cv-009",
+          "user": "I signed up for the Oakland half marathon on November 8th. My goal is under two hours.",
+          "assistant": "That's about 9:09 per mile. With 18 weeks to go, a plan with three easy runs, one tempo run and one long run a week will get you there."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-07-08-anniversary",
+      "startedAt": "2026-07-08T19:30:00Z",
+      "topic": "Anniversary",
+      "turns": [
+        {
+          "id": "cv-075",
+          "user": "I want to take Alex somewhere nice for our fifth anniversary on August 9th.",
+          "assistant": "Since you both love food, a tasting menu works. Book three to four weeks ahead and tell them about your shellfish allergy."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-07-10-books",
+      "startedAt": "2026-07-10T19:30:00Z",
+      "topic": "Books",
+      "turns": [
+        {
+          "id": "cv-036",
+          "user": "I just finished The Mom Test.",
+          "assistant": "Its main idea fits your work: ask restaurant owners about what they did last week, not whether they would use a feature."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-07-12-biscuit",
+      "startedAt": "2026-07-12T19:30:00Z",
+      "topic": "Biscuit",
+      "turns": [
+        {
+          "id": "cv-063",
+          "user": "Biscuit has been scratching his ears a lot.",
+          "assistant": "Frequent ear scratching in dogs is often a yeast or ear infection, especially in floppy-eared breeds. A vet visit is worth it before it gets painful."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-07-14-learning-spanish",
+      "startedAt": "2026-07-14T19:30:00Z",
+      "topic": "Learning Spanish",
+      "turns": [
+        {
+          "id": "cv-022",
+          "user": "I want to get to conversational Spanish before we visit Alex's family in Mexico City next summer.",
+          "assistant": "Daily practice beats long sessions. Fifteen minutes of app practice plus one hour a week with a tutor is a solid plan."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-07-15-biscuit",
+      "startedAt": "2026-07-15T19:30:00Z",
+      "topic": "Biscuit",
+      "turns": [
+        {
+          "id": "cv-064",
+          "user": "The vet said Biscuit has a yeast ear infection and gave us drops twice a day for ten days.",
+          "assistant": "Set two daily reminders. Finish the full course even if he seems better after a few days."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-07-16-balcony-garden",
+      "startedAt": "2026-07-16T19:30:00Z",
+      "topic": "Balcony garden",
+      "turns": [
+        {
+          "id": "cv-060",
+          "user": "The tomatoes on the balcony have yellow leaves at the bottom.",
+          "assistant": "Lower leaves yellowing mid-summer is often uneven watering or a nitrogen shortage. Water deeply every other morning and add a little compost."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-07-18-meal-prep",
+      "startedAt": "2026-07-18T12:30:00Z",
+      "topic": "Meal prep",
+      "turns": [
+        {
+          "id": "cv-045",
+          "user": "I want to meal prep lunches on Sundays so I stop eating chips at my desk.",
+          "assistant": "Pick one grain, one protein and two roasted vegetables each week and mix the sauces. Four lunches take about 90 minutes."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-07-20-half-marathon-training",
+      "startedAt": "2026-07-20T07:40:00Z",
+      "topic": "Half marathon training",
+      "turns": [
+        {
+          "id": "cv-010",
+          "user": "The outside of my right knee hurts after about six miles.",
+          "assistant": "Pain on the outside of the knee that starts at a predictable distance often points to the IT band. Cut the long run back a mile, add hip strengthening, and see a physical therapist if it lasts more than two weeks."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-07-22-sleep",
+      "startedAt": "2026-07-22T07:10:00Z",
+      "topic": "Sleep",
+      "turns": [
+        {
+          "id": "cv-049",
+          "user": "I keep waking up at 4 am thinking about work.",
+          "assistant": "Try writing tomorrow's top three tasks before bed so your brain can let go of them, and keep the phone out of the bedroom."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-07-25-car",
+      "startedAt": "2026-07-25T08:30:00Z",
+      "topic": "Car",
+      "turns": [
+        {
+          "id": "cv-057",
+          "user": "The car is making a grinding noise when I brake.",
+          "assistant": "That usually means the brake pads are worn down to the metal. Get it in this week; driving on it damages the rotors."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-07-28-learning-spanish",
+      "startedAt": "2026-07-28T19:30:00Z",
+      "topic": "Learning Spanish",
+      "turns": [
+        {
+          "id": "cv-023",
+          "user": "I found a tutor, Lucía, we meet Tuesdays at 7 pm on video.",
+          "assistant": "Great. Ask her to spend most of the hour on conversation; you can do grammar drills on your own."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-07-29-car",
+      "startedAt": "2026-07-29T08:30:00Z",
+      "topic": "Car",
+      "turns": [
+        {
+          "id": "cv-058",
+          "user": "The mechanic replaced the front pads and rotors, it was $640.",
+          "assistant": "That's in the normal range for both. Ask them to check the rear pads at the next oil change."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-07-31-books",
+      "startedAt": "2026-07-31T19:30:00Z",
+      "topic": "Books",
+      "turns": [
+        {
+          "id": "cv-037",
+          "user": "Recommend a novel, something I can read before bed that isn't about startups.",
+          "assistant": "Try Klara and the Sun by Kazuo Ishiguro. It's quiet and short chapters make it easy to stop."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-01-meal-prep",
+      "startedAt": "2026-08-01T12:30:00Z",
+      "topic": "Meal prep",
+      "turns": [
+        {
+          "id": "cv-046",
+          "user": "This week's prep was farro, chicken thighs, roasted broccoli and sweet potato with a tahini lemon sauce.",
+          "assistant": "That's a good balance. Farro holds up for four days in the fridge better than rice does."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-02-half-marathon-training",
+      "startedAt": "2026-08-02T07:40:00Z",
+      "topic": "Half marathon training",
+      "turns": [
+        {
+          "id": "cv-011",
+          "user": "The physical therapist said it's IT band syndrome and gave me clamshells and side planks.",
+          "assistant": "Good news that it's not structural. Do the exercises daily, and keep long runs on flat routes for now; downhills make it worse."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-03-japan-trip",
+      "startedAt": "2026-08-03T19:30:00Z",
+      "topic": "Japan trip",
+      "turns": [
+        {
+          "id": "cv-001",
+          "user": "We finally booked the flights to Japan. We land in Tokyo on April 2nd and fly home from Osaka on the 16th.",
+          "assistant": "Two weeks is a good length. Spring is cherry blossom season, so book hotels soon; Kyoto fills up first."
+        },
+        {
+          "id": "cv-002",
+          "user": "Alex wants three nights in Kyoto and I want to see Naoshima for the art museums.",
+          "assistant": "Naoshima is a day trip from Okayama, so you could stop there on the way from Kyoto to Osaka without adding a hotel night."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-05-apartment-lease",
+      "startedAt": "2026-08-05T19:30:00Z",
+      "topic": "Apartment lease",
+      "turns": [
+        {
+          "id": "cv-027",
+          "user": "Our lease ends January 31st and the landlord is raising rent to $3,650.",
+          "assistant": "That's a 12% increase. You have until December 1st to give notice, so you have about four months to compare."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-07-product-work",
+      "startedAt": "2026-08-07T16:00:00Z",
+      "topic": "Product work",
+      "turns": [
+        {
+          "id": "cv-052",
+          "user": "Clover's partner program wants a demo of our integration before they list us.",
+          "assistant": "Build the demo with one pilot restaurant's real menu; their reviewers care most that items and modifiers sync correctly."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-08-dad-s-70th-birthday",
+      "startedAt": "2026-08-08T19:30:00Z",
+      "topic": "Dad's 70th birthday",
+      "turns": [
+        {
+          "id": "cv-032",
+          "user": "Dad turns 70 on December 12th. I want to do something special.",
+          "assistant": "A milestone like that is often about people more than things. Could you gather the family somewhere meaningful to him?"
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-09-roadmap-and-customers",
+      "startedAt": "2026-08-09T17:30:00Z",
+      "topic": "Roadmap and customers",
+      "turns": [
+        {
+          "id": "cv-070",
+          "user": "Priya and I argued about whether to build Android or the supplier price comparison next.",
+          "assistant": "Write down what each would do to the metric you care about most this quarter, new activated restaurants, and decide on that."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-10-anniversary",
+      "startedAt": "2026-08-10T19:30:00Z",
+      "topic": "Anniversary",
+      "turns": [
+        {
+          "id": "cv-076",
+          "user": "The anniversary dinner at Ferment was perfect, they made a special version of the scallop course with mushrooms for me.",
+          "assistant": "That's a lovely way to celebrate five years. Worth remembering for next year."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-11-hiring-customer-success",
+      "startedAt": "2026-08-11T15:00:00Z",
+      "topic": "Hiring customer success",
+      "turns": [
+        {
+          "id": "cv-017",
+          "user": "I want to hire a customer success lead but we can't afford one until the seed closes.",
+          "assistant": "You could write the job description now and start talking to candidates, so you can make an offer the week the money lands."
+        },
+        {
+          "id": "cv-018",
+          "user": "The ideal person has worked a restaurant floor.",
+          "assistant": "Then look at former general managers who moved into hospitality software sales. They know the pain and they've learned to use a CRM."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-12-sleep",
+      "startedAt": "2026-08-12T07:10:00Z",
+      "topic": "Sleep",
+      "turns": [
+        {
+          "id": "cv-050",
+          "user": "The to-do list before bed helped, I've slept through four nights in a row.",
+          "assistant": "Great. Keep the same wake-up time on weekends too; it's what anchors your sleep the most."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-14-seed-round",
+      "startedAt": "2026-08-14T18:00:00Z",
+      "topic": "Seed round",
+      "turns": [
+        {
+          "id": "cv-040",
+          "user": "Marcus from Northgate said our seed deck needs a clearer story on why restaurants won't churn.",
+          "assistant": "Lead with the cohort chart: restaurants open more than two years have had zero product churn, and net revenue retention is 128%."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-15-taxes",
+      "startedAt": "2026-08-15T11:00:00Z",
+      "topic": "Taxes",
+      "turns": [
+        {
+          "id": "cv-067",
+          "user": "Our accountant wants the estimated taxes for Q3 paid by September 15th.",
+          "assistant": "I'll note it. Your Q2 payment was $4,200, so expect something similar unless your income changed."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-16-roadmap-and-customers",
+      "startedAt": "2026-08-16T17:30:00Z",
+      "topic": "Roadmap and customers",
+      "turns": [
+        {
+          "id": "cv-071",
+          "user": "We decided: supplier price comparison first, Android after the seed. Priya agreed once we saw that 11 customers asked for price comparison and only 4 for Android.",
+          "assistant": "That's a clean, data-backed call."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-17-japan-trip",
+      "startedAt": "2026-08-17T19:30:00Z",
+      "topic": "Japan trip",
+      "turns": [
+        {
+          "id": "cv-003",
+          "user": "Is the JR Pass still worth it for our route?",
+          "assistant": "After the 2023 price rise, a 7-day pass costs more than Tokyo to Kyoto and Kyoto to Osaka bought separately. For your route, individual shinkansen tickets are cheaper."
+        },
+        {
+          "id": "cv-004",
+          "user": "Remember that ramen place my friend recommended in Osaka, the one with the yuzu shio broth?",
+          "assistant": "You said it's called Menya Kotori, near Namba station, and that it opens at 11 and sells out by 2."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-19-apartment-lease",
+      "startedAt": "2026-08-19T19:30:00Z",
+      "topic": "Apartment lease",
+      "turns": [
+        {
+          "id": "cv-028",
+          "user": "We want to look in Rockridge so I can walk to BART and Alex can bike to work.",
+          "assistant": "Rockridge two-bedrooms list around $3,800 to $4,300. A one-bedroom plus an office nook might keep you under $3,600."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-21-product-work",
+      "startedAt": "2026-08-21T16:00:00Z",
+      "topic": "Product work",
+      "turns": [
+        {
+          "id": "cv-053",
+          "user": "Tomás found that Clover reports modifiers as separate line items, unlike Toast.",
+          "assistant": "Then map modifiers to recipe add-ons, so 'extra guac' adds the avocado cost to the parent dish instead of showing up as its own sale."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-22-dad-s-70th-birthday",
+      "startedAt": "2026-08-22T19:30:00Z",
+      "topic": "Dad's 70th birthday",
+      "turns": [
+        {
+          "id": "cv-033",
+          "user": "Dad always talks about the fishing trips he took in the Sierra as a kid.",
+          "assistant": "A weekend at a cabin near the lake he went to, with everyone there, could be the gift. Book soon if it's near a holiday weekend."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-24-half-marathon-training",
+      "startedAt": "2026-08-24T07:40:00Z",
+      "topic": "Half marathon training",
+      "turns": [
+        {
+          "id": "cv-012",
+          "user": "Ran ten miles today with no knee pain at all, average pace 9:31.",
+          "assistant": "That's a big step. Your long-run pace should be slower than race pace, so 9:31 is right where it should be."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-25-learning-spanish",
+      "startedAt": "2026-08-25T19:30:00Z",
+      "topic": "Learning Spanish",
+      "turns": [
+        {
+          "id": "cv-024",
+          "user": "I keep mixing up ser and estar.",
+          "assistant": "A simple rule: estar is for states and locations that can change, ser is for identity and lasting traits. Estoy cansado, but soy alto."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-26-balcony-garden",
+      "startedAt": "2026-08-26T19:30:00Z",
+      "topic": "Balcony garden",
+      "turns": [
+        {
+          "id": "cv-061",
+          "user": "We got almost four pounds of cherry tomatoes this week.",
+          "assistant": "Roast them with garlic and freeze them flat in bags; they make a great quick pasta sauce in winter."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-28-seed-round",
+      "startedAt": "2026-08-28T18:00:00Z",
+      "topic": "Seed round",
+      "turns": [
+        {
+          "id": "cv-041",
+          "user": "Should we raise the seed now or wait until we hit $25k MRR?",
+          "assistant": "At 22% monthly growth you'd reach $25k in about three months. Raising after that milestone usually means a better price, and you have 13 months of runway."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-29-books",
+      "startedAt": "2026-08-29T19:30:00Z",
+      "topic": "Books",
+      "turns": [
+        {
+          "id": "cv-038",
+          "user": "Klara and the Sun was beautiful, I cried at the end.",
+          "assistant": "If you liked its tone, The Remains of the Day by the same author is a good next one."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-08-30-meal-prep",
+      "startedAt": "2026-08-30T12:30:00Z",
+      "topic": "Meal prep",
+      "turns": [
+        {
+          "id": "cv-047",
+          "user": "Alex wants to try a vegetarian week.",
+          "assistant": "Swap the chicken for crispy chickpeas or marinated tofu; both keep well and the tahini sauce still works."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-01-japan-trip",
+      "startedAt": "2026-09-01T19:30:00Z",
+      "topic": "Japan trip",
+      "turns": [
+        {
+          "id": "cv-005",
+          "user": "I'm nervous about my shellfish allergy in Japan, so much of the food has dashi.",
+          "assistant": "Most dashi is kombu and bonito, which is fish, not shellfish, but some broths use shrimp or clams. Carry a printed allergy card in Japanese and show it every time you order."
+        },
+        {
+          "id": "cv-006",
+          "user": "We booked the ryokan in Kyoto, the one in Higashiyama with the private bath.",
+          "assistant": "Nice. Ryokan dinners are set menus, so send them your allergy in advance; most will adjust the kaiseki if they know a few days ahead."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-02-apartment-lease",
+      "startedAt": "2026-09-02T19:30:00Z",
+      "topic": "Apartment lease",
+      "turns": [
+        {
+          "id": "cv-029",
+          "user": "We saw a place on Lawton Avenue, two bedrooms, $3,900, but no in-unit laundry.",
+          "assistant": "Laundry matters more than people expect; budget about $60 a month and two hours a week for a laundromat if you take it."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-03-roadmap-and-customers",
+      "startedAt": "2026-09-03T17:30:00Z",
+      "topic": "Roadmap and customers",
+      "turns": [
+        {
+          "id": "cv-072",
+          "user": "Rosa from Little Fern called, she's opening a second location in Piedmont in March.",
+          "assistant": "That's great for her and for you; her second location doubles her account and makes her a strong reference for small groups."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-04-product-work",
+      "startedAt": "2026-09-04T16:00:00Z",
+      "topic": "Product work",
+      "turns": [
+        {
+          "id": "cv-054",
+          "user": "Should the weekly margin summary go out by text or email?",
+          "assistant": "Text. Your owners already respond to the price alert texts, and email gets buried under supplier newsletters."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-05-dad-s-70th-birthday",
+      "startedAt": "2026-09-05T19:30:00Z",
+      "topic": "Dad's 70th birthday",
+      "turns": [
+        {
+          "id": "cv-034",
+          "user": "Cabins near Lake Alpine close in winter because of snow.",
+          "assistant": "Then hold the cabin trip for June, and for his birthday give him a framed map of the lake with the trip dates and a note from everyone."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-07-half-marathon-training",
+      "startedAt": "2026-09-07T07:40:00Z",
+      "topic": "Half marathon training",
+      "turns": [
+        {
+          "id": "cv-013",
+          "user": "My running shoes have about 450 miles on them.",
+          "assistant": "Most shoes lose their cushioning between 300 and 500 miles. Buy the same model now and break them in on easy runs, so you don't race in new shoes."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-08-biscuit",
+      "startedAt": "2026-09-08T19:30:00Z",
+      "topic": "Biscuit",
+      "turns": [
+        {
+          "id": "cv-065",
+          "user": "Biscuit's annual vaccines are due next month.",
+          "assistant": "I'll remember that. Book it a few weeks out; Dr. Okafor's clinic usually has a two-week wait."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-09-hiring-customer-success",
+      "startedAt": "2026-09-09T15:00:00Z",
+      "topic": "Hiring customer success",
+      "turns": [
+        {
+          "id": "cv-019",
+          "user": "I talked to a candidate named Keisha who managed a brunch spot for eight years. She was great with the pilot owners.",
+          "assistant": "Ask her to run a mock onboarding call with Rosa from Little Fern; it's the closest thing to the real job."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-10-taxes",
+      "startedAt": "2026-09-10T11:00:00Z",
+      "topic": "Taxes",
+      "turns": [
+        {
+          "id": "cv-068",
+          "user": "I paid the Q3 estimated taxes, $4,350.",
+          "assistant": "Logged. The next estimated payment is due January 15th."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-11-seed-round",
+      "startedAt": "2026-09-11T18:00:00Z",
+      "topic": "Seed round",
+      "turns": [
+        {
+          "id": "cv-042",
+          "user": "Had a first call with a seed fund called Bayline Capital. They asked about gross margin and the cost of the invoice model.",
+          "assistant": "Your 81% gross margin is solid. Mention the invoice model costs about 9 cents per invoice and drops as you fine-tune a smaller model."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-12-car",
+      "startedAt": "2026-09-12T08:30:00Z",
+      "topic": "Car",
+      "turns": [
+        {
+          "id": "cv-059",
+          "user": "The car registration is due on October 20th and it needs a smog check.",
+          "assistant": "Get the smog check done this week; the results go to the DMV electronically and you can renew online right after."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-14-japan-trip",
+      "startedAt": "2026-09-14T19:30:00Z",
+      "topic": "Japan trip",
+      "turns": [
+        {
+          "id": "cv-007",
+          "user": "Should we get a pocket wifi or an eSIM for Japan?",
+          "assistant": "Since you both have unlocked iPhones, an eSIM is simpler: nothing to pick up or return, and 20 GB each is plenty for two weeks of maps."
+        },
+        {
+          "id": "cv-008",
+          "user": "Alex wants to do a cooking class in Tokyo.",
+          "assistant": "A small market-tour class in Tsukiji would suit you both; ask them to swap any shellfish dishes before you book."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-15-learning-spanish",
+      "startedAt": "2026-09-15T19:30:00Z",
+      "topic": "Learning Spanish",
+      "turns": [
+        {
+          "id": "cv-025",
+          "user": "Lucía says my listening is behind my speaking.",
+          "assistant": "Try Spanish podcasts made for learners, like slow news, at normal speed on your runs. Listening during easy runs adds three hours a week."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-16-apartment-lease",
+      "startedAt": "2026-09-16T19:30:00Z",
+      "topic": "Apartment lease",
+      "turns": [
+        {
+          "id": "cv-030",
+          "user": "The landlord on Lawton said dogs are okay but only under 40 pounds.",
+          "assistant": "Biscuit is 32 pounds, so he fits. Get the pet policy in writing in the lease."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-18-product-work",
+      "startedAt": "2026-09-18T16:00:00Z",
+      "topic": "Product work",
+      "turns": [
+        {
+          "id": "cv-055",
+          "user": "The first weekly margin text went to the pilot restaurants today. Hollow Pine replied asking why their eggs went up so much.",
+          "assistant": "That's exactly the reaction you want. Track how many owners reply within a day as the feature's main metric."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-18-sleep",
+      "startedAt": "2026-09-18T07:10:00Z",
+      "topic": "Sleep",
+      "turns": [
+        {
+          "id": "cv-051",
+          "user": "I've been having two coffees after lunch on hard days.",
+          "assistant": "Caffeine's half-life is five to six hours, so a 3 pm coffee is still half there at 9 pm. Try making the second one decaf."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-19-dad-s-70th-birthday",
+      "startedAt": "2026-09-19T19:30:00Z",
+      "topic": "Dad's 70th birthday",
+      "turns": [
+        {
+          "id": "cv-035",
+          "user": "My sister Mei is collecting old photos of Dad for a slideshow at the birthday dinner.",
+          "assistant": "Ask relatives to send scans by mid-November so Mei has two weeks to put it together."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-21-half-marathon-training",
+      "startedAt": "2026-09-21T07:40:00Z",
+      "topic": "Half marathon training",
+      "turns": [
+        {
+          "id": "cv-014",
+          "user": "What should I eat the morning of the race?",
+          "assistant": "Something you've already tested on long runs, about two to three hours before the start, like a bagel with peanut butter and a banana. Nothing new on race day."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-22-biscuit",
+      "startedAt": "2026-09-22T19:30:00Z",
+      "topic": "Biscuit",
+      "turns": [
+        {
+          "id": "cv-066",
+          "user": "Who can watch Biscuit while we're in Japan?",
+          "assistant": "Your neighbor Sofia offered in the spring. Two weeks is long, so a mix of Sofia and a sitter who stays overnight might be easier on him."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-23-hiring-customer-success",
+      "startedAt": "2026-09-23T15:00:00Z",
+      "topic": "Hiring customer success",
+      "turns": [
+        {
+          "id": "cv-020",
+          "user": "Keisha's mock onboarding went really well, Rosa loved her. What salary should I offer?",
+          "assistant": "For an early customer success lead in the Bay Area, $95,000 to $110,000 base plus 0.3% to 0.5% equity is a reasonable range."
+        },
+        {
+          "id": "cv-021",
+          "user": "Priya thinks we should hire the second iOS engineer before customer success.",
+          "assistant": "The tie-breaker is what's slowing growth today. If onboarding is the bottleneck, customer success first; if Android requests are losing deals, the engineer."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-24-roadmap-and-customers",
+      "startedAt": "2026-09-24T17:30:00Z",
+      "topic": "Roadmap and customers",
+      "turns": [
+        {
+          "id": "cv-073",
+          "user": "Saffron Lane is thinking about cancelling because their chef left and nobody scans invoices anymore.",
+          "assistant": "Offer to do a two-week setup for the new chef yourself. Losing a pilot restaurant hurts more than the revenue."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-25-seed-round",
+      "startedAt": "2026-09-25T18:00:00Z",
+      "topic": "Seed round",
+      "turns": [
+        {
+          "id": "cv-043",
+          "user": "Bayline wants a second meeting with Priya to go deep on the tech.",
+          "assistant": "Prepare Priya with the invoice mapping accuracy, 97.4% on 2,000 labelled invoices, and the plan to move more of it on device."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-26-books",
+      "startedAt": "2026-09-26T19:30:00Z",
+      "topic": "Books",
+      "turns": [
+        {
+          "id": "cv-039",
+          "user": "I'm reading a book on pricing called Monetizing Innovation.",
+          "assistant": "Its core advice is to design the product around willingness to pay before you build. It matches how you moved Larderly to tiers."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-27-meal-prep",
+      "startedAt": "2026-09-27T12:30:00Z",
+      "topic": "Meal prep",
+      "turns": [
+        {
+          "id": "cv-048",
+          "user": "Can you give me a quick weeknight dinner without shellfish that Alex will like?",
+          "assistant": "Miso-glazed salmon with rice and bok choy takes 25 minutes, and there's no shellfish anywhere in it."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-28-half-marathon-training",
+      "startedAt": "2026-09-28T07:40:00Z",
+      "topic": "Half marathon training",
+      "turns": [
+        {
+          "id": "cv-015",
+          "user": "The tempo run felt awful this morning, I couldn't hold 8:50.",
+          "assistant": "One bad tempo run usually means poor sleep or not enough food, not lost fitness. You slept five hours on Saturday; take an easy day and try again Thursday."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-29-balcony-garden",
+      "startedAt": "2026-09-29T19:30:00Z",
+      "topic": "Balcony garden",
+      "turns": [
+        {
+          "id": "cv-062",
+          "user": "What can I plant on the balcony for fall?",
+          "assistant": "Lettuce, spinach, radishes and garlic all do well in Oakland's mild fall. Garlic planted in October is ready in June."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-09-30-apartment-lease",
+      "startedAt": "2026-09-30T19:30:00Z",
+      "topic": "Apartment lease",
+      "turns": [
+        {
+          "id": "cv-031",
+          "user": "We decided to renew our current place after all; they came down to $3,450.",
+          "assistant": "That saves you the move and is $450 a month less than Lawton. Ask for a two-year lease to lock it in."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-10-01-learning-spanish",
+      "startedAt": "2026-10-01T19:30:00Z",
+      "topic": "Learning Spanish",
+      "turns": [
+        {
+          "id": "cv-026",
+          "user": "I held a whole twenty-minute conversation with Lucía about the restaurant without switching to English.",
+          "assistant": "That's a real milestone. Talking about your own work is the hardest topic to stay in Spanish for."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-10-02-seed-round",
+      "startedAt": "2026-10-02T18:00:00Z",
+      "topic": "Seed round",
+      "turns": [
+        {
+          "id": "cv-044",
+          "user": "Dana thinks we should apply to YC before raising the seed.",
+          "assistant": "YC would add a demo day and a higher valuation, at the cost of 7% plus the standard deal. With 13 months of runway you can afford to apply for the winter batch first."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-10-03-product-work",
+      "startedAt": "2026-10-03T16:00:00Z",
+      "topic": "Product work",
+      "turns": [
+        {
+          "id": "cv-056",
+          "user": "Ines redesigned the onboarding so owners scan their first invoice in the first minute.",
+          "assistant": "Measure time to first scan and the share of trials that reach ten invoices before and after the change."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-10-04-half-marathon-training",
+      "startedAt": "2026-10-04T07:40:00Z",
+      "topic": "Half marathon training",
+      "turns": [
+        {
+          "id": "cv-016",
+          "user": "Should I taper before the half?",
+          "assistant": "Yes. Cut your weekly mileage by about 30% in the last ten days and keep a few short race-pace efforts so your legs stay sharp."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-10-05-taxes",
+      "startedAt": "2026-10-05T11:00:00Z",
+      "topic": "Taxes",
+      "turns": [
+        {
+          "id": "cv-069",
+          "user": "Can I deduct my home office if I mostly work from the studio on Telegraph?",
+          "assistant": "Probably not: the home office deduction needs space used regularly and exclusively for work, and your main workplace is the studio."
+        }
+      ]
+    },
+    {
+      "id": "s-2026-10-06-roadmap-and-customers",
+      "startedAt": "2026-10-06T17:30:00Z",
+      "topic": "Roadmap and customers",
+      "turns": [
+        {
+          "id": "cv-074",
+          "user": "The new chef at Saffron Lane scanned 14 invoices this week, they're staying.",
+          "assistant": "Good save. It's a lesson for the playbook: when a key person leaves, re-onboard their replacement right away."
+        }
+      ]
+    }
+  ]
+}

@@ -91,6 +91,15 @@ eval-asr: ## Evaluate the ASR engines on the fixtures: a WER/latency/RTF table p
 eval-noise: ## Compare noise suppressors on the ASR fixtures: WER and cost (docs/noise-suppression.md)
 	scripts/eval-noise-suppression.sh
 
+# Memory evaluation (#70): Recall@k and MRR of hybrid retrieval on the memory
+# eval set, plus LLM-judged answer accuracy where Apple's on-device model can
+# run, with the regression gate in docs/memory-eval/thresholds.json. Text
+# only; the MEMORY_EVAL_* variables are documented in scripts/eval-memory.sh
+# and docs/memory-eval.md.
+.PHONY: eval-memory
+eval-memory: ## Evaluate memory retrieval and answers on the memory eval set (docs/memory-eval.md)
+	scripts/eval-memory.sh
+
 # App icon previews (#82): every iOS appearance of Blau/Resources/AppIcon.icon,
 # rendered with Icon Composer's ictool into .build/AppIcon (docs/branding.md).
 .PHONY: icon-previews

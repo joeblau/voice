@@ -1,0 +1,679 @@
+{
+  "documents": [
+    {
+      "id": "co-001",
+      "kind": "company",
+      "title": "What Larderly does",
+      "body": "Larderly is an inventory and food-cost app for independent restaurants. Kitchen staff photograph supplier invoices, Larderly reads every line item, and it tracks what each plate actually costs as ingredient prices move.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-002",
+      "kind": "company",
+      "title": "Founding",
+      "body": "Larderly was founded in March 2025 in Oakland by Jordan Hale and Priya Raman. Jordan ran the back office of a family restaurant for six years; Priya was a staff engineer on a payments team.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-003",
+      "kind": "company",
+      "title": "Mission",
+      "body": "Our mission: give a 12-seat neighborhood restaurant the same margin visibility a 300-location chain gets from its finance team.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-004",
+      "kind": "company",
+      "title": "MRR June 2026",
+      "body": "Monthly recurring revenue at the end of June 2026 was $9,800 from 27 paying restaurants.",
+      "updatedAt": "2026-07-01"
+    },
+    {
+      "id": "co-005",
+      "kind": "company",
+      "title": "MRR July 2026",
+      "body": "Monthly recurring revenue at the end of July 2026 was $11,600 from 32 paying restaurants.",
+      "updatedAt": "2026-08-01"
+    },
+    {
+      "id": "co-006",
+      "kind": "company",
+      "title": "MRR August 2026",
+      "body": "Monthly recurring revenue at the end of August 2026 was $14,200 from 38 paying restaurants, up 22% month over month.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-007",
+      "kind": "company",
+      "title": "Churn",
+      "body": "Logo churn has been two restaurants in the last six months: one closed for good, and one was bought by a group that uses a different system. No customer has left because of the product.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-008",
+      "kind": "company",
+      "title": "Pricing",
+      "body": "Pricing is $29 per location per month for Basic, which covers invoice scanning and price alerts, and $149 per location per month for Pro, which adds recipe costing, menu engineering and POS sync.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-009",
+      "kind": "company",
+      "title": "Pricing history",
+      "body": "Before May 2026 we charged a flat $99 per month. Moving to two tiers raised average revenue per restaurant from $99 to $374 because most customers chose Pro.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-010",
+      "kind": "company",
+      "title": "Free trial",
+      "body": "New restaurants get a 21-day free trial with no card required. Trial-to-paid conversion has been 41% since we added the onboarding call.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-011",
+      "kind": "company",
+      "title": "Team",
+      "body": "The team is four people: Jordan Hale (CEO), Priya Raman (CTO), Tomás Ferreira (founding engineer, joined January 2026) and Ines Kowal (contract product designer, three days a week).",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-012",
+      "kind": "company",
+      "title": "Advisor",
+      "body": "Dana Whitfield, who ran operations for a 40-location bakery group, advises Larderly for 0.25% vesting over two years. She meets Jordan every other Thursday.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-013",
+      "kind": "company",
+      "title": "Pre-seed round",
+      "body": "Larderly raised a $750,000 pre-seed in September 2025 on a post-money SAFE with an $8M cap. Northgate Ventures led with $400,000; the rest came from six angels.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-014",
+      "kind": "company",
+      "title": "Runway",
+      "body": "We have about $410,000 in the bank and burn roughly $31,000 a month, which gives us about 13 months of runway at the current headcount.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-015",
+      "kind": "company",
+      "title": "Lead investor contact",
+      "body": "Our partner at Northgate Ventures is Marcus Lee. He prefers a short written update on the first Monday of each month rather than calls.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-016",
+      "kind": "company",
+      "title": "Invoice OCR pipeline",
+      "body": "Invoice capture runs on the phone: the camera finds the page edges, on-device text recognition reads it, and a server model maps each line to a canonical ingredient. Accuracy on line items is 97.4% on our labelled set of 2,000 invoices.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-017",
+      "kind": "company",
+      "title": "Tech stack",
+      "body": "The iOS app is Swift and SwiftUI. The backend is Go on Postgres, deployed on Fly.io. Priya chose Go because the team already knew it and it keeps the server cheap.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-018",
+      "kind": "company",
+      "title": "POS integrations",
+      "body": "Larderly syncs sales from Toast and Square, so recipe costs can be multiplied by what was actually sold each night. Clover is next on the integration list.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-019",
+      "kind": "company",
+      "title": "Biggest customer",
+      "body": "Our largest account is Casa Verde, a three-location Mexican restaurant group in Oakland and Berkeley on the Pro plan, paying $447 a month.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-020",
+      "kind": "company",
+      "title": "First customer",
+      "body": "The first paying customer was Little Fern, a 24-seat cafe in Temescal. The owner, Rosa, signed up after Jordan helped her untangle a dairy invoice in person.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-021",
+      "kind": "company",
+      "title": "Customer outcome",
+      "body": "Casa Verde found that their carnitas plate cost had drifted from 28% to 36% of the menu price after a pork price rise. They repriced and recovered about $2,100 a month.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-022",
+      "kind": "company",
+      "title": "Ideal customer profile",
+      "body": "The ideal customer is an independent, owner-operated restaurant with one to five locations, $1M to $5M in annual sales, and no dedicated finance person.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-023",
+      "kind": "company",
+      "title": "Go-to-market",
+      "body": "Most customers come from referrals and from Jordan walking into restaurants between 2 and 5 pm, when kitchens are quiet. Paid ads have not worked: the one test cost $640 per trial.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-024",
+      "kind": "company",
+      "title": "Competitors",
+      "body": "The incumbents in back-office restaurant software sell to multi-unit groups, with onboarding that takes weeks and pricing in the hundreds per location. Spreadsheets and paper are the real competition for single locations.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-025",
+      "kind": "company",
+      "title": "Differentiation",
+      "body": "Larderly is set up in under an hour with just a phone, works without a dedicated bookkeeper, and starts with the invoices a kitchen already has instead of asking staff to count inventory.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-026",
+      "kind": "company",
+      "title": "Market size",
+      "body": "There are roughly 650,000 restaurant locations in the US and about 60% are independent. At $1,800 a year per location, independent restaurants alone are a market of about $700M a year.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-027",
+      "kind": "company",
+      "title": "Roadmap Q4 2026",
+      "body": "Q4 2026 roadmap: Clover integration, supplier price comparisons across nearby restaurants (opt-in and anonymized), and a weekly margin summary sent by text message.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-028",
+      "kind": "company",
+      "title": "Roadmap 2027",
+      "body": "In 2027 we plan to add ordering, so restaurants can reorder from suppliers inside Larderly, which would let us take a small payment fee on purchasing volume.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-029",
+      "kind": "company",
+      "title": "Data policy",
+      "body": "Customer invoice images are deleted from our servers 90 days after processing. Only the extracted line items are kept, and customers can export or delete them at any time.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-030",
+      "kind": "company",
+      "title": "Security",
+      "body": "Larderly encrypts data at rest and in transit, uses single sign-on for staff tools, and completed a third-party penetration test in July 2026 with no critical findings.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-031",
+      "kind": "company",
+      "title": "Office",
+      "body": "We work from a shared studio above a bakery on Telegraph Avenue in Oakland. Rent is $1,900 a month and the lease runs until June 2027.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-032",
+      "kind": "company",
+      "title": "Hiring plan",
+      "body": "The next two hires are a customer success lead who has worked in restaurants and a second iOS engineer. Both depend on raising the seed round.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-033",
+      "kind": "company",
+      "title": "Seed round plan",
+      "body": "We plan to raise a $3M seed in early 2027 to reach 300 paying restaurants and $1.3M ARR within 18 months.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-034",
+      "kind": "company",
+      "title": "Equity split",
+      "body": "Jordan and Priya each own 42% of Larderly after the pre-seed. The option pool is 10% and Tomás holds a 1.5% grant on a four-year vest.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-035",
+      "kind": "company",
+      "title": "Net revenue retention",
+      "body": "Net revenue retention over the last six months is 128%, mostly from Basic customers upgrading to Pro and groups adding locations.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-036",
+      "kind": "company",
+      "title": "Gross margin",
+      "body": "Gross margin is about 81%. The biggest cost of revenue is the server-side model that maps invoice lines to ingredients, at about 9 cents per invoice.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-037",
+      "kind": "company",
+      "title": "Support hours",
+      "body": "Support runs by text message from 7 am to 11 pm Pacific, seven days a week, because restaurants work evenings and weekends. Median first response time is 6 minutes.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-038",
+      "kind": "company",
+      "title": "Weekly metrics meeting",
+      "body": "Every Monday at 9 am the team reviews MRR, new trials, activation and support volume in a 30-minute meeting. Priya owns the dashboard.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-039",
+      "kind": "company",
+      "title": "Activation metric",
+      "body": "We count a restaurant as activated once it has scanned ten invoices and costed five recipes. Activated restaurants convert to paid at 78%.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-040",
+      "kind": "company",
+      "title": "Biggest risk",
+      "body": "The biggest risk is that restaurants churn when they go out of business, which happens to a lot of independents. We try to reduce it by selling to places that have been open more than two years.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-041",
+      "kind": "company",
+      "title": "Brand",
+      "body": "Larderly's brand color is a deep tomato red and the logo is a lowercase l drawn as a ladle. Ines designed both in February 2026.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-042",
+      "kind": "company",
+      "title": "Legal entity",
+      "body": "Larderly, Inc. is a Delaware C corporation incorporated on April 2, 2025. Our lawyer is at a small startup firm in San Francisco and our accountant is Pilot.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-043",
+      "kind": "company",
+      "title": "Bank",
+      "body": "The company banks with Mercury and keeps reserves in a treasury account. The credit card limit is $25,000.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-044",
+      "kind": "company",
+      "title": "Supplier relationships",
+      "body": "We have a data partnership with Bay Produce Co-op, which sends us their price list every morning, so Larderly can flag when a restaurant is paying more than the co-op rate.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-045",
+      "kind": "company",
+      "title": "Customer quote",
+      "body": "Rosa from Little Fern said: 'I used to find out my costs went up when my accountant called in April. Now my phone tells me the day the invoice comes in.'",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-046",
+      "kind": "company",
+      "title": "Android",
+      "body": "There is no Android app yet. About 30% of kitchen staff use Android, so managers scan invoices on the owner's iPhone. An Android version is planned after the seed.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-047",
+      "kind": "company",
+      "title": "Menu engineering feature",
+      "body": "Menu engineering sorts every dish into stars, plowhorses, puzzles and dogs by popularity and margin, using the POS sales data, and suggests which dishes to reprice or drop.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-048",
+      "kind": "company",
+      "title": "Price alerts",
+      "body": "A price alert fires when an ingredient's unit price rises more than 8% against its 30-day average. Restaurants can change the threshold per ingredient.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-049",
+      "kind": "company",
+      "title": "Board",
+      "body": "There is no formal board yet. Jordan and Priya are the two directors, and Marcus Lee from Northgate has board observer rights.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-050",
+      "kind": "company",
+      "title": "Company values",
+      "body": "Values: be in the kitchen (talk to restaurants every week), ship small and often, and never make a restaurant feel stupid about their numbers.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-051",
+      "kind": "company",
+      "title": "Engineering process",
+      "body": "We ship the iOS app every two weeks through TestFlight to five pilot restaurants first. Server changes deploy continuously behind feature flags.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-052",
+      "kind": "company",
+      "title": "Accounting integration",
+      "body": "Larderly exports cost of goods sold to QuickBooks Online and Xero as journal entries at the end of each week, so the restaurant's books match what the kitchen spent.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-053",
+      "kind": "company",
+      "title": "Waste tracking",
+      "body": "Pro customers can log waste with a photo and a reason, such as spoiled, dropped or over-prepped. Casa Verde cut produce waste by 18% in the first two months.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-054",
+      "kind": "company",
+      "title": "Pilot program",
+      "body": "The five pilot restaurants that get early builds are Little Fern, Casa Verde, Hollow Pine Diner, Saffron Lane and Kettle & Crumb. They get Pro free in exchange for weekly feedback calls.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "co-055",
+      "kind": "company",
+      "title": "Customer count by city",
+      "body": "Of 38 paying restaurants, 22 are in Oakland, 9 in Berkeley, 5 in San Francisco and 2 in Alameda.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "pf-029",
+      "kind": "note",
+      "title": "Gift ideas for Alex",
+      "body": "A wheel-throwing ceramics course, a good pair of pruning shears, the botanical illustration book from the museum store, tickets to the symphony.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "pf-030",
+      "kind": "note",
+      "title": "Questions for my advisor Dana",
+      "body": "How do bakery groups decide on back-office software? Who signs the contract? Would she intro us to the owner of the Piedmont group?",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "pf-031",
+      "kind": "note",
+      "title": "My operating rhythm",
+      "body": "Monday metrics review, Tuesday and Thursday afternoons in restaurants, Wednesday no meetings for deep work, Friday investor and advisor calls.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "pf-032",
+      "kind": "note",
+      "title": "Pitch practice",
+      "body": "In pitch practice I ramble on the market size. Say the $700M number in one sentence and move on to traction.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "pf-033",
+      "kind": "note",
+      "title": "Restaurants to visit for sales this month",
+      "body": "Hollow Pine Diner's sister cafe in Alameda, a taqueria on International Boulevard, and the two new ramen shops on Piedmont Avenue.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "pf-034",
+      "kind": "note",
+      "title": "Japan packing list",
+      "body": "Allergy card in Japanese, power adapter not needed, comfortable walking shoes, a small towel, cash for small shops, the eSIM QR codes printed.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "pf-035",
+      "kind": "note",
+      "title": "Personal goals for 2026",
+      "body": "Half marathon under two hours, hold a 30-minute conversation in Spanish, read twelve novels, and take a full week offline.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "pf-036",
+      "kind": "note",
+      "title": "Novels read in 2026",
+      "body": "Klara and the Sun, Tomorrow and Tomorrow and Tomorrow, Piranesi, The Overstory (abandoned halfway), Station Eleven.",
+      "updatedAt": "2026-09-01"
+    },
+    {
+      "id": "yc",
+      "kind": "collection",
+      "title": "YC interview questions",
+      "body": "Practice answers for the Y Combinator interview.",
+      "updatedAt": "2026-09-01",
+      "items": [
+        {
+          "id": "yc-001",
+          "prompt": "What are you working on?",
+          "answer": "Larderly tells independent restaurants what every dish really costs. You photograph supplier invoices and we turn them into live plate costs and price alerts."
+        },
+        {
+          "id": "yc-002",
+          "prompt": "Why did you pick this idea?",
+          "answer": "I spent six years doing the books for my family's restaurant. Every April the accountant told us we had lost money on dishes we thought were our best sellers."
+        },
+        {
+          "id": "yc-003",
+          "prompt": "How do you know people need what you're making?",
+          "answer": "38 restaurants pay us, most found us through another owner, and the ones who activate keep scanning invoices every week without being reminded."
+        },
+        {
+          "id": "yc-004",
+          "prompt": "Why now?",
+          "answer": "Food costs rose about 25% in three years, phone cameras and on-device text recognition got good enough to read crumpled invoices, and POS systems finally opened their APIs."
+        },
+        {
+          "id": "yc-005",
+          "prompt": "Who are your competitors?",
+          "answer": "The incumbents sell to multi-location groups with long onboarding. For a single restaurant the competitor is a spreadsheet, a shoebox of invoices, or nothing."
+        },
+        {
+          "id": "yc-006",
+          "prompt": "What do you understand about your business that other companies in it just don't get?",
+          "answer": "Nobody in a small kitchen will count inventory every week, but they already handle every invoice. Starting from invoices instead of counts is why we get adoption."
+        },
+        {
+          "id": "yc-007",
+          "prompt": "How do you or will you make money?",
+          "answer": "Subscriptions: $29 per location for Basic and $149 for Pro. Later, a small fee on purchasing once restaurants reorder through us."
+        },
+        {
+          "id": "yc-008",
+          "prompt": "How big can this get?",
+          "answer": "About 390,000 independent US restaurants at $1,800 a year is a $700M subscription market before payments on purchasing, which is many times larger."
+        },
+        {
+          "id": "yc-009",
+          "prompt": "How fast are you growing?",
+          "answer": "Revenue has grown 22% month over month for the last three months, from $9,800 to $14,200 MRR."
+        },
+        {
+          "id": "yc-010",
+          "prompt": "How long have the founders known each other and how did you meet?",
+          "answer": "Priya and I met in 2019 volunteering at a community kitchen in Oakland. We built a donation tracker together there before we ever talked about a company."
+        },
+        {
+          "id": "yc-011",
+          "prompt": "Who writes code, or does other technical work on your product?",
+          "answer": "Priya built the backend and the invoice pipeline, Tomás owns the iOS app, and I write the integration scripts and SQL reports. Nothing is outsourced."
+        },
+        {
+          "id": "yc-012",
+          "prompt": "What is the hardest technical problem you've solved?",
+          "answer": "Mapping messy invoice lines like 'CHKN THGH BNLS 40#' to a canonical ingredient and unit, across hundreds of suppliers that each abbreviate differently."
+        },
+        {
+          "id": "yc-013",
+          "prompt": "How will you get users?",
+          "answer": "Walking into restaurants mid-afternoon and from owner referrals. Each restaurant introduces us to about 0.6 other restaurants, and we give a free month for each referral."
+        },
+        {
+          "id": "yc-014",
+          "prompt": "What's the biggest thing that could kill you?",
+          "answer": "Restaurant closures. We screen for restaurants open more than two years and expand within groups, where churn is much lower."
+        },
+        {
+          "id": "yc-015",
+          "prompt": "Why are you the right team?",
+          "answer": "I lived this problem in a kitchen for six years and Priya built financial systems that handled millions of transactions a day. We already have the customers' trust."
+        },
+        {
+          "id": "yc-016",
+          "prompt": "What will you do with the money?",
+          "answer": "Hire a customer success lead from the restaurant world and a second iOS engineer, launch Android, and get to 300 restaurants."
+        },
+        {
+          "id": "yc-017",
+          "prompt": "What's the most surprising thing you've learned from users?",
+          "answer": "Owners care less about the dashboard than the text message. The daily 'your avocado price went up 14%' alert drives most of our retention."
+        },
+        {
+          "id": "yc-018",
+          "prompt": "Who exactly is your customer?",
+          "answer": "An owner-operator with one to five locations and no finance staff, usually doing the books themselves late at night after service."
+        },
+        {
+          "id": "yc-019",
+          "prompt": "How long have you been working on this, and full time?",
+          "answer": "Since March 2025, both founders full time since day one."
+        },
+        {
+          "id": "yc-020",
+          "prompt": "Are people leaving?",
+          "answer": "Two restaurants left in six months, both for reasons outside the product: one closed and one was acquired. Net revenue retention is 128%."
+        },
+        {
+          "id": "yc-021",
+          "prompt": "Why hasn't a big company already done this?",
+          "answer": "The money in restaurant software has been in large groups, so incumbents built for finance teams. Small restaurants looked too cheap to sell to, until you can sell with a phone and no onboarding."
+        },
+        {
+          "id": "yc-022",
+          "prompt": "What did you learn from your first users?",
+          "answer": "Our first version asked for weekly inventory counts and nobody did them. Switching to invoices doubled activation in a month."
+        },
+        {
+          "id": "yc-023",
+          "prompt": "If you could hire one person tomorrow, who would it be?",
+          "answer": "Someone who has run a restaurant floor and loves software, to do onboarding and customer success."
+        },
+        {
+          "id": "yc-024",
+          "prompt": "What's your unfair advantage?",
+          "answer": "A labelled set of 2,000 real invoices and a daily price feed from a produce co-op, which nobody targeting small restaurants has."
+        },
+        {
+          "id": "yc-025",
+          "prompt": "What are your unit economics?",
+          "answer": "Gross margin is about 81%, customers come mostly through referrals, and a Pro customer pays back their acquisition cost in under two months."
+        },
+        {
+          "id": "yc-026",
+          "prompt": "How do you decide what to work on?",
+          "answer": "Every feature has to come from at least three restaurants asking for it, and we test it with the five pilot restaurants before anyone else sees it."
+        },
+        {
+          "id": "yc-027",
+          "prompt": "Have you raised money before?",
+          "answer": "Yes, a $750,000 pre-seed on an $8M post-money SAFE, led by Northgate Ventures, in September 2025."
+        },
+        {
+          "id": "yc-028",
+          "prompt": "How much money do you spend per month and how long will it last?",
+          "answer": "About $31,000 a month, with roughly 13 months of runway."
+        },
+        {
+          "id": "yc-029",
+          "prompt": "Tell me about a user who loves you.",
+          "answer": "Casa Verde found their carnitas plate had gone from 28% to 36% food cost and recovered about $2,100 a month by repricing."
+        },
+        {
+          "id": "yc-030",
+          "prompt": "Tell me about a time you and your co-founder disagreed.",
+          "answer": "Priya wanted to build Android before Pro; I wanted Pro first. We ran the numbers on what customers asked for, shipped Pro, and it tripled revenue per restaurant."
+        },
+        {
+          "id": "yc-031",
+          "prompt": "Where will this be in ten years?",
+          "answer": "The operating system for independent restaurants' money: costs, purchasing, payments to suppliers and eventually working capital."
+        },
+        {
+          "id": "yc-032",
+          "prompt": "Why would a restaurant trust a startup with its books?",
+          "answer": "We delete invoice images after 90 days, they can export everything any time, and we answer support texts in about six minutes."
+        },
+        {
+          "id": "yc-033",
+          "prompt": "What would make you give up on this?",
+          "answer": "If restaurants that see their real food costs still don't change prices or suppliers. So far 70% change something within a month."
+        },
+        {
+          "id": "yc-034",
+          "prompt": "What fraction of signups actually use it?",
+          "answer": "About 55% of trials activate, meaning ten invoices scanned and five recipes costed, and 78% of activated restaurants pay."
+        },
+        {
+          "id": "yc-035",
+          "prompt": "What's the biggest mistake you've made so far?",
+          "answer": "We spent $3,200 on ads in the spring. Every trial cost $640 and none converted, because owners trust other owners, not ads."
+        },
+        {
+          "id": "yc-036",
+          "prompt": "How did you set your price?",
+          "answer": "Pro saves a typical restaurant at least ten times its price in food cost. We tested $99 flat against tiered pricing and tiers won on revenue without hurting conversion."
+        },
+        {
+          "id": "yc-037",
+          "prompt": "Would you change the idea if we asked?",
+          "answer": "We'd change the product in a heartbeat, but not the customer: independent restaurants are who we want to serve."
+        },
+        {
+          "id": "yc-038",
+          "prompt": "Are you technical?",
+          "answer": "Priya is deeply technical, ten years of backend and payments. I'm technical enough to write SQL and Python and ship the integrations."
+        },
+        {
+          "id": "yc-039",
+          "prompt": "What do you want to have achieved by demo day?",
+          "answer": "100 paying restaurants, $40,000 MRR, and Clover live so we cover the three biggest POS systems in our segment."
+        },
+        {
+          "id": "yc-040",
+          "prompt": "What metric do you look at every day?",
+          "answer": "Invoices scanned per active restaurant. If it drops below three a week, that restaurant is about to churn and we call them."
+        },
+        {
+          "id": "yc-041",
+          "prompt": "What's the most impressive thing you've built or achieved?",
+          "answer": "I turned my family's restaurant from losing money to an 8% margin in two years, mostly by fixing purchasing."
+        },
+        {
+          "id": "yc-042",
+          "prompt": "Walk me through how it works under the hood.",
+          "answer": "The phone finds the invoice, reads it on device, a server model maps lines to ingredients, and we join that with recipes and POS sales to get cost per plate."
+        },
+        {
+          "id": "yc-043",
+          "prompt": "Is there a channel you have that others don't?",
+          "answer": "Bay Produce Co-op lets us present at their monthly member meetings, which put us in front of about 200 independent owners."
+        },
+        {
+          "id": "yc-044",
+          "prompt": "Is there anything else you'd like to tell us?",
+          "answer": "Every one of our first ten customers still pays us, and three of them have offered to talk to you."
+        },
+        {
+          "id": "yc-045",
+          "prompt": "What's your goal for this week?",
+          "answer": "Sign four new restaurants, finish the Clover integration spec, and get the weekly margin text into the hands of the pilot group."
+        }
+      ]
+    }
+  ]
+}

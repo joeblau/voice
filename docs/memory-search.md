@@ -117,8 +117,10 @@ plateau at k = 10–20 and 0.35–0.45, rather than the issue's k = 60: at k =
 60 no BM25 weight beats the dense model's MRR@10. The curve is so flat
 there that a chunk both lists rank middling overtakes the dense ranking's
 first place, which on paraphrases is usually the answer. The eval
-set has 200 queries, so a point is two queries; #70 re-tunes on its larger
-set.
+set has 200 queries, so a point is two queries. #70's memory evaluation
+swept the same weights on its own set and found it prefers more BM25
+([memory-eval.md](memory-eval.md#tuning)); the sets disagree, so these
+defaults stay.
 
 | Ranking (personal eval set, top 10) | Recall@5 | Hit@5 | Hit@1 | MRR@10 | Recall@10 |
 | --- | --- | --- | --- | --- | --- |
@@ -131,11 +133,13 @@ By category, hybrid Recall@5: company 0.809, YC answers 0.607, conversations
 0.908, profile 0.971 (dense alone: 0.809, 0.552, 0.900, 0.971). The YC
 answers stay the hardest slice, as in #59.
 
-**The target**, since #70's harness isn't built yet: hybrid Recall@5 and
-MRR@10 at least the dense model's own, and every keyword-style query BM25
-finds still in the top 5. `HybridRetrievalEvalTests` asserts it on every
-`swift test`, plus Recall@5 ≥ 0.82 to catch regressions of the tuned
-defaults. EmbeddingGemma, the shipped model, is gated and not measured yet
+**The target** on this set: hybrid Recall@5 and MRR@10 at least the dense
+model's own, and every keyword-style query BM25 finds still in the top 5.
+`HybridRetrievalEvalTests` asserts it on every `swift test`, plus Recall@5
+≥ 0.82 to catch regressions of the tuned defaults. The memory evaluation
+(#70, [memory-eval.md](memory-eval.md)) adds question types (temporal,
+knowledge updates, multi-hop, abstention), answer accuracy and its own
+regression gate. EmbeddingGemma, the shipped model, is gated and not measured yet
 ([benchmarks.md](benchmarks.md#text-embedding-model-59)); rerun
 `record_eval_vectors.py --model embeddinggemma-300m` and the sweep once it
 is.
@@ -257,7 +261,7 @@ logged.
 
 | What | How |
 | --- | --- |
-| Quality (`swift test`) | `HybridRetrievalEvalTests`: #59's eval set through the real index with recorded Qwen3 vectors; the target above, and the BM25-only fallback keeping keyword queries |
+| Quality (`swift test`) | `HybridRetrievalEvalTests`: #59's eval set through the real index with recorded Qwen3 vectors; the target above, and the BM25-only fallback keeping keyword queries. `MemoryEvalRetrievalTests`: #70's memory eval set against its thresholds ([memory-eval.md](memory-eval.md)) |
 | Weight sweep (opt-in) | `BLAU_RETRIEVAL_TUNING=1 swift test --filter HybridRetrievalEvalTests` |
 | Pipeline (`swift test`) | `MemorySearchTests`: fusion and signals, BM25-only fallback, limits and kinds, hard and soft time filters, calendar dates, multi-hop and query-named expansion, validity in a time filter, expansion kept inside an explicit window, graph failures, dedupe, reranker and its failure, snippets, the signpost, `MemorySearchService` |
 | Pieces (`swift test`) | `RankFusionTests`, `TemporalQueryParserTests` (every row above against a fixed "now", time zones, first weekday, the `NSDataDetector` fallback), `MemoryEntityGraphTests` (matching, validity, duplicates, the cache, reading SwiftData) |
