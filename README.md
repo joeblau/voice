@@ -63,7 +63,7 @@ Formatting, branch naming, commit and pull request conventions are in
 | `BlauPerfTests/` | Performance tests (XCTest UI-testing bundle, launch metrics)    |
 | `TestPlans/`     | `Blau.xctestplan` (unit + UI, coverage) and `BlauPerf.xctestplan` |
 | `Config/`        | xcconfig files; `Secrets.xcconfig` is gitignored ([docs](docs/configuration.md)) |
-| `scripts/`       | `swift-format.sh` (behind `make format` and `make lint`), git hooks, embedded-secrets check and `Secrets.xcconfig` writer |
+| `scripts/`       | `swift-format.sh` (behind `make format` and `make lint`), git hooks, embedded-secrets check, `Secrets.xcconfig` writer and `verify-signposts.sh` (see [`docs/performance.md`](docs/performance.md)) |
 | `docs/`          | Developer documentation                                         |
 | `.github/`       | Pull request and issue templates                                |
 
