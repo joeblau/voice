@@ -5,7 +5,9 @@ built with Swift 6, SwiftUI and SwiftData, and targets iOS 26.0 and later.
 See issue #1 for the architecture overview and
 [`docs/architecture.md`](docs/architecture.md) for the module layout. Data is
 stored with SwiftData and synced through the user's private iCloud container
-([`docs/sync.md`](docs/sync.md)); [`docs/release.md`](docs/release.md) has the
+([`docs/sync.md`](docs/sync.md)), with an optional Markdown copy of every
+conversation in iCloud Drive → Blau ([`docs/export.md`](docs/export.md));
+[`docs/release.md`](docs/release.md) has the
 checklist to run before every TestFlight build.
 
 ## Getting started

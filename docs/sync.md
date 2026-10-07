@@ -5,7 +5,9 @@ SwiftData and mirrors it to the **private database** of the CloudKit container
 `iCloud.com.joeblau.blau` (issue #20). There is no Blau server: the data
 lives on the user's devices and in their own iCloud account. The model and
 CloudKit's schema rules are in [data-model.md](data-model.md); shipping a
-schema to production is in [release.md](release.md).
+schema to production is in [release.md](release.md). The same container's
+iCloud Drive folder holds the optional Markdown copy of every conversation
+([export.md](export.md)).
 
 ## Stores
 

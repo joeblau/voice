@@ -177,3 +177,6 @@ The complete list of declared edges:
 - [apple-asr.md](apple-asr.md): the `SpeechAnalyzer` / `SpeechTranscriber`
   fallback transcriber and the `TranscriberRouter` that switches engines
   at utterance boundaries (Settings toggle, background, memory pressure).
+- [export.md](export.md): the Markdown export of conversations and topics
+  to iCloud Drive → Blau (format, idempotent re-export, automatic export,
+  the iCloud Drive entitlements and the manual test plan).
