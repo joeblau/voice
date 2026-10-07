@@ -67,6 +67,31 @@ struct VoiceLoopTests {
         #expect(after.first?.conversation?.id == conversation.rawValue)
     }
 
+    /// The transcript and the topic lifecycle (#54) can both ask for the
+    /// store right after the container is replaced; they get the same one,
+    /// with the conversation reopened, so neither write is dropped.
+    @Test func callersAfterAContainerSwapShareOneStore() async throws {
+        let first = try BlauModelContainer.makeInMemory()
+        let second = try BlauModelContainer.makeInMemory()
+        let current = CurrentContainer(first)
+        let recorder = PersistenceTranscriptRecorder { current.value }
+        let conversation = ConversationID()
+
+        try await recorder.beginConversation(conversation, at: Self.t0)
+        current.value = second
+        async let one = recorder.conversationStore()
+        async let two = recorder.conversationStore()
+        let (storeOne, storeTwo) = try await (one, two)
+        #expect(storeOne === storeTwo)
+        #expect(storeOne.modelContainer === second)
+
+        try await recorder.record(utterance("After", .agent, in: conversation, at: 2))
+        try await recorder.flush()
+        let after = try ModelContext(second).fetch(FetchDescriptor<StoredUtterance>())
+        #expect(after.map(\.text) == ["After"])
+        #expect(after.first?.conversation?.id == conversation.rawValue)
+    }
+
     @Test func noOpenStoreIsAnError() async {
         let recorder = PersistenceTranscriptRecorder { nil }
         await #expect(throws: PersistenceTranscriptRecorder.StoreUnavailableError.self) {
@@ -80,7 +105,10 @@ struct VoiceLoopTests {
             performance: FixedPerformanceLevel())
         #expect(!loop.isAvailable)
         #expect(loop.hudReadout.value(for: "EOU → audio") == "–")
-        #expect(loop.hudReadout.rows.map(\.label) == ["Turn", "Realtime", "EOU → audio", "Turn time", "Tokens"])
+        #expect(
+            loop.hudReadout.rows.map(\.label) == [
+                "Turn", "Realtime", "Session", "EOU → audio", "Turn time", "Tokens", "Barge-in",
+            ])
     }
 }
 

@@ -56,10 +56,12 @@ public actor ConversationStore: ModelActor {
     /// In-memory partial transcripts by utterance id. Never persisted.
     public private(set) var partials: [UUID: String] = [:]
 
-    private var activeConversation: Conversation?
-    private var currentTopic: Topic?
+    // Internal rather than private where the topic edits in
+    // ConversationStore+Topics.swift need them.
+    var activeConversation: Conversation?
+    var currentTopic: Topic?
     private var conversationsByID: [ConversationID: Conversation] = [:]
-    private var topicsByID: [UUID: Topic] = [:]
+    var topicsByID: [UUID: Topic] = [:]
     /// Every utterance of the active conversation, by id, so a refinement
     /// (second-pass ASR) updates the stored row instead of adding a
     /// duplicate. Complete for the active conversation: filled as utterances
@@ -70,7 +72,7 @@ public actor ConversationStore: ModelActor {
     /// were committed before the first topic or after `closeTopic`), so
     /// `openTopic(at:)` with a past boundary can adopt the ones that started
     /// after it without walking the whole conversation.
-    private var topiclessUtterances: [UUID: StoredUtterance] = [:]
+    var topiclessUtterances: [UUID: StoredUtterance] = [:]
 
     private var deferredSave: Task<Void, Never>?
 
@@ -430,7 +432,7 @@ public actor ConversationStore: ModelActor {
     }
 
     /// Counts a change and saves now or later according to `savePolicy`.
-    private func noteChanges(_ count: Int = 1) {
+    func noteChanges(_ count: Int = 1) {
         statistics.pendingChangeCount += count
         if savePolicy.savesEveryChange || statistics.pendingChangeCount >= savePolicy.maxPendingChanges {
             saveLoggingErrors()
@@ -463,7 +465,7 @@ public actor ConversationStore: ModelActor {
         }
     }
 
-    private func save() throws {
+    func save() throws {
         deferredSave?.cancel()
         deferredSave = nil
         guard modelContext.hasChanges else {
@@ -510,7 +512,7 @@ public actor ConversationStore: ModelActor {
         return fetched
     }
 
-    private func conversation(_ id: ConversationID) throws -> Conversation {
+    func conversation(_ id: ConversationID) throws -> Conversation {
         if let active = activeConversation, active.id == id.rawValue { return active }
         guard let conversation = try conversationIfExists(id) else {
             throw ConversationStoreError.conversationNotFound(id)
@@ -525,7 +527,7 @@ public actor ConversationStore: ModelActor {
         return try modelContext.fetch(descriptor).first
     }
 
-    private func topic(_ id: UUID) throws -> Topic {
+    func topic(_ id: UUID) throws -> Topic {
         if let cached = topicsByID[id] { return cached }
         var descriptor = FetchDescriptor<Topic>(predicate: #Predicate { $0.id == id })
         descriptor.fetchLimit = 1

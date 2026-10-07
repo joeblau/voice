@@ -72,6 +72,14 @@ public enum ConversationStoreError: Error, Hashable, Sendable {
     case topicNotFound(UUID)
     /// The call needs an active conversation and none is started.
     case noActiveConversation
+    /// The topic is the first of its conversation, so there is nothing to
+    /// merge it into or move its start against.
+    case noPreviousTopic(UUID)
+    /// The date doesn't fall strictly inside the topic's span, so the topic
+    /// can't be split there or its start moved there.
+    case invalidTopicBoundary(UUID)
+    /// A manual title was empty or only whitespace.
+    case emptyTitle
 }
 
 /// A topic's title and summary, as `ConversationStore.topicDigest(for:)`
