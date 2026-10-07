@@ -793,16 +793,22 @@ public actor TurnOrchestrator: RealtimeService {
     }
 
     private func sent(_ events: [RealtimeClientEvent], turn number: Int?) {
-        usage.textInputs += events.count { event in
-            guard case .conversationItemCreate(.message(let message), _) = event else { return false }
-            return message.role == .user && message.content.contains { $0.type == .inputText }
-        }
+        countTextInputs(in: events)
         guard let number, let turn = current, turn.number == number else { return }
         guard events.contains(where: { $0.type == "response.create" }) else { return }
         if state == .committing {
             setState(.agentThinking)
         }
         scheduleResponseTimeout(for: number)
+    }
+
+    /// Adds the user text items among `events`, sent to Grok, to the usage
+    /// totals: xAI bills each one as a text input (`RealtimePricing`).
+    func countTextInputs(in events: [RealtimeClientEvent]) {
+        usage.textInputs += events.count { event in
+            guard case .conversationItemCreate(.message(let message), _) = event else { return false }
+            return message.role == .user && message.content.contains { $0.type == .inputText }
+        }
     }
 
     private func sendFailed(turn number: Int?, error: RealtimeClientError) {

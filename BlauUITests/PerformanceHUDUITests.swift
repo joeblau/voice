@@ -92,8 +92,11 @@ final class PerformanceHUDUITests: XCTestCase {
     func testTripleTapTogglesTheHUDInDebugBuilds() {
         let app = launch()
         XCTAssertFalse(hud(app).exists)
-        // The title is plain text on the main screen, away from every button.
-        let title = app.descendants(matching: .any)["blau.root"]
+        // The "Blau" title is plain text in the main screen's content, away
+        // from every button (the content's centre can be the onboarding
+        // button).
+        let title = app.descendants(matching: .any)["blau.mainScreen.empty"].staticTexts["Blau"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
         title.tap(withNumberOfTaps: 3, numberOfTouches: 1)
         XCTAssertTrue(hud(app).waitForExistence(timeout: 5), "Triple-tap should show the HUD")
         title.tap(withNumberOfTaps: 3, numberOfTouches: 1)

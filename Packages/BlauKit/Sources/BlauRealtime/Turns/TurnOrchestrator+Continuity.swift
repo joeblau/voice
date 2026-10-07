@@ -222,7 +222,7 @@ extension TurnOrchestrator {
         let provider = reseedContext
         let client = client
         let epoch = epoch
-        outbox.enqueue {
+        outbox.enqueue { [weak self] in
             guard epoch.current == session else { return }
             let topic = await provider.topicContext(for: conversationID)
             let events = RealtimeReseed.events(history: entries, topic: topic, limits: limits)
@@ -231,6 +231,8 @@ extension TurnOrchestrator {
                     guard epoch.current == session else { return }
                     try await client.send(event)
                 }
+                // The reseeded user texts are billed as text inputs too.
+                await self?.countTextInputs(in: events)
             } catch {
                 Log.realtime.error("Couldn't reseed the realtime session: \(error.description, privacy: .public)")
             }

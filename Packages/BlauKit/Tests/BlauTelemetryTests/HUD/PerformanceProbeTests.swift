@@ -22,18 +22,33 @@ struct CPUUsageTests {
     @Test func theSystemClocksMeasureABusyThread() {
         let source = SystemCPUTimeSource()
         var meter = CPUUsageMeter()
-        _ = meter.sample(cpu: source.processCPUTime(), wall: source.wallTime())
+        let processStart = source.processCPUTime()
+        let wallStart = source.wallTime()
+        _ = meter.sample(cpu: processStart, wall: wallStart)
         let threadStart = source.threadCPUTime()
-        let deadline = ContinuousClock.now + .milliseconds(200)
+        // Spin until the thread clock says this thread used 100 ms of CPU.
+        // How long that takes in wall time depends on how loaded the host
+        // is, so the checks below compare the clocks with each other rather
+        // than with the wall clock (a CI host with a load average far above
+        // its core count preempts the thread most of the time).
+        let target: UInt64 = 100_000_000
+        let deadline = ContinuousClock.now + .seconds(30)
         var spins = 0
-        while ContinuousClock.now < deadline { spins &+= 1 }
+        while source.threadCPUTime() - threadStart < target, ContinuousClock.now < deadline { spins &+= 1 }
         let threadCPU = source.threadCPUTime() - threadStart
+        let processCPU = source.processCPUTime() - processStart
+        let wall = source.wallTime() - wallStart
         let percent = meter.sample(cpu: source.processCPUTime(), wall: source.wallTime())
         #expect(spins > 0)
-        // Spinning for 200 ms keeps this thread on a core almost all of that
-        // time (a loaded CI host can preempt it a little).
-        #expect(threadCPU > 120_000_000)
-        #expect((percent ?? 0) > 60)
+        #expect(threadCPU >= target)
+        // The process clock counts this thread's time, and no single thread
+        // runs for longer than the wall time that passed.
+        #expect(processCPU >= threadCPU)
+        #expect(threadCPU <= wall + 1_000_000)
+        // The meter reports the process's share of a core over that span.
+        let expected = Double(processCPU) / Double(wall) * 100
+        #expect(abs((percent ?? 0) - expected) <= max(5, expected * 0.1))
+        #expect((percent ?? 0) > 0)
     }
 
     @Test func overheadIsChargedTimeOverTheWindow() {

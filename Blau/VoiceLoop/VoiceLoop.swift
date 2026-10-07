@@ -211,7 +211,8 @@ final class LiveVoicePipeline {
     private var bargeInTask: Task<Void, Never>?
 
     private init(
-        transcriber: ParakeetStreamingTranscriber, vadTask: Task<Void, Never>?, bargeInTask: Task<Void, Never>?,
+        transcriber: ParakeetStreamingTranscriber, voiceActivity: VoiceActivitySegmenter,
+        vadTask: Task<Void, Never>?, bargeInTask: Task<Void, Never>?,
         stopAudio: @escaping @Sendable () async -> Void
     ) {
         self.transcriber = transcriber
@@ -279,7 +280,8 @@ final class LiveVoicePipeline {
             }
             let vadTask = Task { await vad.run(on: hub) }
             return LiveVoicePipeline(
-                transcriber: transcriber, vadTask: vadTask, bargeInTask: bargeInTask, stopAudio: stopAudio)
+                transcriber: transcriber, voiceActivity: vad, vadTask: vadTask, bargeInTask: bargeInTask,
+                stopAudio: stopAudio)
         #else
             throw VoiceLoop.StartError.unavailable
         #endif
