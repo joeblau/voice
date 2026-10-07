@@ -130,6 +130,8 @@ case step.
 | `vad.chunk`           | `asr`      | `.vadChunk`           | A chunk is handed to Silero VAD                     | Speech probability and start/end events are out |
 | `asr.chunk`           | `asr`      | `.asrChunk`           | A 320 ms chunk is handed to streaming Parakeet      | The partial transcript for that chunk is out    |
 | `asr.eou`             | `asr`      | `.asrEndOfUtterance`  | VAD reports end of speech                           | The end-of-utterance decision fires (or speech resumes) |
+| `model.download`      | `asr`      | `.modelDownload`      | `ModelManager` starts downloading a model           | Every file is on disk and checksum-verified (or the download fails, pauses or is cancelled) |
+| `model.warmUp`        | `asr`      | `.modelWarmUp`        | `ModelManager` loads an installed model for the first time on this OS | Core ML finished loading (and compiling) every bundle |
 | `voiceid.embed`       | `voiceid`  | `.voiceIDEmbed`       | A speech segment is handed to the embedding model   | The 256-d embedding is out                      |
 | `voiceid.verify`      | `voiceid`  | `.voiceIDVerify`      | Scoring of a segment against the voiceprint starts  | Accept / reject / uncertain is decided          |
 | `realtime.turn`       | `realtime` | `.realtimeTurn`       | A verified utterance's text is committed to Grok    | `response.done`, or the response is cancelled by barge-in |

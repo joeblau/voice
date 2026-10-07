@@ -15,6 +15,8 @@ final class XAIKeyEntryUITests: XCTestCase {
     private func launch(stub: String) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["BLAU_UI_TEST_XAI"] = stub
+        // Fixture speech models: no real model download from a UI test.
+        app.launchEnvironment["BLAU_MODEL_FIXTURES"] = "1"
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
         return app

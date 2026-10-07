@@ -14,6 +14,8 @@ final class ICloudSyncUITests: XCTestCase {
     private func makeApp() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["BLAU_UI_TEST_XAI"] = "offline"
+        // Fixture speech models: no real model download from a UI test.
+        app.launchEnvironment["BLAU_MODEL_FIXTURES"] = "1"
         return app
     }
 

@@ -9,6 +9,8 @@ final class LaunchUITests: XCTestCase {
 
     func testLaunchShowsRootView() throws {
         let app = XCUIApplication()
+        // Fixture speech models: no real model download from a UI test.
+        app.launchEnvironment["BLAU_MODEL_FIXTURES"] = "1"
         app.launch()
 
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
