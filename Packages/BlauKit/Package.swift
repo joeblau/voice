@@ -98,6 +98,10 @@ enum KitModule: String, CaseIterable {
         case .persistence:
             // A store written by schema v1, for the v1 → v2 migration tests.
             [.copy("Fixtures")]
+        case .voiceID:
+            // CMU ARCTIC speech clips from four speakers, for the speaker
+            // embedding tests.
+            [.copy("Fixtures")]
         default:
             []
         }
