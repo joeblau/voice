@@ -122,7 +122,7 @@ says so. Their own files in the folder are never touched.
 
 ## Manual and automatic export
 
-Settings → **Markdown Export** (`MarkdownExportSettingsSection`, backed by
+Settings → iCloud → **Markdown Export** (`MarkdownExportSettingsSection`, backed by
 `MarkdownExportController`):
 
 - **Export Now** exports every conversation, including one being recorded.
@@ -193,7 +193,7 @@ account for step 7).
 
 | # | Step | Expected | Result |
 | - | ---- | -------- | ------ |
-| 1 | Record a short conversation with at least two topics, stop it. Settings → Markdown Export → Export Now. | Status: "N conversations exported: N new, 0 updated." | pending |
+| 1 | Record a short conversation with at least two topics, stop it. Settings → iCloud → Markdown Export → Export Now. | Status: "N conversations exported: N new, 0 updated." | pending |
 | 2 | Open Files → iCloud Drive. | A **Blau** folder with one `.md` per conversation, named `<date> <time> <title> (<id>).md`. | pending |
 | 3 | Open a file (Quick Look) or in a Markdown app. | Front matter, `# title`, a `##` heading per topic with its span and summary, utterances with `HH:mm:ss · You/Grok`. | pending |
 | 4 | Export Now again. Check the files' modification dates in Files (Get Info). | Status: "all up to date"; dates unchanged; no new files. | pending |

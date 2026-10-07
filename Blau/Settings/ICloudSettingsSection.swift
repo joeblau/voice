@@ -5,11 +5,14 @@ import SwiftUI
 import UIKit
 import os
 
-/// Settings → iCloud: sync status and exporting the conversations.
+/// Settings → iCloud: sync status, the Markdown copy of every conversation
+/// in iCloud Drive → Blau (`MarkdownExportSettingsSection`, #78), and a
+/// one-off export through the share sheet.
 struct ICloudSettingsView: View {
     var body: some View {
         Form {
             ICloudSettingsSection()
+            MarkdownExportSettingsSection()
             ConversationExportSection()
         }
         .navigationTitle("iCloud")
@@ -141,3 +144,14 @@ struct ICloudSettingsSection: View {
         }
     }
 }
+
+#if DEBUG
+    #Preview("iCloud") {
+        NavigationStack {
+            ICloudSettingsView()
+        }
+        .environment(PersistenceController.preview())
+        .environment(MarkdownExportController.local(persistence: .preview()))
+        .modelContainer(PersistenceController.previewContainer())
+    }
+#endif

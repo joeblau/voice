@@ -38,7 +38,7 @@ ToolbarItem(placement: .bottomBar) { SettingsButton { isShowingSettings = true }
 | Voice ID | `VoiceIDSettingsView` | Status of the voiceprint, enroll / re-enroll, **sensitivity** | Voiceprint: SwiftData, synced; sensitivity: `UserDefaults` (`blau.voiceID.sensitivity`), per device | The next segment the gate scores (`VoiceIDSettings.currentConfig()`) |
 | Transcription | `TranscriptionSettingsView` | Engine (always Apple's), second pass, language | `UserDefaults` (`blau.transcription.engine`, `blau.transcription.options`), per device | Engine and language at the next utterance boundary (`preferenceChanges()`); second pass per utterance (`isSecondPassEnabled()`) |
 | Knowledge | `KnowledgeSettingsView` | Opens the knowledge base: what Blau knows (profile, documents, people, facts), whether Grok may search it, and the on-device **search index** (`MemoryIndexSettingsSection`: status, progress, **Rebuild Index**, see [memory-indexer.md](memory-indexer.md)) | SwiftData, synced; the index is derived per device | Rebuild at once |
-| iCloud | `ICloudSettingsView` | Sync status, account, last sync; **Export Conversations** as Markdown through the share sheet | – | – |
+| iCloud | `ICloudSettingsView` | Sync status, account, last sync; **Markdown Export** to iCloud Drive → Blau (`MarkdownExportSettingsSection`, #78, [export.md](export.md)); **Export Conversations** as one Markdown file through the share sheet | Export settings: `UserDefaults` (see export.md) | Export Now at once; automatic export as conversations change |
 | Speech Models | `SpeechModelSettingsView` | Wi-Fi only, extra models, per-model download and delete, disk usage | `UserDefaults` (`blau.models.preferences`) | At once |
 | Privacy & Data | `PrivacySettingsView` | Where data lives; delete conversations, the knowledge base, the voiceprint, or everything | – | At once, and on the user's other devices as iCloud syncs the deletions |
 | Developer | `DeveloperSettingsView` | Performance HUD (`PerformanceHUDToggle`, #71, every build), feature flags, MetricKit diagnostics, **Export Logs** | HUD: `UserDefaults` (`blau.performanceHUD.*`); flag overrides: `UserDefaults`, DEBUG builds only | At once: the HUD appears over the main screen as soon as it is on |
@@ -92,8 +92,9 @@ availability is checked for that language. The language list is Apple's
 every conversation, oldest first, as one Markdown file: a heading per
 conversation (its title or its date), its time span, a heading per topic,
 and a paragraph per committed utterance led by **You**, **Grok** or
-**Blau**. Partials are left out. Writing to the iCloud Drive container is
-#78.
+**Blau**. Partials are left out. The Markdown Export section above it
+keeps one file per conversation in iCloud Drive → Blau instead (#78,
+[export.md](export.md)).
 
 **Delete data** (`DataEraser`, BlauPersistence) fetches and deletes every
 record of the chosen models one by one, then saves, so each deletion lands

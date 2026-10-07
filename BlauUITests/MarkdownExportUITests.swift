@@ -1,6 +1,6 @@
 import XCTest
 
-/// Settings → Markdown Export (#78). A test simulator has no iCloud Drive
+/// Settings → iCloud → Markdown Export (#78). A test simulator has no iCloud Drive
 /// (no Apple Account, or an unsigned build without the entitlement), so
 /// "Export Now" must explain why it can't export instead of failing
 /// silently. Files in iCloud Drive → Blau need a signed build on a device
@@ -20,8 +20,8 @@ final class MarkdownExportUITests: XCTestCase {
         app.launchEnvironment["BLAU_MODEL_FIXTURES"] = "1"
         app.launch()
         XCTAssertTrue(app.descendants(matching: .any)["blau.root"].waitForExistence(timeout: 10))
-        app.buttons["blau.settings.open"].tap()
-        XCTAssertTrue(app.collectionViews.firstMatch.waitForExistence(timeout: 10), "Settings did not open")
+        openSettingsPane(SettingsPaneID.iCloud, in: app)
+        XCTAssertTrue(app.navigationBars["iCloud"].waitForExistence(timeout: 10), "Settings → iCloud did not open")
         return app
     }
 
