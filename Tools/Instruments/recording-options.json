@@ -1,0 +1,15 @@
+{
+  "os_signpost" : {
+    "dynamicTracingEnabledSubsystems" : [
+      "com.joeblau.blau"
+    ],
+    "recordAllProcessesInSingleProcessMode" : false
+  },
+  "os_log" : {
+    "recordAllProcessesInSingleProcessMode" : false
+  },
+  "Hangs" : {
+    "detectPriorityInversions" : false,
+    "hangsThreshold" : 100
+  }
+}
