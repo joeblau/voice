@@ -1,6 +1,8 @@
 import BlauCore
+import BlauPersistence
 import BlauRealtime
 import BlauTranscription
+import SwiftData
 import SwiftUI
 
 /// Top-level view hosted by the app's window: the main screen (#40).
@@ -118,21 +120,33 @@ struct MainScreenScaffold: View {
     }
 }
 
-/// The main screen's content: the area the conversation (#42) and topic
-/// timeline (#56) fill. Until they land it shows the brand lockup and, while no
-/// usable xAI key is stored, the onboarding button.
+/// The main screen's content: the conversation (#42), and later the topic
+/// timeline (#56). It shows the running conversation, or else the most
+/// recent one; before there is any, the brand lockup and, while no usable xAI
+/// key is stored, the onboarding button.
 ///
-/// It is a scroll view that runs under the bottom bar's glass, anchored to the
-/// bottom like a conversation. The empty state is at least as tall as the
-/// area between the bars so it stays centered, and scrolls instead of clipping
-/// when Dynamic Type makes it taller than the screen.
+/// Either way it is a scroll view that runs under the bottom bar's glass,
+/// anchored to the bottom like a conversation. The empty state is at least as
+/// tall as the area between the bars so it stays centered, and scrolls instead
+/// of clipping when Dynamic Type makes it taller than the screen.
 struct MainScreen: View {
     /// Opens the xAI key onboarding step.
     var onConnectAccount: () -> Void = {}
 
     @Environment(XAIAccount.self) private var account
+    @Environment(AppEnvironment.self) private var environment
+    @Query(ChatTranscript.latestConversation) private var latestConversation: [Conversation]
 
     var body: some View {
+        if let conversationID = environment.chat.conversationID?.rawValue ?? latestConversation.first?.id {
+            ChatTranscriptView(conversationID: conversationID, onConnectAccount: onConnectAccount)
+                .accessibilityIdentifier(MainScreenAccessibility.content)
+        } else {
+            emptyState
+        }
+    }
+
+    private var emptyState: some View {
         // The reader's size is the area between the bars (it respects the
         // safe area); the scroll view inside still runs under them.
         GeometryReader { visible in
@@ -161,17 +175,31 @@ struct MainScreen: View {
 
 #Preview("Main screen") {
     let environment = AppEnvironment.preview()
-    RootView()
-        .appEnvironment(environment)
-        .environment(AppDiagnostics(store: nil))
-        .task { await environment.speechModels.start() }
+    PersistenceGate(persistence: environment.persistence) {
+        RootView()
+    }
+    .appEnvironment(environment)
+    .environment(AppDiagnostics(store: nil))
+    .task { await environment.speechModels.start() }
+}
+
+#Preview("Main screen, conversation") {
+    let environment = AppEnvironment.preview()
+    PersistenceGate(persistence: environment.persistence) {
+        RootView()
+    }
+    .appEnvironment(environment)
+    .environment(AppDiagnostics(store: nil))
+    .task { await ChatTranscriptFixture.seed(count: 60, into: environment.persistence) }
 }
 
 #Preview("Main screen, largest text") {
     let environment = AppEnvironment.preview()
-    RootView()
-        .appEnvironment(environment)
-        .environment(AppDiagnostics(store: nil))
-        .task { await environment.speechModels.start() }
-        .dynamicTypeSize(.accessibility5)
+    PersistenceGate(persistence: environment.persistence) {
+        RootView()
+    }
+    .appEnvironment(environment)
+    .environment(AppDiagnostics(store: nil))
+    .task { await environment.speechModels.start() }
+    .dynamicTypeSize(.accessibility5)
 }

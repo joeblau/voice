@@ -1,3 +1,4 @@
+import BlauAudio
 import BlauCore
 import Foundation
 
@@ -132,6 +133,11 @@ public struct TurnSnapshot: Sendable, Equatable {
     /// transcript can mark them as interrupted. Their stored text is what
     /// was heard.
     public var interruptedAgentUtterances: Set<UUID>
+    /// Grok's reply so far, one entry per message item, in order: the
+    /// transcript next to the stored utterance and the audio it belongs to.
+    /// The chat transcript (#42) reveals each one as its audio plays.
+    /// Empty between replies, like ``agentText``.
+    public var agentSpeech: [AgentSpeech]
 
     public init(
         state: TurnState = .paused,
@@ -146,7 +152,8 @@ public struct TurnSnapshot: Sendable, Equatable {
         session: RealtimeSessionContinuity = RealtimeSessionContinuity(),
         bargeIns: Int = 0,
         lastBargeIn: BargeInRecord? = nil,
-        interruptedAgentUtterances: Set<UUID> = []
+        interruptedAgentUtterances: Set<UUID> = [],
+        agentSpeech: [AgentSpeech] = []
     ) {
         self.state = state
         self.connection = connection
@@ -161,5 +168,27 @@ public struct TurnSnapshot: Sendable, Equatable {
         self.bargeIns = bargeIns
         self.lastBargeIn = lastBargeIn
         self.interruptedAgentUtterances = interruptedAgentUtterances
+        self.agentSpeech = agentSpeech
+    }
+}
+
+extension TurnSnapshot {
+    /// One message item of Grok's reply in progress.
+    public struct AgentSpeech: Sendable, Hashable {
+        /// The id the agent utterance is (or will be) stored under.
+        public var utteranceID: UUID
+        /// Where its audio plays: ask the player how much was heard.
+        public var playbackID: PlaybackItemID
+        /// The transcript received so far.
+        public var transcript: String
+        /// Wall-clock time the item started (its first audio or text).
+        public var startedAt: Date?
+
+        public init(utteranceID: UUID, playbackID: PlaybackItemID, transcript: String, startedAt: Date? = nil) {
+            self.utteranceID = utteranceID
+            self.playbackID = playbackID
+            self.transcript = transcript
+            self.startedAt = startedAt
+        }
     }
 }
