@@ -78,11 +78,11 @@ struct RecordButtonTests {
         #expect(RecordButtonFace.systemImage(for: .paused) == "mic.slash.fill")
         #expect(RecordButtonFace.systemImage(for: .error(.audioInterrupted)) == "exclamationmark.triangle.fill")
         #expect(RecordButtonFace.systemImage(for: .reconnecting) == "ellipsis")
-        #expect(RecordButtonFace.tint(for: .listening) == .red)
-        #expect(RecordButtonFace.tint(for: .reconnecting) == .red)
+        #expect(RecordButtonFace.tint(for: .listening) == .brand(.recordingFill))
+        #expect(RecordButtonFace.tint(for: .reconnecting) == .brand(.recordingFill))
         #expect(RecordButtonFace.tint(for: .paused) == .gray)
         #expect(RecordButtonFace.tint(for: .error(.audioUnavailable)) == .orange)
-        #expect(RecordButtonFace.tint(for: .idle) == .accentColor)
+        #expect(RecordButtonFace.tint(for: .idle) == .brand(.accentFill))
     }
 
     @Test func hapticsOnStartAndStop() {

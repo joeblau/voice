@@ -264,15 +264,15 @@ The identifiers live in `MainScreenAccessibility`.
 The record button (#41) is the main screen's primary control. It starts and
 ends a conversation, pauses listening, and shows where the conversation is.
 
-| State | Face | Tint | VoiceOver value |
+| State | Face | Fill ([branding.md](branding.md)) | VoiceOver value |
 | ----- | ---- | ---- | --------------- |
-| `idle` | `mic.fill` | accent | Not listening |
-| `connecting` | spinner (ellipsis with Reduce Motion) | accent | Connecting |
-| `listening` | `stop.fill` in a ring that follows the microphone level | red | Listening (", connecting to Grok" while the session opens) |
-| `agentSpeaking` | `speaker.wave.2.fill` in a ring and halo that follow Grok's level | red | Grok is speaking |
+| `idle` | `mic.fill` | `accentFill` | Not listening |
+| `connecting` | spinner (ellipsis with Reduce Motion) | `accentFill` | Connecting |
+| `listening` | `stop.fill` in a ring that follows the microphone level | `recordingFill` | Listening (", connecting to Grok" while the session opens) |
+| `agentSpeaking` | `speaker.wave.2.fill` in a ring and halo that follow Grok's level | `recordingFill` | Grok is speaking |
 | `paused` | `mic.slash.fill` | gray | Paused, microphone muted |
-| `reconnecting` | spinner (ellipsis with Reduce Motion) | red | Reconnecting the microphone (label End Conversation) |
-| `stopping` | spinner | red | Ending |
+| `reconnecting` | spinner (ellipsis with Reduce Motion) | `recordingFill` | Reconnecting the microphone (label End Conversation) |
+| `stopping` | spinner | `recordingFill` | Ending |
 | `error` | `exclamationmark.triangle.fill` | orange | Couldn't start / Lost the connection to Grok / Microphone in use by another app / ... |
 
 - **Tap** starts a conversation (also after a failed start) and ends a

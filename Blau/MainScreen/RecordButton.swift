@@ -171,13 +171,14 @@ struct RecordButtonFace: View {
         }
     }
 
-    /// The bar button's tint for `state`: the accent color to start, red
-    /// while a conversation is live (reconnecting included, so it doesn't
-    /// look like a fresh start), gray while paused, orange for errors.
+    /// The bar button's fill for `state`, behind the white face: the brand's
+    /// accent fill to start, its recording fill while a conversation is live
+    /// (reconnecting included, so it doesn't look like a fresh start; see
+    /// docs/branding.md), gray while paused, orange for errors.
     static func tint(for state: RecordButtonState) -> Color {
         switch state {
-        case .idle, .connecting: .accentColor
-        case .listening, .agentSpeaking, .reconnecting, .stopping: .red
+        case .idle, .connecting: .brand(.accentFill)
+        case .listening, .agentSpeaking, .reconnecting, .stopping: .brand(.recordingFill)
         case .paused: .gray
         case .error: .orange
         }
