@@ -96,6 +96,11 @@ final class AppEnvironment {
     /// app only).
     @ObservationIgnored private var deviceLock: DeviceLockObserver?
 
+    /// The spoken conversation loop (#36): the live audio pipeline feeding
+    /// the turn orchestrator in `realtime`. Only the live environment can
+    /// start it.
+    let voiceLoop: VoiceLoop
+
     /// The xAI key refresh started by the latest return to `active`, so tests
     /// can wait for it.
     @ObservationIgnored var xaiRefresh: Task<Void, Never>?
@@ -140,6 +145,9 @@ final class AppEnvironment {
         self.realtimeSession = realtimeSession
         self.conversationAudio = conversationAudio
         self.backgroundInference = backgroundInference
+        self.voiceLoop = VoiceLoop(
+            realtime: realtime, speechModels: speechModels, audio: conversationAudio,
+            backgroundInference: backgroundInference)
         self.lifecycle = AppLifecycleCoordinator(
             participants: Self.lifecycleOrder(
                 persistence: persistence, audio: audio, transcriber: transcriber,
@@ -183,10 +191,11 @@ final class AppEnvironment {
     }
 
     /// Ends the conversation: what the Live Activity's Stop button does.
-    /// Today that is turning the microphone off; the turn orchestrator (#36)
-    /// will also close the realtime session here.
+    /// Stops the voice loop, which closes the realtime session (#36), and
+    /// turns the microphone off.
     func stopConversation() async {
         Log.ui.notice("Stopping the conversation from the Live Activity")
+        await voiceLoop.stop()
         await audio.stopCapture()
     }
 
@@ -249,6 +258,9 @@ extension AppEnvironment {
         // #27: the on-device model download manager, which also installs the
         // shared text embedding model (#60).
         let models = speechModels ?? SpeechModels.makeManager()
+        let persistence = persistence ?? .live(isDebugBuild: AppConfig.isDebugBuild)
+        let xai = xai ?? XAIServices.make(config: config)
+        let realtimeSession = RealtimeSessionServices.make()
         return AppEnvironment(
             kind: .live,
             config: config,
@@ -264,17 +276,19 @@ extension AppEnvironment {
             transcriber: UnavailableService(subsystem: "transcription"),
             // #47: the voice ID verification gate.
             voiceGate: UnavailableService(subsystem: "voice ID"),
-            // #34 - #36: the Grok realtime session.
-            realtime: UnavailableService(subsystem: "realtime"),
+            // The Grok realtime session and the turn orchestrator (#34 - #36).
+            realtime: VoiceLoop.makeOrchestrator(
+                config: config, xai: xai, realtimeSession: realtimeSession, persistence: persistence,
+                player: conversationAudio.player),
             // The SwiftData stores with CloudKit sync (#20).
-            persistence: persistence ?? .live(isDebugBuild: AppConfig.isDebugBuild),
+            persistence: persistence,
             // #52 - #54: the topic segmenter.
             topics: UnavailableService(subsystem: "topics"),
             // #62 - #68: memory and its tools.
             memory: UnavailableService(subsystem: "memory"),
-            xai: xai ?? XAIServices.make(config: config),
+            xai: xai,
             speechModels: models,
-            realtimeSession: RealtimeSessionServices.make(),
+            realtimeSession: realtimeSession,
             conversationAudio: conversationAudio,
             textEmbeddings: TextEmbeddings.make(models: models)
         )

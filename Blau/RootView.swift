@@ -40,6 +40,7 @@ struct RootView: View {
                         }
                     #endif
                 }
+                .voiceLoopHUD()
         }
         // Outside the gear's overlay, so the card takes its own space below
         // the content and the gear sits above it instead of under it.

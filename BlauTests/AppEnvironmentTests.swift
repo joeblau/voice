@@ -116,7 +116,7 @@ struct AppEnvironmentFactoryTests {
         #expect(defaults.object(forKey: FeatureFlag.memoryTools.defaultsKey) as? Bool == false)
 
         for service in [
-            environment.transcriber as Any, environment.voiceGate, environment.realtime, environment.topics,
+            environment.transcriber as Any, environment.voiceGate, environment.topics,
             environment.memory,
         ] {
             #expect(service is UnavailableService)
@@ -127,7 +127,24 @@ struct AppEnvironmentFactoryTests {
         #expect(keeper === environment.conversationAudio?.keeper)
         #expect(await keeper.status == .inactive)
         #expect(await environment.conversationAudio?.controller.state == .idle)
-        await #expect(throws: ServiceUnavailableError.self) { try await environment.realtime.connect() }
+        await #expect(throws: ServiceUnavailableError.self) { try await environment.transcriber.start() }
+
+        // The realtime slot holds the turn orchestrator (#36), idle until the
+        // voice loop starts a conversation, and its replies play on the
+        // conversation audio's player.
+        let orchestrator = try #require(environment.realtime as? TurnOrchestrator)
+        #expect(await orchestrator.state == .paused)
+        #expect(orchestrator.audio as? StreamingAudioPlayer === environment.conversationAudio?.player)
+        #expect(environment.voiceLoop.isAvailable)
+        #expect(environment.voiceLoop.phase == .idle)
+    }
+
+    @Test func fakeEnvironmentsCantStartTheVoiceLoop() async {
+        let environment = AppEnvironment.make(kind: .unitTest)
+        #expect(!environment.voiceLoop.isAvailable)
+        await environment.voiceLoop.start()
+        #expect(environment.voiceLoop.phase == .failed(VoiceLoop.StartError.unavailable.description))
+        #expect(environment.voiceLoop.hudReadout.value(for: "Turn") == "paused")
     }
 
     @Test func uiTestEnvironmentKeepsFlagsInMemory() async {

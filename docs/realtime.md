@@ -4,8 +4,9 @@
 Blau's connection to the xAI Grok realtime voice API,
 `wss://api.x.ai/v1/realtime?model=…` (issue #34). It owns one WebSocket at a
 time, speaks typed events, keeps the connection alive and reopens it when it
-drops. Session settings (#35), turn orchestration (#36), barge-in (#37), tools
-(#38) and resumption (#39) are built on top of it.
+drops. Session settings (#35), [turn orchestration](#turn-orchestration)
+(#36), barge-in (#37), tools (#38) and resumption (#39) are built on top of
+it.
 
 ```swift
 let client = RealtimeClient(endpoint: config.xaiRealtimeURL, tokenProvider: services.tokenProvider)
@@ -352,6 +353,152 @@ A transcript never contains the client secret (it travels in the upgrade
 header, which isn't recorded), but it does contain what was said and the
 audio, so treat recordings of real conversations as private.
 
+## Turn orchestration
+
+`TurnOrchestrator` (in `Packages/BlauKit/Sources/BlauRealtime/Turns/`, #36)
+owns the client for a conversation. It commits each verified user utterance
+to Grok, plays the reply, shows both sides live and writes both to the
+transcript.
+
+```swift
+let orchestrator = TurnOrchestrator(
+    client: RealtimeClient(endpoint: config.xaiRealtimeURL, tokenProvider: xai.tokenProvider),
+    configurator: realtimeSession.configurator,
+    audio: StreamingAudioPlayer(),                  // AgentAudioOutput (#25)
+    transcript: conversationStore)                  // TurnTranscriptRecording, e.g. ConversationStore (#21)
+try await orchestrator.start(waitsForConnection: false)
+Task { await orchestrator.run(transcript: transcriber.events) }   // partials and finals (#29)
+for await snapshot in orchestrator.updates() { ... }             // state, live text, latency, usage
+await orchestrator.stop()
+```
+
+In the app, `AppEnvironment.live()` builds the orchestrator into the
+`realtime` slot (`VoiceLoop.makeOrchestrator`) and `VoiceLoop` composes the
+rest of the pipeline on `start()`: the audio session with capture and the
+player on one voice-processing engine, Silero VAD and the Parakeet
+transcriber (see `Blau/VoiceLoop/`). Until the record button (#41) exists,
+**Debug menu → Voice Loop** starts and stops it.
+
+### States
+
+```
+paused ──start()──▶ listening ──partial──▶ userSpeaking ──final──▶ committing
+committing ──item + response.create sent──▶ agentThinking ──first audio delta──▶ agentSpeaking
+agentSpeaking ──response.done and the player has drained──▶ listening
+any ──failed response, no response.created within 15 s, connection given up──▶ error ──partial / final──▶ …
+any ──stop()──▶ paused
+```
+
+`agentSpeaking` lasts until the reply has finished *playing*
+(`AgentAudioOutput.waitUntilIdle()`), not just arriving: Grok generates audio
+faster than real time, so `response.done` comes seconds before the last word
+is heard.
+
+### One turn
+
+| Step | What happens |
+| ---- | ------------ |
+| Final utterance | `TranscriptEvent.final`, or `send(_:)` from the voice gate (#47). Blank text and utterances the gate didn't `accept` are ignored. It is written to the transcript at once, then sent |
+| Commit | `conversation.item.create` with one `input_text` part, then `response.create` with `metadata: {"blau_turn": "<n>"}`, so `response.created` matches its turn even after a cancel (without the echo, responses are matched in order) |
+| Reply | `response.output_audio.delta` → the player, keyed by `item_id` and `content_index`. `response.output_audio_transcript.delta` (and `response.output_text.delta`) → `TurnSnapshot.agentText`. `response.output_audio.done` finishes the item in the player |
+| Done | `response.done` writes the agent utterance (text from the transcript deltas, or from the response's output items if they didn't arrive), adds the response's token usage, ends the signposts |
+| Stale events | Deltas of a cancelled or merged response are dropped by response id |
+
+Agent utterances are stored with the wall-clock time of their first audio
+and, on the conversation's timeline, an offset from the start of the
+conversation and the length of the audio received (or heard, if cut).
+
+### Rapid follow-ups and interruptions
+
+The issue asked to merge utterances less than 400 ms apart. Holding every
+final back for 400 ms in case a continuation follows would add 400 ms to
+every turn (the latency budget, #74, is 1.5 s), so nothing is held:
+
+- A final that starts less than `mergeWindow` (400 ms) after the previous
+  utterance ended **on the audio timeline** continues it. The reply in
+  progress is cancelled (`response.cancel`), the new text goes in as a
+  second user item and a new response is requested. Grok sees the two
+  items back to back; the transcript stores **one** user utterance (the
+  first one's id, the text joined, the ranges united). While the
+  connection is down, a continuation merges into the queued utterance.
+- A final that doesn't continue the previous one, while Grok is answering
+  or still playing, **interrupts** the reply the same way and starts a new
+  turn.
+
+Either way the cut reply is handled by what the user heard
+(`StreamingAudioPlayer.flush()` reports it): an item none of which was heard
+is removed from Grok's history (`conversation.item.delete`) and not stored;
+one cut part-way is truncated there (`conversation.item.truncate` with the
+played milliseconds) and stored with the share of its text that was heard,
+replaced by the transcript `conversation.item.truncated` brings. Triggering
+the same cut on *speech start* (VAD), with the echo guard, is barge-in (#37).
+
+### Connection
+
+- After every `.connected` the orchestrator sends `configure(_:)`'s
+  `session.update` before anything else, through the same serial send queue
+  as the turns. `followSettingsChanges(sending:)` runs for the
+  conversation's lifetime.
+- Utterances finalized while no session is ready are stored and **queued**.
+  On the next configured session they go out in order, as user items
+  followed by one `response.create`. A turn whose reply hadn't started when
+  the connection dropped is queued again; a reply cut off mid-way keeps what
+  arrived (played out and stored). Every send carries the session it was
+  decided for, so nothing meant for a dead session reaches the next one.
+- Each connection is a new server session, so Grok doesn't remember earlier
+  turns after a reconnect; resumption and reseeding are #39.
+- `start(waitsForConnection: false)` returns at once and connects in the
+  background (the voice loop uses it so the user can start talking while the
+  secret is minted). A connection that gives up moves the state to
+  `error(.connection)`; `connect()` tries again.
+
+### Latency and the HUD
+
+`TurnSnapshot.latency` keeps the last 200 turns of **end of utterance →
+first audio** (the same span as `realtime.firstAudio`) and **end of utterance
+→ `response.done`** (`realtime.turn`) as `RollingLatency`: last, p50, p95.
+Turns sent from the queue (they measure the outage) and turns that were
+merged or interrupted (they never ended) are not sampled. "End of utterance"
+is when the final reaches the orchestrator; ASR's own end-of-speech delay
+is `asr.eou`.
+
+With the **Performance HUD** flag on, `VoiceLoopHUD` shows
+`TurnHUDReadout`'s rows over the main screen:
+
+```
+Turn         agentSpeaking
+Realtime     connected
+EOU → audio  last 640 · p50 610 · p95 900 ms (n=12)
+Turn time    last 3120 · p50 2890 · p95 4410 ms (n=12)
+Tokens       4120 in · 960 out · 12 resp
+```
+
+The full HUD (#71) adds the other subsystems.
+
+### Usage
+
+`response.done`'s usage, cancelled responses included (they are billed), is
+summed per conversation in `TurnSnapshot.usage` and logged per response
+(`Log.realtime`, counts only). The SwiftData schema has no usage field, so
+it is not written to the store; adding it is a schema change (v3) for the
+cost view.
+
+### Tests
+
+`swift test --filter "TurnOrchestrator|TurnHelper"` runs the orchestrator
+against a real `RealtimeClient` over fake sockets on a `ManualClock`: a full
+turn and its state sequence, signposts and latency samples; text-only
+replies; transcripts from `response.done`; filtering; merging (in flight,
+unheard, queued); interruptions mid-reply and after `response.done`, with
+the truncate and the server's corrected transcript; queuing while
+disconnected and sending after `session.update`; requeuing a turn lost
+before its reply; a reply cut off by a drop; connect failures, failed
+responses and the response timeout; stop and restart; settings changes;
+flushing on backgrounding. `TurnOrchestratorIntegrationTests` adds the
+real `ConversationStore` over SwiftData (both roles stored, merges and cuts
+stored once), the `manual-text-turn` fixture replayed in lockstep, and the
+real `StreamingAudioPlayer` rendering the reply.
+
 ## Testing
 
 `swift test` in `Packages/BlauKit` covers, without the internet:
@@ -378,11 +525,15 @@ audio, so treat recordings of real conversations as private.
 | Check | How | Result |
 | ----- | --- | ------ |
 | Real session decodes | Run `LiveRealtimeRecordingTests` with a real key; it fails on any undecoded event | pending (needs xAI credentials) |
-| Drop on a device | Start a session on an iPhone, toggle Airplane Mode for 5 s, then off; Console (`category:realtime`) shows `Realtime connection lost` then `Realtime reconnected` | pending (needs a device and #36) |
-| Wi-Fi to cellular | Walk out of Wi-Fi range mid-session; the keepalive should notice within 25 s and reconnect | pending (needs a device and #36) |
-| Session accepted | With a real key, `session.updated` echoes `turn_detection.type: null`, the voice, 24 kHz PCM output and the speed; no `error` event | pending (needs xAI credentials and #36) |
-| Voice change mid-session | Change the voice and speed in Settings during a conversation; the next reply uses them | pending (needs xAI credentials and #36) |
+| Drop on a device | Start a session on an iPhone, toggle Airplane Mode for 5 s, then off; Console (`category:realtime`) shows `Realtime connection lost` then `Realtime reconnected` | pending (needs a device) |
+| Wi-Fi to cellular | Walk out of Wi-Fi range mid-session; the keepalive should notice within 25 s and reconnect | pending (needs a device) |
+| Session accepted | With a real key, `session.updated` echoes `turn_detection.type: null`, the voice, 24 kHz PCM output and the speed; no `error` event | pending (needs xAI credentials) |
+| Voice change mid-session | Change the voice and speed in Settings during a conversation; the next reply uses them | pending (needs a device and xAI credentials) |
 | Echo tool, live | Register `EchoTool`, ask Grok to "test the echo tool with the words blue harbor" with a real key, record it with `RealtimeTranscriptRecorder`; the session should match `echo-tool.jsonl` in shape (filler, `function_call`, one output, one `response.create`, an answer using the result) | pending (needs xAI credentials) |
 | Parallel calls, live | Ask a question that needs two lookups at once; Console (`category:realtime`) shows two `Running tool` lines and one `requested the follow-up`; no `conversation_already_has_active_response` error | pending (needs xAI credentials and #68 tools) |
-| Web and X search | Turn on Settings → Search → Web Search, ask about today's news; `session.updated` echoes `{"type": "web_search"}` and the answer is current | pending (needs xAI credentials and #36) |
-| Spoken filler | With a slow tool, Grok says something like "let me check" before the pause | pending (needs xAI credentials, a device and #36) |
+| Web and X search | Turn on Settings → Search → Web Search, ask about today's news; `session.updated` echoes `{"type": "web_search"}` and the answer is current | pending (needs xAI credentials) |
+| Spoken filler | With a slow tool, Grok says something like "let me check" before the pause | pending (needs xAI credentials and a device) |
+| Spoken conversation end to end | Install the speech models, add an xAI key, open **Debug menu → Voice Loop**, Start, and hold a ten-turn conversation on the speaker and on AirPods; every reply plays and the Voice Loop screen shows both sides | pending (needs a device and xAI credentials) |
+| Transcript stored for both roles | After the conversation above, the store holds one user and one agent utterance per turn, in order | pending (needs a device and xAI credentials) |
+| EOU → first audio p50 | Turn on **Performance HUD** in the debug menu; after 20 turns, record the HUD's p50 / p95 here and compare them with Instruments' `realtime.firstAudio` | pending (needs a device and xAI credentials) |
+| Echo | On the loudspeaker, Grok's own voice never produces a user utterance (VPIO echo cancellation; voice ID is #47) | pending (needs a device) |

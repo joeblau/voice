@@ -1,0 +1,244 @@
+import BlauAudio
+import BlauCore
+import BlauPersistence
+import BlauRealtime
+import BlauTelemetry
+import BlauTranscription
+import Foundation
+import Observation
+
+/// Runs a spoken conversation with Grok (#36): the live audio pipeline
+/// (voice-processing capture, Silero VAD, streaming Parakeet ASR) feeding the
+/// `TurnOrchestrator`, whose replies play through the `StreamingAudioPlayer`
+/// on the same audio engine.
+///
+/// The conversation audio (#26: the voice-processing engine with capture and
+/// playback, kept alive off screen by its `AudioSessionKeeper`) and the
+/// orchestrator are built once at launch (`ConversationAudio.live`,
+/// `makeOrchestrator`) and live in `AppEnvironment`; the VAD and ASR are
+/// built on each `start()`, because they need the downloaded speech models. Views read `snapshot` (state, live text,
+/// latency, usage) and `phase`. The record button (#41) will call `start()`
+/// and `stop()`; until then the DEBUG menu's Voice Loop screen does.
+@MainActor
+@Observable
+final class VoiceLoop {
+    enum Phase: Equatable {
+        case idle
+        case starting
+        case running
+        case failed(String)
+
+        var isActive: Bool { self == .starting || self == .running }
+    }
+
+    enum StartError: Error, CustomStringConvertible {
+        case unavailable
+        case modelsNotInstalled
+        case audio(String)
+
+        var description: String {
+            switch self {
+            case .unavailable: "The voice loop isn't available in this environment"
+            case .modelsNotInstalled: "The speech models aren't installed yet"
+            case .audio(let state): "The microphone couldn't start (\(state))"
+            }
+        }
+    }
+
+    private(set) var phase: Phase = .idle
+    /// The orchestrator's latest snapshot.
+    private(set) var snapshot = TurnSnapshot()
+
+    /// `nil` outside the live environment (previews and tests run on a
+    /// `FakeRealtimeService`).
+    let orchestrator: TurnOrchestrator?
+    /// The conversation audio the orchestrator's player belongs to; `nil`
+    /// outside the live environment.
+    private let audio: ConversationAudio?
+    private let speechModels: ModelManager
+    private let backgroundInference: BackgroundInferenceMonitor?
+
+    @ObservationIgnored private var pipeline: LiveVoicePipeline?
+    @ObservationIgnored private var transcriptTask: Task<Void, Never>?
+    @ObservationIgnored private var observation: Task<Void, Never>?
+
+    init(
+        realtime: any RealtimeService,
+        speechModels: ModelManager,
+        audio: ConversationAudio? = nil,
+        backgroundInference: BackgroundInferenceMonitor? = nil
+    ) {
+        let orchestrator = realtime as? TurnOrchestrator
+        self.orchestrator = orchestrator
+        self.audio = audio
+        self.speechModels = speechModels
+        self.backgroundInference = backgroundInference
+        if let orchestrator {
+            observation = Task { [weak self] in
+                for await snapshot in orchestrator.updates() {
+                    self?.snapshot = snapshot
+                }
+            }
+        }
+    }
+
+    isolated deinit {
+        observation?.cancel()
+        transcriptTask?.cancel()
+    }
+
+    /// Whether this environment can run a conversation.
+    var isAvailable: Bool {
+        guard let orchestrator, let audio else { return false }
+        return orchestrator.audio as? StreamingAudioPlayer === audio.player
+    }
+
+    /// The HUD rows for the current snapshot.
+    var hudReadout: TurnHUDReadout { TurnHUDReadout(snapshot) }
+
+    /// Builds the audio pipeline and starts a conversation. The realtime
+    /// session connects in the background; what the user says meanwhile is
+    /// queued.
+    func start() async {
+        guard !phase.isActive else { return }
+        guard isAvailable, let orchestrator, let audio else {
+            phase = .failed(StartError.unavailable.description)
+            return
+        }
+        phase = .starting
+        do {
+            let pipeline = try await LiveVoicePipeline.start(
+                audio: audio, models: speechModels, backgroundInference: backgroundInference)
+            self.pipeline = pipeline
+            try await orchestrator.start(waitsForConnection: false)
+            transcriptTask = Task { await pipeline.run(into: orchestrator) }
+            phase = .running
+            Log.ui.notice("Voice loop started")
+        } catch {
+            Log.ui.error("Voice loop failed to start: \(String(describing: error), privacy: .public)")
+            await pipeline?.stop()
+            pipeline = nil
+            phase = .failed(String(describing: error))
+        }
+    }
+
+    /// Commits what is being said, ends the conversation and releases the
+    /// microphone.
+    func stop() async {
+        guard phase.isActive else { return }
+        // The transcriber commits the utterance in progress on stop; the
+        // orchestrator stops once that has arrived.
+        await pipeline?.stopListening()
+        await transcriptTask?.value
+        transcriptTask = nil
+        await orchestrator?.stop()
+        await pipeline?.stop()
+        pipeline = nil
+        phase = .idle
+        Log.ui.notice("Voice loop stopped")
+    }
+
+    /// The live orchestrator: a realtime client minting its secrets on
+    /// device, Blau's session configuration, the conversation's 24 kHz
+    /// `player` and the SwiftData transcript.
+    static func makeOrchestrator(
+        config: AppConfig,
+        xai: XAIServices,
+        realtimeSession: RealtimeSessionServices,
+        persistence: PersistenceController,
+        player: StreamingAudioPlayer
+    ) -> TurnOrchestrator {
+        TurnOrchestrator(
+            client: RealtimeClient(endpoint: config.xaiRealtimeURL, tokenProvider: xai.tokenProvider),
+            configurator: realtimeSession.configurator,
+            audio: player,
+            transcript: PersistenceTranscriptRecorder(persistence: persistence)
+        )
+    }
+}
+
+/// The on-device half of the voice loop for one conversation: the VAD and
+/// streaming ASR over the conversation audio's capture, with the microphone
+/// started through its `AudioSessionKeeper` (#26) so the conversation keeps
+/// running off screen.
+@MainActor
+final class LiveVoicePipeline {
+    let transcriber: ParakeetStreamingTranscriber
+    private let stopAudio: @Sendable () async -> Void
+    private var vadTask: Task<Void, Never>?
+
+    private init(
+        transcriber: ParakeetStreamingTranscriber, vadTask: Task<Void, Never>?,
+        stopAudio: @escaping @Sendable () async -> Void
+    ) {
+        self.transcriber = transcriber
+        self.vadTask = vadTask
+        self.stopAudio = stopAudio
+    }
+
+    /// Loads the models, starts the conversation audio (capture and
+    /// playback on its engine), then the transcriber and VAD. The Silero
+    /// stage is registered with `backgroundInference`, which moves it off
+    /// the Neural Engine while Blau is off screen.
+    static func start(
+        audio: ConversationAudio,
+        models: ModelManager,
+        backgroundInference: BackgroundInferenceMonitor?
+    ) async throws -> LiveVoicePipeline {
+        #if os(iOS)
+            guard let vadDirectory = models.directory(for: .sileroVAD),
+                let asrDirectory = models.directory(for: .parakeetRealtimeEOU)
+            else { throw VoiceLoop.StartError.modelsNotInstalled }
+
+            let silero = try await SileroSpeechProbabilityModel(modelDirectory: vadDirectory)
+            let vad = VoiceActivitySegmenter(model: silero, inferenceObserver: backgroundInference)
+            let hub = audio.capture.hub
+            let transcriber = try await ParakeetStreamingTranscriber.load(
+                modelDirectory: asrDirectory, audio: hub, voiceActivity: vad)
+
+            do {
+                try await audio.keeper.startCapture()
+            } catch {
+                throw VoiceLoop.StartError.audio(String(describing: error))
+            }
+            let stage = silero.inferenceStage
+            await backgroundInference?.register(silero, budget: .milliseconds(256))
+            let keeper = audio.keeper
+            let stopAudio: @Sendable () async -> Void = {
+                await backgroundInference?.unregister(stage: stage)
+                await keeper.stopCapture()
+            }
+            do {
+                // The transcriber subscribes to VAD before VAD sees any audio.
+                try await transcriber.start()
+            } catch {
+                await stopAudio()
+                throw error
+            }
+            let vadTask = Task { await vad.run(on: hub) }
+            return LiveVoicePipeline(transcriber: transcriber, vadTask: vadTask, stopAudio: stopAudio)
+        #else
+            throw VoiceLoop.StartError.unavailable
+        #endif
+    }
+
+    /// Feeds the transcriber's events to the orchestrator until the
+    /// transcriber finishes.
+    nonisolated func run(into orchestrator: TurnOrchestrator) async {
+        await orchestrator.run(transcript: transcriber.events)
+    }
+
+    /// Stops the transcriber, which commits the utterance in progress and
+    /// ends its events (so `run(into:)` returns).
+    func stopListening() async {
+        await transcriber.finish()
+    }
+
+    /// Stops ASR, VAD and the audio session.
+    func stop() async {
+        await transcriber.finish()
+        vadTask?.cancel()
+        vadTask = nil
+        await stopAudio()
+    }
+}
