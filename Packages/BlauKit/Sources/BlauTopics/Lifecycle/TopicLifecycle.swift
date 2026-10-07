@@ -56,6 +56,14 @@ public enum TopicLifecycleEvent: Hashable, Sendable {
 /// final. The last topic is refined the same way when the conversation
 /// finishes.
 ///
+/// **Re-segmenting.** When the conversation finishes, its boundaries are
+/// checked once more against every exchange (`TopicResegmenter`, #55): a
+/// break between two topics that turn out to be the same is merged away, a
+/// boundary a little off is moved, and a change of subject the streaming
+/// segmenter missed becomes a topic if the labeling model agrees. Merged and
+/// split topics are titled again. Topics the user renamed, merged or split
+/// are never touched.
+///
 /// **Manual edits.** ``rename(_:to:)``, ``mergeWithPrevious(_:)`` and
 /// ``split(_:atUtterance:)`` work on any conversation's topics. A renamed
 /// title is final, and the store only writes a labeler's title over a
@@ -85,15 +93,22 @@ public actor TopicLifecycle: TopicService {
         /// closed and scored, if the user hasn't spoken again. `nil` waits
         /// for the user's next utterance.
         public var exchangeSettleDelay: Duration?
+        /// Offline re-segmentation when the conversation finishes (#55):
+        /// the thresholds, with the shortest topic taken from the
+        /// segmenter's `TopicConfig`. `nil` keeps the streaming topics as
+        /// they are.
+        public var resegmentation: TopicResegmenter.Configuration?
 
         public init(
             firstTitleAfterExchanges: Int = 3,
             opensTopicsAtCandidates: Bool = true,
-            exchangeSettleDelay: Duration? = .seconds(1)
+            exchangeSettleDelay: Duration? = .seconds(1),
+            resegmentation: TopicResegmenter.Configuration? = .standard
         ) {
             self.firstTitleAfterExchanges = max(1, firstTitleAfterExchanges)
             self.opensTopicsAtCandidates = opensTopicsAtCandidates
             self.exchangeSettleDelay = exchangeSettleDelay
+            self.resegmentation = resegmentation
         }
 
         public static let standard = Configuration()
@@ -111,10 +126,10 @@ public actor TopicLifecycle: TopicService {
     public nonisolated let labeling: TopicLabelingService
     public nonisolated let configuration: Configuration
 
-    private let store: any TopicStore
+    let store: any TopicStore
     private let makeSegmenter: @Sendable () async -> StreamingTopicSegmenter
     private let clock: any BlauClock
-    private let broadcaster = TopicEventBroadcaster()
+    let broadcaster = TopicEventBroadcaster()
 
     private var live: LiveConversation?
     /// Conversations whose topics were finished; utterances that still
@@ -244,6 +259,8 @@ public actor TopicLifecycle: TopicService {
     public func rename(_ topicID: UUID, to title: String) async throws {
         try await store.renameTopic(topicID, to: title)
         if let live {
+            // Re-segmentation leaves a topic the user named alone.
+            live.lockedTopics.insert(topicID)
             if live.provisional?.topicID == topicID {
                 // Naming a provisional topic accepts its break: the segmenter
                 // taking the candidate back must not merge the named topic away.
@@ -321,6 +338,8 @@ public actor TopicLifecycle: TopicService {
         if let open = existing.last, open.isOpen {
             conversation.currentTopicID = open.id
             conversation.topicStartUnits[open.id] = 0
+            // Its earlier exchanges aren't in this session's segmenter.
+            conversation.lockedTopics.insert(open.id)
             if !open.hasPlaceholderTitle {
                 conversation.titledTopics.insert(open.id)
             }
@@ -379,12 +398,25 @@ public actor TopicLifecycle: TopicService {
             await score(unit, in: conversation)
         }
         await handle(await conversation.pipeline.finish(), in: conversation)
+        let openTopic = conversation.currentTopicID
+        let resegmented = await resegment(conversation)
+        // Topics closing for the first time are announced as `.closed`;
+        // the others closed earlier and are revised (`.updated`).
+        var firstClose = resegmented.opened
+        if let openTopic { firstClose.insert(openTopic) }
+        for topicID in resegmented.relabeled where topicID != conversation.currentTopicID {
+            await refine(
+                topicID, in: conversation.id, finalizing: true, announcesClose: firstClose.contains(topicID),
+                retitle: resegmented.retitle.contains(topicID))
+        }
         if let current = conversation.currentTopicID {
             do {
                 if try await store.removeTopicIfEmpty(current) {
                     broadcaster.yield(.removed(topicID: current))
                 } else {
-                    await refine(current, in: conversation.id, finalizing: true)
+                    await refine(
+                        current, in: conversation.id, finalizing: true, announcesClose: firstClose.contains(current),
+                        retitle: resegmented.retitle.contains(current))
                 }
             } catch {
                 Log.topics.error("Couldn't finish the last topic: \(String(describing: error), privacy: .public)")
@@ -502,6 +534,7 @@ public actor TopicLifecycle: TopicService {
             conversation.topicStartUnits[topicID] = boundary.unitIndex
             if label != nil {
                 conversation.titledTopics.insert(topicID)
+                await noteLabelTitle(topicID, in: conversation.id)
             }
             await syncPipelineTitle(conversation)
             Log.topics.notice("Opened a provisional topic before exchange \(boundary.unitIndex, privacy: .public)")
@@ -555,8 +588,11 @@ public actor TopicLifecycle: TopicService {
             conversation.currentTopicID = newID
         }
         do {
-            _ = try await store.applyTopicLabel(
+            if try await store.applyTopicLabel(
                 newID, title: label.title, summary: label.summary, finalizesTitle: false)
+            {
+                await noteLabelTitle(newID, in: conversation.id)
+            }
         } catch {
             Log.topics.error("Couldn't title a confirmed topic: \(String(describing: error), privacy: .public)")
         }
@@ -634,8 +670,12 @@ public actor TopicLifecycle: TopicService {
     ///   - announcesClose: Whether a final title is reported as `.closed`
     ///     (the topic just closed) or as `.updated` (an edit revised a topic
     ///     that had closed before).
+    ///   - retitle: Re-segmentation merged or split the topic: replace its
+    ///     title even if it is final, as long as it is still the title a
+    ///     labeler wrote (never one the user typed).
     private func refine(
-        _ topicID: UUID, in conversationID: ConversationID?, finalizing: Bool, announcesClose: Bool = true
+        _ topicID: UUID, in conversationID: ConversationID?, finalizing: Bool, announcesClose: Bool = true,
+        retitle: Bool = false
     ) async {
         do {
             var previousTitle: String?
@@ -648,8 +688,23 @@ public actor TopicLifecycle: TopicService {
             let units = Self.units(of: try await store.topicUtterances(topicID))
             guard !units.isEmpty else { return }
             let result = await labeling.label(.topic(units, previousTitle: previousTitle))
-            _ = try await store.applyTopicLabel(
-                topicID, title: result.label.title, summary: result.label.summary, finalizesTitle: finalizing)
+            var applied = false
+            if retitle, let owner = live, owner.id == conversationID {
+                let snapshot = try await store.topicSnapshot(topicID)
+                if !owner.isUserOwned(snapshot) {
+                    // Compare-and-swap: a rename that lands meanwhile wins.
+                    applied = try await store.replaceTopicLabel(
+                        topicID, expectedTitle: snapshot.title, title: result.label.title,
+                        summary: result.label.summary)
+                }
+            }
+            if !applied {
+                applied = try await store.applyTopicLabel(
+                    topicID, title: result.label.title, summary: result.label.summary, finalizesTitle: finalizing)
+            }
+            if applied {
+                await noteLabelTitle(topicID, in: conversationID)
+            }
             await emit(topicID) { finalizing && announcesClose ? .closed($0) : .updated($0) }
         } catch {
             Log.topics.error(
@@ -690,6 +745,8 @@ public actor TopicLifecycle: TopicService {
                 conversationID = conversation.id
             }
             conversation.forget(topicID)
+            // The user drew this topic's edges; re-segmentation keeps them.
+            conversation.lockedTopics.insert(survivor)
             await syncPipelineTitle(conversation)
         }
         broadcaster.yield(.removed(topicID: topicID))
@@ -715,6 +772,7 @@ public actor TopicLifecycle: TopicService {
         let newID = try await store.splitTopic(topicID, at: utterances[index].startedAt, title: Topic.placeholderTitle)
         try await store.flush()
         if let conversation = live, conversation.knows(topicID) {
+            conversation.lockedTopics.formUnion([topicID, newID])
             if conversation.currentTopicID == topicID {
                 conversation.currentTopicID = newID
             }
@@ -745,7 +803,16 @@ public actor TopicLifecycle: TopicService {
 
     // MARK: Helpers
 
-    private func emit(_ topicID: UUID, _ event: (TopicSnapshot) -> TopicLifecycleEvent) async {
+    /// Remembers the title a labeler just wrote, so re-segmentation can
+    /// tell it from a title the user typed (both are final in the store).
+    private func noteLabelTitle(_ topicID: UUID, in conversationID: ConversationID?) async {
+        guard let live, live.id == conversationID, let snapshot = try? await store.topicSnapshot(topicID) else {
+            return
+        }
+        live.labelTitles[topicID] = snapshot.title
+    }
+
+    func emit(_ topicID: UUID, _ event: (TopicSnapshot) -> TopicLifecycleEvent) async {
         guard let snapshot = try? await store.topicSnapshot(topicID) else { return }
         broadcaster.yield(event(snapshot))
     }
@@ -769,7 +836,7 @@ public actor TopicLifecycle: TopicService {
 // MARK: - Live state
 
 /// A candidate boundary shown as a topic before the segmenter confirmed it.
-private struct ProvisionalBreak {
+struct ProvisionalBreak {
     let topicID: UUID
     let boundary: TopicBoundary
     /// The topic it was split from, which the boundary closes.
@@ -781,7 +848,7 @@ private struct ProvisionalBreak {
 
 /// What the lifecycle tracks about the conversation being recorded. Only
 /// touched on the lifecycle's actor.
-private final class LiveConversation {
+final class LiveConversation {
     let id: ConversationID
     let startedAt: Date
     let pipeline: TopicPipeline
@@ -804,6 +871,11 @@ private final class LiveConversation {
     /// The user merged away the provisional topic of the pending candidate,
     /// so the event that resolves it (confirmed or taken back) is ignored.
     var ignoresPendingCandidate = false
+    /// Topics re-segmentation must leave alone: renamed, merged or split by
+    /// the user, or carried over from an earlier session.
+    var lockedTopics: Set<UUID> = []
+    /// The last title a labeler wrote to each topic.
+    var labelTitles: [UUID: String] = [:]
 
     init(id: ConversationID, startedAt: Date, pipeline: TopicPipeline) {
         self.id = id
@@ -819,6 +891,18 @@ private final class LiveConversation {
     func forget(_ topicID: UUID) {
         topicStartUnits[topicID] = nil
         titledTopics.remove(topicID)
+        labelTitles[topicID] = nil
+    }
+
+    /// Whether `topic` is the user's: re-segmentation neither moves its
+    /// edges nor writes its title. That is a topic in `lockedTopics`, one
+    /// this session didn't open, or one whose final title isn't the one a
+    /// labeler wrote here (renamed some other way, such as on another
+    /// device).
+    func isUserOwned(_ topic: TopicSnapshot) -> Bool {
+        if lockedTopics.contains(topic.id) || !knows(topic.id) { return true }
+        if topic.titleIsProvisional { return false }
+        return labelTitles[topic.id] != topic.title
     }
 
     /// `unit` on a timeline the segmenter accepts: measured from the
@@ -859,7 +943,7 @@ private final class LiveConversation {
 // MARK: - Broadcasting
 
 /// Fans lifecycle events out to every subscriber.
-private final class TopicEventBroadcaster: Sendable {
+final class TopicEventBroadcaster: Sendable {
     private let continuations = Mutex<[UUID: AsyncStream<TopicLifecycleEvent>.Continuation]>([:])
 
     func subscribe() -> AsyncStream<TopicLifecycleEvent> {

@@ -27,7 +27,8 @@ struct LifecycleFixture {
     init(
         _ transcript: ScriptedTranscript,
         labeler: ScriptedLabeler = .lifecycle(),
-        configuration: TopicLifecycle.Configuration = .standard
+        configuration: TopicLifecycle.Configuration = .standard,
+        topicConfig: TopicConfig = .default
     ) throws {
         self.transcript = transcript
         self.labeler = labeler
@@ -38,7 +39,8 @@ struct LifecycleFixture {
         clock = ManualClock()
         let labeling = TopicLabelingService.test([labeler])
         lifecycle = TopicLifecycle(store: store, labeling: labeling, configuration: configuration, clock: clock) {
-            StreamingTopicSegmenter(embedder: LexicalTextEmbedder(), signposter: .disabled(.topics))
+            StreamingTopicSegmenter(
+                embedder: LexicalTextEmbedder(), config: topicConfig, signposter: .disabled(.topics))
         }
         let units = transcript.units()
         origin = units.first?.startedAt ?? Date(timeIntervalSinceReferenceDate: 800_000_000)

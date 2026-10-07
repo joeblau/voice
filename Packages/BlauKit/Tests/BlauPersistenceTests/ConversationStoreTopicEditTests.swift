@@ -280,6 +280,45 @@ struct ConversationStoreTopicEditTests {
         #expect(try await store.topicSnapshot(topic).title == "Refined")
     }
 
+    /// Offline re-segmentation (#55) re-titles a refined topic it merged or
+    /// split, but only while the title is still the one it expects: a
+    /// manual title is never replaced.
+    @Test func replacingALabelNeedsTheExpectedTitle() async throws {
+        let fixture = try StoreFixture()
+        let store = fixture.store
+        let (_, topic, _) = try await conversation(fixture, utterancesAt: [1])
+        #expect(try await store.applyTopicLabel(topic, title: "Refined", summary: "Old.", finalizesTitle: true))
+
+        #expect(
+            try await store.replaceTopicLabel(topic, expectedTitle: "Refined", title: " Merged Topic ", summary: "New.")
+        )
+        var snapshot = try await store.topicSnapshot(topic)
+        #expect(snapshot.title == "Merged Topic")
+        #expect(!snapshot.titleIsProvisional)
+        #expect(snapshot.summary == "New.")
+
+        try await store.renameTopic(topic, to: "Mine")
+        #expect(
+            !(try await store.replaceTopicLabel(
+                topic, expectedTitle: "Merged Topic", title: "Again", summary: "Newer.")))
+        snapshot = try await store.topicSnapshot(topic)
+        #expect(snapshot.title == "Mine")
+        // The summary is still refreshed, as with `applyTopicLabel`.
+        #expect(snapshot.summary == "Newer.")
+    }
+
+    @Test func replacingAProvisionalLabelFinalizesIt() async throws {
+        let fixture = try StoreFixture()
+        let store = fixture.store
+        let (_, topic, _) = try await conversation(fixture, utterancesAt: [1])
+        #expect(
+            try await store.replaceTopicLabel(
+                topic, expectedTitle: Topic.placeholderTitle, title: "Split Part", summary: nil))
+        let snapshot = try await store.topicSnapshot(topic)
+        #expect(snapshot.title == "Split Part")
+        #expect(!snapshot.titleIsProvisional)
+    }
+
     @Test func anEmptyRenameThrows() async throws {
         let fixture = try StoreFixture()
         let (_, topic, _) = try await conversation(fixture, utterancesAt: [1])

@@ -82,7 +82,9 @@ public struct TopicSnapshot: Identifiable, Hashable, Sendable {
 /// write a title: the lifecycle only writes over a provisional title
 /// (`applyTopicLabel`), and a manual rename (`renameTopic`) makes it final.
 /// So a manual title is never overwritten. A title refined when the topic
-/// closed is final too, so it isn't refined twice.
+/// closed is final too, so it isn't refined twice. The one exception is
+/// offline re-segmentation (#55), which re-titles a topic it merged or split
+/// with `replaceTopicLabel`, a compare-and-swap on the title it wrote.
 extension ConversationStore {
     // MARK: Reading
 
@@ -337,6 +339,37 @@ extension ConversationStore {
         {
             if topic.title != title { topic.title = title }
             if finalizesTitle { topic.titleIsProvisional = false }
+            appliedTitle = true
+        }
+        if let summary = summary?.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty,
+            topic.summary != summary
+        {
+            topic.summary = summary
+        }
+        noteChanges()
+        return appliedTitle
+    }
+
+    /// Replaces a topic's title, provisional or final, but only while it is
+    /// still `expectedTitle`: for offline re-segmentation (#55), which
+    /// re-titles a topic it merged or split after that topic's title was
+    /// refined. The caller passes the title it wrote itself, so a manual
+    /// title, including one the user typed while the labeler was running,
+    /// is never overwritten. The title becomes final. The summary is always
+    /// written, as in `applyTopicLabel`.
+    ///
+    /// - Returns: Whether the title was written.
+    /// - Throws: `ConversationStoreError.topicNotFound`.
+    @discardableResult
+    public func replaceTopicLabel(
+        _ topicID: UUID, expectedTitle: String, title: String, summary: String?
+    ) throws -> Bool {
+        let topic = try topic(topicID)
+        var appliedTitle = false
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty, topic.title == expectedTitle {
+            if topic.title != title { topic.title = title }
+            if topic.titleIsProvisional { topic.titleIsProvisional = false }
             appliedTitle = true
         }
         if let summary = summary?.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty,

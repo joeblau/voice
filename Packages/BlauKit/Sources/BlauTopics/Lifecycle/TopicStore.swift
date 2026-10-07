@@ -17,6 +17,7 @@ public protocol TopicStore: Sendable {
     func mergeTopicWithPrevious(_ topicID: UUID) async throws -> UUID
     func removeTopicIfEmpty(_ topicID: UUID) async throws -> Bool
     func applyTopicLabel(_ topicID: UUID, title: String?, summary: String?, finalizesTitle: Bool) async throws -> Bool
+    func replaceTopicLabel(_ topicID: UUID, expectedTitle: String, title: String, summary: String?) async throws -> Bool
     func renameTopic(_ topicID: UUID, to title: String) async throws
     func topicSnapshot(_ topicID: UUID) async throws -> TopicSnapshot
     func topicSnapshots(in conversationID: ConversationID) async throws -> [TopicSnapshot]
@@ -61,6 +62,12 @@ public struct DeferredTopicStore: TopicStore {
         _ topicID: UUID, title: String?, summary: String?, finalizesTitle: Bool
     ) async throws -> Bool {
         try await store().applyTopicLabel(topicID, title: title, summary: summary, finalizesTitle: finalizesTitle)
+    }
+
+    public func replaceTopicLabel(
+        _ topicID: UUID, expectedTitle: String, title: String, summary: String?
+    ) async throws -> Bool {
+        try await store().replaceTopicLabel(topicID, expectedTitle: expectedTitle, title: title, summary: summary)
     }
 
     public func renameTopic(_ topicID: UUID, to title: String) async throws {

@@ -118,6 +118,7 @@ struct SharedEmbedderTopicSegmentationTests {
 
             var rows: [String] = []
             var pkTotal = 0.0
+            var resegmentedPkTotal = 0.0
             for transcript in ScriptedTranscript.all {
                 let segmenter = StreamingTopicSegmenter(
                     embedder: embedder, config: config, signposter: .disabled(.topics))
@@ -134,9 +135,19 @@ struct SharedEmbedderTopicSegmentationTests {
                 let windowDiff = SegmentationMetrics.windowDiff(
                     reference: transcript.boundaries, hypothesis: found, count: transcript.count)
                 pkTotal += pk
+                // Offline re-segmentation (#55) on the same vectors.
+                let units = transcript.units()
+                let resegmented = TopicResegmenter(
+                    configuration: TopicResegmenter.Configuration.standard.matching(config)
+                ).resegment(
+                    embeddings: await segmenter.embeddings, timeRanges: units.map(\.timeRange), boundaries: found)
+                let resegmentedPk = SegmentationMetrics.pk(
+                    reference: transcript.boundaries, hypothesis: resegmented.boundaries, count: transcript.count)
+                resegmentedPkTotal += resegmentedPk
+                #expect(resegmentedPk <= pk + 1e-12, "\(transcript.name): re-segmentation made it worse")
                 let deepest = depths.sorted(by: >).prefix(3).map { String(format: "%.3f", $0) }
                 rows.append(
-                    "| `\(transcript.name)` | \(transcript.boundaries) | \(found) | \(String(format: "%.2f", pk)) / \(String(format: "%.2f", windowDiff)) | \(deepest.joined(separator: ", ")) |"
+                    "| `\(transcript.name)` | \(transcript.boundaries) | \(found) | \(String(format: "%.2f", pk)) / \(String(format: "%.2f", windowDiff)) | \(deepest.joined(separator: ", ")) | \(resegmented.boundaries) (Pk \(String(format: "%.2f", resegmentedPk))) |"
                 )
                 if let digression = transcript.digression {
                     let span = digression.lowerBound...digression.upperBound
@@ -148,11 +159,12 @@ struct SharedEmbedderTopicSegmentationTests {
                 """
                 ## Topics on \(model.modelVersion), minimumDepth \(config.minimumDepth)
 
-                | Transcript | Reference | Found | Pk / WindowDiff | Deepest gaps |
-                | --- | --- | --- | --- | --- |
+                | Transcript | Reference | Found | Pk / WindowDiff | Deepest gaps | Re-segmented (#55) |
+                | --- | --- | --- | --- | --- | --- |
                 \(rows.joined(separator: "\n"))
 
-                Mean Pk \(String(format: "%.3f", meanPk))
+                Mean Pk \(String(format: "%.3f", meanPk)), re-segmented \(
+                    String(format: "%.3f", resegmentedPkTotal / Double(ScriptedTranscript.all.count)))
                 """)
             #expect(meanPk <= 0.25)
         }
