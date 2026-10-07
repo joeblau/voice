@@ -94,6 +94,17 @@ public final class MetricKitSignpostBackend: SignpostBackend {
         }
     }
 
+    /// The message goes to `base` only: `mxSignpost` intervals carry no end
+    /// message, and MetricKit aggregates by name.
+    public func endInterval(_ name: StaticString, _ token: SignpostIntervalToken, message: String) {
+        if token.baseActive {
+            base.endInterval(name, token, message: message)
+        }
+        if let id = token.metricKitID {
+            emitter.endInterval(name, id: id)
+        }
+    }
+
     /// Events go to `base` only: MetricKit aggregates intervals, not events.
     public func emitEvent(_ name: StaticString) {
         guard base.isEnabled else { return }
@@ -114,7 +125,8 @@ extension PipelineInterval {
         switch self {
         case .asrEndOfUtterance, .voiceIDVerify, .realtimeTurn, .realtimeFirstAudio, .topicsLabel, .memorySearch:
             true
-        case .captureFrame, .vadChunk, .asrChunk, .voiceIDEmbed, .topicsSegment, .memoryEmbed, .dbSave:
+        case .captureFrame, .playbackFirstBuffer, .vadChunk, .asrChunk, .voiceIDEmbed, .realtimeConnect, .realtimeEvent,
+            .topicsSegment, .memoryEmbed, .dbSave:
             false
         }
     }

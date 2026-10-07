@@ -88,6 +88,19 @@ struct MetricKitSignpostTests {
         #expect(base.openIntervals.isEmpty)
     }
 
+    /// `realtime.event` and `realtime.connect` end with a message (#104); the
+    /// realtime signposter is a `MetricKitSignpostBackend`, so it must pass
+    /// the message on rather than fall back to the default that drops it.
+    @Test func endMessagesReachTheBase() {
+        let signposter = makeSignposter()
+        signposter.beginInterval(.realtimeEvent).end(message: "response.output_audio.delta")
+        signposter.beginInterval(.realtimeTurn).end(message: "completed")
+
+        #expect(base.endMessages(of: "realtime.event") == ["response.output_audio.delta"])
+        #expect(base.endMessages(of: "realtime.turn") == ["completed"])
+        #expect(emitter.calls == [.begin("realtime.turn", 1), .end("realtime.turn", 1)])
+    }
+
     @Test func eventsOnlyGoToTheBase() {
         makeSignposter().event("realtime.bargeIn")
         #expect(base.events == ["realtime.bargeIn"])
@@ -95,11 +108,12 @@ struct MetricKitSignpostTests {
     }
 
     @Test func disabledEmitterSkipsMetricKit() {
+        let disabled = RecordingMetricEmitter(isEnabled: false)
         let backend = MetricKitSignpostBackend(
-            base: base, emitter: RecordingMetricEmitter(isEnabled: false),
-            reportedIntervals: [PipelineInterval.realtimeTurn.name])
+            base: base, emitter: disabled, reportedIntervals: [PipelineInterval.realtimeTurn.name])
         Signposter(category: .realtime, backend: backend).withInterval(.realtimeTurn) {}
         #expect(base.completedIntervals == ["realtime.turn"])
+        #expect(disabled.calls.isEmpty)
     }
 
     @Test func disabledBaseStillReportsToMetricKit() {
@@ -135,6 +149,9 @@ struct MetricKitSignpostTests {
     @Test func intervalsByCategory() {
         #expect(PipelineInterval.metricKitIntervals(in: .realtime) == [.realtimeTurn, .realtimeFirstAudio])
         #expect(PipelineInterval.metricKitIntervals(in: .audio).isEmpty)
+        #expect(!PipelineInterval.playbackFirstBuffer.reportsToMetricKit)
+        #expect(!PipelineInterval.realtimeConnect.reportsToMetricKit)
+        #expect(!PipelineInterval.realtimeEvent.reportsToMetricKit)
     }
 
     @Test func defaultBackendsAddMetricKitWhereNeeded() {

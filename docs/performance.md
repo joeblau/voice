@@ -447,9 +447,15 @@ and the code in sync.
 | `topics.label`        | `topics`   | On-device Foundation Models call, rare but slow     |
 | `memory.search`       | `memory`   | Retrieval time behind `search_memory`               |
 
-Per-chunk intervals (`capture.frame`, `vad.chunk`, `asr.chunk`) and the
-frequent `voiceid.embed`, `topics.segment`, `memory.embed` and `db.save`
-stay out: they would swamp MetricKit's signpost budget. Use the shared
+Per-chunk and per-frame intervals (`capture.frame`, `vad.chunk`,
+`asr.chunk`, `realtime.event`) and the frequent `voiceid.embed`,
+`topics.segment`, `memory.embed` and `db.save` stay out: they would swamp
+MetricKit's signpost budget. `playback.firstBuffer` also stays out: it
+starts where `realtime.firstAudio` ends and only times local jitter-buffer
+priming, so the `audio` category stays Instruments-only. `realtime.connect`
+runs once per session, before any turn, and stays Instruments-only for now.
+End messages (`realtime.event`'s event type) only reach Instruments:
+`mxSignpost` intervals carry none. Use the shared
 `Signposts` statics (or `Signposts.defaultBackend(for:)`) to get both;
 a `Signposter(category:)` built by hand only emits `os_signpost`.
 
