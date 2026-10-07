@@ -54,6 +54,9 @@ public enum PipelineInterval: CaseIterable, Sendable {
     case memoryEmbed
     /// One hybrid memory search (BM25 + vector + fusion).
     case memorySearch
+    /// Extracting facts and entities from one closed topic (#66): the text
+    /// model call, entity resolution and the SwiftData write.
+    case memoryExtract
     /// One SwiftData save.
     case dbSave
 
@@ -78,6 +81,7 @@ public enum PipelineInterval: CaseIterable, Sendable {
         case .topicsLabel: "topics.label"
         case .memoryEmbed: "memory.embed"
         case .memorySearch: "memory.search"
+        case .memoryExtract: "memory.extract"
         case .dbSave: "db.save"
         }
     }
@@ -90,7 +94,7 @@ public enum PipelineInterval: CaseIterable, Sendable {
         case .voiceIDEmbed, .voiceIDVerify: .voiceID
         case .realtimeTurn, .realtimeFirstAudio, .realtimeConnect, .realtimeEvent: .realtime
         case .topicsSegment, .topicsLabel: .topics
-        case .memoryEmbed, .memorySearch: .memory
+        case .memoryEmbed, .memorySearch, .memoryExtract: .memory
         case .dbSave: .data
         }
     }

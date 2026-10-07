@@ -54,6 +54,9 @@ extension AppEnvironment {
             persistenceRefresh = Task { await persistence.refresh() }
             // The embedding model may have been installed meanwhile (#63).
             memoryIndexing.refresh()
+            // Topics waiting for fact extraction (#66): the key or the
+            // network may be back.
+            memoryLearning.resume()
         }
 
         #if canImport(UIKit)
@@ -106,7 +109,8 @@ extension AppEnvironment {
 /// environment: the `AppEnvironment` itself, its `FeatureFlags`, its
 /// `AppLifecycleCoordinator`, its `XAIAccount`, its `PersistenceController`,
 /// its speech `ModelManager`, its `TranscriptionSettings`, its
-/// `PerformanceStatus` and its `MarkdownExportController`.
+/// `MemoryLearningSettings`, its `PerformanceStatus` and its
+/// `MarkdownExportController`.
 ///
 /// The SwiftData container is not set here: it is replaced when the iCloud
 /// account changes, so `PersistenceGate` (inside this modifier in the app)
@@ -124,6 +128,7 @@ struct AppEnvironmentModifier: ViewModifier {
             .environment(environment.persistence)
             .environment(environment.speechModels)
             .environment(environment.transcriptionSettings)
+            .environment(environment.memoryLearning.settings)
             .environment(environment.performanceStatus)
             .environment(environment.memoryIndexing)
             .environment(environment.markdownExport)

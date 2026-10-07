@@ -168,6 +168,9 @@ The complete list of declared edges:
 - [memory-search.md](memory-search.md): hybrid retrieval (weighted RRF of
   BM25 and vectors tuned on the eval set, time expressions, entity
   expansion, the reranker hook, latency).
+- [memory-extraction.md](memory-extraction.md): the post-conversation
+  fact and entity extraction pipeline (add-only, validity-dated facts,
+  entity resolution, the privacy toggle and "What Blau Learned").
 - [embeddings.md](embeddings.md): the shared text embedding service
   (EmbeddingGemma 256-d int8): tokenizer, token table, batches, model
   versions, and how topics use it.

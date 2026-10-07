@@ -12,7 +12,7 @@ struct PipelineIntervalTests {
                 "capture.frame", "vad.chunk", "asr.chunk", "asr.eou", "asr.secondPass", "model.download",
                 "model.warmUp", "voiceid.embed", "voiceid.verify", "realtime.turn", "realtime.firstAudio",
                 "realtime.connect", "realtime.event", "playback.firstBuffer", "topics.segment", "topics.label",
-                "memory.embed", "memory.search", "db.save",
+                "memory.embed", "memory.search", "memory.extract", "db.save",
             ]
         )
     }
@@ -53,6 +53,7 @@ struct PipelineIntervalTests {
         #expect(categories["topics.label"] == .topics)
         #expect(categories["memory.embed"] == .memory)
         #expect(categories["memory.search"] == .memory)
+        #expect(categories["memory.extract"] == .memory)
         #expect(categories["db.save"] == .data)
     }
 
