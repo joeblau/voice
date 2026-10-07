@@ -57,8 +57,12 @@ The launch screen is the `UILaunchScreen` dictionary, not a storyboard:
 | `UIColorName` | `LaunchBackground` | Equal to the system background in both appearances, so launch hands over to the main screen without a flash |
 | `UIImageName` | `BrandMark` | The waveform in the accent blue, 96 × 96 pt, centered |
 
-The main screen's empty state (`BrandLockup`) shows the same mark above the
-"Blau" wordmark, so the mark stays put while the app finishes launching.
+The main screen's empty state (`BrandLockup`) shows the same mark, at the
+same size, above the "Blau" wordmark. It doesn't sit in exactly the same
+place: the launch image is centered on the whole screen, while the lockup is
+centered in the area between the bars and sits above the onboarding button
+until a key is stored, so at handoff the mark moves up by a few dozen points
+on the same background.
 
 ## Color tokens
 
@@ -67,20 +71,47 @@ Code reads them through `BrandColor` and `TopicDotColor`
 (`Blau/Branding/BrandColor.swift`), never as literals:
 `Color.brand(.recording)`, `Color.topicDot(colorSeed: topic.colorSeed)`.
 
+The brand colors come in two kinds:
+
+- A **tint** (`accent`, `recording`) is drawn on the background as text or a
+  glyph. It gets lighter in dark mode and, with Increased Contrast, moves
+  further from the background.
+- A **fill** (`accentFill`, `recordingFill`) is drawn behind a white label:
+  a prominent button's background. It stays deep in dark mode and gets darker
+  with Increased Contrast, so the label stays legible. Every prominent button
+  uses one through `.brandProminentButtonStyle()` (the record button passes
+  `.recordingFill` while recording).
+
+One color can't be both. White on the dark accent `#4A7BFF` is 3.8:1, and on
+its increased-contrast variant `#8AAEFF` only 2.2:1.
+
 | Token | Color set | Light | Dark | Increased contrast (light / dark) | Use |
 | ----- | --------- | ----- | ---- | --------------------------------- | --- |
-| `accent` | `AccentColor` | `#2152E8` | `#4A7BFF` | `#1A3FBF` / `#8AAEFF` | The app's global accent (`ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME`): tint, buttons, the record button |
+| `accent` | `AccentColor` | `#2152E8` | `#4A7BFF` | `#1A3FBF` / `#8AAEFF` | The app's global accent (`ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME`): tint, links, toggles, bordered buttons |
+| `accentFill` | `Brand/AccentFill` | `#2152E8` | `#2F5FEE` | `#1A3FBF` / `#1E4BD6` | Behind a white label: prominent buttons, the idle record button |
 | `launchBackground` | `Brand/LaunchBackground` | `#FFFFFF` | `#000000` | | Launch screen background |
-| `recording` | `Brand/RecordingTint` | `#D92D20` | `#F0443A` | `#B02018` / `#FF7A70` | The record button while recording |
+| `recording` | `Brand/RecordingTint` | `#D92D20` | `#F0443A` | `#B02018` / `#FF7A70` | Recording state as text or a glyph |
+| `recordingFill` | `Brand/RecordingFill` | `#D92D20` | `#C7271C` | `#A81F16` / `#B02018` | Behind a white label: the record button while recording |
 
 Contrast, WCAG 2 (checked by `BrandingTests`):
 
-- `accent` and `recording` reach at least 4.5:1 against the system background
-  in both appearances (text contrast), and the increased-contrast variants
-  reach more. Light accent: 6.1:1 on white, and a white glyph on it 6.1:1.
-  Dark accent: 5.6:1 on black.
+- Tints reach at least 4.5:1 (text) against the system background in both
+  appearances, and their increased-contrast variants reach more.
+- A white label on a fill reaches at least 4.5:1 (text) in every appearance
+  and contrast level, and Increased Contrast raises it. The fill itself
+  reaches at least 3:1 (WCAG's minimum for graphics) against the system
+  background, so the button's shape stays visible.
 - Topic dots reach at least 3:1 (WCAG's minimum for graphics) on both the
   system background and the secondary background, in both appearances.
+
+| Token | Against | Light | Dark | Increased contrast (light / dark) |
+| ----- | ------- | ----- | ---- | --------------------------------- |
+| `accent` | background | 6.1:1 | 5.6:1 | 8.4:1 / 9.6:1 |
+| `recording` | background | 4.8:1 | 5.6:1 | 6.9:1 / 8.3:1 |
+| `accentFill` | white label | 6.1:1 | 5.3:1 | 8.4:1 / 6.9:1 |
+| `accentFill` | background | 6.1:1 | 4.0:1 | 8.4:1 / 3.0:1 |
+| `recordingFill` | white label | 4.8:1 | 5.6:1 | 7.3:1 / 6.9:1 |
+| `recordingFill` | background | 4.8:1 | 3.7:1 | 7.3:1 / 3.1:1 |
 
 ### Topic dots
 
@@ -130,7 +161,7 @@ Apply a style with `.brandTextStyle(.transcript)` or
 
 | Check | How |
 | ----- | --- |
-| Every token is in the asset catalog, with dark and (accent, recording) increased-contrast variants | `BrandingTests` (app-hosted, `make test-unit`) |
+| Every token is in the asset catalog, with dark and (tints, fills) increased-contrast variants | `BrandingTests` (app-hosted, `make test-unit`) |
 | Contrast thresholds above | `BrandingTests` |
 | Launch screen background and image resolve in both appearances | `BrandingTests` |
 | The icon compiles into the app (`CFBundleIconName` `AppIcon`, fallback PNG) | `BrandingTests` |

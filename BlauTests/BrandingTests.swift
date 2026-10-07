@@ -34,8 +34,8 @@ struct BrandingTests {
         #expect(Contrast.components(light) != Contrast.components(dark), "\(name) has no dark variant")
     }
 
-    @Test(arguments: [BrandColor.accent, .recording])
-    func tokenHasIncreasedContrastVariants(token: BrandColor) throws {
+    @Test(arguments: BrandColor.tints)
+    func tintHasIncreasedContrastVariants(token: BrandColor) throws {
         let color = try Self.named(token.assetName)
         for traits in Self.appearances {
             let standard = color.resolvedColor(with: traits)
@@ -56,7 +56,7 @@ struct BrandingTests {
     /// The accent and the recording tint are used for text and glyphs, so they
     /// meet WCAG AA for text (4.5:1) on the system background in both
     /// appearances.
-    @Test(arguments: [BrandColor.accent, .recording])
+    @Test(arguments: BrandColor.tints)
     func tintsMeetTextContrastOnTheBackground(token: BrandColor) throws {
         let color = try Self.named(token.assetName)
         for traits in Self.appearances {
@@ -68,10 +68,35 @@ struct BrandingTests {
         }
     }
 
-    /// The light accent fills the record button behind a white glyph.
-    @Test func whiteGlyphOnTheLightAccentMeetsTextContrast() throws {
-        let accent = try Self.named(BrandColor.accent.assetName).resolvedColor(with: Self.light)
-        #expect(Contrast.ratio(accent, .white) >= 4.5)
+    /// A fill sits behind a prominent button's white label (the record
+    /// button, Connect, Continue...). In every appearance and contrast level
+    /// the label meets WCAG AA for text (4.5:1), and the button's shape meets
+    /// the non-text minimum (3:1) against the background.
+    @Test(arguments: BrandColor.fills)
+    func whiteLabelOnTheFillMeetsTextContrast(token: BrandColor) throws {
+        let color = try Self.named(token.assetName)
+        for traits in Self.appearances + Self.appearances.map(Self.highContrast) {
+            let fill = color.resolvedColor(with: traits)
+            let label = Contrast.ratio(fill, .white)
+            let shape = Contrast.ratio(fill, UIColor.systemBackground.resolvedColor(with: traits))
+            let style = traits.userInterfaceStyle == .dark ? "dark" : "light"
+            let name = "\(token.assetName) (\(style), contrast \(traits.accessibilityContrast.rawValue))"
+            #expect(label >= 4.5, "A white label on \(name) is \(label):1")
+            #expect(shape >= 3, "\(name) is \(shape):1 against the background")
+        }
+    }
+
+    /// Increased Contrast must make the white label on a fill easier to read,
+    /// not harder: the fill gets darker, where a tint gets lighter in dark
+    /// mode.
+    @Test(arguments: BrandColor.fills)
+    func increasedContrastDarkensTheFill(token: BrandColor) throws {
+        let color = try Self.named(token.assetName)
+        for traits in Self.appearances {
+            let standard = Contrast.ratio(color.resolvedColor(with: traits), .white)
+            let increased = Contrast.ratio(color.resolvedColor(with: Self.highContrast(traits)), .white)
+            #expect(increased > standard, "\(token.assetName) in \(traits.userInterfaceStyle.rawValue)")
+        }
     }
 
     /// Timeline dots are graphics, not text: WCAG's non-text minimum (3:1)
@@ -160,13 +185,26 @@ struct BrandingTests {
         }
     }
 
-    /// The scale is declared from the largest style to the smallest.
-    @Test func scaleIsOrderedFromLargestToSmallest() {
+    /// The scale is declared from the most prominent style to the least: each
+    /// style is smaller than the one before it, or the same size and lighter
+    /// (Headline and Body are both 17 pt; `heading` is the semibold one).
+    @Test func scaleIsOrderedFromMostToLeastProminent() {
         let traits = UITraitCollection(preferredContentSizeCategory: .large)
-        let sizes = BrandTextStyle.allCases.map {
-            UIFont.preferredFont(forTextStyle: UIKitTextStyle.of($0.textStyle), compatibleWith: traits).pointSize
+        let styles = BrandTextStyle.allCases
+        func size(_ style: BrandTextStyle) -> CGFloat {
+            UIFont.preferredFont(forTextStyle: UIKitTextStyle.of(style.textStyle), compatibleWith: traits).pointSize
         }
-        #expect(sizes == sizes.sorted(by: >))
+        func weight(_ style: BrandTextStyle) -> Int {
+            let ascending: [Font.Weight] = [
+                .ultraLight, .thin, .light, .regular, .medium, .semibold, .bold, .heavy, .black,
+            ]
+            return ascending.firstIndex(of: style.weight) ?? -1
+        }
+        for (larger, smaller) in zip(styles, styles.dropFirst()) {
+            let isLessProminent =
+                size(smaller) < size(larger) || (size(smaller) == size(larger) && weight(smaller) < weight(larger))
+            #expect(isLessProminent, "\(smaller) is not less prominent than \(larger)")
+        }
     }
 
     @Test func onlyTimestampsUseMonospacedDigits() {

@@ -1,8 +1,10 @@
 import SwiftUI
 
 /// The brand mark above the "Blau" wordmark (#82). The main screen shows it
-/// until there is a conversation; the launch screen shows the same mark
-/// alone, so launch hands over to it.
+/// until there is a conversation. The launch screen shows the same mark at the
+/// same size, alone and centered on the whole screen, so launch hands over to
+/// it on the same background (the mark moves up a little, see
+/// docs/branding.md).
 ///
 /// The mark scales with Dynamic Type alongside the wordmark. VoiceOver reads
 /// the lockup as one heading, "Blau"; the mark itself is decorative.

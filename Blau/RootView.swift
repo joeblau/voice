@@ -142,7 +142,7 @@ struct MainScreen: View {
 
                     if account.needsKeyEntry {
                         Button("Connect Your xAI Account", action: onConnectAccount)
-                            .buttonStyle(.borderedProminent)
+                            .brandProminentButtonStyle()
                             .accessibilityIdentifier(XAIKeyIdentifiers.openOnboarding)
                     }
                 }

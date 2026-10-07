@@ -79,7 +79,7 @@ struct SpeechModelSetupView: View {
         Button(title) {
             Task { await action() }
         }
-        .buttonStyle(.borderedProminent)
+        .brandProminentButtonStyle()
         .accessibilityIdentifier(Identifier.action)
     }
 
