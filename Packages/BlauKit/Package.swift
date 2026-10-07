@@ -70,6 +70,9 @@ enum KitModule: String, CaseIterable {
         case .transcription, .voiceID:
             // Silero VAD, Parakeet ASR and WeSpeaker embeddings (CoreML).
             [.product(name: "FluidAudio", package: "FluidAudio")]
+        case .memory:
+            // The local search index (#62): SQLite with FTS5 through GRDB.
+            [.product(name: "GRDB", package: "GRDB.swift")]
         default:
             []
         }
@@ -179,7 +182,10 @@ let package = Package(
         // default `NemoTextProcessing` trait links a prebuilt Rust text
         // normalizer (~8 MB per slice) that only its TTS frontends use; Blau
         // gets speech from Grok, so it opts out with `traits: []`.
-        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.17.5", traits: [])
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.17.5", traits: []),
+        // GRDB: SQLite (the system library, FTS5 included) for BlauMemory's
+        // local, rebuildable search index (#62).
+        .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.11.1"),
     ],
     targets: KitModule.allCases.map(\.target) + KitModule.allCases.map(\.testTarget) + [integrationTests],
     swiftLanguageModes: [.v6]

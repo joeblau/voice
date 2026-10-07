@@ -24,6 +24,7 @@ them by filling in the tables.
 | `voiceid.campplus` | CAM++ (FluidAudio, beta, 192-d) | same as above | The challenger named in #1 |
 | `memory.embeddinggemma` | EmbeddingGemma-300M as Core ML, truncated to 256-d and quantized to int8 | `load`, `embed.64tok`, `embed.128tok`, `embed.256tok`, memory | Memory index (#59, #60) |
 | `memory.embed.batch32` | The shared text embedding service (#60) on an installed hosting folder: prompt, Swift tokenizer, token table, Core ML, 256-d int8 | `load`, `embed.batch32` and `embed.batch32.chunk` latency, `tokens.mean`, `budget.batch32`, a within/over-budget note, memory | #60's acceptance criterion: a batch of 32 chunks within #59's budget |
+| `memory.index.search50k` | The memory index (#62): 50k exchange-like chunks with 256-d int8 vectors in an on-disk SQLite/FTS5 index (no model needed) | `build`, `load` (every vector into the matrix, the launch cost), `search.vector`, `search.keyword` and `search.hybrid` latency, `budget.search`, `index.fileSize`, a within/over-budget note, memory | #62's acceptance criterion: a search over 50k chunks within 20 ms p95 on an A17 |
 | `topics.label.foundationModels` | On-device Foundation Models through Blau's production `FoundationModelsTopicLabeler` (#53) | `label.cold`, `label`, `label.prewarmed`, `titles.withinWordLimit` | Topic confirmation and titles (#53) |
 | Background probe | Parakeet EOU 320 ms on the Neural Engine, with a CPU-only baseline | Per-window latency by app phase, errors, Neural Engine availability, verdict, mitigation | iOS 27 background Neural Engine restrictions (#26) |
 
@@ -243,6 +244,9 @@ go/no-go below.
 | | `memory.footprintGrowth` | pending | pending | pending |
 | Qwen3-Embedding-0.6B 256-d int8 (fallback, #59) | `embed.128tok` p50 / p95 | pending | pending | pending |
 | | `memory.neuralGrowth` | pending | pending | pending |
+| Memory index, 50k chunks (#62) | `search.hybrid` p50 / p95 (budget 20 ms) | pending | pending | pending |
+| | `search.vector` / `search.keyword` p95 | pending | pending | pending |
+| | `load` (50k vectors at launch) | pending | pending | pending |
 | Foundation Models | `label.cold` | pending | pending | pending |
 | | `label` / `label.prewarmed` p50 | pending | pending | pending |
 | Background probe (iOS 27) | verdict / mitigation | pending | pending | pending |
@@ -864,6 +868,48 @@ for Gemma's 32 MB `tokenizer.json`, 0.10 s for Qwen's; encoding about
 model. To measure: finish EmbeddingGemma (above), then `make bench` with
 its `hosting/` folder in `BlauBenchmarks/Assets/`, and fill the
 `Shared service` row of the results table.
+
+## Memory index (#62)
+
+#62's acceptance criterion is **a search over 50k chunks within 20 ms p95
+on an A17**. `memory.index.search50k` writes 50,000 synthetic exchange-like
+chunks (Zipf-distributed words, so BM25 sees realistic posting lists) with
+random 256-d int8 vectors (which cost the brute-force scan exactly what real
+ones do, so no model is needed) into an on-disk index, reopens it as at
+launch, and runs 200 queries three ways: the vector scan alone, BM25 alone,
+and both at once (`search.hybrid`, how #64 runs them). The budget applies
+to `search.hybrid`. See [memory-index.md](memory-index.md).
+
+**Mac reference** (M3 Max, macOS 27.2, optimized build, shared with other
+builds; `BLAU_INDEX_BENCHMARK=1 swift test -Xswiftc -O --scratch-path
+.build/optimized --filter MemoryIndexSearchBenchmarkTests`, 2026-10-07):
+
+| Metric | M3 Max (loaded) |
+| --- | --- |
+| `search.hybrid` p50 / p95 | 2.6 / 5.0 ms |
+| `search.vector` p50 / p95 | 2.4 / 3.6 ms |
+| `search.keyword` p50 / p95 | 1.5 / 3.7 ms |
+| `load` (50k vectors into the matrix) | 422 ms |
+| `build` (writing 50k chunks with FTS5 and vectors) | 20.5 s |
+
+Before the common-word cutoff (`MemoryIndex.commonTermDocuments`),
+`search.keyword` was 12.9 / 36.9 ms p50 / p95 on the same data: FTS5 scores
+every matching row with `bm25()`, and an OR query over a word found in
+thousands of chunks matched up to 9,400 of them. The vector scan alone
+measured 1.5 ms per query for 50k × 256 in a standalone loop.
+
+The XCTest wiring was checked end to end on a temporary iPhone 15 Pro
+simulator (iOS 26.5, Release, `BLAU_DEVICE_TESTS=1
+BLAU_BENCH_ALLOW_SIMULATOR=1`, `-only-testing:BlauBenchmarks/MemoryIndexBenchmarks`):
+`search.hybrid` p50 / p95 6.75 / 21.7 ms, `search.vector` 5.64 / 21.2 ms,
+`search.keyword` 2.84 / 8.52 ms, `load` 111 ms, a 97 MB index file. The
+simulator runs on the Mac's CPU, which was under a load average of 550 to
+950 at the time, so this validates the harness, not the A17 number.
+
+**iPhone: pending.** It needs an A17 device: `make bench` runs
+`MemoryIndexBenchmarks.testSearch50k`, or run "Memory index search, 50k
+chunks" on the debug benchmark screen, and fill the `Memory index` rows of
+the results table.
 
 ## After the numbers land
 

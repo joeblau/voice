@@ -86,7 +86,7 @@ the same `make` targets as above. See [docs/ci.md](docs/ci.md).
 | `Datasets/voice-id/` | The owner's voice ID evaluation recordings, stored with consent in LFS (see its README and [`docs/voice-id-eval.md`](docs/voice-id-eval.md)) |
 | `Datasets/asr/` | The owner's ASR evaluation recordings, stored with consent in LFS (see its README and [`docs/asr-eval.md`](docs/asr-eval.md)) |
 | `Tools/Instruments/` | `Blau.tracetemplate`, the Instruments template for profiling Blau, and the instrument list and options it is generated from |
-| `docs/`          | Developer documentation, including [on-device models](docs/models.md) and [text embeddings](docs/embeddings.md) |
+| `docs/`          | Developer documentation, including [on-device models](docs/models.md), [text embeddings](docs/embeddings.md) and the [memory search index](docs/memory-index.md) |
 | `.github/`       | CI workflow ([docs](docs/ci.md)), pull request and issue templates |
 
 ### Targets and schemes
