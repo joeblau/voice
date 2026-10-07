@@ -67,6 +67,30 @@ struct PerformanceIndicatorTests {
         try await waitFor { await environment.backgroundInference.performanceLevel == .normal }
     }
 
+    /// The voice loop builds the live transcriber with the environment's
+    /// policy (`LiveVoicePipeline.start` → `PerformanceASRChunkSizePolicy`),
+    /// so the ASR chunk size follows the level in every environment,
+    /// the live one included.
+    @Test func theVoiceLoopFollowsTheEnvironmentsPolicy() throws {
+        let environments = [
+            AppEnvironment.fake(kind: .unitTest),
+            AppEnvironment.live(config: .fallback, persistence: .inMemory()),
+        ]
+        for environment in environments {
+            let forwarded = try #require(environment.voiceLoop.performance as? PerformancePolicy)
+            #expect(forwarded === environment.performance)
+
+            // Overrides, so the live policy doesn't depend on the host's
+            // battery or Low Power Mode.
+            let chunkSize = PerformanceASRChunkSizePolicy(environment.voiceLoop.performance)
+            environment.performance.setOverride(.normal)
+            #expect(chunkSize.preferredChunkSize(current: .ms320) == .ms320)
+            environment.performance.setOverride(.reduced)
+            #expect(chunkSize.preferredChunkSize(current: .ms320) == .ms1280)
+            environment.performance.setOverride(nil)
+        }
+    }
+
     private func waitFor(
         timeout: Duration = .seconds(30), _ condition: @MainActor () async -> Bool
     ) async throws {

@@ -89,6 +89,7 @@ struct PerformanceIndicator: View {
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(content.accessibilityLabel)
                     .accessibilityIdentifier(Self.accessibilityIdentifier)
+                    .padding(.vertical, 4)
                     .transition(.opacity)
             }
         }

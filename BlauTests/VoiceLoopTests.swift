@@ -1,6 +1,7 @@
 import BlauCore
 import BlauPersistence
 import BlauRealtime
+import BlauTelemetry
 import Foundation
 import SwiftData
 import Testing
@@ -74,7 +75,9 @@ struct VoiceLoopTests {
     }
 
     @Test func theHUDRowsFollowTheSnapshot() {
-        let loop = VoiceLoop(realtime: FakeRealtimeService(), speechModels: SpeechModels.fixtureManager())
+        let loop = VoiceLoop(
+            realtime: FakeRealtimeService(), speechModels: SpeechModels.fixtureManager(),
+            performance: FixedPerformanceLevel())
         #expect(!loop.isAvailable)
         #expect(loop.hudReadout.value(for: "EOU → audio") == "–")
         #expect(loop.hudReadout.rows.map(\.label) == ["Turn", "Realtime", "EOU → audio", "Turn time", "Tokens"])

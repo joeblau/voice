@@ -493,7 +493,7 @@ which intervals reach MetricKit. Delivery itself needs a device:
 | Simulated payload stored and shown (device, Xcode) | Pending |
 | Real metric payload on a TestFlight build          | Pending |
 | Real diagnostic payload (hang) on a TestFlight build | Pending |
-| `realtime.firstAudio` in `signpostMetrics`         | Pending (needs #36) |
+| `realtime.firstAudio` in `signpostMetrics`         | Pending (needs a device and xAI credentials) |
 | Export opens in Files / AirDrop on device          | Pending |
 
 ## Thermal and power adaptation
@@ -524,7 +524,10 @@ better one waits until conditions have allowed it for `recoveryDelay`
 (60 s), then relaxes one level; the next level waits another 60 s. The
 policy runs a timer for the delay, so recovery happens even when no new
 notification arrives. A device hovering at the `serious` boundary keeps
-`reduced` instead of flipping the pipeline every few seconds. The
+`reduced` instead of flipping the pipeline every few seconds. The battery
+margins (held until 25% or 15%) apply only to a level the battery itself
+called for: a device degraded for heat or Low Power Mode at 22% returns to
+`normal` once it cools, because the charge never crossed 20%. The
 decision logic is the value type `PerformanceLevelTracker`, tested on the
 Mac with explicit times.
 
@@ -557,22 +560,38 @@ ASR stays at 320 ms and only the other stages back off. Apple's
 fixed nominal readings in previews and tests. `start()` starts it, feeds
 its levels to the background inference monitor
 (`backgroundInference.follow(performance.performanceLevels())`) and to the
-views (`PerformanceStatus`). The live transcriber, topic pipeline and
-indexer are still `UnavailableService` in `AppEnvironment.live()`; the issues
-that compose them pass `environment.performance` where the table above
-says:
+views (`PerformanceStatus`).
+
+The live streaming ASR follows it today: `AppEnvironment` hands
+`performance` to the `VoiceLoop` (#36), and `LiveVoicePipeline.start`
+builds the transcriber with it on every conversation:
 
 ```swift
-let streaming = ParakeetStreamingTranscriber(
-    recognizer: recognizer, audio: hub, voiceActivity: vad,
-    chunkSizePolicy: PerformanceASRChunkSizePolicy(environment.performance),
-    recognizerProvider: ParakeetEouRecognizer.provider(modelManager: environment.speechModels))
+let transcriber = try await ParakeetStreamingTranscriber.load(
+    modelDirectory: asrDirectory, audio: hub, voiceActivity: vad,
+    chunkSizePolicy: PerformanceASRChunkSizePolicy(performance),
+    recognizerProvider: ParakeetEouRecognizer.provider(modelManager: models))
+```
+
+`BlauTests/PerformanceIndicatorTests.swift` checks that both the fake and
+the live environment pass their policy through. The second pass, the
+topic pipeline and the indexer aren't composed in the app yet (the
+`transcriber`, `topics` and `memory` slots of `AppEnvironment.live()` are
+still `UnavailableService`, and the voice loop runs the streaming
+transcriber without a second pass); the issues that compose them pass
+`environment.performance` where the table above says:
+
+```swift
 let transcriber = SecondPassTranscriber(
     wrapping: streaming, audio: hub, recognizer: ParakeetTdtRecognizer.provider(modelManager: models),
     flags: environment.flags, performance: environment.performance)
 let labeling = TopicLabelingService.standard(textGenerator: xai, performance: environment.performance)
 let gate = IndexingGate(performance: environment.performance)   // await gate.waitUntilAllowed() per batch
 ```
+
+The indicator sits in a top safe-area inset of the main screen
+(`MainScreenScaffold`), so the DEBUG voice loop HUD lays out below it and
+the conversation scrolls under it.
 
 The debug menu's **Thermal and power** section shows the readings, the
 level and why, and overrides the level (Automatic, Normal, Reduced,
@@ -601,7 +620,7 @@ tests launch with `-BlauPerformanceLevel reduced`.
 
 | Where | What |
 | --- | --- |
-| `BlauTelemetryTests/Performance/PerformanceLevelTrackerTests.swift` | The decision table (thermal, Low Power Mode, battery on and off charge, hysteresis margins, strictest cause first), immediate escalation, the recovery delay, one level at a time, flapping, overrides |
+| `BlauTelemetryTests/Performance/PerformanceLevelTrackerTests.swift` | The decision table (thermal, Low Power Mode, battery on and off charge, hysteresis margins, strictest cause first), the battery margins held only by the battery's own level (not heat or Low Power Mode), immediate escalation, the recovery delay, one level at a time, flapping, overrides |
 | `BlauTelemetryTests/Performance/PerformancePolicyTests.swift` | Following a source, snapshot and level streams, the recovery timer on a `ManualClock`, `perf.degraded` and `perf.levelChange` signposts, statistics, the system source on the Mac |
 | `BlauTelemetryTests/Performance/PerformanceStatisticsTests.swift` | Time per level and thermal state, heat at `normal`, battery drain, transitions, JSON |
 | `BlauTranscriptionTests/ASR/ParakeetStreamingTranscriberTests.swift` | The chunk size following the level both ways, between utterances |
@@ -610,7 +629,7 @@ tests launch with `-BlauPerformanceLevel reduced`.
 | `BlauTranscriptionTests/Models/ModelManifestTests.swift` | The 1280 ms export pinned from the same revision as the 320 ms one |
 | `BlauTopicsTests/Labeling/TopicPerformanceLevelTests.swift` | Level modes, strong candidates, the pipeline sending exactly the strong candidates at `reduced` and none at `minimal` |
 | `BlauMemoryTests/IndexingGateTests.swift` | Immediate, deferred and suspended indexing on a `ManualClock` |
-| `BlauTests/PerformanceIndicatorTests.swift`, `BlauUITests/PerformanceIndicatorUITests.swift` | The indicator's text per cause, the status following the policy, the environment feeding the monitor; the capsule hidden at `normal`, shown with `-BlauPerformanceLevel reduced` and after a debug-menu override |
+| `BlauTests/PerformanceIndicatorTests.swift`, `BlauUITests/PerformanceIndicatorUITests.swift` | The indicator's text per cause, the status following the policy, the environment feeding the monitor and passing its policy to the voice loop's ASR; the capsule hidden at `normal`, shown with `-BlauPerformanceLevel reduced` and after a debug-menu override |
 
 ### Verifying on a device
 
@@ -646,6 +665,16 @@ The on-device model benchmark harness (#22) measures each model's latency,
 real-time factor and memory, and probes background Neural Engine behaviour.
 It emits the canonical intervals above around every measured step. Running
 it and the results are in [docs/benchmarks.md](benchmarks.md).
+
+## Turn latency in the HUD
+
+The turn orchestrator (#36) measures each turn as it happens: end of
+utterance → first audio (`realtime.firstAudio`'s span) and end of utterance
+→ `response.done` (`realtime.turn`'s), kept as last / p50 / p95 over the last
+200 turns. With the **Performance HUD** flag on, the main screen shows them
+with the turn state, the connection and token usage
+([realtime.md](realtime.md#latency-and-the-hud)). Device numbers go in the
+pending table there.
 
 ## What comes next
 

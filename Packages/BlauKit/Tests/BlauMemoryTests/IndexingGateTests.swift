@@ -77,7 +77,9 @@ struct IndexingGateTests {
         let level = ManualPerformanceLevel(.minimal)
         let gate = IndexingGate(performance: level, deferral: .seconds(300), clock: clock)
         let waiter = Waiter(gate)
-        try await Task.sleep(for: .milliseconds(20))
+        // The waiter subscribes right after reading the start of its
+        // deferral, so the clock only moves once that is fixed.
+        try await waitUntil { level.subscriberCount == 1 }
         clock.advance(by: .seconds(3_600))
         try await Task.sleep(for: .milliseconds(20))
         #expect(!waiter.isDone, "suspended: time alone doesn't release it")
@@ -92,7 +94,7 @@ struct IndexingGateTests {
         let level = ManualPerformanceLevel(.minimal)
         let gate = IndexingGate(performance: level, deferral: .seconds(300), clock: clock)
         let waiter = Waiter(gate)
-        try await Task.sleep(for: .milliseconds(20))
+        try await waitUntil { level.subscriberCount == 1 }
         clock.advance(by: .seconds(100))
         level.set(.reduced)
         await clock.waitForSleepers()
@@ -111,5 +113,21 @@ struct IndexingGateTests {
         waiter.task.cancel()
         await waiter.task.value
         #expect(waiter.wasCancelled)
+    }
+}
+
+/// Polls `condition` until it holds, failing after `timeout`.
+private func waitUntil(
+    timeout: Duration = .seconds(5),
+    sourceLocation: SourceLocation = #_sourceLocation,
+    _ condition: @Sendable () async -> Bool
+) async throws {
+    let deadline = ContinuousClock.now + timeout
+    while !(await condition()) {
+        guard ContinuousClock.now < deadline else {
+            Issue.record("Timed out waiting for the condition", sourceLocation: sourceLocation)
+            return
+        }
+        try await Task.sleep(for: .milliseconds(2))
     }
 }

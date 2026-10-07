@@ -172,7 +172,7 @@ final class AppEnvironment {
         self.performanceStatus = PerformanceStatus(policy: performance)
         self.voiceLoop = VoiceLoop(
             realtime: realtime, speechModels: speechModels, audio: conversationAudio,
-            backgroundInference: backgroundInference)
+            backgroundInference: backgroundInference, performance: performance)
         self.lifecycle = AppLifecycleCoordinator(
             participants: Self.lifecycleOrder(
                 persistence: persistence, audio: audio, transcriber: transcriber,

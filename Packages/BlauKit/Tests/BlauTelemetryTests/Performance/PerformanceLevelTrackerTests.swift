@@ -8,8 +8,10 @@ struct PerformanceLevelTrackerTests {
         DeviceConditions(battery: BatteryStatus(level: level, state: state))
     }
 
-    static func assess(_ conditions: DeviceConditions, current: PerformanceLevel = .normal) -> PerformanceAssessment {
-        PerformancePolicyConfiguration.standard.assess(conditions, current: current)
+    static func assess(
+        _ conditions: DeviceConditions, currentBattery: PerformanceLevel = .normal
+    ) -> PerformanceAssessment {
+        PerformancePolicyConfiguration.standard.assess(conditions, currentBattery: currentBattery)
     }
 
     // MARK: The decision table
@@ -35,7 +37,7 @@ struct PerformanceLevelTrackerTests {
 
     @Test func lowPowerModeCanBeIgnored() {
         let configuration = PerformancePolicyConfiguration(lowPowerModeLevel: .normal)
-        let assessment = configuration.assess(DeviceConditions(isLowPowerModeEnabled: true), current: .normal)
+        let assessment = configuration.assess(DeviceConditions(isLowPowerModeEnabled: true), currentBattery: .normal)
         #expect(assessment.level == .normal)
         #expect(assessment.reasons.isEmpty)
     }
@@ -66,13 +68,25 @@ struct PerformanceLevelTrackerTests {
 
     @Test func batteryLevelsHoldUntilTheChargeClearsTheHysteresis() {
         // Entered at 20%: holds until 25%.
-        #expect(Self.assess(Self.battery(0.22), current: .reduced).level == .reduced)
-        #expect(Self.assess(Self.battery(0.25), current: .reduced).level == .normal)
+        #expect(Self.assess(Self.battery(0.22), currentBattery: .reduced).level == .reduced)
+        #expect(Self.assess(Self.battery(0.25), currentBattery: .reduced).level == .normal)
         // Entered at 10%: holds until 15%, then still reduced until 25%.
-        #expect(Self.assess(Self.battery(0.12), current: .minimal).level == .minimal)
-        #expect(Self.assess(Self.battery(0.16), current: .minimal).level == .reduced)
-        // Without a degraded level in force, 22% is fine.
-        #expect(Self.assess(Self.battery(0.22), current: .normal).level == .normal)
+        #expect(Self.assess(Self.battery(0.12), currentBattery: .minimal).level == .minimal)
+        #expect(Self.assess(Self.battery(0.16), currentBattery: .minimal).level == .reduced)
+        // Unless the battery itself called for a degraded level, 22% is fine.
+        #expect(Self.assess(Self.battery(0.22), currentBattery: .normal).level == .normal)
+    }
+
+    @Test func theBatteryLevelIsTheBatterysOwnCall() {
+        let configuration = PerformancePolicyConfiguration.standard
+        let low = BatteryStatus(level: 0.23, state: .unplugged)
+        #expect(configuration.batteryLevel(for: low, current: .normal) == .normal)
+        #expect(configuration.batteryLevel(for: low, current: .reduced) == .reduced)
+        let veryLow = BatteryStatus(level: 0.12, state: .unplugged)
+        #expect(configuration.batteryLevel(for: veryLow, current: .reduced) == .reduced)
+        #expect(configuration.batteryLevel(for: veryLow, current: .minimal) == .minimal)
+        let charging = BatteryStatus(level: 0.05, state: .charging)
+        #expect(configuration.batteryLevel(for: charging, current: .minimal) == .normal)
     }
 
     @Test func theStrictestCauseWinsAndComesFirst() {
@@ -185,6 +199,71 @@ struct PerformanceLevelTrackerTests {
         // Plugging in releases it (after the delay).
         tracker.update(Self.battery(0.21, .charging), at: .seconds(600))
         tracker.evaluate(at: .seconds(660))
+        #expect(tracker.level == .normal)
+    }
+
+    /// Heat at 21–24% on battery: the battery never crossed 20%, so it
+    /// never holds the level once the device cools.
+    @Test func heatDoesNotLendTheBatteryItsHysteresis() {
+        var tracker = PerformanceLevelTracker()
+        let battery = BatteryStatus(level: 0.23, state: .unplugged)
+        tracker.update(DeviceConditions(thermalState: .serious, battery: battery), at: .zero)
+        #expect(tracker.level == .reduced)
+        #expect(tracker.reasons == [.thermal(.serious)])
+
+        tracker.update(DeviceConditions(thermalState: .nominal, battery: battery), at: .seconds(1))
+        #expect(tracker.level == .reduced, "still waiting out the recovery delay")
+        #expect(tracker.reasons == [.thermal(.serious)])
+        tracker.evaluate(at: .seconds(120))
+        #expect(tracker.level == .normal)
+        #expect(tracker.reasons.isEmpty)
+    }
+
+    @Test func lowPowerModeDoesNotLendTheBatteryItsHysteresis() {
+        var tracker = PerformanceLevelTracker()
+        let battery = BatteryStatus(level: 0.22, state: .unplugged)
+        tracker.update(DeviceConditions(isLowPowerModeEnabled: true, battery: battery), at: .zero)
+        #expect(tracker.reasons == [.lowPowerMode])
+
+        tracker.update(DeviceConditions(isLowPowerModeEnabled: false, battery: battery), at: .seconds(1))
+        tracker.evaluate(at: .seconds(120))
+        #expect(tracker.level == .normal)
+        #expect(tracker.reasons.isEmpty)
+    }
+
+    /// Critical heat at 11–14%: the battery alone calls for `reduced`
+    /// there, so cooling relaxes to `reduced`, not `minimal`.
+    @Test func criticalHeatDoesNotLendTheBatteryTheMinimalHysteresis() {
+        var tracker = PerformanceLevelTracker()
+        let battery = BatteryStatus(level: 0.12, state: .unplugged)
+        tracker.update(DeviceConditions(thermalState: .critical, battery: battery), at: .zero)
+        #expect(tracker.level == .minimal)
+        #expect(tracker.reasons == [.thermal(.critical), .lowBattery(percent: 12)])
+
+        tracker.update(DeviceConditions(thermalState: .nominal, battery: battery), at: .seconds(1))
+        tracker.evaluate(at: .seconds(120))
+        #expect(tracker.level == .reduced)
+        #expect(tracker.reasons == [.lowBattery(percent: 12)])
+        tracker.evaluate(at: .seconds(600))
+        #expect(tracker.level == .reduced, "12% still calls for reduced on its own")
+    }
+
+    /// The battery keeps its own hysteresis when heat came and went in
+    /// between.
+    @Test func theBatteryKeepsItsOwnHysteresisThroughHeat() {
+        var tracker = PerformanceLevelTracker()
+        let entered = BatteryStatus(level: 0.19, state: .unplugged)
+        tracker.update(DeviceConditions(thermalState: .serious, battery: entered), at: .zero)
+        #expect(Set(tracker.reasons) == [.thermal(.serious), .lowBattery(percent: 19)])
+
+        let bounced = BatteryStatus(level: 0.22, state: .unplugged)
+        tracker.update(DeviceConditions(thermalState: .nominal, battery: bounced), at: .seconds(1))
+        tracker.evaluate(at: .seconds(120))
+        #expect(tracker.level == .reduced)
+        #expect(tracker.reasons == [.lowBattery(percent: 22)])
+
+        tracker.update(Self.battery(0.25), at: .seconds(130))
+        tracker.evaluate(at: .seconds(200))
         #expect(tracker.level == .normal)
     }
 

@@ -61,9 +61,11 @@ public struct PerformancePolicyConfiguration: Codable, Hashable, Sendable {
     public static let standard = PerformancePolicyConfiguration()
 
     /// The level `conditions` call for on their own, and why, with no
-    /// recovery delay. `current` is the level in force, for the battery
-    /// hysteresis.
-    public func assess(_ conditions: DeviceConditions, current: PerformanceLevel) -> PerformanceAssessment {
+    /// recovery delay. `currentBattery` is the level the battery itself
+    /// last called for (`batteryLevel(for:current:)`), for the battery
+    /// hysteresis; the level in force doesn't matter, so a device degraded
+    /// for heat or Low Power Mode at 21–24% recovers fully once it cools.
+    public func assess(_ conditions: DeviceConditions, currentBattery: PerformanceLevel) -> PerformanceAssessment {
         var causes: [(PerformanceLevel, PerformanceReason)] = []
 
         if conditions.thermalState >= minimalThermalState {
@@ -77,23 +79,34 @@ public struct PerformancePolicyConfiguration: Codable, Hashable, Sendable {
         }
 
         let battery = conditions.battery
-        if battery.isDischarging, let charge = battery.level {
-            let reason = PerformanceReason.lowBattery(percent: battery.percent ?? 0)
-            if charge <= minimalBatteryLevel
-                || (current >= .minimal && charge < minimalBatteryLevel + batteryHysteresis)
-            {
-                causes.append((.minimal, reason))
-            } else if charge <= reducedBatteryLevel
-                || (current >= .reduced && charge < reducedBatteryLevel + batteryHysteresis)
-            {
-                causes.append((.reduced, reason))
-            }
+        let batteryLevel = batteryLevel(for: battery, current: currentBattery)
+        if batteryLevel.isDegraded {
+            causes.append((batteryLevel, .lowBattery(percent: battery.percent ?? 0)))
         }
 
         let level = causes.map(\.0).max() ?? .normal
         // Worst cause first.
         let reasons = causes.sorted { $0.0 > $1.0 }.map(\.1)
         return PerformanceAssessment(level: level, reasons: reasons)
+    }
+
+    /// The level the battery alone calls for: `reduced` or `minimal` at its
+    /// threshold, held until the charge is `batteryHysteresis` above it
+    /// while `current` (the level the battery last called for) is at least
+    /// that level; `normal` while charging, full or unknown.
+    public func batteryLevel(for battery: BatteryStatus, current: PerformanceLevel) -> PerformanceLevel {
+        guard battery.isDischarging, let charge = battery.level else { return .normal }
+        if charge <= minimalBatteryLevel
+            || (current >= .minimal && charge < minimalBatteryLevel + batteryHysteresis)
+        {
+            return .minimal
+        }
+        if charge <= reducedBatteryLevel
+            || (current >= .reduced && charge < reducedBatteryLevel + batteryHysteresis)
+        {
+            return .reduced
+        }
+        return .normal
     }
 }
 
@@ -148,6 +161,10 @@ public struct PerformanceLevelTracker: Sendable {
     public private(set) var reasons: [PerformanceReason] = []
     public private(set) var conditions: DeviceConditions = .nominal
     public private(set) var override: PerformanceLevel?
+    /// The level the battery alone last called for: the battery hysteresis
+    /// holds this, not `level`, so heat or Low Power Mode never borrow it.
+    /// Follows every reading, even while a recovery is pending.
+    private var batteryLevel: PerformanceLevel = .normal
     /// When conditions started to allow a better level than `level`.
     private var calmSince: Duration?
 
@@ -180,7 +197,8 @@ public struct PerformanceLevelTracker: Sendable {
         if level == nil, wasOverridden {
             // Leaving a simulation applies the real conditions at once.
             let before = (self.level, reasons)
-            let assessment = configuration.assess(conditions, current: .normal)
+            batteryLevel = configuration.batteryLevel(for: conditions.battery, current: .normal)
+            let assessment = configuration.assess(conditions, currentBattery: .normal)
             self.level = assessment.level
             reasons = assessment.reasons
             calmSince = nil
@@ -202,7 +220,8 @@ public struct PerformanceLevelTracker: Sendable {
             return before != (level, reasons)
         }
 
-        let assessment = configuration.assess(conditions, current: level)
+        let assessment = configuration.assess(conditions, currentBattery: batteryLevel)
+        batteryLevel = configuration.batteryLevel(for: conditions.battery, current: batteryLevel)
         if assessment.level >= level {
             level = assessment.level
             reasons = assessment.reasons
