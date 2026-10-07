@@ -25,7 +25,11 @@ the user to turn on the Voice Isolation mic mode.**
   -0.3 dB after DeepFilterNet3) and some made it more intelligible, so the
   recognizer transcribed more of it (TV WER 39.7% after DeepFilterNet3).
   Competing speech is the voice ID gate's job (#47), not a denoiser's.
-- **Voice ID: see [below](#voice-id).** VOICEID_SUMMARY
+- **Voice ID gets worse too.** Both suppressors raised the equal error
+  rate at the gate's first window (1.5 s: 4.17% alone, 7.00% after
+  DeepFilterNet3, 8.48% after Apple's high-quality model) and at the
+  re-score (3 s: 3.33%, 4.00%, 5.92%), worst in exactly the conditions they
+  were meant to help: far-field, babble and overlap ([below](#voice-id)).
 - **It costs latency for nothing.** 30 ms of algorithmic delay for
   DeepFilterNet3 (58-94 ms for Apple's models) on every turn, before
   compute, plus a 48 kHz path through two resamplers.
@@ -51,9 +55,9 @@ ID corpus on a Mac, without VPIO in the loop. The on-device checks
 
 Apple's unit was added to the comparison because it answers two questions
 at once: is there a zero-download alternative to DeepFilterNet3, and what
-would Voice Isolation-style processing do to ASR? (It is not literally the
-mic mode, which the system applies inside VPIO, but the same family of
-model.)
+would Voice Isolation-style processing do to ASR? (It is not the mic
+mode itself, which the system applies inside VPIO and a Mac can't run on
+a file; whether the two share a model isn't documented.)
 
 ### Where the design notes met reality
 
@@ -121,22 +125,68 @@ Findings:
   babble and dishes off for 1.6 dB of the user's speech; Apple's models
   take 30 dB of room tone off.
 - **Parakeet doesn't need it.** The streaming model's cafe WER was 2.9%
-  without any suppressor; it was trained on noisy speech, and the
+  without any suppressor: it copes with this babble on its own, and the
   suppressors' artifacts cost it more than the noise did (cafe 5.7-18.6%).
+  DeepFilterNet3 helped on clean speech (4.1% → 2.7%, one word).
 - **TV gets worse, not better.** The TV is speech, so nothing removes it;
-  cleaned up, more of it is recognized (DeepFilterNet3 18 → 26 inserted
+  cleaned up, more of it is recognized (DeepFilterNet3 19 → 26 inserted
   words overall, most of them TV). Unended utterances barely move (10 → 8
   of 32): the turn stays open because the TV keeps talking.
 - **End of utterance gets slower** with every suppressor except the HQ
-  model (p95 2.2 s → 4.2-4.7 s): with the background gone, the speech
-  decays differently and VAD closes later on some fixtures.
+  model (p95 2.2 s → 4.2-4.7 s): VAD or the end-of-utterance token closes
+  later on some cafe fixtures (the cause wasn't isolated).
 - **The differences are a handful of words.** 70 words a category: one
   word is 1.4%. Nothing here argues *for* a suppressor; the streaming
-  regressions are consistent across suppressors and categories.
+  regressions on cafe and TV are consistent across all three.
 
 ## Voice ID
 
-VOICEID_SECTION
+`VoiceIDEvaluator` with each suppressor as a `NoiseSuppressionPreprocessor`
+(enrollment clips and probes both enhanced, as they would be if the
+suppressor sat in the capture chain), WeSpeaker ResNet34-LM on Core ML
+(`cpuAndNeuralEngine`), cosine against the centroid, the 1.5 s and 3 s
+windows the gate scores. Dataset: a subset of the LibriSpeech calibration
+set of [voice-id-eval.md](voice-id-eval.md#datasets): all 40 target
+speakers and their 4 enrollment clips, the first 3 probes per speaker
+(120 probes: 600 owner and 28,080 impostor trials per window over the
+conditions) and 5 cohort clips per test-clean speaker (200) as background
+talkers. The host was so loaded by other jobs that the full set would
+have taken hours per suppressor; the baseline rows are the same code on
+the same subset, so the comparison is like for like (and close to the
+full set's 4.50% / 3.00%). Release build, M3 Max.
+
+| Suppressor | Window | EER all | clean | room-near | room-far | babble | overlap | FRR at FAR 1% (all) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `none` | 1.5 s | **4.17%** | 1.86% | 2.50% | 5.00% | 5.83% | 5.83% | 12.0% |
+| `dfn3` | 1.5 s | **7.00%** | 2.20% | 2.82% | 10.15% | 9.17% | 7.31% | 19.7% |
+| `apple-voice-isolation-hq` | 1.5 s | **8.48%** | 2.39% | 2.50% | 9.89% | 10.68% | 9.42% | 25.3% |
+| `none` | 3 s | **3.33%** | 1.82% | 2.12% | 3.33% | 4.59% | 4.17% | 5.3% |
+| `dfn3` | 3 s | **4.00%** | 1.82% | 2.50% | 5.00% | 4.89% | 5.00% | 10.0% |
+| `apple-voice-isolation-hq` | 3 s | **5.92%** | 1.67% | 2.50% | 7.26% | 7.41% | 6.84% | 15.0% |
+
+The loudspeaker condition has no owner trials, so it has no EER of its
+own; its impostor scores are in the pooled column.
+
+Findings:
+
+- **Clean speech is unaffected**, as it should be: nothing to remove.
+- **Noisy and far speech gets harder to verify.** Far-field EER doubles at
+  1.5 s with either suppressor (5.0% → about 10%); babble goes from 5.8%
+  to 9-11%. The suppressors take reverberation and other voices off, and
+  with them some of what identifies the speaker; WeSpeaker was trained on
+  unprocessed audio and, on this set, copes better with the noise than
+  with the processing.
+- **At the shipped operating point it would cost the owner.** With false
+  accepts held at 1%, the owner would be rejected 19.7% of the time at
+  1.5 s after DeepFilterNet3 instead of 12.0%, and the gate's thresholds
+  would need recalibrating.
+- **So "both paths" is out**, and an ASR-only suppressor would need a
+  second, unprocessed stream for voice ID, for an ASR gain the previous
+  section didn't find.
+
+The standard Apple voice model (`apple-voice-isolation`) wasn't run on the
+voice ID set: the high-quality model was the better of the two on ASR and
+already loses here.
 
 ## Cost
 
@@ -157,7 +207,7 @@ on `cpuAndNeuralEngine`, 0.45 ms (p95 0.48 ms) on `cpuOnly`: the compute
 plan places every operation on the CPU, so asking for the Neural Engine
 only adds dispatch and load time. The other ~0.1 ms per frame is the
 Swift signal path and the two resamplers. In a debug build the same chain
-runs at about 3× real time, which is why the voice ID runs below used a
+runs at about 3× real time, which is why the voice ID runs above used a
 release build.
 
 On an iPhone the CPU is slower than the M3 Max's; a few percent of one
@@ -225,8 +275,13 @@ BLAU_DFN3_MODEL_DIR=.build/deepfilternet3/dfc12319b3a62d09e9d51aace480c981067b9d
 ```
 
 In the package's debug build DeepFilterNet3 runs at about 3× real time,
-so a full LibriSpeech run takes hours; the numbers above came from the
-same `VoiceIDEvaluator` call in a release build.
+so a full LibriSpeech run takes hours. The numbers above came from the
+same `VoiceIDEvaluator` call in a release build (a scratch executable
+linking BlauKit; `swift test -c release` doesn't build on `main`, see
+[asr-eval.md](asr-eval.md#limitations)), with
+`VoiceIDEvaluationPlan(windows: [.short, .long], scorings: [.cosineCentroid])`
+on a manifest cut down to the first 3 probes per target speaker and 5
+cohort clips per cohort speaker.
 
 `BLAU_NOISE_SUPPRESSION_LIVE=1` (plus `BLAU_DFN3_MODEL_DIR`) runs
 `NoiseSuppressionLiveTests`: each real suppressor keeps clean speech
