@@ -1,4 +1,5 @@
 import BlauCore
+import BlauMemory
 import BlauRealtime
 import BlauTelemetry
 import BlauTranscription
@@ -51,10 +52,15 @@ extension AppEnvironment {
             // background don't always post CKAccountChanged.
             let persistence = persistence
             persistenceRefresh = Task { await persistence.refresh() }
+            // The embedding model may have been installed meanwhile (#63).
+            memoryIndexing.refresh()
         }
 
         #if canImport(UIKit)
             if transition.isEnteringBackground {
+                // A rebuild or embedding backlog left: finish it in a
+                // background processing task (#63).
+                if kind == .live { MemoryIndexBackgroundTask.scheduleIfNeeded(memoryIndexing) }
                 let assertion = BackgroundTaskAssertion(name: "blau.lifecycle.background")
                 Task {
                     await lifecycle.waitUntilDelivered()
@@ -111,6 +117,7 @@ struct AppEnvironmentModifier: ViewModifier {
             .environment(environment.speechModels)
             .environment(environment.transcriptionSettings)
             .environment(environment.performanceStatus)
+            .environment(environment.memoryIndexing)
     }
 }
 

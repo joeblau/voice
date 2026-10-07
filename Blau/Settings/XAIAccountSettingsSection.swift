@@ -1,3 +1,4 @@
+import BlauMemory
 import BlauPersistence
 import BlauRealtime
 import BlauTranscription
@@ -111,6 +112,7 @@ struct SettingsView: View {
                 VoiceSettingsSection()
                 SearchToolsSettingsSection()
                 ICloudSettingsSection()
+                MemoryIndexSettingsSection()
                 SpeechModelsSettingsSection()
                 SpeechRecognitionSettingsSection()
                 Section("Developer") {
@@ -142,5 +144,6 @@ struct SettingsView: View {
             .environment(SpeechModels.fixtureManager())
             .environment(RealtimeVoiceSettingsModel.preview())
             .environment(TranscriptionSettings.preview())
+            .environment(MemoryIndexingController(persistence: .preview(), embedder: nil, performance: nil))
     }
 #endif

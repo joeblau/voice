@@ -86,9 +86,12 @@ CloudKit when it is `YES`.
   with `ModelContext.author = HistoryAuthor.app`.
 - The controller reads history on every remote change, after each successful
   import and when the app becomes active, and publishes non-empty change sets
-  through `storeChanges()`. Other consumers (the memory indexer, #63) create
-  their own tracker with their own consumer name and
-  `startPosition: .beginning`.
+  through `storeChanges()`. Other consumers create their own tracker with
+  their own consumer name and `startPosition: .beginning`. The memory
+  indexer (#63, consumer `memory-index`, [memory-indexer.md](memory-indexer.md))
+  reads with `fetchNewChanges(savingCursor: false)` and calls
+  `saveCursor()` only once the changes are in its index, so a kill in
+  between replays them; before a full rebuild it calls `skipToLatest()`.
 - History is never deleted: CloudKit mirroring needs it to export. If a
   cursor's token has expired (SwiftData throws
   `SwiftDataError.historyTokenExpired`), the tracker moves the cursor to the

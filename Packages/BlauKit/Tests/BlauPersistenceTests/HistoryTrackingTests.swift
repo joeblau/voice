@@ -240,6 +240,52 @@ struct PersistentHistoryTrackerTests {
         #expect(try await fixture.tracker().fetchNewChanges().isEmpty)
     }
 
+    @Test func aDeferredCursorIsOnlySavedWhenTheConsumerSaysSo() async throws {
+        let fixture = try HistoryFixture()
+        let context = fixture.context()
+        context.insert(Conversation(startedAt: syncT0))
+        try context.save()
+
+        // Read but not handled before the app dies: reported again.
+        let tracker = fixture.tracker("indexer")
+        #expect(try await tracker.fetchNewChanges(savingCursor: false).transactionCount == 1)
+        #expect(try await tracker.fetchNewChanges(savingCursor: false).isEmpty)
+        #expect(try await HistoryCursorStore(modelContainer: fixture.derived).position(for: "indexer") == .unsaved)
+        let relaunched = fixture.tracker("indexer")
+        #expect(try await relaunched.fetchNewChanges(savingCursor: false).transactionCount == 1)
+
+        // Handled, then saved: not reported again.
+        try await relaunched.saveCursor()
+        #expect(try await fixture.tracker("indexer").fetchNewChanges().isEmpty)
+    }
+
+    @Test func skipToLatestMovesPastEverythingWrittenSoFar() async throws {
+        let fixture = try HistoryFixture()
+        let context = fixture.context()
+        context.insert(Conversation(startedAt: syncT0))
+        try context.save()
+
+        try await fixture.tracker("indexer").skipToLatest()
+        let later = Conversation(startedAt: syncT0 + 1)
+        context.insert(later)
+        try context.save()
+
+        let changes = try await fixture.tracker("indexer").fetchNewChanges()
+        #expect(changes.transactionCount == 1)
+        #expect(changes.changes(to: Conversation.self).inserted == [later.persistentModelID])
+    }
+
+    @Test func skipToLatestOnAnEmptyStoreMissesNothing() async throws {
+        let fixture = try HistoryFixture()
+        try await fixture.tracker("indexer").skipToLatest()
+        #expect(try await HistoryCursorStore(modelContainer: fixture.derived).position(for: "indexer") == .beginning)
+
+        let context = fixture.context()
+        context.insert(Conversation(startedAt: syncT0))
+        try context.save()
+        #expect(try await fixture.tracker("indexer").fetchNewChanges().transactionCount == 1)
+    }
+
     @Test func recognisesBothHistoryTokenExpiredErrors() {
         #expect(PersistentHistoryTracker.isHistoryTokenExpired(SwiftDataError.historyTokenExpired))
         #expect(
