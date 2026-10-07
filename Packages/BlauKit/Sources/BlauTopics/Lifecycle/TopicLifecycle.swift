@@ -12,10 +12,13 @@ import os
 public enum TopicLifecycleEvent: Hashable, Sendable {
     /// A topic opened, with a provisional title (or the placeholder).
     case opened(TopicSnapshot)
-    /// A topic's title, summary or span changed.
+    /// A topic's title, summary or span changed. After a merge or split
+    /// changes a topic that had already closed, its refined final title and
+    /// summary arrive here: a revision of what `.closed` reported.
     case updated(TopicSnapshot)
     /// A topic closed and was refined: its final title (unless the user
-    /// named it) and its summary over the whole topic.
+    /// named it) and its summary over the whole topic. Sent once per topic,
+    /// when it closes; later edits to it are `.updated`.
     case closed(TopicSnapshot)
     /// A topic was removed: a provisional break the segmenter took back, a
     /// topic the user merged into the one before it, or an empty topic.
@@ -208,17 +211,27 @@ public actor TopicLifecycle: TopicService {
     /// Renames a topic. The title is final: no labeler overwrites it. It is
     /// saved at once, so it syncs to the user's other devices.
     ///
+    /// The store write isn't queued behind labeling; telling the pipeline
+    /// the current topic's new title is, so it can't interleave with a
+    /// boundary that changes the current topic.
+    ///
     /// - Throws: `ConversationStoreError.emptyTitle` or `.topicNotFound`.
     public func rename(_ topicID: UUID, to title: String) async throws {
         try await store.renameTopic(topicID, to: title)
-        if let live, live.provisional?.topicID == topicID {
-            // Naming a provisional topic accepts its break: the segmenter
-            // taking the candidate back must not merge the named topic away.
-            live.provisional?.isUserOwned = true
+        if let live {
+            if live.provisional?.topicID == topicID {
+                // Naming a provisional topic accepts its break: the segmenter
+                // taking the candidate back must not merge the named topic away.
+                live.provisional?.isUserOwned = true
+            }
+            if live.knows(topicID) {
+                live.titledTopics.insert(topicID)
+            }
         }
-        if let live, live.currentTopicID == topicID {
-            live.titledTopics.insert(topicID)
-            await syncPipelineTitle(live)
+        enqueue { lifecycle in
+            if let live = lifecycle.live, live.currentTopicID == topicID {
+                await lifecycle.syncPipelineTitle(live)
+            }
         }
         await emit(topicID) { .updated($0) }
     }
@@ -441,9 +454,7 @@ public actor TopicLifecycle: TopicService {
             if let summary = label?.summary {
                 _ = try await store.applyTopicLabel(topicID, title: nil, summary: summary, finalizesTitle: false)
             }
-            conversation.provisional = ProvisionalBreak(
-                topicID: topicID, boundary: boundary, previousTopicID: current,
-                previousStartUnit: conversation.topicStartUnits[current] ?? 0)
+            conversation.provisional = ProvisionalBreak(topicID: topicID, boundary: boundary, previousTopicID: current)
             conversation.currentTopicID = topicID
             conversation.topicStartUnits[topicID] = boundary.unitIndex
             if label != nil {
@@ -574,9 +585,15 @@ public actor TopicLifecycle: TopicService {
     /// Labels a topic over all of its stored exchanges and records the
     /// title (only while it is provisional) and the summary.
     ///
-    /// - Parameter finalizing: `true` when the topic has closed: the title
-    ///   becomes final.
-    private func refine(_ topicID: UUID, in conversationID: ConversationID?, finalizing: Bool) async {
+    /// - Parameters:
+    ///   - finalizing: `true` when the topic has closed: the title becomes
+    ///     final.
+    ///   - announcesClose: Whether a final title is reported as `.closed`
+    ///     (the topic just closed) or as `.updated` (an edit revised a topic
+    ///     that had closed before).
+    private func refine(
+        _ topicID: UUID, in conversationID: ConversationID?, finalizing: Bool, announcesClose: Bool = true
+    ) async {
         do {
             var previousTitle: String?
             if let conversationID {
@@ -590,7 +607,7 @@ public actor TopicLifecycle: TopicService {
             let result = await labeling.label(.topic(units, previousTitle: previousTitle))
             _ = try await store.applyTopicLabel(
                 topicID, title: result.label.title, summary: result.label.summary, finalizesTitle: finalizing)
-            await emit(topicID) { finalizing ? .closed($0) : .updated($0) }
+            await emit(topicID) { finalizing && announcesClose ? .closed($0) : .updated($0) }
         } catch {
             Log.topics.error(
                 "Couldn't label topic \(topicID, privacy: .public): \(String(describing: error), privacy: .public)")
@@ -636,8 +653,11 @@ public actor TopicLifecycle: TopicService {
         await emit(survivor) { .updated($0) }
         let remaining = try? await store.topicSnapshot(survivor)
         let owner = conversationID ?? remaining?.conversationID
+        // The earlier topic had closed (and been reported) before the
+        // merge; its refined title is a revision.
         enqueue { lifecycle in
-            await lifecycle.refine(survivor, in: owner, finalizing: !(remaining?.isOpen ?? false))
+            await lifecycle.refine(
+                survivor, in: owner, finalizing: !(remaining?.isOpen ?? false), announcesClose: false)
         }
         return survivor
     }
@@ -648,6 +668,7 @@ public actor TopicLifecycle: TopicService {
             throw EditError.utteranceNotInTopic(utteranceID)
         }
         guard index > 0 else { throw EditError.splitAtFirstUtterance }
+        let wasOpen = (try? await store.topicSnapshot(topicID).isOpen) ?? false
         let newID = try await store.splitTopic(topicID, at: utterances[index].startedAt, title: Topic.placeholderTitle)
         try await store.flush()
         if let conversation = live, conversation.knows(topicID) {
@@ -667,7 +688,10 @@ public actor TopicLifecycle: TopicService {
         let second = try? await store.topicSnapshot(newID)
         let conversationID = second?.conversationID
         enqueue { lifecycle in
-            await lifecycle.refine(topicID, in: conversationID, finalizing: !(first?.isOpen ?? false))
+            // Splitting the open topic closes its first part; splitting a
+            // closed one revises it. The second part is a new topic.
+            await lifecycle.refine(
+                topicID, in: conversationID, finalizing: !(first?.isOpen ?? false), announcesClose: wasOpen)
             await lifecycle.refine(newID, in: conversationID, finalizing: !(second?.isOpen ?? false))
             if let live = lifecycle.live, live.currentTopicID == newID {
                 await lifecycle.syncPipelineTitle(live)
@@ -707,7 +731,6 @@ private struct ProvisionalBreak {
     let boundary: TopicBoundary
     /// The topic it was split from, which the boundary closes.
     var previousTopicID: UUID
-    var previousStartUnit: Int
     /// The user renamed the provisional topic, which accepts the break: it
     /// is kept even if the segmenter takes the candidate back.
     var isUserOwned = false

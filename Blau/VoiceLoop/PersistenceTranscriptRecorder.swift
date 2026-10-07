@@ -21,6 +21,9 @@ actor PersistenceTranscriptRecorder: TurnTranscriptRecording, RealtimeReseedCont
 
     private let container: @MainActor @Sendable () -> ModelContainer?
     private var store: ConversationStore?
+    /// Flushing the previous store and reopening the active conversation in
+    /// `store`; callers wait for it before using `store`.
+    private var storeReady: Task<Void, any Error>?
     private var active: (id: ConversationID, startedAt: Date)?
 
     /// - Parameter container: The open container, read on the main actor
@@ -36,16 +39,16 @@ actor PersistenceTranscriptRecorder: TurnTranscriptRecording, RealtimeReseedCont
 
     func beginConversation(_ id: ConversationID, at date: Date) async throws {
         active = (id, date)
-        try await currentStore(reopening: false).beginConversation(id, at: date)
+        try await currentStore().beginConversation(id, at: date)
     }
 
     func record(_ utterance: BlauCore.Utterance) async throws {
-        try await currentStore(reopening: true).record(utterance)
+        try await currentStore().record(utterance)
     }
 
     func finishConversation(_ id: ConversationID, at date: Date) async throws {
         defer { active = nil }
-        try await currentStore(reopening: true).finishConversation(id, at: date)
+        try await currentStore().finishConversation(id, at: date)
     }
 
     func flush() async throws {
@@ -55,7 +58,7 @@ actor PersistenceTranscriptRecorder: TurnTranscriptRecording, RealtimeReseedCont
     /// The conversation's current topic from the store, for reseeding a new
     /// realtime session (#39). `nil` while no store is open.
     func topicContext(for conversation: ConversationID) async -> RealtimeTopicContext? {
-        guard let store = try? await currentStore(reopening: false) else { return nil }
+        guard let store = try? await currentStore() else { return nil }
         return await store.topicContext(for: conversation)
     }
 
@@ -65,20 +68,44 @@ actor PersistenceTranscriptRecorder: TurnTranscriptRecording, RealtimeReseedCont
     ///
     /// - Throws: `StoreUnavailableError` while no store is open.
     func conversationStore() async throws -> ConversationStore {
-        try await currentStore(reopening: true)
+        try await currentStore()
     }
 
     /// The store over the current container. A new container gets a new
-    /// store; with `reopening`, the active conversation is started (or
-    /// resumed) in it first.
-    private func currentStore(reopening: Bool) async throws -> ConversationStore {
+    /// store, and the active conversation is started (or resumed) in it.
+    ///
+    /// Two callers can arrive at once (the orchestrator's transcript and the
+    /// topic lifecycle), so the new store is installed before the first
+    /// suspension and every caller waits for the same `storeReady` task:
+    /// both write through one store and none is dropped with its pending
+    /// changes. If reopening fails, the next call tries again.
+    private func currentStore() async throws -> ConversationStore {
         guard let container = await container() else { throw StoreUnavailableError() }
-        if let store, store.modelContainer === container { return store }
-        try? await store?.flush()
+        if let store, store.modelContainer === container {
+            if let storeReady {
+                try await storeReady.value
+            }
+            return store
+        }
+        let previous = store
         let fresh = ConversationStore(modelContainer: container)
+        let active = active
+        let ready = Task {
+            try? await previous?.flush()
+            if let active {
+                try await fresh.beginConversation(active.id, at: active.startedAt)
+            }
+        }
         store = fresh
-        if reopening, let active {
-            try await fresh.beginConversation(active.id, at: active.startedAt)
+        storeReady = ready
+        do {
+            try await ready.value
+        } catch {
+            if store === fresh {
+                store = nil
+                storeReady = nil
+            }
+            throw error
         }
         return fresh
     }

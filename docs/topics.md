@@ -375,7 +375,8 @@ and `Packages/BlauKit/Sources/BlauPersistence/ConversationStore+Topics.swift`.
 // Blau/Topics/TopicLifecycle+App.swift and AppEnvironment.live():
 let transcript = PersistenceTranscriptRecorder(persistence: persistence)
 let topics = TopicLifecycle.app(transcript: transcript, labeling: .app(xai: xai), textEmbeddings: textEmbeddings)
-let orchestrator = TurnOrchestrator(..., transcript: TopicTrackingTranscript(base: transcript, topics: topics))
+let orchestrator = VoiceLoop.makeOrchestrator(
+    ..., transcript: TopicTrackingTranscript(base: transcript, topics: topics), reseedContext: transcript, ...)
 // The timeline's context menu (Blau/Topics/TopicEditMenu.swift):
 try await topics.rename(topicID, to: "Seed round")
 try await topics.mergeWithPrevious(topicID)
@@ -444,8 +445,22 @@ instead (three to five exchanges).
 
 Topic order is `ordinal` (renumbered 0, 1, 2... on every split and merge).
 Each closed topic's final title and summary are stored on the `Topic`, and
-`TopicLifecycle.events()` reports them (`.closed`) for session continuity
-(#39) and memory (M3).
+`TopicLifecycle.events()` reports them for session continuity (#39) and
+memory (M3):
+
+| Event | When |
+| ----- | ---- |
+| `.opened` | A topic opened: the first topic, a provisional break, or the second part of a split |
+| `.updated` | A title, summary or span changed. A merge or split that revises a topic which had already closed reports its new final label here |
+| `.closed` | A topic closed and was refined. Sent once per topic, when it closes (a confirmed boundary, the end of the conversation, or splitting the open topic) |
+| `.removed` | A provisional break taken back, a topic merged into the one before it, or an empty last topic |
+
+Session continuity reads the current topic straight from the store: the
+realtime reseed (#39) gets `reseedContext: transcript`, the same
+`PersistenceTranscriptRecorder` (and so the same `ConversationStore`) the
+lifecycle writes titles and summaries to. The recorder opens one store per
+container and makes every caller wait for it, so the transcript and the
+lifecycle never write through two stores after an iCloud account change.
 
 Until the timeline (#56) exists, DEBUG builds show recent conversations'
 topics with the edit menu in **Debug → Topics** (`TopicsDebugView`).

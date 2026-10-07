@@ -164,6 +164,10 @@ final class LifecycleEventLog: Sendable {
         all.compactMap { if case .closed(let snapshot) = $0 { snapshot } else { nil } }
     }
 
+    var updated: [TopicSnapshot] {
+        all.compactMap { if case .updated(let snapshot) = $0 { snapshot } else { nil } }
+    }
+
     var opened: [TopicSnapshot] {
         all.compactMap { if case .opened(let snapshot) = $0 { snapshot } else { nil } }
     }

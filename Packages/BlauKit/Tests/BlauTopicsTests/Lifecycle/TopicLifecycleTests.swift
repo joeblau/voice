@@ -319,6 +319,62 @@ struct TopicLifecycleTests {
         #expect(merged[0].summary == "Covers 12 exchanges.")
     }
 
+    /// Continuity and memory hear `.closed` once per topic; a later edit to
+    /// a closed topic arrives as `.updated` with its revised final label.
+    @Test func editingAClosedTopicReportsARevisionNotASecondClose() async throws {
+        let fixture = try LifecycleFixture(.threeTopics)
+        try await fixture.begin()
+        let log = LifecycleEventLog(fixture.lifecycle)
+        try await fixture.play(0..<ScriptedTranscript.threeTopics.count)
+        try await fixture.finish()
+        try await waitFor { log.closed.count == 3 }
+        let topics = try await fixture.topics()
+
+        let survivor = try await fixture.lifecycle.mergeWithPrevious(topics[1].id)
+        await fixture.lifecycle.waitUntilIdle()
+        try await waitFor {
+            log.updated.contains { $0.id == survivor && $0.summary == "Covers 12 exchanges." }
+        }
+        #expect(log.removed.contains(topics[1].id))
+        #expect(log.closed.count == 3)
+        let revised = try #require(log.updated.last { $0.id == survivor })
+        #expect(!revised.isOpen)
+        #expect(!revised.titleIsProvisional)
+    }
+
+    @Test func splittingTheOpenTopicClosesItsFirstPart() async throws {
+        let fixture = try LifecycleFixture(.singleTopic)
+        try await fixture.begin()
+        let log = LifecycleEventLog(fixture.lifecycle)
+        try await fixture.play(0..<6)
+        let topic = try #require(try await fixture.topics().first)
+        #expect(topic.isOpen)
+
+        let newID = try await fixture.lifecycle.split(topic.id, atUtterance: fixture.users[3].id)
+        await fixture.lifecycle.waitUntilIdle()
+        try await waitFor { log.closed.contains { $0.id == topic.id } }
+        #expect(!log.closed.contains { $0.id == newID })
+        #expect(log.opened.contains { $0.id == newID })
+    }
+
+    @Test func renamingTheCurrentTopicBeforeItIsTitledSkipsItsProvisionalTitle() async throws {
+        let fixture = try LifecycleFixture(.threeTopics)
+        try await fixture.begin()
+        try await fixture.play(0..<2)
+        let current = try #require(await fixture.lifecycle.currentTopicID)
+
+        try await fixture.lifecycle.rename(current, to: "Bread Notes")
+        // Saved at once, before the queued pipeline update runs.
+        let renamed = try #require(try await fixture.topics().first { $0.id == current })
+        #expect(renamed.title == "Bread Notes")
+        #expect(!renamed.titleIsProvisional)
+        await fixture.lifecycle.waitUntilIdle()
+        // The topic isn't given a provisional title after three exchanges.
+        try await fixture.play(2..<5)
+        #expect(fixture.labeler.topicRequestSizes.isEmpty)
+        #expect(try await fixture.topics().first { $0.id == current }?.title == "Bread Notes")
+    }
+
     @Test func renamingAnUnknownTopicThrows() async throws {
         let fixture = try LifecycleFixture(.threeTopics)
         let unknown = UUID()

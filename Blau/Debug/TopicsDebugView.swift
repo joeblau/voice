@@ -26,7 +26,7 @@
                         }
                         ForEach(Array(topics.enumerated()), id: \.element.id) { index, topic in
                             NavigationLink {
-                                TopicTranscriptDebugView(topic: topic)
+                                TopicTranscriptDebugView(topicID: topic.id)
                             } label: {
                                 TopicDebugRow(topic: topic)
                             }
@@ -69,22 +69,36 @@
     }
 
     /// A topic's lines; long-press one to split the topic there.
+    ///
+    /// It looks the topic up by identifier rather than holding the model: a
+    /// merge from the list, or a sync, can delete the topic while this
+    /// screen is open, and a deleted model must not be read.
     private struct TopicTranscriptDebugView: View {
-        let topic: Topic
+        @Query private var topics: [Topic]
+
+        init(topicID: UUID) {
+            _topics = Query(filter: #Predicate<Topic> { $0.id == topicID })
+        }
 
         var body: some View {
-            let utterances = topic.orderedUtterances
-            List(Array(utterances.enumerated()), id: \.element.id) { index, utterance in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(utterance.role == .agent ? "Grok" : "You")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(utterance.text)
+            if let topic = topics.first {
+                let utterances = topic.orderedUtterances
+                List(Array(utterances.enumerated()), id: \.element.id) { index, utterance in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(utterance.role == .agent ? "Grok" : "You")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(utterance.text)
+                    }
+                    .splitTopicMenu(topicID: topic.id, utteranceID: utterance.id, isEnabled: index > 0)
                 }
-                .splitTopicMenu(topicID: topic.id, utteranceID: utterance.id, isEnabled: index > 0)
+                .navigationTitle(topic.title)
+                .navigationBarTitleDisplayMode(.inline)
+            } else {
+                ContentUnavailableView(
+                    "Topic Removed", systemImage: "text.badge.xmark",
+                    description: Text("This topic was merged into another one or deleted."))
             }
-            .navigationTitle(topic.title)
-            .navigationBarTitleDisplayMode(.inline)
         }
     }
 #endif
