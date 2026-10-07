@@ -200,9 +200,14 @@ final class SettingsUITests: XCTestCase {
 
     // MARK: Knowledge
 
-    func testKnowledgeShowsTheMemorySearchIndex() {
+    func testKnowledgeShowsLearningAndTheMemorySearchIndex() {
         let app = launchOnFakes()
         openSettingsPane(SettingsPaneID.knowledge, in: app)
+        let learn = app.switches["settings.memory.learn"]
+        scrollTo(learn, in: app.collectionViews.firstMatch)
+        XCTAssertTrue(learn.waitForExistence(timeout: 10), "No Learn From Conversations in Settings → Knowledge")
+        XCTAssertTrue(app.buttons["settings.memory.learned"].exists, "No What Blau Learned in Settings → Knowledge")
+
         let status = app.descendants(matching: .any)["settings.memory.status"]
         scrollTo(status, in: app.collectionViews.firstMatch)
         XCTAssertTrue(status.waitForExistence(timeout: 10), "No search index status in Settings → Knowledge")

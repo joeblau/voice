@@ -2,7 +2,7 @@ import BlauMemory
 import Foundation
 
 /// User-facing text for the memory index's status (#63), shown in
-/// Settings → Memory.
+/// Settings → Knowledge → Search Index.
 struct MemoryIndexPresentation: Equatable {
     /// A long job and how far it has got.
     struct Job: Equatable {

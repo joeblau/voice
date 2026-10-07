@@ -36,7 +36,7 @@ Task(priority: .utility) { await indexer.run() }
 | `MemorySourceReader` | BlauMemory | Reads sources by id, ids per kind, and every source with its date; `SwiftDataMemorySources` implements it |
 | `MemoryIndexingController` | BlauMemory | `@MainActor @Observable`: one indexer per `PersistenceController.generation`, status for Settings, the background task's entry point |
 | `MemoryIndexBackgroundTask` | `Blau/Memory` | Registers and schedules the `BGProcessingTask` |
-| `MemoryIndexSettingsSection`, `MemoryIndexPresentation` | `Blau/Settings` | Settings → Knowledge → Memory: status, progress, rebuild |
+| `MemoryIndexSettingsSection`, `MemoryIndexPresentation` | `Blau/Settings` | Settings → Knowledge → Search Index: status, progress, rebuild |
 
 ## Incremental indexing
 
@@ -182,7 +182,7 @@ lost: the work resumes where it was.
   before launch finishes, as BackgroundTasks requires. On iOS 27 the
   request is submitted with the async `submitTaskRequest(_:)`;
   `submit(_:)` is deprecated there.
-- **Settings → Knowledge → Memory.** Status (Up to date, Updating…, Rebuilding…,
+- **Settings → Knowledge → Search Index.** Status (Up to date, Updating…, Rebuilding…,
   Waiting, Paused), a progress bar for a rebuild or embedding backlog
   ("1,200 of 3,400"), the number of passages, when it was last rebuilt, and
   Rebuild Index.
@@ -219,7 +219,7 @@ setup in [sync.md](sync.md#manual-test-plan-device-a--device-b)):
 
 | # | Step | Expected | Result |
 | - | ---- | -------- | ------ |
-| 1 | On B, open Settings → Knowledge → Memory. | "Up to date" (after a first rebuild), a passage count. | pending |
+| 1 | On B, open Settings → Knowledge → Search Index. | "Up to date" (after a first rebuild), a passage count. | pending |
 | 2 | On A, create a note with a distinctive word (until the knowledge base UI #65 exists, a DEBUG build inserting a `Document`). | It syncs (A: "Syncing…" then "On"). | pending |
 | 3 | Keep B in the foreground for up to a minute. | B's passage count grows; a keyword search on B (debug tooling or #64's search) finds the word. | pending |
 | 4 | On A, edit one paragraph of the note. | B finds the new text and no longer the old; Console (`category == "memory"`) shows one incremental pass with 1 embedded (when the model is installed). | pending |
@@ -230,7 +230,7 @@ kill:**
 
 | # | Step | Expected | Result |
 | - | ---- | -------- | ------ |
-| 1 | Install on a device with ~10k chunks of data (or sign in to an account that has it), or delete the index (`Application Support/Blau/Derived/MemoryIndex.sqlite`) and relaunch. | Settings → Knowledge → Memory: "Rebuilding…" with a progress bar. | pending |
+| 1 | Install on a device with ~10k chunks of data (or sign in to an account that has it), or delete the index (`Application Support/Blau/Derived/MemoryIndex.sqlite`) and relaunch. | Settings → Knowledge → Search Index: "Rebuilding…" with a progress bar. | pending |
 | 2 | Kill the app from the app switcher at about 30%. Relaunch. | Progress continues from where it was, not from 0. | pending |
 | 3 | Background the app; in Xcode, pause and run `e -l objc -- (void)[[BGTaskScheduler sharedScheduler] _simulateLaunchForTaskWithIdentifier:@"com.joeblau.blau.memory-index"]`, resume. | Console: "Memory index background task started", then "finished" once done. | pending |
 | 4 | Or leave the device idle overnight. | Next morning, "Up to date"; `needsRebuild` false. | pending |

@@ -64,7 +64,7 @@ final class AppEnvironment {
     let topicLifecycle: TopicLifecycle
 
     /// Learning from conversations (#66): each topic the lifecycle closes is
-    /// sent for fact and entity extraction, and Settings → Memory binds to
+    /// sent for fact and entity extraction, and Settings → Knowledge binds to
     /// its toggle and "What Blau Learned". Only the live app calls xAI;
     /// every other kind runs on a text model that is never available.
     let memoryLearning: MemoryLearning

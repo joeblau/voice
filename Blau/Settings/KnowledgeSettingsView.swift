@@ -12,8 +12,10 @@ enum KnowledgeSettingsIdentifiers {
 
 /// Settings → Knowledge: what Blau knows about the user (the knowledge
 /// base: profile, notes, collections, people and facts), read from the
-/// synced store, whether Grok may search it while they talk, and the
-/// on-device search index over it (`MemoryIndexSettingsSection`, #63).
+/// synced store, whether Grok may search it while they talk, whether Blau
+/// learns from conversations and what it learned (`MemorySettingsSection`,
+/// #66), and the on-device search index over it
+/// (`MemoryIndexSettingsSection`, #63).
 ///
 /// This is where the knowledge base screen opens. Viewing and editing each
 /// item is that screen's job (#65); until it ships, this page shows what is
@@ -52,6 +54,7 @@ struct KnowledgeSettingsView: View {
                 Text("Grok looks things up in what Blau knows when it helps answer you.")
             }
 
+            MemorySettingsSection()
             MemoryIndexSettingsSection()
         }
         .accessibilityIdentifier(KnowledgeSettingsIdentifiers.view)
@@ -66,6 +69,7 @@ struct KnowledgeSettingsView: View {
         }
         .environment(FeatureFlags.inMemory())
         .environment(MemoryIndexingController(persistence: .preview(), embedder: nil, performance: nil))
+        .environment(MemoryLearningSettings(store: InMemoryMemoryLearningPreferenceStore()))
         .modelContainer(PersistenceController.previewContainer())
     }
 #endif
