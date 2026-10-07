@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#
+# Optional pre-commit hook: lints the Swift files staged for commit with
+# swift-format. Install it with `make hooks` (sets core.hooksPath to
+# scripts/git-hooks) and remove it with `make unhooks`. Skip it for a single
+# commit with `git commit --no-verify`.
+
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+
+if ! "$root/scripts/swift-format.sh" lint --staged; then
+    echo "pre-commit: swift-format found problems in the staged Swift files." >&2
+    echo "pre-commit: run 'make format', stage the changes, and commit again." >&2
+    exit 1
+fi

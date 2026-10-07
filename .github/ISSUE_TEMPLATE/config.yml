@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Architecture overview (#1)
+    url: https://github.com/joeblau/voice/issues/1
+    about: Key decisions, the module map and research briefs. Read this before proposing a design change.

@@ -29,11 +29,17 @@ Run `make generate` again after every pull or after editing `project.yml`.
 | `make test-ui`   | Run only `BlauUITests`                                           |
 | `make perf`      | Run `BlauPerfTests` (`Blau-Perf` scheme, Release build)          |
 | `make clean`     | Delete the generated project, plists and DerivedData             |
+| `make format`    | Format all Swift sources in place with swift-format              |
+| `make lint`      | Lint all Swift sources with swift-format (fails on any finding)  |
+| `make hooks`     | Install the optional pre-commit hook that lints staged Swift     |
 
 Test tasks default to `DESTINATION='platform=iOS Simulator,name=iPhone 17,OS=latest'`.
 Point them at another simulator with, for example,
 `make test DESTINATION='id=<simulator udid>'`. DerivedData is kept in
 `.build/DerivedData`.
+
+Formatting, branch naming, commit and pull request conventions are in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Project layout
 
@@ -45,6 +51,8 @@ Point them at another simulator with, for example,
 | `BlauUITests/`   | UI tests (XCTest)                                               |
 | `BlauPerfTests/` | Performance tests (XCTest UI-testing bundle, launch metrics)    |
 | `TestPlans/`     | `Blau.xctestplan` (unit + UI, coverage) and `BlauPerf.xctestplan` |
+| `scripts/`       | `swift-format.sh` (behind `make format` and `make lint`) and git hooks |
+| `.github/`       | Pull request and issue templates                                |
 
 ### Targets and schemes
 

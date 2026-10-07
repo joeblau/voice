@@ -1,0 +1,53 @@
+name: Research spike
+description: A time-boxed investigation that ends in a written finding and a decision.
+title: "Research spike: "
+labels: ["research"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A spike answers a question; it does not ship a feature. The outcome is
+        a document (usually under `docs/`) and a decision, with #1 updated if
+        an architecture decision changes.
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What we need to find out, and which decision depends on the answer.
+    validations:
+      required: true
+  - type: textarea
+    id: background
+    attributes:
+      label: Background
+      description: What is already known, prior research and links.
+  - type: textarea
+    id: approach
+    attributes:
+      label: Approach
+      description: What to measure or try, on which devices and with which data or models.
+    validations:
+      required: true
+  - type: input
+    id: timebox
+    attributes:
+      label: Time box
+      placeholder: 2 days
+    validations:
+      required: true
+  - type: textarea
+    id: deliverables
+    attributes:
+      label: Deliverables
+      description: Where the findings go and what the decision covers.
+      value: |
+        - [ ] Findings written to `docs/<topic>.md`
+        - [ ] Clear go / no-go or recommendation
+        - [ ] #1 updated if an architecture decision changed
+    validations:
+      required: true
+  - type: textarea
+    id: depends
+    attributes:
+      label: Depends on
+      placeholder: "- [ ] #13"
