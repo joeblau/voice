@@ -1,4 +1,5 @@
 import BlauTelemetry
+import Foundation
 
 /// The voice loop's lines in the debug performance HUD: turn state,
 /// connection, the session's continuity (#39), end of utterance → first
@@ -35,6 +36,7 @@ public struct TurnHUDReadout: Sendable, Equatable {
                 value:
                     "\(snapshot.usage.inputTokens) in · \(snapshot.usage.outputTokens) out · \(snapshot.usage.responses) resp"
             ),
+            Row(label: "Barge-in", value: Self.describe(bargeIns: snapshot.bargeIns, last: snapshot.lastBargeIn)),
         ]
     }
 
@@ -49,6 +51,15 @@ public struct TurnHUDReadout: Sendable, Equatable {
         guard let last = latency.last, let p50 = latency.p50, let p95 = latency.p95 else { return "–" }
         return
             "last \(milliseconds(last)) · p50 \(milliseconds(p50)) · p95 \(milliseconds(p95)) ms (n=\(latency.samples.count))"
+    }
+
+    /// `2 · last 0.4 ms to flush (VAD +290 ms)`, or `–` before the first:
+    /// how many barge-ins, the onset reaching the monitor → playback
+    /// flushed, and VAD's confirmation delay before that.
+    static func describe(bargeIns: Int, last: BargeInRecord?) -> String {
+        guard bargeIns > 0, let last else { return "–" }
+        let reaction = String(format: "%.1f", last.reactionTime.milliseconds)
+        return "\(bargeIns) · last \(reaction) ms to flush (VAD +\(milliseconds(last.detectionLatency)) ms)"
     }
 
     static func describe(_ connection: RealtimeClient.ConnectionState) -> String {

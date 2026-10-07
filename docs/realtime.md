@@ -326,6 +326,8 @@ response.done (completed)                                     │
 | `realtime.resumed` | event | A connection resumed the server conversation |
 | `realtime.resumeRefused` | event | A connection meant to resume started a new conversation (or the upgrade was refused) |
 | `realtime.reseed` | event | A new server conversation is being given the history again |
+| `realtime.bargeIn` | event | The user barged in: playback was flushed and the reply cut (`realtime.turn` ends with `bargedIn`) |
+| `realtime.bargeInSuppressed` | event | A speech onset over Grok was judged echo, too quiet, too early or another speaker |
 
 `realtime.connect` and `realtime.event` are canonical (see
 [performance.md](performance.md)); `realtime.toolCall` is not a pipeline
@@ -487,7 +489,9 @@ is removed from Grok's history (`conversation.item.delete`) and not stored;
 one cut part-way is truncated there (`conversation.item.truncate` with the
 played milliseconds) and stored with the share of its text that was heard,
 replaced by the transcript `conversation.item.truncated` brings. Triggering
-the same cut on *speech start* (VAD), with the echo guard, is barge-in (#37).
+the same cut on *speech start* (VAD), with the echo guard, is
+[barge-in](#barge-in) (#37). Both mark the cut agent utterance in
+`TurnSnapshot.interruptedAgentUtterances`.
 
 ### Connection
 
@@ -641,6 +645,121 @@ debug screen shows "Reconnecting…" while `isReconnecting`.
 | Renewal on a device | Hold a conversation past 110 minutes (or set `rolloverAfter` to 5 minutes in a debug build): the next reply after the renewal shows Grok still knows the conversation; the HUD's Session row shows `1 renewed · 1 reseeded` | pending (needs a device and xAI credentials) |
 | Soak | The 1–2 h soak test (#76) covers renewal with real audio | pending (#76) |
 
+## Barge-in
+
+When the user starts talking over Grok, Blau stops the reply at once and
+cuts Grok's memory of it to what was actually heard (issue #37). The code is
+in `Packages/BlauKit/Sources/BlauRealtime/Turns/BargeIn/` and
+`TurnOrchestrator.bargeIn(_:)`.
+
+```swift
+let monitor = BargeInMonitor(
+    target: orchestrator,              // TurnOrchestrator
+    playback: audio.player,            // StreamingAudioPlayer: the grace period
+    microphone: audio.capture.hub)     // CaptureHub: the level checks
+let onsets = vad.events()              // subscribe before VAD sees audio
+Task { await monitor.run(onsets) }
+```
+
+`LiveVoicePipeline` (`Blau/VoiceLoop/`) builds one per conversation, next to
+the VAD and the transcriber.
+
+### Trigger and action
+
+| Step | What happens |
+| ---- | ------------ |
+| Trigger | A confirmed VAD onset (`VoiceActivityEvent.speechStarted`, [vad.md](vad.md)) on the voice-processed (echo-cancelled) microphone while the turn state is `agentSpeaking` |
+| Echo guard | Grace period, level checks and the speaker gate below. An onset that fails one is logged (`No barge-in on segment …`) and counted in `BargeInMonitor.statistics` |
+| Silence | `StreamingAudioPlayer.flush()` first: the next render cycle (≤ 20 ms) plays a 5 ms fade and then silence ([audio.md](audio.md#playback-25)) |
+| Cancel | `response.cancel` with the response id, if the reply is still being generated. A reply that is done but still playing needs none |
+| Truncate | Per agent item: `conversation.item.truncate {item_id, content_index, audio_end_ms}` with the milliseconds the player rendered (`PlayedItem.playedMilliseconds`, rounded down, fade included), or `conversation.item.delete` if none of it was heard. Grok's next reply builds only on what the user heard |
+| Store | The heard share of the transcript is written at once and replaced by the server's `conversation.item.truncated` transcript when it arrives (see [Rapid follow-ups and interruptions](#rapid-follow-ups-and-interruptions)) |
+| Mark | The agent utterance's id goes into `TurnSnapshot.interruptedAgentUtterances`; `TurnSnapshot.lastBargeIn` (`BargeInRecord`) says what was cut and how fast |
+| State | `agentSpeaking → listening` (`userSpeaking` once ASR partials arrive). The user's final utterance starts the next turn as usual; its `response.create` waits for the cancelled response's `response.done` (see [Matching responses to turns](#matching-responses-to-turns)) |
+
+Speech while Grok is still *thinking* doesn't barge in: there is nothing to
+silence, and the final utterance interrupts the pending reply anyway (#36).
+
+### Echo guard
+
+Voice processing removes most of Grok's voice from the microphone, but not
+all of it, and least in the first moments of playback while its echo
+canceller converges. `BargeInConfiguration` (defaults below) decides:
+
+| Check | Default | Rule |
+| ----- | ------- | ---- |
+| Grace period | `playbackGracePeriod` 300 ms, `speechAfterGrace` 200 ms | An onset in the first 300 ms of an agent item's audio is held until 200 ms of speech *after* the grace period has been heard; it barges in only if the segment is still open then, and the level checks run on that later audio. Speech that began before the agent's audio can't be its echo and is not held |
+| Absolute level | `minimumSpeechLevel` −45 dBFS | The speech's RMS on the 16 kHz capture must reach it |
+| Relative level | `echoMargin` 9 dB over the peaks of `referenceWindow` 500 ms | The speech must be that much louder than the peak level (90th percentile of 20 ms pieces) of the microphone just before the onset, which is where the agent's echo leak shows while it talks. The leak is speech with pauses, and VAD trips on its loud syllables, so the reference is those syllables: a median would sit at the pauses, near the noise floor, and let the agent's own voice barge in. The 90th percentile rather than the maximum, so one click doesn't set it. A voice close to the phone jumps well above the leak's peaks |
+| Speaker | `BargeInSpeakerGate` | Voice ID's verdict on the onset (#47): only `reject` stops the barge-in, so `uncertain` still interrupts, as the issue asks. Not wired until the verification gate lands; until then any voice the guard lets through interrupts |
+
+Where playback started is read from the player (`AgentPlaybackObserving`,
+how long the item now playing has been audible) and placed on the capture
+timeline at the onset's `detectedAt`. Without a player there is no grace
+period; without the capture history the level checks are skipped.
+
+Two more rules close gaps where the guard would otherwise fail open:
+
+- *Continuation onsets never barge in.* When a segment reaches VAD's
+  `maximumSegmentDuration` (8 s), VAD ends it and starts a continuation
+  (`SpeechOnset.isContinuation`) at the quietest point of its last second,
+  which can sit right on `detectedAt`. That is the same speech carrying on,
+  whose real onset was already judged (or came before Grok spoke), so the
+  monitor returns `BargeInOutcome.continuation` without judging or counting
+  it. Otherwise the agent's own leak, holding a segment open through a long
+  reply, would get a fresh chance to interrupt it every 8 s, with almost
+  nothing to measure.
+- *Too short to measure is suppressed.* Speech the capture history still
+  holds but that is shorter than 10 ms (`minimumMeasuredSamples`, including
+  an empty span) can't be told from the leak, so it is suppressed as
+  `echo`. Only speech the history no longer holds at all is let through
+  unjudged.
+
+The level defaults are starting points chosen from the signal levels, not
+measured on a phone yet: calibrate them with the manual checks below and
+change `BargeInConfiguration.standard`.
+
+### Latency
+
+The issue's "interrupt → silence < 150 ms" is measured from the onset
+reaching `BargeInMonitor` (`BargeInTrigger.receivedAt`) to the player's
+flush (`BargeInRecord.reactionTime`), plus one render cycle. In
+`aVADOnsetSilencesTheRealPlayerWithinOneRenderCycle` (real
+`StreamingAudioPlayer`, real orchestrator, `SystemClock`) the flush comes
+0.2–0.4 ms after the onset on an M-series Mac, and the next 20 ms render
+cycle is silent after its 5 ms fade.
+
+From the user's first sound, VAD's confirmation comes first: Silero scores
+256 ms chunks and speech is confirmed once 250 ms of it is voiced
+(`SpeechOnset.detectionLatency`, typically 250–500 ms). That delay is what
+keeps coughs and clicks from cutting Grok off; the HUD's **Barge-in** row
+shows both numbers (`2 · last 0.3 ms to flush (VAD +290 ms)`).
+
+### Not stored yet
+
+The SwiftData `Utterance` model has no "interrupted" field, and adding one
+is a schema change (`SchemaV3`, see [data-model.md](data-model.md)) with a
+CloudKit production deploy. Until then the stored agent row is cut to what
+was heard (its text and its `endedAt`), and the live conversation's
+interrupted replies are in `TurnSnapshot.interruptedAgentUtterances` for the
+transcript view (#42) to mark.
+
+### Barge-in tests
+
+`swift test --filter BargeIn` runs `BargeInMonitorTests` (the trigger and
+every echo-guard rule against fakes and a `ManualClock`, with synthetic
+microphone signals: speech over a faint echo, the agent's own voice leaking
+through at syllable rate, with and without speech pauses at the noise floor
+between syllables (and the user talking over each), the reference level
+being the leak's syllables rather than its pauses or one click, quiet
+speech, onsets inside and after the grace period, a segment that ends
+during the hold, a rejected or uncertain speaker) and `TurnOrchestratorBargeInTests` (the cut over fake sockets: the
+cancel and the truncate at the played milliseconds, a reply nobody heard
+deleted, a reply done but still playing, nothing cut outside
+`agentSpeaking`, the next turn going out after the cancelled response;
+the stored row through the real `ConversationStore`; and the end-to-end
+path from a VAD onset through the real `StreamingAudioPlayer`).
+
 ## Testing
 
 `swift test` in `Packages/BlauKit` covers, without the internet:
@@ -680,3 +799,8 @@ debug screen shows "Reconnecting…" while `isReconnecting`.
 | Response matching echoes | Record the conversation above with `RealtimeTranscriptRecorder`, interrupting Grok mid-reply a few times. Note whether `response.created` echoes `metadata.blau_turn`, and whether an `error` names the `response.create`'s `event_id` in `error.event_id`. Without either, matching runs on the order fallback | pending (needs xAI credentials) |
 | EOU → first audio p50 | Turn on **Performance HUD** in the debug menu; after 20 turns, record the HUD's p50 / p95 here and compare them with Instruments' `realtime.firstAudio` | pending (needs a device and xAI credentials) |
 | Echo | On the loudspeaker, Grok's own voice never produces a user utterance (VPIO echo cancellation; voice ID is #47) | pending (needs a device) |
+| Barge-in → silence | Debug menu → Voice Loop on the loudspeaker; ask for a long answer and say "wait" mid-sentence. The audio stops at once; Console (`category:realtime`) shows `Barge-in on segment …: playback flushed … ms after the onset` and `Flushed playback` (`category:audio`). Record the HUD's **Barge-in** row over 10 barge-ins, and a screen recording's onset → silence | pending (needs a device and xAI credentials) |
+| Next reply heard-only | Ask for a numbered list of five items, barge in during item two and ask "what was the last item you said?". Grok names item one or two, never a later one; the truncate's `audio_end_ms` matches what was heard (audio.md check 11) | pending (needs a device and xAI credentials) |
+| No self-interruption | Loudspeaker at full volume, phone on a table, 10 long replies without speaking: no `Barge-in` log. `No barge-in … (echo)` or `(playbackGrace)` lines, if any, show the guard working; note their levels | pending (needs a device and xAI credentials) |
+| Guard calibration | During the two checks above, collect the `No barge-in` and `Barge-in` log lines (speech and reference dBFS) at arm's length, across the room and on AirPods, and set `BargeInConfiguration.standard` between the echo and the speech levels | pending (needs a device and xAI credentials) |
+| TV in the room | With voice ID (#47) wired as the `BargeInSpeakerGate`, play a talk show near the phone while Grok speaks: no barge-in (`otherSpeaker`) | pending (needs #47 and a device) |

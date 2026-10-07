@@ -108,7 +108,8 @@ final class VoiceLoop {
         phase = .starting
         do {
             let pipeline = try await LiveVoicePipeline.start(
-                audio: audio, models: speechModels, backgroundInference: backgroundInference)
+                audio: audio, models: speechModels, backgroundInference: backgroundInference,
+                bargeInTarget: orchestrator)
             self.pipeline = pipeline
             try await orchestrator.start(waitsForConnection: false)
             transcriptTask = Task { await pipeline.run(into: orchestrator) }
@@ -165,30 +166,36 @@ final class VoiceLoop {
 /// The on-device half of the voice loop for one conversation: the VAD and
 /// streaming ASR over the conversation audio's capture, with the microphone
 /// started through its `AudioSessionKeeper` (#26) so the conversation keeps
-/// running off screen.
+/// running off screen, and barge-in (#37) watching VAD for the user talking
+/// over Grok.
 @MainActor
 final class LiveVoicePipeline {
     let transcriber: ParakeetStreamingTranscriber
     private let stopAudio: @Sendable () async -> Void
     private var vadTask: Task<Void, Never>?
+    private var bargeInTask: Task<Void, Never>?
 
     private init(
-        transcriber: ParakeetStreamingTranscriber, vadTask: Task<Void, Never>?,
+        transcriber: ParakeetStreamingTranscriber, vadTask: Task<Void, Never>?, bargeInTask: Task<Void, Never>?,
         stopAudio: @escaping @Sendable () async -> Void
     ) {
         self.transcriber = transcriber
         self.vadTask = vadTask
+        self.bargeInTask = bargeInTask
         self.stopAudio = stopAudio
     }
 
     /// Loads the models, starts the conversation audio (capture and
     /// playback on its engine), then the transcriber and VAD. The Silero
     /// stage is registered with `backgroundInference`, which moves it off
-    /// the Neural Engine while Blau is off screen.
+    /// the Neural Engine while Blau is off screen. A `BargeInMonitor` cuts
+    /// `bargeInTarget` off when VAD hears the user over the agent's audio,
+    /// its echo guard reading the player and the capture history.
     static func start(
         audio: ConversationAudio,
         models: ModelManager,
-        backgroundInference: BackgroundInferenceMonitor?
+        backgroundInference: BackgroundInferenceMonitor?,
+        bargeInTarget: (any BargeInTarget)? = nil
     ) async throws -> LiveVoicePipeline {
         #if os(iOS)
             guard let vadDirectory = models.directory(for: .sileroVAD),
@@ -220,8 +227,16 @@ final class LiveVoicePipeline {
                 await stopAudio()
                 throw error
             }
+            // Barge-in subscribes to VAD before VAD sees any audio, too.
+            var bargeInTask: Task<Void, Never>?
+            if let bargeInTarget {
+                let monitor = BargeInMonitor(target: bargeInTarget, playback: audio.player, microphone: hub)
+                let onsets = vad.events()
+                bargeInTask = Task { await monitor.run(onsets) }
+            }
             let vadTask = Task { await vad.run(on: hub) }
-            return LiveVoicePipeline(transcriber: transcriber, vadTask: vadTask, stopAudio: stopAudio)
+            return LiveVoicePipeline(
+                transcriber: transcriber, vadTask: vadTask, bargeInTask: bargeInTask, stopAudio: stopAudio)
         #else
             throw VoiceLoop.StartError.unavailable
         #endif
@@ -239,11 +254,13 @@ final class LiveVoicePipeline {
         await transcriber.finish()
     }
 
-    /// Stops ASR, VAD and the audio session.
+    /// Stops ASR, VAD, barge-in and the audio session.
     func stop() async {
         await transcriber.finish()
         vadTask?.cancel()
         vadTask = nil
+        bargeInTask?.cancel()
+        bargeInTask = nil
         await stopAudio()
     }
 }

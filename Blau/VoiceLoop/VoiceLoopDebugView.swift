@@ -62,6 +62,8 @@
                         LabeledContent(row.label, value: row.value)
                     }
                     LabeledContent("Completed turns", value: "\(loop.snapshot.completedTurns)")
+                    LabeledContent(
+                        "Replies cut short", value: "\(loop.snapshot.interruptedAgentUtterances.count)")
                 }
             }
             .navigationTitle("Voice Loop")
