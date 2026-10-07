@@ -322,7 +322,14 @@ struct MemoryModelBehaviorTests {
         #expect(
             Fact(predicate: "prefers", objectText: "short answers", validFrom: t0, origin: .user)
                 .statement(userName: "Joe") == "Joe prefers short answers")
-        #expect(Fact(predicate: "", objectText: "x", validFrom: t0, origin: .user).statement() == "User x")
+        // An empty predicate: the object is a whole sentence (`remember`, #68).
+        #expect(
+            Fact(predicate: "", objectText: " The user's sister is Maya ", validFrom: t0, origin: .user).statement()
+                == "The user's sister is Maya")
+        #expect(
+            Fact(subject: acme, predicate: "", objectText: "Acme moved to Oakland", validFrom: t0, origin: .user)
+                .statement() == "Acme moved to Oakland")
+        #expect(Fact(predicate: "", objectText: " ", validFrom: t0, origin: .user).statement() == "User")
     }
 
     @Test func profileBlocksTrackTheirBudget() {

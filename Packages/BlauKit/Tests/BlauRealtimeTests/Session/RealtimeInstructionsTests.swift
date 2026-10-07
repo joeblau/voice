@@ -123,6 +123,28 @@ struct RealtimeInstructionsTests {
         #expect(!text.contains("third"))
     }
 
+    @Test func teachesTheMemoryToolsTheSessionHas() throws {
+        let all = try RealtimeToolRegistry(MemoryTools.all(backend: FakeMemoryBackend())).definitions
+        let text = render(tools: all)
+        #expect(text.contains("\n# Memory\nYou have a long-term memory"))
+        #expect(text.contains("search with kinds [\"company\"]"))
+        for line in ["- Call search_memory", "- Call get_entity", "- Call remember", "call forget with its id"] {
+            #expect(text.contains(line), "missing \(line)")
+        }
+        #expect(text.contains("Only after they say yes, call forget again with confirm set to true."))
+        // Tools, then memory guidance, before the user's profile.
+        let tools = try #require(text.range(of: "# Tools"))
+        let memory = try #require(text.range(of: "# Memory"))
+        #expect(tools.lowerBound < memory.lowerBound)
+
+        // Only what the session has.
+        let searchOnly = render(tools: [SearchMemoryTool.definition])
+        #expect(searchOnly.contains("- Call search_memory"))
+        #expect(!searchOnly.contains("get_entity"))
+        #expect(!searchOnly.contains("forget"))
+        #expect(!render(tools: [EchoTool.definition]).contains("# Memory"))
+    }
+
     @Test func usesTheAssistantName() {
         #expect(render(RealtimeInstructions(assistantName: "Nova")).hasPrefix("You are Nova,"))
     }

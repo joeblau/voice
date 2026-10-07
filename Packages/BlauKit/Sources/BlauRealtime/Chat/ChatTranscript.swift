@@ -17,6 +17,9 @@ public struct ChatRow: Identifiable, Hashable, Sendable {
         /// so far; the view shows the part already heard
         /// (``ChatTranscript/revealedText(of:played:)``).
         case streaming(PlaybackItemID)
+        /// A tool Grok called, shown as a subtle chip (#68). The row's role
+        /// is `system` and its text the chip's title.
+        case tool(ChatToolCall)
     }
 
     /// The utterance's id. A streaming reply keeps the id it is stored
@@ -59,6 +62,16 @@ public struct ChatRow: Identifiable, Hashable, Sendable {
 
     /// The row id of the user's speech in progress. There is at most one.
     public static let livePartialID = UUID(uuidString: "B1A00000-0000-4000-8000-0000000000A1")!
+
+    /// The chip row for a tool call.
+    public init(tool call: ChatToolCall) {
+        self.init(id: call.rowID, role: .system, text: call.title, startedAt: call.startedAt, kind: .tool(call))
+    }
+
+    /// The tool call, for a chip row.
+    public var toolCall: ChatToolCall? {
+        if case .tool(let call) = kind { call } else { nil }
+    }
 }
 
 /// Builds the chat transcript's rows. Pure functions over plain values, so
@@ -92,7 +105,42 @@ public enum ChatTranscript {
         excluding excluded: Set<UUID> = [],
         interrupted: Set<UUID> = [],
         waiting: Set<UUID> = [],
-        notSent: Set<UUID> = []
+        notSent: Set<UUID> = [],
+        toolCalls: [ChatToolCall] = []
+    ) -> [ChatRow] {
+        let rows = utteranceRows(
+            stored: stored, recorded: recorded, excluding: excluded, interrupted: interrupted, waiting: waiting,
+            notSent: notSent)
+        return merged(rows, toolCalls: toolCalls)
+    }
+
+    /// `rows` with a chip for each of `toolCalls`, placed by start time: a
+    /// chip goes after the rows that started at or before it (the question
+    /// and the "let me check"), before the answer.
+    public static func merged(_ rows: [ChatRow], toolCalls: [ChatToolCall]) -> [ChatRow] {
+        guard !toolCalls.isEmpty else { return rows }
+        let chips = toolCalls.sorted { ($0.startedAt, $0.id) < ($1.startedAt, $1.id) }.map(ChatRow.init(tool:))
+        var result: [ChatRow] = []
+        result.reserveCapacity(rows.count + chips.count)
+        var next = chips.startIndex
+        for row in rows {
+            while next < chips.endIndex, chips[next].startedAt < row.startedAt {
+                result.append(chips[next])
+                next += 1
+            }
+            result.append(row)
+        }
+        result += chips[next...]
+        return result
+    }
+
+    private static func utteranceRows(
+        stored: [ChatLine],
+        recorded: [UUID: ChatLine],
+        excluding excluded: Set<UUID>,
+        interrupted: Set<UUID>,
+        waiting: Set<UUID>,
+        notSent: Set<UUID>
     ) -> [ChatRow] {
         var lines: [ChatLine]
         if recorded.isEmpty {

@@ -10,18 +10,20 @@ import Foundation
 /// `configurator.configure(client)` after every `.connected` and runs
 /// `configurator.followSettingsChanges(sending: client)` for the session's
 /// lifetime, so a voice, speed or search change in Settings goes out in the
-/// next `session.update`. It makes one runner with
-/// `makeToolRunner(sender: client)`, passes it every server event
-/// (`runner.handle(event)`), and calls `runner.cancelAll()` on barge-in and
-/// on each new connection.
+/// next `session.update`. It is built with `toolRegistry`
+/// (`VoiceLoop.makeOrchestrator`) and owns the runner that answers the
+/// calls: it feeds it the session's events, cancels it on barge-in and on
+/// each new connection, and carries a turn over its tool round (#68,
+/// docs/memory-tools.md). `makeToolRunner(sender:)` makes a standalone one.
 @MainActor
 final class RealtimeSessionServices {
     /// Settings → Voice and Settings → Search bind to this.
     let voiceSettings: RealtimeVoiceSettingsModel
     /// Builds and sends `session.update`.
     let configurator: RealtimeSessionConfigurator
-    /// The client-side tools declared in `session.tools`. Empty until the
-    /// memory tools (#68) register here, behind the `memoryTools` flag.
+    /// The client-side tools declared in `session.tools`: the memory tools
+    /// (#68) when the `memoryTools` flag is on. The turn orchestrator runs
+    /// them (`VoiceLoop.makeOrchestrator`).
     let toolRegistry: RealtimeToolRegistry
 
     init(
@@ -41,16 +43,16 @@ final class RealtimeSessionServices {
         RealtimeToolRunner(registry: toolRegistry, sender: sender)
     }
 
-    /// The app's services. Settings live in `UserDefaults`; DEBUG UI-test
-    /// runs use a separate suite so they never change the developer's own
-    /// settings.
-    static func make() -> RealtimeSessionServices {
+    /// The app's services, declaring `tools`. Settings live in
+    /// `UserDefaults`; DEBUG UI-test runs use a separate suite so they never
+    /// change the developer's own settings.
+    static func make(tools: RealtimeToolRegistry = RealtimeToolRegistry()) -> RealtimeSessionServices {
         #if DEBUG
             if XAIUITestStub.current != nil {
                 return RealtimeSessionServices(
-                    persistence: UserDefaultsVoiceSettingsPersistence(suiteName: "blau.uitests"))
+                    persistence: UserDefaultsVoiceSettingsPersistence(suiteName: "blau.uitests"), tools: tools)
             }
         #endif
-        return RealtimeSessionServices(persistence: UserDefaultsVoiceSettingsPersistence())
+        return RealtimeSessionServices(persistence: UserDefaultsVoiceSettingsPersistence(), tools: tools)
     }
 }

@@ -61,6 +61,22 @@ All of the rules (merging, ordering, interruptions, revealing, holding a
 partial) are plain functions in BlauKit (`BlauRealtime/Chat`) and tested on
 the Mac with `swift test`; the app target only lays rows out.
 
+## Tool chips
+
+When Grok calls a tool (the memory tools, #68), the transcript shows a
+subtle centered chip, a caption-sized label in a hairline capsule:
+"Searching memory…" while it runs, then "Searched memory", "Saved to
+memory", "Checked memory" or "Couldn't search memory". The chips come from
+`TurnSnapshot.toolCalls`; `ChatLiveState` keeps them for the conversation on
+screen, the current turn's with the reply as it plays (`liveRows`) and
+finished ones among the stored rows by start time
+(`ChatTranscript.rows(…, toolCalls:)`), so a chip sits after the question
+and the "let me check" and before the answer. In DEBUG builds tapping a chip
+opens the call's arguments and output, pretty-printed. Chips live in memory
+only, so a conversation reopened after a relaunch has none (see
+[memory-tools.md](memory-tools.md#in-the-chat)). VoiceOver reads them as
+"Blau, Searched memory" (`blau.chat.tool`).
+
 ## Interrupted replies
 
 Two sources mark a reply as interrupted; a row is marked when either does.
@@ -127,6 +143,7 @@ frame rate come from a device run:
 | Test | Covers |
 | --- | --- |
 | `ChatTranscriptTests` (BlauKit) | ordering, merging stored and just-written lines, interruptions, revealing a reply, the fetch descriptors |
+| `ChatToolCallTests` (BlauKit) | tool chip titles, placement between question and answer, live and finished chips |
 | `ChatLiveStateTests`, `TranscriptFeedTests` (BlauKit) | partials resolving to finals, held partials expiring, streaming rows, conversation switches, the feed, the orchestrator's `agentSpeech` |
 | `ChatTranscriptViewTests` (BlauTests) | the live model, the fixture, and a rendered row: on its speaker's side, within 85 %, no filled background |
 | `ChatTranscriptUITests` | user rows right and agent rows left on screen, opening at the latest line, the long-press menu, the largest text size |

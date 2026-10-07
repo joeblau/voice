@@ -194,7 +194,8 @@ struct TurnHarness {
         reseedContext: any RealtimeReseedContextProviding = NoRealtimeReseedContext(),
         tokens: FakeTokenProvider = FakeTokenProvider(),
         sessionTimers: Bool = false,
-        retriesAfterGivingUp: Bool = false
+        retriesAfterGivingUp: Bool = false,
+        tools: RealtimeToolRegistry = RealtimeToolRegistry()
     ) {
         self.connector = connector
         self.tokens = tokens
@@ -221,7 +222,7 @@ struct TurnHarness {
         }
         orchestrator = TurnOrchestrator(
             client: client, configurator: configurator, audio: audio, transcript: self.transcript,
-            reseedContext: reseedContext, clock: clock,
+            reseedContext: reseedContext, tools: tools, clock: clock,
             signposter: Signposter(category: .realtime, backend: signposts), configuration: configuration)
     }
 

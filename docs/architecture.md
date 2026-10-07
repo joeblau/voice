@@ -136,7 +136,8 @@ The complete list of declared edges:
   `BLAU_DEVICE_TESTS=1`.
 - `BlauKitIntegrationTests` compose sibling modules the way the
   composition root does (today: topic segmentation on BlauMemory's shared
-  embedding service). It is a test target only, so it doesn't add an edge
+  embedding service, and BlauRealtime's memory tools over BlauMemory's
+  backend). It is a test target only, so it doesn't add an edge
   to the graph; it shares `BlauTopicsTests`' scripted transcripts through a
   symlink in its `Fixtures/`.
 - App-level unit, UI and performance tests stay in `BlauTests`,
@@ -171,6 +172,10 @@ The complete list of declared edges:
 - [memory-extraction.md](memory-extraction.md): the post-conversation
   fact and entity extraction pipeline (add-only, validity-dated facts,
   entity resolution, the privacy toggle and "What Blau Learned").
+- [memory-tools.md](memory-tools.md): Grok's memory tools (`search_memory`,
+  `get_entity`, `remember`, `forget`): the BlauCore contract, the backend,
+  the token budget, the spoken confirmation, tool rounds inside a turn and
+  the chat's chips.
 - [embeddings.md](embeddings.md): the shared text embedding service
   (EmbeddingGemma 256-d int8): tokenizer, token table, batches, model
   versions, and how topics use it.

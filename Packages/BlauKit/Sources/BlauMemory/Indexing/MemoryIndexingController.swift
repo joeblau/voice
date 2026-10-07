@@ -41,6 +41,13 @@ public final class MemoryIndexingController {
     /// The indexer for the current stores, if any.
     @ObservationIgnored public private(set) var indexer: MemoryIndexer?
 
+    /// The current store and index for Grok's memory tools (#68), or `nil`
+    /// until the stores are open. An in-memory store (or an index file that
+    /// couldn't be opened) gets a context with no index: the tools then read
+    /// the knowledge base and facts from the store alone. Replaced with
+    /// every store generation.
+    @ObservationIgnored public private(set) var toolContext: MemoryToolService.Context?
+
     /// - Parameters:
     ///   - embedder: The shared text embedding service (#60). Without a
     ///     model the index is built for keyword search and embedded later.
@@ -146,6 +153,7 @@ public final class MemoryIndexingController {
         guard stack.mode.isPersistent else {
             installedGeneration = generation
             status = nil
+            toolContext = MemoryToolService.Context(container: stack.container, index: nil)
             return
         }
 
@@ -163,6 +171,7 @@ public final class MemoryIndexingController {
             Log.memory.error("Memory index unavailable: \(String(describing: error), privacy: .public)")
             installedGeneration = generation
             status = nil
+            toolContext = MemoryToolService.Context(container: stack.container, index: nil)
             return
         }
         // The stores may have been replaced while the file opened.
@@ -179,6 +188,7 @@ public final class MemoryIndexingController {
             gate: performance.map { IndexingGate(performance: $0) },
             configuration: configuration)
         self.indexer = indexer
+        toolContext = MemoryToolService.Context(container: stack.container, index: index, indexer: indexer)
         installedGeneration = generation
         status = MemoryIndexingStatus()
         runner = Task.detached(priority: .utility) { await indexer.run() }
@@ -197,6 +207,7 @@ public final class MemoryIndexingController {
         runner = nil
         statusFollower = nil
         indexer = nil
+        toolContext = nil
         status = nil
     }
 }

@@ -162,6 +162,9 @@ public struct TurnSnapshot: Sendable, Equatable {
     /// The chat transcript (#42) reveals each one as its audio plays.
     /// Empty between replies, like ``agentText``.
     public var agentSpeech: [AgentSpeech]
+    /// The function calls Grok made this conversation (newest 64), for the
+    /// chat's tool chips (#68). Those of the turn in progress are `isLive`.
+    public var toolCalls: [ToolCall]
 
     public init(
         state: TurnState = .paused,
@@ -180,7 +183,8 @@ public struct TurnSnapshot: Sendable, Equatable {
         bargeIns: Int = 0,
         lastBargeIn: BargeInRecord? = nil,
         interruptedAgentUtterances: Set<UUID> = [],
-        agentSpeech: [AgentSpeech] = []
+        agentSpeech: [AgentSpeech] = [],
+        toolCalls: [ToolCall] = []
     ) {
         self.state = state
         self.connection = connection
@@ -199,6 +203,7 @@ public struct TurnSnapshot: Sendable, Equatable {
         self.lastBargeIn = lastBargeIn
         self.interruptedAgentUtterances = interruptedAgentUtterances
         self.agentSpeech = agentSpeech
+        self.toolCalls = toolCalls
     }
 }
 

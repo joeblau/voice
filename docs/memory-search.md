@@ -35,6 +35,7 @@ try await search.search("pricing", after: start, before: end, kinds: [.document,
 | `MemoryQueryEmbedding` | Embeds the query; `TextEmbeddingService` and `TextEmbeddingModel` conform |
 | `MemoryReranker` | The optional cross-encoder hook (Qwen3-Reranker-0.6B); off unless one is passed |
 | `MemorySearchService` | `MemorySearch` behind BlauCore's `MemoryService` (snippets as `MemoryHit`s) |
+| `MemoryToolService` | What `search_memory` and the other memory tools call (#68): `MemorySearch` over the current index with each hit's source and date, narrowing by document kind, entity timelines, remember and forget ([memory-tools.md](memory-tools.md)) |
 | `MemorySearchBenchmark` | `memory.search50k`, the latency criterion |
 
 ## One search

@@ -45,6 +45,12 @@ public struct ChatLiveState: Sendable, Equatable {
     /// never sent. Kept after the conversation ends, like
     /// ``interruptedAgentIDs``.
     public private(set) var unsentUserIDs: Set<UUID> = []
+    /// The tool calls Grok made in ``conversationID`` (#68), as chips, by
+    /// call id. Kept after the conversation ends, while its rows stay on
+    /// screen; the store doesn't keep them.
+    public private(set) var toolCalls: [String: ChatToolCall] = [:]
+    /// The calls of the turn in progress: shown with the live rows.
+    public private(set) var liveToolCallIDs: Set<String> = []
     /// How long a cleared partial is kept waiting for its final text.
     public var holdDuration: TimeInterval
 
@@ -84,9 +90,14 @@ public struct ChatLiveState: Sendable, Equatable {
         if snapshot.conversationID != nil {
             interruptedAgentIDs.formUnion(snapshot.interruptedAgentUtterances)
             unsentUserIDs.formUnion(snapshot.discardedUtteranceIDs)
+            for call in snapshot.toolCalls {
+                toolCalls[call.id] = ChatToolCall(call)
+            }
+            liveToolCallIDs = Set(snapshot.toolCalls.filter(\.isLive).map(\.id))
         } else {
             // The conversation stopped: what still waited is never sent.
             unsentUserIDs.formUnion(waitingUserIDs)
+            liveToolCallIDs = []
         }
         waitingUserIDs = Set(snapshot.queuedUtteranceIDs)
     }
@@ -137,6 +148,8 @@ public struct ChatLiveState: Sendable, Equatable {
         interruptedAgentIDs.removeAll()
         waitingUserIDs.removeAll()
         unsentUserIDs.removeAll()
+        toolCalls.removeAll()
+        liveToolCallIDs.removeAll()
     }
 
     // MARK: Output
@@ -146,16 +159,26 @@ public struct ChatLiveState: Sendable, Equatable {
         Set(agentSpeech.map(\.utteranceID))
     }
 
-    /// The rows after the finished ones: Grok's reply as it plays, then the
-    /// user's speech in progress (or held until its final text arrives).
+    /// The chips of finished turns, for the finished rows
+    /// (`ChatTranscript.rows(…, toolCalls:)`), oldest first.
+    public var finishedToolCalls: [ChatToolCall] {
+        toolCalls.values.filter { !liveToolCallIDs.contains($0.id) }
+            .sorted { ($0.startedAt, $0.id) < ($1.startedAt, $1.id) }
+    }
+
+    /// The rows after the finished ones: Grok's reply as it plays, with the
+    /// chips of the tools it is calling, then the user's speech in progress
+    /// (or held until its final text arrives).
     ///
     /// - Parameter now: Stands in for a start time that wasn't recorded.
     public func liveRows(now: Date) -> [ChatRow] {
-        var rows = agentSpeech.map { speech in
+        let speech = agentSpeech.map { speech in
             ChatRow(
                 id: speech.utteranceID, role: .agent, text: speech.transcript, startedAt: speech.startedAt ?? now,
                 kind: .streaming(speech.playbackID))
         }
+        let chips = liveToolCallIDs.compactMap { toolCalls[$0] }
+        var rows = ChatTranscript.merged(speech, toolCalls: chips)
         if let text = userPartial ?? heldPartial?.text {
             rows.append(
                 ChatRow(
