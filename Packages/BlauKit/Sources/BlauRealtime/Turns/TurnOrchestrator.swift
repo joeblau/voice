@@ -259,6 +259,10 @@ public actor TurnOrchestrator: RealtimeService {
     /// Connections in a row that dropped before their resumption was
     /// confirmed.
     var unconfirmedResumes = 0
+    /// The user texts of discarded turns whose items had already reached
+    /// the server conversation (#80): a connection still resuming that
+    /// conversation deletes them from the replayed history.
+    var discardedSentTexts: [String] = []
     /// The session is old enough to renew at the next quiet moment.
     var rolloverDue = false
     /// A renewal is under way.
@@ -633,8 +637,15 @@ public actor TurnOrchestrator: RealtimeService {
     /// Drops the utterances waiting for the connection: the user chose not
     /// to wait for Grok's answer. They stay in the transcript (they were
     /// said) and are marked in ``TurnSnapshot/discardedUtteranceIDs``; Grok
-    /// never sees them, so a reconnect doesn't answer them, and a later
+    /// doesn't get them, so a reconnect doesn't answer them, and a later
     /// reseed (which only sends stored exchanges) leaves them out too.
+    ///
+    /// A turn whose items reached xAI before the connection dropped is
+    /// already in the server conversation. Resuming that conversation would
+    /// leave the question there for the next reply to answer, so the next
+    /// connection starts a new server conversation instead (reseeded
+    /// without the discarded utterances). A connection already reopening
+    /// the old conversation deletes those items once it has resumed.
     ///
     /// - Returns: How many utterances were discarded.
     @discardableResult
@@ -644,6 +655,10 @@ public actor TurnOrchestrator: RealtimeService {
         queued.removeAll()
         discardedUtterances.formUnion(discarded.map(\.user.id))
         Log.realtime.notice("Discarded \(discarded.count, privacy: .public) queued utterance(s)")
+        let sent = discarded.filter(\.wasSent)
+        if !sent.isEmpty {
+            discardedSent(sent.flatMap(\.texts))
+        }
         publish()
         return discarded.count
     }

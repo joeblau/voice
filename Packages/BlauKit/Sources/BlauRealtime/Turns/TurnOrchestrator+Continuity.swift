@@ -125,6 +125,7 @@ extension TurnOrchestrator {
         pendingResume = nil
         evidenceSinceDrop = ResumeEvidence()
         unconfirmedResumes = 0
+        discardedSentTexts.removeAll()
         rolloverDue = false
         isRollingOver = false
         continuityCounts = RealtimeSessionContinuity()
@@ -184,6 +185,8 @@ extension TurnOrchestrator {
         let needsReseed = hasHadSession
         hasHadSession = true
         unconfirmedResumes = 0
+        // A new conversation never had the discarded items.
+        discardedSentTexts.removeAll()
         serverConversationID = conversation
         setEndpointConversation(conversation)
         sessionStartedAt = clock.uptime
@@ -332,8 +335,46 @@ extension TurnOrchestrator {
             rolloverDue = false
             scheduleSessionTimers()
         }
+        deleteDiscardedReplayedItems(pending.evidence.replayed)
         skipReplayedItems(pending.evidence.replayed)
         sessionReady()
+    }
+
+    /// The user discarded queued turns whose items had already reached the
+    /// server conversation (``discardQueued()``): the next connection
+    /// starts a new conversation, reseeded without them. A connection
+    /// already reopening the old one deletes them once it has resumed
+    /// (``deleteDiscardedReplayedItems(_:)``).
+    func discardedSent(_ texts: [String]) {
+        discardedSentTexts = texts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        Log.realtime.notice(
+            "Discarded utterance(s) already reached the server conversation; the next connection starts a new one")
+        forgetServerConversation()
+    }
+
+    /// A resumed conversation still holds the items of turns the user
+    /// discarded while it was disconnected: they are deleted, with any
+    /// reply the server made to them (none of it was heard), so the next
+    /// response doesn't answer them.
+    private func deleteDiscardedReplayedItems(_ replayed: [ReplayedItem]) {
+        let discarded = discardedSentTexts
+        discardedSentTexts.removeAll()
+        guard !discarded.isEmpty, !replayed.isEmpty else { return }
+        let userIndices = replayed.indices.filter { replayed[$0].role == .user }
+        let userTexts = userIndices.map { replayed[$0].text }
+        var matched = 0
+        for count in stride(from: min(discarded.count, userTexts.count), through: 1, by: -1)
+        where Array(userTexts.suffix(count)) == Array(discarded.prefix(count)) {
+            matched = count
+            break
+        }
+        guard matched > 0 else { return }
+        let first = userIndices[userIndices.count - matched]
+        let ids = replayed[first...].compactMap(\.id)
+        guard !ids.isEmpty else { return }
+        Log.realtime.notice(
+            "Deleting \(ids.count, privacy: .public) discarded item(s) from the resumed conversation")
+        send(ids.map { .conversationItemDelete(itemID: $0) }, turn: nil)
     }
 
     /// A turn sent again after the drop may already be in the resumed
@@ -434,7 +475,7 @@ extension TurnOrchestrator {
         await endpointQueue.drain()
     }
 
-    private func forgetServerConversation() {
+    func forgetServerConversation() {
         serverConversationID = nil
         setEndpointConversation(nil)
     }

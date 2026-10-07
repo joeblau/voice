@@ -33,7 +33,6 @@ struct RootView: View {
 /// from `RootView` so it can own the `RecordingController` built from the
 /// environment's audio service.
 struct MainScreenScaffold: View {
-    @Environment(AppEnvironment.self) private var environment
     @Environment(ModelManager.self) private var models
     @Environment(AppEnvironment.self) private var environment
     @Environment(\.scenePhase) private var scenePhase

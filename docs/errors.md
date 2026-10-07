@@ -49,7 +49,7 @@ fails when a code is missing here, or listed here but not in `IssueCode`.
 | `connection.offline` | You're offline | `NWPathMonitor` reports no path, or the client gave up on `notConnectedToInternet`, `dataNotAllowed`, `internationalRoamingOff` or `callIsActive` | Keeps transcribing, storing and segmenting topics; queues utterances; reconnects the moment the path is back | Discard (while utterances wait) |
 | `connection.reconnecting` | Reconnecting to Grok… | The socket dropped and the client is reopening it (or resuming the conversation, #39) | Queues utterances and sends them as one turn after the resume or reseed | Discard (while utterances wait) |
 | `connection.unreachable` | Can't reach Grok | The client's 8 reconnect attempts ran out on timeouts, resets, missed pongs or server closes | Tries again every 30 s while the network is up (`retryAfterGivingUp`), and at once when the path comes back | Try Again, Discard |
-| `connection.insecure` | Secure connection failed | TLS failed: an untrusted or expired certificate, often a captive portal, a VPN or a wrong clock | Tries again like `connection.unreachable` | Try Again |
+| `connection.insecure` | Secure connection failed | TLS failed: an untrusted or expired certificate, often a captive portal, a VPN or a wrong clock | A server certificate problem (untrusted, expired, unknown root, not yet valid, or ATS) won't pass by itself, so there is no 30 s retry: Blau reconnects when the network comes back or on Try Again. Other TLS failures (`secureConnectionFailed`, `clientCertificateRejected`) are retried like `connection.unreachable` | Try Again |
 | `connection.rateLimited` | Grok is busy | HTTP 429 on the token or the upgrade, or an `error` / failed response with a `rate_limit` code | The client retries with backoff; after it gives up, every 30 s | Try Again |
 | `connection.serverError` | xAI is having problems | HTTP 408 or 5xx, or an `internal_error` from the server | Tries again later | Try Again |
 
@@ -72,6 +72,16 @@ fails when a code is missing here, or listed here but not in `IssueCode`.
 | `reply.failed` | Grok couldn't answer | `response.done` with status `failed`, or an `error` rejecting the turn's `response.create` | Ends the turn; the next utterance starts a new one | none (say it again) |
 | `reply.timedOut` | No answer from Grok | No `response.created` within 15 s of `response.create` | Ends the turn; a late response is cancelled | none (say it again) |
 | `reply.unexpected` | Something went wrong | HTTP 400/404/422 that isn't about the key, an undecodable token response, an event Blau can't encode | Reports it; a protocol change can't end a session (unknown frames are ignored, see the fuzz tests below) | Try Again |
+
+A turn's `error` event or failed `response.done` can carry a connection or
+account code too (`connection.rateLimited`, `connection.serverError`,
+`account.noCredits`). The connection is still open then, and Try Again
+only reconnects, so a reply-level failure (`TurnFailure.Kind.response`) is
+reworded for that one reply (`UserFacingIssue.asReplyFailure`): Try Again
+is dropped, the severity is capped at warning so the banner can be
+dismissed (a reply-level `account.noCredits` offers Open xAI Console
+only), and the message says to say it again. The next utterance is the
+retry, and the issue clears when it is answered.
 
 ### Microphone and audio
 
@@ -140,6 +150,13 @@ online ──path lost / drop──▶ reconnecting ──retries run out──�
   transcript, marked "Not sent", and Grok never sees them, not even in a
   later reseed (`TurnOrchestrator.discardQueued()`). Utterances still
   waiting when the conversation stops are marked "Not sent" the same way.
+  A turn whose items reached xAI just before the drop is already in the
+  server conversation, so discarding it also stops the next connection
+  from resuming that conversation: it starts a new one, reseeded without
+  the discarded utterances. A connection that was already reopening the
+  old conversation deletes the discarded items (and any reply the server
+  made to them) with `conversation.item.delete` once it has resumed,
+  before anything else goes out.
 - **Topics keep segmenting.** An exchange normally closes when Grok's reply
   is stored. While replies are deferred the orchestrator tells the
   transcript (`TurnTranscriptRecording.repliesDeferredChanged`), and the

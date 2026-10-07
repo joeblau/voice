@@ -96,6 +96,42 @@ struct RealtimeIssueMappingTests {
         #expect(failure.issue.code == .missingAPIKey)
         #expect(failure.requiresUserAction)
     }
+
+    /// Try Again only reconnects, and a failed reply leaves the connection
+    /// open, so a reply-level failure never offers it, and its banner can
+    /// always be dismissed (review of #139).
+    @Test(arguments: [
+        RealtimeErrorDetail(type: "rate_limit_error", code: "rate_limit_exceeded"),
+        RealtimeErrorDetail(type: .invalidRequest, code: "insufficient_quota"),
+        RealtimeErrorDetail(type: .internalError, code: nil),
+        RealtimeErrorDetail(type: .invalidRequest, code: "invalid_value", message: "Bad"),
+    ])
+    func replyFailuresOfferNoTryAgainAndCanBeDismissed(detail: RealtimeErrorDetail) {
+        let failure = TurnFailure(kind: .response, message: "x", issue: detail.issue)
+        #expect(failure.issue.code == detail.issue.code)
+        #expect(!failure.issue.actions.contains(.retry))
+        #expect(failure.issue.severity <= .warning)
+        #expect(IssueBoard.canDismiss(failure.issue))
+        #expect(!failure.issue.message.contains("tries again"))
+        #expect(!failure.issue.message.contains("keeps trying"))
+    }
+
+    @Test func noCreditsBlocksOnlyWhenItStopsTheConnection() {
+        let connection = TurnFailure(connectionError: .token(.insufficientCredits(message: nil)))
+        #expect(connection.issue.code == .insufficientCredits)
+        #expect(connection.issue.severity == .blocking)
+        #expect(connection.issue.actions == [.openXAIConsole, .retry])
+
+        let reply = TurnFailure(kind: .response, message: "x", issue: UserFacingIssue(.insufficientCredits))
+        #expect(reply.issue.severity == .warning)
+        #expect(reply.issue.actions == [.openXAIConsole])
+        #expect(reply.issue.message.hasSuffix("then say it again."))
+
+        var board = IssueBoard()
+        board.update(.conversation, reply.issue)
+        board.dismiss(.insufficientCredits)
+        #expect(board.visible.isEmpty)
+    }
 }
 
 @Suite("Conversation connectivity")
@@ -169,7 +205,10 @@ struct ConversationConnectivityTests {
 
     @Test func aFailedTurnShowsWhenTheConnectionIsFine() {
         let failure = TurnFailure(kind: .response, message: "x", issue: UserFacingIssue(.rateLimited))
-        #expect(snapshot(connection: .connected, phase: .live, state: .error(failure)).issue?.code == .rateLimited)
+        let shown = snapshot(connection: .connected, phase: .live, state: .error(failure)).issue
+        #expect(shown?.code == .rateLimited)
+        #expect(shown?.actions == [])
+        #expect(shown?.severity == .warning)
         // A connection failure is reported through the connection.
         let connection = TurnFailure(connectionError: .handshakeFailed(status: 503))
         #expect(snapshot(connection: .connected, phase: .live, state: .error(connection)).issue == nil)

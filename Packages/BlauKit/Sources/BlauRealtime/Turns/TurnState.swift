@@ -73,11 +73,15 @@ public struct TurnFailure: Error, Sendable, Hashable, CustomStringConvertible {
 
     /// - Parameter issue: The catalog entry. By default the one for `kind`
     ///   (a failed connection, a failed reply, a failed transcript write).
+    ///   A failed reply's entry is worded for that one reply
+    ///   (``UserFacingIssue/asReplyFailure``): the connection still works,
+    ///   so the way to retry is to say it again.
     public init(kind: Kind, message: String, requiresUserAction: Bool = false, issue: UserFacingIssue? = nil) {
         self.kind = kind
         self.message = message
         self.requiresUserAction = requiresUserAction
-        self.issue = issue ?? kind.defaultIssue
+        let issue = issue ?? kind.defaultIssue
+        self.issue = kind == .response ? issue.asReplyFailure : issue
     }
 
     public var description: String { "\(kind.rawValue): \(message)" }

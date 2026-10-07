@@ -274,6 +274,134 @@ struct TurnOrchestratorOfflineTests {
         let issue = try #require(await harness.snapshot().issue)
         #expect(issue.code == .rateLimited)
         #expect(issue.detail == "Slow down")
+        // The connection is fine, so Try Again (a reconnect) would do
+        // nothing: the banner offers no action, can be dismissed, and says
+        // to say it again.
+        #expect(issue.actions.isEmpty)
+        #expect(issue.severity == .warning)
+        #expect(IssueBoard.canDismiss(issue))
+        #expect(issue.message.hasSuffix("then say it again."))
+        #expect(await harness.snapshot().connectivity == .online)
+
+        // Saying it again is the retry: a new turn, and the issue clears.
+        await harness.orchestrator.handle(.final(harness.utterance("Hello again", from: 5, to: 6)))
+        try await harness.waitForSent("response.create", count: 2, on: socket)
+        for event in ServerEvents.reply("Hi.", response: "resp_2", item: "item_2", turn: socket.turnTag(1)) {
+            socket.push(event)
+        }
+        try await waitUntil("answered") { await harness.snapshot().completedTurns == 1 }
+        #expect(await harness.snapshot().issue == nil)
+    }
+
+    @Test func aReplyLevelCreditsErrorCanBeDismissed() async throws {
+        let harness = TurnHarness()
+        let socket = try await harness.start()
+        await harness.orchestrator.handle(.final(harness.utterance("Hello", from: 0, to: 1)))
+        try await harness.waitForSent("response.create", on: socket)
+        socket.push(ServerEvents.error("insufficient_quota", eventID: "blau_rc_1_1", message: "No credits"))
+        try await waitUntil("failed") {
+            if case .error = await harness.orchestrator.state { return true }
+            return false
+        }
+        let issue = try #require(await harness.snapshot().issue)
+        #expect(issue.code == .insufficientCredits)
+        #expect(issue.actions == [.openXAIConsole])
+        #expect(issue.severity == .warning)
+        var board = IssueBoard()
+        board.update(.conversation, issue)
+        board.dismiss(issue.code)
+        #expect(board.visible.isEmpty)
+    }
+
+    // MARK: Discarding what already reached xAI
+
+    /// A turn sent to xAI, then lost with the connection before any reply,
+    /// is in the server conversation. Discarding it means the next
+    /// connection doesn't resume that conversation: it starts a new one,
+    /// reseeded without the discarded question (review of #139).
+    @Test func discardingASentTurnStartsANewServerConversation() async throws {
+        let harness = TurnHarness()
+        let first = try await harness.start()
+        first.push(ServerEvents.conversationCreated("conv_1"))
+        try await harness.waitForEndpoint(conversation: "conv_1")
+        try await harness.converse("Plan the trip", at: 0, reply: "Sure, where to?", id: "1")
+
+        // The second question reaches xAI; the socket drops before
+        // `response.created`.
+        await harness.orchestrator.networkReachabilityChanged(false)
+        await harness.orchestrator.handle(.final(harness.utterance("Book the expensive hotel", from: 10, to: 11)))
+        try await harness.waitForSent("response.create", count: 2, on: first)
+        harness.connector.enqueue(.fail(Self.offline))
+        first.fail(Self.offline)
+        try await waitUntil("requeued") { await harness.snapshot().queuedUtterances == 1 }
+        try await waitUntil("waiting to retry") { harness.clock.sleeperCount > 0 }
+
+        #expect(await harness.orchestrator.discardQueued() == 1)
+        try await harness.waitForEndpoint(conversation: nil)
+
+        harness.clock.advance(by: .seconds(1))
+        let second = try await harness.connector.socket(1)
+        #expect(!second.url.absoluteString.contains("conversation_id"))
+        second.push(ServerEvents.conversationCreated("conv_2"))
+        try await waitUntil("live") { await harness.snapshot().session.phase == .live }
+        await harness.orchestrator.waitUntilSettled()
+        // Reseeded with the earlier exchange only, and nothing asks for a
+        // reply.
+        #expect(await harness.snapshot().session.reseeds == 1)
+        #expect(second.sentUserTexts == ["Plan the trip"])
+        #expect(second.sentAssistantTexts == ["Sure, where to?"])
+        #expect(!second.sentEvents.contains { $0.type == "response.create" })
+
+        // The next question is answered on its own.
+        await harness.orchestrator.handle(.final(harness.utterance("What's the weather there?", from: 30, to: 31)))
+        try await harness.waitForSent("response.create", on: second)
+        #expect(second.sentUserTexts == ["Plan the trip", "What's the weather there?"])
+    }
+
+    /// The same, when a connection already reopening the old conversation
+    /// resumes it: the discarded question (and any reply the server made to
+    /// it) is deleted from the resumed history before anything else goes
+    /// out.
+    @Test func discardingASentTurnWhileResumingDeletesItFromTheServerConversation() async throws {
+        let harness = TurnHarness()
+        let first = try await harness.start()
+        first.push(ServerEvents.conversationCreated("conv_1"))
+        try await harness.waitForEndpoint(conversation: "conv_1")
+        try await harness.converse("Plan the trip", at: 0, reply: "Sure, where to?", id: "1")
+
+        await harness.orchestrator.handle(.final(harness.utterance("Book the expensive hotel", from: 10, to: 11)))
+        try await harness.waitForSent("response.create", count: 2, on: first)
+        first.fail()
+
+        // The client reconnects to conv_1 at once; the user discards while
+        // it is resuming.
+        let second = try await harness.connector.socket(1)
+        #expect(second.url.absoluteString.contains("conversation_id=conv_1"))
+        try await harness.waitForSent("session.update", on: second)
+        try await waitUntil("resuming") { await harness.snapshot().session.phase == .resuming }
+        #expect(await harness.snapshot().queuedUtterances == 1)
+        #expect(await harness.orchestrator.discardQueued() == 1)
+
+        second.push(ServerEvents.conversationCreated("conv_1"))
+        second.push(ServerEvents.replayed(.userText("Plan the trip", id: "i1")))
+        second.push(ServerEvents.replayed(.assistantText("Sure, where to?", id: "i2")))
+        second.push(ServerEvents.replayed(.userText("Book the expensive hotel", id: "i3")))
+        second.push(ServerEvents.replayed(.assistantText("Booking the", id: "i4")))
+        second.push(ServerEvents.sessionUpdated)
+        try await waitUntil("live") { await harness.snapshot().session.phase == .live }
+        try await harness.waitForSent("conversation.item.delete", count: 2, on: second)
+        await harness.orchestrator.waitUntilSettled()
+        #expect(
+            second.sentEvents.map(\.type) == ["session.update", "conversation.item.delete", "conversation.item.delete"])
+        #expect(second.sentEvents.contains(.conversationItemDelete(itemID: "i3")))
+        #expect(second.sentEvents.contains(.conversationItemDelete(itemID: "i4")))
+        #expect(second.sentUserTexts.isEmpty)
+        #expect(await harness.snapshot().session.resumptions == 1)
+
+        // The next question is answered without the discarded one.
+        await harness.orchestrator.handle(.final(harness.utterance("What's the weather there?", from: 30, to: 31)))
+        try await harness.waitForSent("response.create", on: second)
+        #expect(second.sentUserTexts == ["What's the weather there?"])
     }
 
     @Test func aTimedOutResponseIsCataloged() async throws {

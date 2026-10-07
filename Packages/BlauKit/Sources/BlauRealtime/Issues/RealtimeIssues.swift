@@ -140,6 +140,38 @@ extension RealtimeErrorDetail {
     }
 }
 
+extension UserFacingIssue {
+    /// This issue as the reason one reply failed (`TurnFailure.Kind.response`)
+    /// while the connection stays open.
+    ///
+    /// Try Again reconnects, and the connection is already there, so it is
+    /// dropped: the user says it again instead (the next utterance starts a
+    /// new turn). The severity is capped at warning so the banner can be
+    /// dismissed, even for `account.noCredits`, which blocks only when it
+    /// stops the connection itself. Connection-level wording ("Blau tries
+    /// again shortly") is replaced, since nothing is retried by itself.
+    public var asReplyFailure: UserFacingIssue {
+        var issue = self
+        issue.actions.removeAll { $0 == .retry }
+        issue.severity = min(issue.severity, .warning)
+        switch code {
+        case .rateLimited:
+            issue.message = "xAI is limiting requests from your key right now. Wait a moment, then say it again."
+        case .xaiServerError:
+            issue.message = "xAI's servers returned an error for that reply. Say it again to retry."
+        case .insufficientCredits:
+            issue.message =
+                "Your xAI team has no credits left or hit its spending limit. Add credits at console.x.ai, then "
+                + "say it again."
+        case .unexpectedResponse:
+            issue.message = "xAI sent something Blau didn't expect. Say it again; if it keeps happening, update Blau."
+        default:
+            break
+        }
+        return issue
+    }
+}
+
 extension TurnFailure.Kind {
     /// The catalog entry for a failure of this kind with no more specific
     /// cause.
