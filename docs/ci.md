@@ -63,7 +63,7 @@ The simulator is **not** booted ahead of the build: xcodebuild boots it when
 testing starts, and a later step shuts it down. Booting it first starved the
 runner; with the freshly booted simulator's background work competing,
 xcodebuild took about four minutes just to start and the job took 14 minutes
-instead of 7.5.
+instead of 6 to 7.5.
 
 Override any of these without a code change through repository variables
 (**Settings > Secrets and variables > Actions > Variables**):
@@ -111,7 +111,7 @@ that added CI (#15), `xcode-27` image, Xcode 27.1, warm cache:
 | --------------- | -------- | ------------------- |
 | `lint`          | ~15 s    | swift-format, script tests |
 | `package-tests` | 1 to 1.7 min | cache restore (~580 MB), build, about 5 s of tests |
-| `app-tests`     | ~7.5 min | 40 s build; then about 6 min of testing, mostly booting the simulator and launching the UI-test runner |
+| `app-tests`     | 6 to 7.5 min | ~40 s build; then 4.5 to 6 min of testing, mostly booting the simulator and launching the UI-test runner |
 
 Booting the simulator and UI testing dominate. They grow with the number of UI
 tests, not with the code. If `app-tests` approaches the budget, move UI tests
