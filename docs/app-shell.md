@@ -47,14 +47,16 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `topicLifecycle` | `TopicLifecycle` | the same lifecycle as `topics`; the timeline's rename, merge and split go through it | keyword titles over the in-memory store (`TopicLifecycle.offline`) |
 | `memory` | `any MemoryService` | unavailable until #62 - #68 | `FakeMemoryService` |
 | `transcriptionSettings` | `TranscriptionSettings` | `UserDefaults` (`blau.transcription.engine`); the `blau.uitests` suite in DEBUG UI tests | in memory, Apple's engine reported installed |
+| `markdownExport` | `MarkdownExportController` | Markdown files in iCloud Drive → Blau (#78, [export.md](export.md)); settings in `UserDefaults`, the `blau.uitests` suite in DEBUG UI tests; `start()` runs its automatic export, leaving the foreground flushes it | a temporary folder and in-memory settings (`MarkdownExportController.local`) |
 | `xai` | `XAIServices` | Keychain + network (`XAIServices.make`); the `BLAU_UI_TEST_XAI` stub in DEBUG UI tests | in-memory key store + stub transport (`XAIServices.hermetic`) |
 | `lifecycle` | `AppLifecycleCoordinator` | | |
 
 Views read it with `@Environment(AppEnvironment.self)`. The
 `.appEnvironment(_:)` modifier also injects `FeatureFlags`, the
 `AppLifecycleCoordinator`, the `XAIAccount` (`xai.account`), the
-`PersistenceController` (Settings reads its iCloud status) and the
-`TranscriptionSettings` (Settings → Speech Recognition), so a view can read
+`PersistenceController` (Settings reads its iCloud status), the
+`TranscriptionSettings` (Settings → Speech Recognition) and the
+`MarkdownExportController` (Settings → Markdown Export), so a view can read
 just the part it needs.
 
 The modifier does not set the SwiftData container: the controller opens the

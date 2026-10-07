@@ -93,6 +93,13 @@ final class AppEnvironment {
     /// in memory.
     let transcriptionSettings: TranscriptionSettings
 
+    /// The Markdown export to iCloud Drive → Blau (#78, docs/export.md).
+    /// Settings → Markdown Export binds to it; `start()` lets it follow the
+    /// store for automatic export, and leaving the foreground flushes it.
+    /// Live launches write to iCloud Drive; every other kind writes to a
+    /// temporary folder with in-memory settings.
+    let markdownExport: MarkdownExportController
+
     /// Delivers scene phase changes to the services (see `ScenePhaseHandling`).
     let lifecycle: AppLifecycleCoordinator
 
@@ -125,6 +132,9 @@ final class AppEnvironment {
 
     /// Applies the performance level to the inference backends.
     @ObservationIgnored private var performanceFollower: Task<Void, Never>?
+
+    /// Runs the automatic Markdown export (`MarkdownExportController.run()`).
+    @ObservationIgnored private var markdownExportFollower: Task<Void, Never>?
 
     /// Reports device lock and unlock to the keeper and the monitor (live
     /// app only).
@@ -178,7 +188,8 @@ final class AppEnvironment {
         textEmbeddings: TextEmbeddingService = TextEmbeddings.unavailable(),
         performance: PerformancePolicy = PerformancePolicy(source: ManualDeviceConditionsSource()),
         topicLifecycle: TopicLifecycle? = nil,
-        transcriptFeed: TranscriptFeed = TranscriptFeed()
+        transcriptFeed: TranscriptFeed = TranscriptFeed(),
+        markdownExport: MarkdownExportController? = nil
     ) {
         self.kind = kind
         self.config = config
@@ -203,6 +214,7 @@ final class AppEnvironment {
         self.backgroundInference = backgroundInference
         self.performance = performance
         self.performanceStatus = PerformanceStatus(policy: performance)
+        self.markdownExport = markdownExport ?? .local(persistence: persistence)
         self.memoryIndexing = MemoryIndexingController(
             persistence: persistence, embedder: textEmbeddings, performance: performance)
         let voiceLoop = VoiceLoop(
@@ -243,6 +255,7 @@ final class AppEnvironment {
         memoryIndexing.start()
         // Previews and UI tests only: a canned conversation (#42).
         async let fixture: Void = ChatTranscriptFixture.seedIfRequested(in: self)
+        startMarkdownExport()
         async let models: Void = speechModels.start()
         await xai.start()
         await models
@@ -277,6 +290,14 @@ final class AppEnvironment {
         let inference = backgroundInference
         let levels = performance.performanceLevels()
         performanceFollower = Task { await inference.follow(levels) }
+    }
+
+    /// Starts following the store for the automatic Markdown export (#78).
+    /// It only exports while Settings → Export Automatically is on.
+    private func startMarkdownExport() {
+        guard markdownExportFollower == nil else { return }
+        let export = markdownExport
+        markdownExportFollower = Task { await export.run() }
     }
 
     /// Ends the conversation: what the Live Activity's Stop button does.
@@ -395,7 +416,9 @@ extension AppEnvironment {
             // The device's thermal state, Low Power Mode and battery (#75).
             performance: PerformancePolicy(),
             topicLifecycle: topics,
-            transcriptFeed: transcriptFeed
+            transcriptFeed: transcriptFeed,
+            // #78: Markdown files in iCloud Drive → Blau.
+            markdownExport: .live(persistence: persistence)
         )
     }
 

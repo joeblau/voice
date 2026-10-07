@@ -113,6 +113,7 @@ struct SettingsView: View {
                 SearchToolsSettingsSection()
                 ICloudSettingsSection()
                 MemoryIndexSettingsSection()
+                MarkdownExportSettingsSection()
                 SpeechModelsSettingsSection()
                 SpeechRecognitionSettingsSection()
                 Section {
@@ -151,5 +152,6 @@ struct SettingsView: View {
             .environment(RealtimeVoiceSettingsModel.preview())
             .environment(TranscriptionSettings.preview())
             .environment(MemoryIndexingController(persistence: .preview(), embedder: nil, performance: nil))
+            .environment(MarkdownExportController.local(persistence: .preview()))
     }
 #endif

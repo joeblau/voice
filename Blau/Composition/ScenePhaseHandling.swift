@@ -66,6 +66,14 @@ extension AppEnvironment {
                     await lifecycle.waitUntilDelivered()
                     assertion.end()
                 }
+                // Write a pending automatic Markdown export (#78) now rather
+                // than after its delay, which a suspended app may not get.
+                let export = markdownExport
+                let exportAssertion = BackgroundTaskAssertion(name: "blau.export.markdown")
+                Task {
+                    await export.flushAutoExport()
+                    exportAssertion.end()
+                }
             }
         #endif
     }
@@ -97,8 +105,8 @@ extension AppEnvironment {
 /// Puts `environment` and the objects views read most into the SwiftUI
 /// environment: the `AppEnvironment` itself, its `FeatureFlags`, its
 /// `AppLifecycleCoordinator`, its `XAIAccount`, its `PersistenceController`,
-/// its speech `ModelManager`, its `TranscriptionSettings` and its
-/// `PerformanceStatus`.
+/// its speech `ModelManager`, its `TranscriptionSettings`, its
+/// `PerformanceStatus` and its `MarkdownExportController`.
 ///
 /// The SwiftData container is not set here: it is replaced when the iCloud
 /// account changes, so `PersistenceGate` (inside this modifier in the app)
@@ -118,6 +126,7 @@ struct AppEnvironmentModifier: ViewModifier {
             .environment(environment.transcriptionSettings)
             .environment(environment.performanceStatus)
             .environment(environment.memoryIndexing)
+            .environment(environment.markdownExport)
     }
 }
 
