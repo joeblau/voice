@@ -4,9 +4,10 @@ import os
 
 /// What the topic pipeline decided after an exchange arrived.
 public enum TopicEvent: Hashable, Sendable {
-    /// The segmenter raised a candidate boundary. In `.full` mode the model
-    /// has already agreed and titled the new topic provisionally; otherwise
-    /// `provisionalLabel` is `nil`. Not final: show it as a provisional
+    /// The segmenter raised a candidate boundary. When the candidate was
+    /// confirmed (always in `.full` mode, strong candidates only in
+    /// `.confirmStrongCandidates`) the model has already agreed and titled
+    /// the new topic provisionally; otherwise `provisionalLabel` is `nil`. Not final: show it as a provisional
     /// break.
     case candidate(TopicBoundary, provisionalLabel: TopicLabel?)
 
@@ -59,6 +60,9 @@ public enum TopicEvent: Hashable, Sendable {
 /// - **Thermal.** At `.serious` the confirm step is skipped (the segmenter's
 ///   decision stands and only the confirmed topic is titled); at
 ///   `.critical` titles come from keywords.
+/// - **Performance level (#75).** At `reduced` only strong candidates
+///   (`TopicLabelingPolicy.isStrong(_:)`) are confirmed; at `minimal` none
+///   are.
 ///
 /// Calls are processed one at a time, in the order they were made, even if
 /// a caller doesn't await one before making the next.
@@ -159,7 +163,7 @@ public actor TopicPipeline {
     /// Asks the model about a new candidate. Returns the event to emit and,
     /// on a veto, the segmenter's rejection.
     private func judge(_ boundary: TopicBoundary) async -> (TopicEvent, [TopicSegmentationEvent]) {
-        guard await labeling.mode == .full else {
+        guard labeling.policy.confirms(boundary, in: await labeling.mode) else {
             return (.candidate(boundary, provisionalLabel: nil), [])
         }
         let units = await segmenter.units

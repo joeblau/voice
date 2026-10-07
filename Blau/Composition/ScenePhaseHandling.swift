@@ -91,7 +91,8 @@ extension AppEnvironment {
 /// Puts `environment` and the objects views read most into the SwiftUI
 /// environment: the `AppEnvironment` itself, its `FeatureFlags`, its
 /// `AppLifecycleCoordinator`, its `XAIAccount`, its `PersistenceController`,
-/// its speech `ModelManager` and its `TranscriptionSettings`.
+/// its speech `ModelManager`, its `TranscriptionSettings` and its
+/// `PerformanceStatus`.
 ///
 /// The SwiftData container is not set here: it is replaced when the iCloud
 /// account changes, so `PersistenceGate` (inside this modifier in the app)
@@ -109,6 +110,7 @@ struct AppEnvironmentModifier: ViewModifier {
             .environment(environment.persistence)
             .environment(environment.speechModels)
             .environment(environment.transcriptionSettings)
+            .environment(environment.performanceStatus)
     }
 }
 

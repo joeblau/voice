@@ -2,7 +2,7 @@ import BlauTranscription
 import SwiftUI
 
 /// Settings for the on-device speech models: network policy, automatic
-/// download of the optional model, per-model status and disk usage, and
+/// download of the extra speech models, per-model status and disk usage, and
 /// delete. Settings links here through ``SpeechModelsSettingsSection``.
 struct SpeechModelSettingsView: View {
     @Environment(ModelManager.self) private var models
@@ -25,11 +25,11 @@ struct SpeechModelSettingsView: View {
             Section {
                 Toggle("Download on Wi-Fi Only", isOn: wifiOnly)
                     .accessibilityIdentifier(Identifier.wifiOnly)
-                Toggle("Download High-Accuracy Model", isOn: $models.preferences.downloadsOptionalModels)
+                Toggle("Download Extra Speech Models", isOn: $models.preferences.downloadsOptionalModels)
                     .accessibilityIdentifier(Identifier.optional)
             } footer: {
                 Text(
-                    "Wi-Fi only also skips Low Data Mode networks. The high-accuracy model adds punctuation after each sentence."
+                    "Wi-Fi only also skips Low Data Mode networks. The extra speech models add punctuation after each sentence and keep transcription light when your iPhone is hot or low on battery."
                 )
             }
 

@@ -2,7 +2,7 @@
 ///
 /// The cases are ordered the way the manager fetches them on a fresh
 /// install: the small, required models first, then the large optional
-/// second-pass model.
+/// second-pass model, then the other optional models.
 public enum ModelID: String, CaseIterable, Codable, Hashable, Sendable {
     /// Silero VAD v6 (Core ML): speech start and end.
     case sileroVAD
@@ -20,6 +20,11 @@ public enum ModelID: String, CaseIterable, Codable, Hashable, Sendable {
     /// it, and topics fall back to Apple's contextual embedding. Not in the
     /// pinned manifest until the converted model is hosted (docs/models.md).
     case textEmbedding
+    /// Parakeet realtime EOU 120M at 1280 ms chunks: about a quarter of the
+    /// model calls of the 320 ms export, with slower partials. Streaming ASR
+    /// switches to it while the device is hot, in Low Power Mode or low on
+    /// battery (#75). Optional; without it ASR stays at 320 ms.
+    case parakeetRealtimeEOU1280
 
     /// Short name for Settings and onboarding.
     public var displayName: String {
@@ -29,6 +34,7 @@ public enum ModelID: String, CaseIterable, Codable, Hashable, Sendable {
         case .parakeetRealtimeEOU: "Live transcription"
         case .parakeetTDTv3: "High-accuracy transcription"
         case .textEmbedding: "Memory search"
+        case .parakeetRealtimeEOU1280: "Low-power transcription"
         }
     }
 
@@ -40,6 +46,8 @@ public enum ModelID: String, CaseIterable, Codable, Hashable, Sendable {
         case .parakeetRealtimeEOU: "Turns speech into text as you talk (Parakeet realtime)."
         case .parakeetTDTv3: "Adds punctuation and fixes words after each sentence (Parakeet TDT v3)."
         case .textEmbedding: "Finds what you talked about before and notices topic changes (EmbeddingGemma)."
+        case .parakeetRealtimeEOU1280:
+            "Keeps transcribing with less work when your iPhone is hot or low on battery (Parakeet realtime)."
         }
     }
 
@@ -48,16 +56,16 @@ public enum ModelID: String, CaseIterable, Codable, Hashable, Sendable {
     public var isRequired: Bool {
         switch self {
         case .sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU: true
-        case .parakeetTDTv3, .textEmbedding: false
+        case .parakeetTDTv3, .textEmbedding, .parakeetRealtimeEOU1280: false
         }
     }
 
     /// Whether the model downloads only while
-    /// `ModelPreferences.downloadsOptionalModels` ("Download High-Accuracy
-    /// Model") is on. Other optional models download after the required ones
-    /// either way.
+    /// `ModelPreferences.downloadsOptionalModels` ("Download Extra Speech
+    /// Models") is on: the second pass and the low-power streaming export.
+    /// Other optional models download after the required ones either way.
     public var followsOptionalModelsPreference: Bool {
-        self == .parakeetTDTv3
+        self == .parakeetTDTv3 || self == .parakeetRealtimeEOU1280
     }
 
     /// What the user loses by deleting the model, for the confirmation.
@@ -69,6 +77,8 @@ public enum ModelID: String, CaseIterable, Codable, Hashable, Sendable {
             "Transcripts won't get the high-accuracy second pass until you download it again."
         case .textEmbedding:
             "Blau can't search past conversations until it downloads again."
+        case .parakeetRealtimeEOU1280:
+            "Blau keeps transcribing at full rate when your iPhone is hot or low on battery until you download it again."
         }
     }
 }

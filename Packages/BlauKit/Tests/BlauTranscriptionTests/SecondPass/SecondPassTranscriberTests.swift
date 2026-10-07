@@ -22,25 +22,27 @@ struct SecondPassTranscriberTests {
             recognizer: any SecondPassRecognizer,
             isEnabled: @escaping @Sendable () -> Bool = { true },
             thermalState: @escaping @Sendable () -> ProcessInfo.ThermalState = { .nominal },
+            performance: (any PerformanceLevelProviding)? = nil,
             configuration: SecondPassConfiguration = .standard,
             audio: FixtureAudioSource = indexedAudio(seconds: 30)
         ) {
             self.init(
                 provider: { recognizer }, isEnabled: isEnabled, thermalState: thermalState,
-                configuration: configuration, audio: audio)
+                performance: performance, configuration: configuration, audio: audio)
         }
 
         init(
             provider: @escaping SecondPassRecognizerProvider,
             isEnabled: @escaping @Sendable () -> Bool = { true },
             thermalState: @escaping @Sendable () -> ProcessInfo.ThermalState = { .nominal },
+            performance: (any PerformanceLevelProviding)? = nil,
             configuration: SecondPassConfiguration = .standard,
             audio: FixtureAudioSource = indexedAudio(seconds: 30)
         ) {
             self.audio = audio
             transcriber = SecondPassTranscriber(
                 wrapping: base, audio: audio, recognizer: provider, isEnabled: isEnabled,
-                thermalState: thermalState, configuration: configuration,
+                thermalState: thermalState, performance: performance, configuration: configuration,
                 signposter: Signposter(category: .asr, backend: signposts))
             log = EventLog(transcriber.events)
         }
@@ -242,6 +244,52 @@ struct SecondPassTranscriberTests {
 
         #expect(harness.log.refined.count == 1)
         #expect(harness.transcriber.statistics.skipped[.thermalPressure] == 1)
+    }
+
+    // MARK: Thermal and power policy (#75)
+
+    @Test(arguments: [PerformanceLevel.reduced, .minimal])
+    func itIsSkippedBelowTheNormalPerformanceLevel(_ level: PerformanceLevel) async throws {
+        let recognizer = ScriptedSecondPassRecognizer(fallback: { _ in "Saving power." })
+        let harness = Harness(recognizer: recognizer, performance: FixedPerformanceLevel(level))
+        harness.base.send(.final(utterance("saving power", samples: 0..<16_000)))
+        await harness.finish()
+
+        #expect(harness.log.finals.map(\.text) == ["saving power"], "the final still goes out")
+        #expect(await recognizer.callCount == 0)
+        #expect(harness.log.refined.isEmpty)
+        #expect(harness.transcriber.statistics.skipped == [.reducedPerformance: 1])
+        #expect(harness.signposts.records.isEmpty)
+    }
+
+    @Test func itRunsAgainOnceTheLevelIsBackToNormal() async throws {
+        let performance = ManualPerformanceLevel(.reduced)
+        let recognizer = ScriptedSecondPassRecognizer(fallback: { _ in "Back." })
+        let harness = Harness(recognizer: recognizer, performance: performance)
+        harness.base.send(.final(utterance("skipped", samples: 0..<16_000)))
+        try await waitUntil { harness.transcriber.statistics.skipped[.reducedPerformance] == 1 }
+        performance.set(.normal)
+        harness.base.send(.final(utterance("back", samples: 16_000..<32_000)))
+        await harness.finish()
+
+        #expect(harness.log.refined.map(\.text) == ["Back."])
+        #expect(harness.transcriber.statistics.skipped == [.reducedPerformance: 1])
+    }
+
+    @Test func anUtteranceWaitingWhenTheLevelDropsIsSkipped() async throws {
+        let performance = ManualPerformanceLevel(.normal)
+        let recognizer = ScriptedSecondPassRecognizer(held: true, fallback: { _ in "Text." })
+        let harness = Harness(recognizer: recognizer, performance: performance)
+        harness.base.send(.final(utterance("first", samples: 0..<16_000)))
+        try await waitUntil { await recognizer.callCount == 1 }
+        harness.base.send(.final(utterance("second", samples: 16_000..<32_000)))
+        try await waitUntil { harness.log.finals.count == 2 }
+        performance.set(.reduced)
+        await recognizer.release()
+        await harness.finish()
+
+        #expect(harness.log.refined.count == 1)
+        #expect(harness.transcriber.statistics.skipped[.reducedPerformance] == 1)
     }
 
     @Test func withoutTheModelItWaitsUntilOneIsInstalled() async throws {

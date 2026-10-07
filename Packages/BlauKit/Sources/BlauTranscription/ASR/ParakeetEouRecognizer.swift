@@ -100,7 +100,9 @@ public actor ParakeetEouRecognizer: StreamingSpeechRecognizer {
     ///   - modelDirectory: The directory holding `streaming_encoder.mlmodelc`,
     ///     `decoder.mlmodelc`, `joint_decision.mlmodelc` and `vocab.json` for
     ///     `chunkSize`.
-    ///   - chunkSize: The export in the directory. Blau installs `ms320`.
+    ///   - chunkSize: The export in the directory: `ms320`
+    ///     (`ModelID.parakeetRealtimeEOU`) or `ms1280`
+    ///     (`ModelID.parakeetRealtimeEOU1280`).
     ///   - endOfUtteranceDebounce: Silence after the model's EOU token before
     ///     the end is confirmed.
     ///   - computeUnits: Override for the compute units, for example
@@ -353,6 +355,33 @@ private final class CallbackInbox: Sendable {
         state.withLock { state in
             defer { state = Fired() }
             return (state.partial, state.endOfUtterance)
+        }
+    }
+}
+
+extension ParakeetEouRecognizer {
+    /// A `RecognizerProvider` over the exports installed in `modelManager`:
+    /// it loads the recognizer for a chunk size from that size's model
+    /// (`ASRChunkSize.modelID`), and returns `nil` while that model isn't
+    /// installed (and always for 160 ms). `ParakeetStreamingTranscriber`
+    /// then stays at its current size and asks again after the policy has
+    /// wanted the current size once, so a download that finishes
+    /// mid-conversation is picked up.
+    ///
+    /// ```swift
+    /// ParakeetStreamingTranscriber(
+    ///     recognizer: ..., audio: hub, voiceActivity: vad,
+    ///     chunkSizePolicy: PerformanceASRChunkSizePolicy(performance),
+    ///     recognizerProvider: ParakeetEouRecognizer.provider(modelManager: models))
+    /// ```
+    public static func provider(
+        modelManager: ModelManager,
+        endOfUtteranceDebounce: Duration = defaultEndOfUtteranceDebounce
+    ) -> RecognizerProvider {
+        { chunkSize in
+            guard let id = chunkSize.modelID, let directory = await modelManager.directory(for: id) else { return nil }
+            return try await load(
+                modelDirectory: directory, chunkSize: chunkSize, endOfUtteranceDebounce: endOfUtteranceDebounce)
         }
     }
 }

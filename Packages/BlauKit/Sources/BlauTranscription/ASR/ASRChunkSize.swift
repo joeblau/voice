@@ -10,9 +10,11 @@ import BlauCore
 /// encoder frames of it. Bigger chunks are cheaper per second of audio but
 /// slower to show words.
 ///
-/// Each size is a separate Core ML export. Blau installs the 320 ms one
-/// (`ModelID.parakeetRealtimeEOU`); the others are only used when a
-/// recognizer for them can be loaded (see `ASRChunkSizePolicy`).
+/// Each size is a separate Core ML export. Blau requires the 320 ms one
+/// (`ModelID.parakeetRealtimeEOU`) and downloads the 1280 ms one as an
+/// optional model (`ModelID.parakeetRealtimeEOU1280`) for the thermal and
+/// power policy (#75); a size is only used when a recognizer for it can be
+/// loaded (see `ASRChunkSizePolicy`).
 public enum ASRChunkSize: String, CaseIterable, Hashable, Sendable {
     /// A chunk every 160 ms over a 160 ms window.
     case ms160
@@ -58,6 +60,16 @@ public enum ASRChunkSize: String, CaseIterable, Hashable, Sendable {
     /// Audio needed before the first chunk can run.
     public var window: Duration {
         .samples(Int64(windowSamples), sampleRate: AudioFrame.captureSampleRate)
+    }
+
+    /// The model that holds this size's export, or `nil` when Blau doesn't
+    /// install it (160 ms, see docs/benchmarks.md).
+    public var modelID: ModelID? {
+        switch self {
+        case .ms160: nil
+        case .ms320: .parakeetRealtimeEOU
+        case .ms1280: .parakeetRealtimeEOU1280
+        }
     }
 
     /// The length of one decoded encoder frame (80 ms for `ms320` and

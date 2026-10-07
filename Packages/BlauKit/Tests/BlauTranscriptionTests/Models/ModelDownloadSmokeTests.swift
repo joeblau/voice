@@ -97,8 +97,9 @@ struct ModelDownloadSmokeTests {
             let results = try await vad.process([Float](repeating: 0, count: 16_000))
             #expect(!results.isEmpty)
             #expect(results.allSatisfy { !$0.isVoiceActive }, "Silence is not speech")
-        case .parakeetRealtimeEOU:
-            let asr = StreamingEouAsrManager(configuration: configuration, chunkSize: .ms320)
+        case .parakeetRealtimeEOU, .parakeetRealtimeEOU1280:
+            let chunkSize: StreamingChunkSize = id == .parakeetRealtimeEOU ? .ms320 : .ms1280
+            let asr = StreamingEouAsrManager(configuration: configuration, chunkSize: chunkSize)
             try await asr.loadModels(from: directory)
             let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1))
             let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 16_000))

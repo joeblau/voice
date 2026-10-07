@@ -14,6 +14,7 @@ import Foundation
 /// | --- | --- |
 /// | `.sileroVAD` | `VadManager(config:vadModel:)` with the `MLModel` at ``vadModelBundle`` |
 /// | `.parakeetRealtimeEOU` | `StreamingEouAsrManager(chunkSize: .ms320).loadModels(from:)` |
+/// | `.parakeetRealtimeEOU1280` | `StreamingEouAsrManager(chunkSize: .ms1280).loadModels(from:)` |
 /// | `.parakeetTDTv3` | `AsrModels.loadLocal(from:version: .v3)` |
 /// | `.speakerEmbedding` | `MLModel` at ``speakerEmbeddingBundle`` |
 public enum FluidAudioModels {
@@ -33,7 +34,9 @@ public enum FluidAudioModels {
 
     /// The models FluidAudio loads. (`.textEmbedding` is Blau's own Core
     /// ML model, loaded by BlauMemory.)
-    public static let models: [ModelID] = [.sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU, .parakeetTDTv3]
+    public static let models: [ModelID] = [
+        .sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU, .parakeetTDTv3, .parakeetRealtimeEOU1280,
+    ]
 
     /// The top-level files and bundles FluidAudio's local loaders read from
     /// a model's directory. The pinned manifest must provide all of them
@@ -42,7 +45,7 @@ public enum FluidAudioModels {
         switch id {
         case .sileroVAD:
             ModelNames.VAD.requiredModels
-        case .parakeetRealtimeEOU:
+        case .parakeetRealtimeEOU, .parakeetRealtimeEOU1280:
             ModelNames.ParakeetEOU.requiredModels
         case .parakeetTDTv3:
             ModelNames.ASR.requiredModelsV3(precision: .int8).union([ModelNames.ASR.vocabularyFile])
@@ -61,6 +64,7 @@ public enum FluidAudioModels {
         switch id {
         case .sileroVAD: repo = .vad
         case .parakeetRealtimeEOU: repo = .parakeetEou320
+        case .parakeetRealtimeEOU1280: repo = .parakeetEou1280
         case .parakeetTDTv3: repo = .parakeetV3
         case .speakerEmbedding: repo = .diarizer
         case .textEmbedding: return nil

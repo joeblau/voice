@@ -16,10 +16,14 @@ the rest of the app's life.
 | `.parakeetRealtimeEOU` | Parakeet realtime EOU 120M, 320 ms chunks | 224 MB | yes | Streaming ASR (#29, [asr.md](asr.md)) |
 | `.parakeetTDTv3` | Parakeet TDT 0.6B v3 (int8 encoder) | 483 MB | no | Second pass (#30, [asr.md](asr.md#second-pass-punctuation-and-accuracy)) |
 | `.textEmbedding` | EmbeddingGemma-300M, Core ML, int8 weights and int8 token table, 128 tokens | about 300 MB | no | Shared text embeddings for memory and topics (#60, [embeddings.md](embeddings.md)). **Not pinned yet** (below) |
+| `.parakeetRealtimeEOU1280` | Parakeet realtime EOU 120M, 1280 ms chunks | 225 MB | no | Streaming ASR below the `normal` performance level (#75, [performance.md](performance.md#thermal-and-power-adaptation)) |
 
 Required models download first, during onboarding. The optional second-pass
-model follows when **Download High-Accuracy Model** is on (the default);
-Blau transcribes without it. The text embedding model is optional too
+model and the 1280 ms streaming export follow when **Download Extra Speech
+Models** is on (the default); Blau transcribes without them. Without the
+1280 ms export, streaming ASR stays at 320 ms chunks when the device is hot
+or short on power (the second pass and the topic model still back off). The
+text embedding model is optional too
 (Blau listens without it, and topics fall back to Apple's contextual
 embedding), but it doesn't follow that setting: it downloads after the
 required models either way (`ModelID.followsOptionalModelsPreference`).

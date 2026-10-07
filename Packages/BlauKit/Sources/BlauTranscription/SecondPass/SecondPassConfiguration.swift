@@ -98,6 +98,9 @@ public enum SecondPassSkipReason: String, CaseIterable, Codable, Hashable, Senda
     case disabled
     /// The device is at `skipThermalState` or hotter.
     case thermalPressure
+    /// The thermal and power policy (#75) is below `normal`: the device is
+    /// hot, in Low Power Mode or low on battery.
+    case reducedPerformance
     /// Parakeet TDT v3 isn't installed, or failed to load.
     case modelUnavailable
     /// The utterance's start already scrolled out of the capture history.

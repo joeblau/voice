@@ -5,7 +5,8 @@ import Foundation
 
 /// What a long-session soak run on a device produced (#26): how the
 /// conversation's audio, capture, VAD and background inference fared over
-/// a session that spent most of its time with the screen locked.
+/// a session that spent most of its time with the screen locked, and how
+/// hot it got and what the thermal and power policy did about it (#75).
 ///
 /// The debug "Long session" screen builds one when a run stops and shares
 /// it as JSON; `verdict` applies the acceptance rules in docs/background.md.
@@ -69,6 +70,10 @@ public struct LongSessionReport: Codable, Hashable, Sendable {
         /// Audio the VAD analysed as a share of the session's duration: it
         /// kept up the whole time, locked included.
         public var minimumVADCoverage: Double = 0.95
+        /// Seconds the device may spend at `serious` thermal state or hotter
+        /// while the pipeline still runs at the `normal` performance level
+        /// (#75: stay at or below `fair`, or degrade gracefully).
+        public var maximumSecondsHotAtNormal: Double = 10
 
         public init() {}
     }
@@ -82,6 +87,9 @@ public struct LongSessionReport: Codable, Hashable, Sendable {
     public var capture: Capture
     public var vad: VAD?
     public var inference: BackgroundInferenceMonitor.Snapshot
+    /// Thermal state, performance level and battery over the run (#75), when
+    /// the app's `PerformancePolicy` was recorded.
+    public var performance: PerformanceStatistics?
     public var rules: Rules
     public var verdict: Verdict
 
@@ -94,6 +102,7 @@ public struct LongSessionReport: Codable, Hashable, Sendable {
         capture: Capture,
         vad: VAD?,
         inference: BackgroundInferenceMonitor.Snapshot,
+        performance: PerformanceStatistics? = nil,
         rules: Rules = Rules()
     ) {
         self.device = device
@@ -104,18 +113,22 @@ public struct LongSessionReport: Codable, Hashable, Sendable {
         self.capture = capture
         self.vad = vad
         self.inference = inference
+        self.performance = performance
         self.rules = rules
-        self.verdict = Self.evaluate(keeper: keeper, vad: vad, inference: inference, rules: rules)
+        self.verdict = Self.evaluate(
+            keeper: keeper, vad: vad, inference: inference, performance: performance, rules: rules)
     }
 
     /// Applies `rules`. Interruptions (a call during the run) don't fail it;
     /// time not live without one does, and so does a stall the keeper
-    /// couldn't clear, a VAD that fell behind, or a model stage with no
-    /// backend left.
+    /// couldn't clear, a VAD that fell behind, a model stage with no
+    /// backend left, or a device that got hot without the pipeline
+    /// degrading.
     public static func evaluate(
         keeper: AudioSessionKeeper.Statistics,
         vad: VAD?,
         inference: BackgroundInferenceMonitor.Snapshot,
+        performance: PerformanceStatistics? = nil,
         rules: Rules
     ) -> Verdict {
         var findings: [String] = []
@@ -146,6 +159,14 @@ public struct LongSessionReport: Codable, Hashable, Sendable {
             let times = max(stage.exhaustedOffScreen, 1)
             findings.append(
                 "The \(stage.stage) stage couldn't keep up on any backend off screen (\(times) time\(times == 1 ? "" : "s"))"
+            )
+        }
+        if let performance, performance.secondsHotAtNormal > rules.maximumSecondsHotAtNormal {
+            findings.append(
+                """
+                Hot (\(performance.worstThermalState.rawValue) at worst) for \
+                \(Int(performance.secondsHotAtNormal.rounded())) s without the pipeline degrading
+                """
             )
         }
         return Verdict(passed: findings.isEmpty, findings: findings)

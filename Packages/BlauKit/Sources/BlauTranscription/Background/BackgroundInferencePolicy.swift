@@ -46,6 +46,13 @@ extension BackgroundInferenceMitigation {
 /// - **Back on screen** every stage returns to its preferred backend. The
 ///   furthest backend each one needed is remembered, and the next trip off
 ///   screen starts there instead of rediscovering it.
+/// - **At the `minimal` performance level** (#75: critically hot or almost
+///   out of battery), on screen or off, a stage that can run on Apple's
+///   `SpeechTranscriber` (`.systemSpeech`) runs there; other stages are
+///   unaffected (moving the VAD to the CPU would only add heat). When the
+///   level improves, stages go back to where the phase puts them. A trip
+///   off screen spent on `SpeechTranscriber` because of the level isn't
+///   remembered as something the stage needed.
 ///
 /// The policy only decides. It keeps a *desired* and a *current* backend
 /// per stage; `BackgroundInferenceMonitor` performs the switches and reports
@@ -128,6 +135,8 @@ public struct BackgroundInferencePolicy: Sendable {
         case tooSlow(p95Milliseconds: Double, budgetMilliseconds: Double)
         /// Switching to `backend` failed.
         case switchFailed(InferenceBackend, error: String)
+        /// The thermal and power policy moved to this level.
+        case performanceLevel(PerformanceLevel)
 
         public var description: String {
             switch self {
@@ -137,6 +146,7 @@ public struct BackgroundInferencePolicy: Sendable {
             case .tooSlow(let p95, let budget):
                 "p95 \(Int(p95.rounded())) ms over the \(Int(budget.rounded())) ms budget"
             case .switchFailed(let backend, let error): "switching to \(backend.rawValue) failed (\(error))"
+            case .performanceLevel(let level): "the performance level is \(level.rawValue)"
             }
         }
     }
@@ -208,6 +218,8 @@ public struct BackgroundInferencePolicy: Sendable {
 
     public let configuration: Configuration
     public private(set) var phase: ExecutionPhase = .foreground
+    /// The thermal and power policy's level (#75).
+    public private(set) var performanceLevel: PerformanceLevel = .normal
     private var stages: [String: StageState] = [:]
     /// Registration order, so changes come out deterministically.
     private var order: [String] = []
@@ -255,7 +267,7 @@ public struct BackgroundInferencePolicy: Sendable {
             if !newPhase.isBackground {
                 // Remember how far off screen this stage had to go.
                 let reached = state.isSwitching ? state.desired : state.current
-                if old.isBackground, reached > state.stage.ladder[0] {
+                if old.isBackground, reached > (performanceFloor(for: state) ?? state.stage.ladder[0]) {
                     state.learned = max(state.learned ?? reached, reached)
                 }
                 state.unusable.removeAll()
@@ -265,6 +277,24 @@ public struct BackgroundInferencePolicy: Sendable {
             guard old.isBackground != newPhase.isBackground else { continue }
             let reason: Reason = newPhase.isBackground ? leftForeground : .returnedToForeground
             if let change = retarget(name, to: target(for: state), reason: reason) {
+                changes.append(change)
+            }
+        }
+        return changes
+    }
+
+    // MARK: Performance level
+
+    /// The thermal and power policy moved to `level`. Returns the stages
+    /// whose desired backend changed: at `minimal`, every stage that can
+    /// run on `SpeechTranscriber` moves there.
+    public mutating func setPerformanceLevel(_ level: PerformanceLevel) -> [Change] {
+        guard level != performanceLevel else { return [] }
+        performanceLevel = level
+        var changes: [Change] = []
+        for name in order {
+            guard let state = stages[name] else { continue }
+            if let change = retarget(name, to: target(for: state), reason: .performanceLevel(level)) {
                 changes.append(change)
             }
         }
@@ -393,7 +423,16 @@ public struct BackgroundInferencePolicy: Sendable {
     }
 
     private func target(for state: StageState) -> InferenceBackend {
-        phase.isBackground ? backgroundTarget(for: state) : usable(state.stage.ladder[0], in: state)
+        let target = phase.isBackground ? backgroundTarget(for: state) : usable(state.stage.ladder[0], in: state)
+        guard let floor = performanceFloor(for: state), floor > target else { return target }
+        return usable(floor, in: state)
+    }
+
+    /// The backend the performance level holds `state` at, at least: Apple's
+    /// `SpeechTranscriber` at `minimal`, for a stage that can run there.
+    private func performanceFloor(for state: StageState) -> InferenceBackend? {
+        guard performanceLevel >= .minimal, state.stage.ladder.contains(.systemSpeech) else { return nil }
+        return .systemSpeech
     }
 
     /// The mitigation's backend, or what an earlier trip learned, whichever

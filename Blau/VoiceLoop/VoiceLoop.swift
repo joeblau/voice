@@ -57,6 +57,9 @@ final class VoiceLoop {
     private let audio: ConversationAudio?
     private let speechModels: ModelManager
     private let backgroundInference: BackgroundInferenceMonitor?
+    /// The thermal and power policy (#75): the live ASR follows it between
+    /// utterances, 320 ms chunks at `normal` and 1280 ms below it.
+    let performance: any PerformanceLevelProviding
 
     @ObservationIgnored private var pipeline: LiveVoicePipeline?
     @ObservationIgnored private var transcriptTask: Task<Void, Never>?
@@ -66,13 +69,15 @@ final class VoiceLoop {
         realtime: any RealtimeService,
         speechModels: ModelManager,
         audio: ConversationAudio? = nil,
-        backgroundInference: BackgroundInferenceMonitor? = nil
+        backgroundInference: BackgroundInferenceMonitor? = nil,
+        performance: any PerformanceLevelProviding
     ) {
         let orchestrator = realtime as? TurnOrchestrator
         self.orchestrator = orchestrator
         self.audio = audio
         self.speechModels = speechModels
         self.backgroundInference = backgroundInference
+        self.performance = performance
         if let orchestrator {
             observation = Task { [weak self] in
                 for await snapshot in orchestrator.updates() {
@@ -109,7 +114,7 @@ final class VoiceLoop {
         do {
             let pipeline = try await LiveVoicePipeline.start(
                 audio: audio, models: speechModels, backgroundInference: backgroundInference,
-                bargeInTarget: orchestrator)
+                performance: performance, bargeInTarget: orchestrator)
             self.pipeline = pipeline
             try await orchestrator.start(waitsForConnection: false)
             transcriptTask = Task { await pipeline.run(into: orchestrator) }
@@ -188,13 +193,18 @@ final class LiveVoicePipeline {
     /// Loads the models, starts the conversation audio (capture and
     /// playback on its engine), then the transcriber and VAD. The Silero
     /// stage is registered with `backgroundInference`, which moves it off
-    /// the Neural Engine while Blau is off screen. A `BargeInMonitor` cuts
-    /// `bargeInTarget` off when VAD hears the user over the agent's audio,
-    /// its echo guard reading the player and the capture history.
+    /// the Neural Engine while Blau is off screen. The transcriber follows
+    /// `performance` (#75): between utterances it switches to the 1280 ms
+    /// export below `normal` and back to 320 ms, while that export is
+    /// installed (`ParakeetEouRecognizer.provider(modelManager:)`). A
+    /// `BargeInMonitor` cuts `bargeInTarget` off when VAD hears the user over
+    /// the agent's audio, its echo guard reading the player and the capture
+    /// history.
     static func start(
         audio: ConversationAudio,
         models: ModelManager,
         backgroundInference: BackgroundInferenceMonitor?,
+        performance: any PerformanceLevelProviding,
         bargeInTarget: (any BargeInTarget)? = nil
     ) async throws -> LiveVoicePipeline {
         #if os(iOS)
@@ -206,7 +216,9 @@ final class LiveVoicePipeline {
             let vad = VoiceActivitySegmenter(model: silero, inferenceObserver: backgroundInference)
             let hub = audio.capture.hub
             let transcriber = try await ParakeetStreamingTranscriber.load(
-                modelDirectory: asrDirectory, audio: hub, voiceActivity: vad)
+                modelDirectory: asrDirectory, audio: hub, voiceActivity: vad,
+                chunkSizePolicy: PerformanceASRChunkSizePolicy(performance),
+                recognizerProvider: ParakeetEouRecognizer.provider(modelManager: models))
 
             do {
                 try await audio.keeper.startCapture()

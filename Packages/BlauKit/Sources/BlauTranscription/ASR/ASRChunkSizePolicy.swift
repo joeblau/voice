@@ -1,3 +1,4 @@
+import BlauTelemetry
 import Foundation
 
 /// Picks the streaming chunk size for the next utterance: the hook for the
@@ -67,5 +68,36 @@ public struct ThermalASRChunkSizePolicy: ASRChunkSizePolicy {
         @unknown default:
             current
         }
+    }
+}
+
+/// Follows the thermal and power policy (#75): 320 ms chunks at `normal`,
+/// 1280 ms chunks (about a quarter of the model calls, slower partials)
+/// at `reduced` and `minimal`.
+///
+/// The policy already holds a worse level until conditions have allowed a
+/// better one for a while, so this needs no hysteresis of its own. At
+/// `minimal` the background inference monitor also moves ASR to Apple's
+/// `SpeechTranscriber` when the stage offers it; until then the 1280 ms
+/// export is the cheapest Parakeet there is.
+public struct PerformanceASRChunkSizePolicy: ASRChunkSizePolicy {
+    /// The size at `normal`.
+    public let normal: ASRChunkSize
+    /// The size below `normal`.
+    public let reduced: ASRChunkSize
+    private let performance: any PerformanceLevelProviding
+
+    public init(
+        _ performance: any PerformanceLevelProviding,
+        normal: ASRChunkSize = .ms320,
+        reduced: ASRChunkSize = .ms1280
+    ) {
+        self.performance = performance
+        self.normal = normal
+        self.reduced = reduced
+    }
+
+    public func preferredChunkSize(current: ASRChunkSize) -> ASRChunkSize {
+        performance.performanceLevel.isDegraded ? reduced : normal
     }
 }

@@ -223,6 +223,37 @@ public actor BackgroundInferenceMonitor: InferenceObserver, AppLifecycleParticip
         await reconcile()
     }
 
+    // MARK: Performance level
+
+    /// Applies the thermal and power policy's level (#75): at `minimal`,
+    /// stages that can run on Apple's `SpeechTranscriber` move there (see
+    /// `BackgroundInferencePolicy`).
+    public func setPerformanceLevel(_ level: PerformanceLevel) async {
+        let from = policy.performanceLevel
+        guard level != from else { return }
+        let changes = policy.setPerformanceLevel(level)
+        logger.notice(
+            """
+            Inference performance level \(from.rawValue, privacy: .public) -> \(level.rawValue, privacy: .public): \
+            \(changes.count, privacy: .public) stage(s) to move
+            """
+        )
+        for change in changes { log(change) }
+        publish()
+        await reconcile()
+    }
+
+    /// Follows `levels` (`PerformancePolicy.performanceLevels()`) until it
+    /// ends or the calling task is cancelled.
+    public func follow(_ levels: AsyncStream<PerformanceLevel>) async {
+        for await level in levels {
+            await setPerformanceLevel(level)
+        }
+    }
+
+    /// The level last applied.
+    public var performanceLevel: PerformanceLevel { policy.performanceLevel }
+
     // MARK: State
 
     public var snapshot: Snapshot {

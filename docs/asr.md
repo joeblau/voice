@@ -127,18 +127,28 @@ up to the cutoff is already decoded, so the flush runs no extra chunk.
 `TranscriberSoakTests` checks over an hour that the recognizer's history
 never exceeds the longest sentence.
 
-### Chunk size and the thermal hook
+### Chunk size and the thermal and power policy
 
 `ASRChunkSizePolicy` picks the chunk size between utterances (never
 mid-utterance; a recognizer's state can't move between sizes), and a
-`RecognizerProvider` supplies a recognizer for it. `ThermalASRChunkSizePolicy`
-moves to 1280 ms chunks (about a quarter of the model calls, slower
-partials) at `ProcessInfo.ThermalState.serious` and back at `nominal`
-(`fair` keeps what is running). Blau installs only the 320 ms export
-(`ModelID.parakeetRealtimeEOU`), so the provider returns `nil` for 1280 ms
-and the transcriber stays at 320 ms without asking again. Adding the
-1280 ms (and, for lower partial latency, the 160 ms) export to the model
-manifest is left to the thermal and power work (#75).
+`RecognizerProvider` supplies a recognizer for it.
+
+- **`PerformanceASRChunkSizePolicy`** is the one the app uses (#75): 320 ms
+  chunks at the `normal` performance level and 1280 ms chunks (about a
+  quarter of the model calls, slower partials) at `reduced` and
+  `minimal`. The level already has hysteresis (see
+  [performance.md](performance.md#thermal-and-power-adaptation)).
+- `ThermalASRChunkSizePolicy` does the same from the thermal state alone:
+  1280 ms at `.serious`, back at `nominal` (`fair` keeps what is running).
+- **`ParakeetEouRecognizer.provider(modelManager:)`** loads the export for a
+  size from its own model: 320 ms from `ModelID.parakeetRealtimeEOU`
+  (required) and 1280 ms from `ModelID.parakeetRealtimeEOU1280` (optional,
+  225 MB, the `1280ms` directory of the same pinned repository revision).
+  It returns `nil` while that model isn't installed, and the transcriber
+  then stays at its current size without asking again until the policy has
+  wanted the current size once, so a download that finishes mid-session is
+  picked up the next time the device runs hot. The 160 ms export isn't
+  installed (see [benchmarks.md](benchmarks.md)).
 
 ### Autorelease pools
 
@@ -276,6 +286,7 @@ the extra 3 s costs 192 KB.
 | --- | --- |
 | `disabled` | The `secondPassASR` flag is off (read for every utterance, so it can be toggled mid-conversation) |
 | `thermalPressure` | `ProcessInfo.thermalState` is `.serious` or `.critical` (checked when the utterance is committed and again when its turn comes) |
+| `reducedPerformance` | The thermal and power policy is below `normal` (hot, Low Power Mode or low battery; #75, [performance.md](performance.md#thermal-and-power-adaptation)), checked at the same two points. Pass the policy as `performance:` |
 | `modelUnavailable` | Parakeet TDT v3 isn't installed (it is optional; asked again for every utterance, so a download that finishes mid-conversation is picked up), or it failed to load (retried after 10 utterances) |
 | `audioUnavailable` | The utterance's start already left the capture history |
 | `backlog` | More than 4 utterances were waiting; the oldest waiting one is dropped |

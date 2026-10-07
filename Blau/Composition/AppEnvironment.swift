@@ -99,6 +99,19 @@ final class AppEnvironment {
     /// as they are built (the VAD, ASR #29, voice ID #47).
     let backgroundInference: BackgroundInferenceMonitor
 
+    /// The thermal and power policy (#75): watches the thermal state, Low
+    /// Power Mode and the battery and publishes the `PerformanceLevel` the
+    /// pipeline adapts to (docs/performance.md). Live launches read the
+    /// device; every other kind runs on fixed nominal conditions, which a
+    /// UI test can override with `-BlauPerformanceLevel <level>`.
+    let performance: PerformancePolicy
+
+    /// The policy's state for the views (the degraded-mode indicator).
+    let performanceStatus: PerformanceStatus
+
+    /// Applies the performance level to the inference backends.
+    @ObservationIgnored private var performanceFollower: Task<Void, Never>?
+
     /// Reports device lock and unlock to the keeper and the monitor (live
     /// app only).
     @ObservationIgnored private var deviceLock: DeviceLockObserver?
@@ -134,7 +147,8 @@ final class AppEnvironment {
         transcriptionSettings: TranscriptionSettings,
         conversationAudio: ConversationAudio? = nil,
         backgroundInference: BackgroundInferenceMonitor = BackgroundInferenceMonitor(),
-        textEmbeddings: TextEmbeddingService = TextEmbeddings.unavailable()
+        textEmbeddings: TextEmbeddingService = TextEmbeddings.unavailable(),
+        performance: PerformancePolicy = PerformancePolicy(source: ManualDeviceConditionsSource())
     ) {
         self.kind = kind
         self.config = config
@@ -154,9 +168,11 @@ final class AppEnvironment {
         self.transcriptionSettings = transcriptionSettings
         self.conversationAudio = conversationAudio
         self.backgroundInference = backgroundInference
+        self.performance = performance
+        self.performanceStatus = PerformanceStatus(policy: performance)
         self.voiceLoop = VoiceLoop(
             realtime: realtime, speechModels: speechModels, audio: conversationAudio,
-            backgroundInference: backgroundInference)
+            backgroundInference: backgroundInference, performance: performance)
         self.lifecycle = AppLifecycleCoordinator(
             participants: Self.lifecycleOrder(
                 persistence: persistence, audio: audio, transcriber: transcriber,
@@ -176,6 +192,7 @@ final class AppEnvironment {
     /// the installed speech models and starts any downloads they need.
     func start() async {
         startBackgroundServices()
+        startPerformancePolicy()
         async let models: Void = speechModels.start()
         await xai.start()
         await models
@@ -197,6 +214,18 @@ final class AppEnvironment {
         }
         deviceLock?.start()
         Task { await LiveActivityRecordingIndicator.endAll() }
+    }
+
+    /// Starts the thermal and power policy (#75) and applies its level to
+    /// the inference backends. The pipeline's other stages read the level
+    /// themselves as they are built (see docs/performance.md).
+    private func startPerformancePolicy() {
+        guard performanceFollower == nil else { return }
+        performance.start()
+        performanceStatus.start()
+        let inference = backgroundInference
+        let levels = performance.performanceLevels()
+        performanceFollower = Task { await inference.follow(levels) }
     }
 
     /// Ends the conversation: what the Live Activity's Stop button does.
@@ -301,7 +330,9 @@ extension AppEnvironment {
             // #31: the Settings toggle that forces Apple's speech engine.
             transcriptionSettings: TranscriptionSettings.make(),
             conversationAudio: conversationAudio,
-            textEmbeddings: TextEmbeddings.make(models: models)
+            textEmbeddings: TextEmbeddings.make(models: models),
+            // The device's thermal state, Low Power Mode and battery (#75).
+            performance: PerformancePolicy()
         )
     }
 
@@ -342,6 +373,10 @@ extension AppEnvironment {
         speechModels: ModelManager? = nil
     ) -> AppEnvironment {
         let flags = flags ?? .inMemory(kind == .uiTest ? launchArgumentFlagOverrides() : [:])
+        let performance = PerformancePolicy(source: ManualDeviceConditionsSource(), clock: clock)
+        if kind == .uiTest, let level = launchArgumentPerformanceLevel() {
+            performance.setOverride(level)
+        }
         return AppEnvironment(
             kind: kind,
             config: config,
@@ -358,7 +393,8 @@ extension AppEnvironment {
             speechModels: speechModels ?? fakeSpeechModels(kind: kind),
             realtimeSession: RealtimeSessionServices(persistence: InMemoryVoiceSettingsPersistence()),
             transcriptionSettings: TranscriptionSettings(
-                store: InMemoryTranscriptionPreferencesStore(), availability: { .installed(locale: "en_US") })
+                store: InMemoryTranscriptionPreferencesStore(), availability: { .installed(locale: "en_US") }),
+            performance: performance
         )
     }
 
@@ -377,6 +413,15 @@ extension AppEnvironment {
         let root = SpeechModels.defaultFixtureRoot.appending(
             path: UUID().uuidString, directoryHint: .isDirectory)
         return SpeechModels.fixtureManager(root: root)
+    }
+
+    /// Launch argument that holds a UI test's performance level, e.g.
+    /// `-BlauPerformanceLevel reduced`.
+    static let performanceLevelArgument = "BlauPerformanceLevel"
+
+    private static func launchArgumentPerformanceLevel() -> PerformanceLevel? {
+        let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        return (arguments[performanceLevelArgument] as? String).flatMap(PerformanceLevel.init(rawValue:))
     }
 
     private static func launchArgumentFlagOverrides() -> [FeatureFlag: Bool] {

@@ -33,7 +33,8 @@ import os
 ///
 /// **Skipped** (the utterance keeps its streaming text, see
 /// `SecondPassSkipReason`) when the `secondPassASR` flag is off, the device
-/// is at `.serious` thermal state or hotter, Parakeet TDT v3 isn't
+/// is at `.serious` thermal state or hotter, the thermal and power policy
+/// (`performance`, #75) is below `normal`, Parakeet TDT v3 isn't
 /// installed, the audio has left the history, more than
 /// `maximumPendingUtterances` are waiting, or the second pass returns
 /// nothing or something too different (a misfire).
@@ -58,6 +59,8 @@ public final class SecondPassTranscriber: Transcriber {
     ///     installed.
     ///   - isEnabled: Read for every utterance: the `secondPassASR` flag.
     ///   - thermalState: Reads the device's thermal state; tests pass a fake.
+    ///   - performance: The thermal and power policy (#75). Below `normal`
+    ///     every utterance keeps its streaming text. `nil` ignores it.
     ///   - configuration: Padding, backlog and acceptance limits.
     ///   - signposter: Where `asr.secondPass` intervals go.
     public init(
@@ -66,6 +69,7 @@ public final class SecondPassTranscriber: Transcriber {
         recognizer: @escaping SecondPassRecognizerProvider,
         isEnabled: @escaping @Sendable () -> Bool = { true },
         thermalState: @escaping @Sendable () -> ProcessInfo.ThermalState = { ProcessInfo.processInfo.thermalState },
+        performance: (any PerformanceLevelProviding)? = nil,
         configuration: SecondPassConfiguration = .standard,
         signposter: Signposter = Signposts.asr
     ) {
@@ -73,7 +77,7 @@ public final class SecondPassTranscriber: Transcriber {
         self.configuration = configuration
         let engine = Engine(
             audio: audio, provider: recognizer, isEnabled: isEnabled, thermalState: thermalState,
-            configuration: configuration, signposter: signposter)
+            performance: performance, configuration: configuration, signposter: signposter)
         self.engine = engine
 
         let (events, output) = AsyncStream.makeStream(of: TranscriptEvent.self, bufferingPolicy: .unbounded)
@@ -112,12 +116,14 @@ public final class SecondPassTranscriber: Transcriber {
         recognizer: @escaping SecondPassRecognizerProvider,
         flags: FeatureFlags,
         thermalState: @escaping @Sendable () -> ProcessInfo.ThermalState = { ProcessInfo.processInfo.thermalState },
+        performance: (any PerformanceLevelProviding)? = nil,
         configuration: SecondPassConfiguration = .standard,
         signposter: Signposter = Signposts.asr
     ) {
         self.init(
             wrapping: base, audio: audio, recognizer: recognizer, isEnabled: { flags.isEnabled(.secondPassASR) },
-            thermalState: thermalState, configuration: configuration, signposter: signposter)
+            thermalState: thermalState, performance: performance, configuration: configuration,
+            signposter: signposter)
     }
 
     deinit {
@@ -177,6 +183,7 @@ extension SecondPassTranscriber {
         let provider: SecondPassRecognizerProvider
         let isEnabled: @Sendable () -> Bool
         let thermalState: @Sendable () -> ProcessInfo.ThermalState
+        let performance: (any PerformanceLevelProviding)?
         let configuration: SecondPassConfiguration
         let signposter: Signposter
         private let logger = Log.asr
@@ -194,6 +201,7 @@ extension SecondPassTranscriber {
             provider: @escaping SecondPassRecognizerProvider,
             isEnabled: @escaping @Sendable () -> Bool,
             thermalState: @escaping @Sendable () -> ProcessInfo.ThermalState,
+            performance: (any PerformanceLevelProviding)?,
             configuration: SecondPassConfiguration,
             signposter: Signposter
         ) {
@@ -201,6 +209,7 @@ extension SecondPassTranscriber {
             self.provider = provider
             self.isEnabled = isEnabled
             self.thermalState = thermalState
+            self.performance = performance
             self.configuration = configuration
             self.signposter = signposter
         }
@@ -235,7 +244,8 @@ extension SecondPassTranscriber {
         /// it keeps its streaming text.
         func run(_ job: Job, recognizer slot: inout RecognizerSlot) async -> Utterance? {
             let utterance = job.utterance
-            // The flag or the temperature may have changed while it waited.
+            // The flag, the temperature or the level may have changed while
+            // it waited.
             if let reason = policySkipReason() {
                 skip(utterance, reason)
                 return nil
@@ -333,6 +343,7 @@ extension SecondPassTranscriber {
         private func policySkipReason() -> SecondPassSkipReason? {
             guard isEnabled() else { return .disabled }
             if thermalState().rawValue >= configuration.skipThermalState.rawValue { return .thermalPressure }
+            if let performance, performance.performanceLevel.isDegraded { return .reducedPerformance }
             return nil
         }
 
