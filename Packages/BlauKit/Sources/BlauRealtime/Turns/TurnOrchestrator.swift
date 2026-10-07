@@ -134,11 +134,27 @@ public actor TurnOrchestrator: RealtimeService {
     private var completedTurns = 0
 
     // Matching server events to turns
-    /// Turns whose `response.create` went out, oldest first, until their
-    /// `response.created` arrives.
-    private var awaitingResponse: [Int] = []
+    /// One slot per `response.create` sent this session, oldest first, until
+    /// its `response.created` arrives. A turn given up before then keeps its
+    /// slot, marked abandoned: the server still creates that response, and
+    /// an untagged `response.created` (no `metadata` echo) is matched to the
+    /// oldest slot, so removing it would hand the late response to the next
+    /// turn.
+    private var awaitingResponse: [ResponseSlot] = []
+    /// Set when an untagged `response.created` was matched to the slot of a
+    /// turn that timed out, and cleared by the next one matched to a live
+    /// turn. If the turn after it times out too, the response taken was
+    /// really that turn's: the timed-out one never got a response, so its
+    /// slot was stale (see ``responseTimedOut(turn:)``).
+    private var timedOutSlotTookAResponse = false
     /// Responses of turns that were cancelled, merged or abandoned.
     private var ignoredResponses: Set<String> = []
+    /// The stored user rows, by the id of each final that went into one, so
+    /// a refined transcript (`TranscriptEvent.refined`, #30) updates the
+    /// right row even after a merge.
+    private var userRows: [UUID: UserRow] = [:]
+    /// The row each committed final went into.
+    private var rowOfFinal: [UUID: UUID] = [:]
     /// Agent items cut short, waiting for `conversation.item.truncated` and
     /// the transcript that was kept.
     private var truncatedItems: [String: AgentItem] = [:]
@@ -369,7 +385,22 @@ public actor TurnOrchestrator: RealtimeService {
             } catch {
                 // Not running: already guarded above.
             }
+        case .refined(let utterance):
+            refine(utterance)
         }
+    }
+
+    /// Stores the second pass's better text for a final already committed
+    /// (#30). Grok keeps the streaming text it was sent; a final that was
+    /// ignored (blank, or not the enrolled speaker) stays unstored.
+    private func refine(_ refined: Utterance) {
+        guard let rowID = rowOfFinal[refined.id], var row = userRows[rowID],
+            let index = row.parts.firstIndex(where: { $0.id == refined.id })
+        else { return }
+        row.parts[index].text = refined.text
+        row.utterance.text = Self.joinedText(of: row.parts)
+        userRows[rowID] = row
+        record(row.utterance)
     }
 
     /// Commits a final, verified user utterance and asks Grok to respond.
@@ -453,11 +484,11 @@ public actor TurnOrchestrator: RealtimeService {
                 let merged = merge(last.user, utterance)
                 queued[queued.count - 1].user = merged
                 queued[queued.count - 1].texts.append(utterance.text)
-                record(merged)
+                recordUser(merged, adding: utterance)
                 Log.realtime.notice("Merged a rapid follow-up into a queued utterance")
             } else {
                 queued.append(QueuedUtterance(user: utterance, texts: [utterance.text]))
-                record(utterance)
+                recordUser(utterance, adding: utterance)
             }
             Log.realtime.notice(
                 "Queued an utterance until the session is ready (\(self.queued.count, privacy: .public) waiting)")
@@ -470,7 +501,7 @@ public actor TurnOrchestrator: RealtimeService {
             if isContinuation(utterance, of: turn.user) {
                 let merged = merge(turn.user, utterance)
                 abandon(turn, reason: .merged)
-                record(merged)
+                recordUser(merged, adding: utterance)
                 signposter.event("realtime.turnMerged")
                 Log.realtime.notice("Turn \(turn.number, privacy: .public) continued by a rapid follow-up")
                 begin(user: merged, texts: [utterance.text], endOfUtterance: endOfUtterance, isMeasured: true)
@@ -479,7 +510,7 @@ public actor TurnOrchestrator: RealtimeService {
             abandon(turn, reason: .interrupted)
             signposter.event("realtime.turnInterrupted")
         }
-        record(utterance)
+        recordUser(utterance, adding: utterance)
         begin(user: utterance, texts: [utterance.text], endOfUtterance: endOfUtterance, isMeasured: true)
     }
 
@@ -491,10 +522,7 @@ public actor TurnOrchestrator: RealtimeService {
     }
 
     private func merge(_ first: Utterance, _ second: Utterance) -> Utterance {
-        let text = [first.text, second.text]
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
+        let text = Self.joinedText(of: [(first.id, first.text), (second.id, second.text)])
         return Utterance(
             id: first.id, conversationID: first.conversationID, speaker: .user, text: text,
             timeRange: first.timeRange.union(second.timeRange), startedAt: first.startedAt,
@@ -515,7 +543,7 @@ public actor TurnOrchestrator: RealtimeService {
             turnInterval: signposter.beginInterval(.realtimeTurn),
             firstAudioInterval: signposter.beginInterval(.realtimeFirstAudio)
         )
-        awaitingResponse.append(number)
+        awaitingResponse.append(ResponseSlot(turn: number))
         setState(.committing)
         Log.realtime.notice(
             "Turn \(number, privacy: .public): committing \(texts.count, privacy: .public) item(s): \(user.text, privacy: .private)"
@@ -566,10 +594,8 @@ public actor TurnOrchestrator: RealtimeService {
     }
 
     private func sent(_ events: [RealtimeClientEvent], turn number: Int?) {
-        guard let number, var turn = current, turn.number == number else { return }
+        guard let number, let turn = current, turn.number == number else { return }
         guard events.contains(where: { $0.type == "response.create" }) else { return }
-        turn.isRequested = true
-        current = turn
         if state == .committing {
             setState(.agentThinking)
         }
@@ -580,11 +606,15 @@ public actor TurnOrchestrator: RealtimeService {
         Log.realtime.error(
             "Realtime send failed\(number.map { " for turn \($0)" } ?? "", privacy: .public): \(error.description, privacy: .public)"
         )
-        guard let number, let turn = current, turn.number == number, !turn.hasReplyContent else { return }
+        guard let number else { return }
+        // A turn's events stop at the first failure, so its
+        // `response.create` didn't go out: no `response.created` will come
+        // for its slot, whether the turn is still current or was abandoned.
+        awaitingResponse.removeAll { $0.turn == number }
+        guard let turn = current, turn.number == number, !turn.hasReplyContent else { return }
         // Nothing of the reply arrived: send the turn again once a session
         // is ready.
         endIntervals(of: turn, message: "requeued")
-        awaitingResponse.removeAll { $0 == number }
         current = nil
         queued.insert(QueuedUtterance(user: turn.user, texts: turn.texts), at: 0)
         cancelTimers()
@@ -618,7 +648,9 @@ public actor TurnOrchestrator: RealtimeService {
         case .connected:
             let session = epoch.advance()
             isSessionReady = true
+            // A new server session: nothing sent on the old one will answer.
             awaitingResponse.removeAll()
+            timedOutSlotTookAResponse = false
             let configurator = configurator
             let client = client
             let epoch = epoch
@@ -656,7 +688,7 @@ public actor TurnOrchestrator: RealtimeService {
             // No reply yet: ask again on the next session.
             Log.realtime.notice("Turn \(turn.number, privacy: .public) lost with the connection; requeued")
             endIntervals(of: turn, message: "requeued")
-            awaitingResponse.removeAll { $0 == turn.number }
+            awaitingResponse.removeAll { $0.turn == turn.number }
             current = nil
             cancelTimers()
             queued.insert(QueuedUtterance(user: turn.user, texts: turn.texts), at: 0)
@@ -676,6 +708,14 @@ public actor TurnOrchestrator: RealtimeService {
             responseCreated(created.response)
         case .responseOutputItemAdded(let added):
             if case .message(let message) = added.item, message.role == .assistant, let itemID = message.id {
+                if let responseID = added.responseID, ignoredResponses.contains(responseID) {
+                    // An item of a response given up: none of it is played,
+                    // so Grok shouldn't think it said it.
+                    if isSessionReady {
+                        send([.conversationItemDelete(itemID: itemID)], turn: nil)
+                    }
+                    return
+                }
                 updateTurn(responseID: added.responseID) { turn in
                     _ = self.agentItemIndex(itemID, contentIndex: 0, in: &turn)
                 }
@@ -707,10 +747,21 @@ public actor TurnOrchestrator: RealtimeService {
         let tagged = response.metadata?[Self.turnMetadataKey]?.stringValue.flatMap(Int.init)
         let number: Int?
         if let tagged {
-            awaitingResponse.removeAll { $0 == tagged }
+            // The server echoed the turn: that slot is answered.
+            awaitingResponse.removeAll { $0.turn == tagged }
             number = tagged
+        } else if awaitingResponse.isEmpty {
+            number = nil
         } else {
-            number = awaitingResponse.isEmpty ? nil : awaitingResponse.removeFirst()
+            // No echo: the server creates responses in the order it was asked
+            // for them, so this one answers the oldest slot.
+            let slot = awaitingResponse.removeFirst()
+            guard slot.status == .live else {
+                ignoreLateResponse(responseID, of: slot)
+                return
+            }
+            timedOutSlotTookAResponse = false
+            number = slot.turn
         }
         guard let number, var turn = current, turn.number == number,
             turn.responseID == nil || turn.responseID == responseID
@@ -724,6 +775,25 @@ public actor TurnOrchestrator: RealtimeService {
         current = turn
         responseTimeoutTask?.cancel()
         responseTimeoutTask = nil
+    }
+
+    /// The response asked for by a turn given up before its
+    /// `response.created` (merged, interrupted, stopped or timed out): never
+    /// played, and cancelled by id. The cancel sent when the turn was given
+    /// up had no id to name and may have reached the server before the
+    /// response existed (always so after a timeout). If it did cancel it,
+    /// the server answers this one with an `error`, which changes nothing.
+    private func ignoreLateResponse(_ responseID: String, of slot: ResponseSlot) {
+        ignoredResponses.insert(responseID)
+        if slot.status == .timedOut {
+            timedOutSlotTookAResponse = true
+        }
+        Log.realtime.notice(
+            "Response \(responseID, privacy: .public) belongs to abandoned turn \(slot.turn, privacy: .public); ignoring it"
+        )
+        if isSessionReady {
+            send([.responseCancel(responseID: responseID)], turn: nil)
+        }
     }
 
     private func audioDelta(_ delta: RealtimeServerEvent.AudioDelta) {
@@ -884,6 +954,9 @@ public actor TurnOrchestrator: RealtimeService {
         case interrupted
         /// The conversation was stopped.
         case stopped
+        /// `response.created` didn't arrive within
+        /// ``Configuration/responseTimeout``.
+        case timedOut
     }
 
     /// Stops `turn`'s reply: cancels the response if it is still being
@@ -899,7 +972,12 @@ public actor TurnOrchestrator: RealtimeService {
                 ignoredResponses.insert(responseID)
             }
         }
-        awaitingResponse.removeAll { $0 == turn.number }
+        // The server still creates the response it was asked for: keep the
+        // slot, so an untagged `response.created` for it isn't matched to
+        // the next turn (see `responseCreated`).
+        if let slot = awaitingResponse.firstIndex(where: { $0.turn == turn.number }) {
+            awaitingResponse[slot].status = reason == .timedOut ? .timedOut : .abandoned
+        }
         let flushed = audio.flush()
         for item in turn.agentItems {
             let received = Int(item.receivedFrames * 1000 / Int64(sampleRate))
@@ -967,7 +1045,19 @@ public actor TurnOrchestrator: RealtimeService {
     private func responseTimedOut(turn number: Int) {
         guard let turn = current, turn.number == number, turn.responseID == nil else { return }
         Log.realtime.error("Turn \(number, privacy: .public): no response from Grok")
-        abandon(turn, reason: .interrupted)
+        // Its response may still be created late, so `abandon` keeps the
+        // slot (marked timed out) to keep untagged responses in order.
+        abandon(turn, reason: .timedOut)
+        if timedOutSlotTookAResponse {
+            // An earlier timed-out turn's slot took a response since, and
+            // now this turn got none either: that response was this turn's,
+            // and the earlier one's never came. Drop this slot instead of
+            // waiting on it, or every later turn would be answered by its
+            // predecessor's slot.
+            timedOutSlotTookAResponse = false
+            awaitingResponse.removeAll { $0.turn == number }
+            Log.realtime.notice("Realigned response matching after turn \(number, privacy: .public) timed out")
+        }
         fail(TurnFailure(kind: .response, message: "Grok didn't respond"))
     }
 
@@ -979,6 +1069,30 @@ public actor TurnOrchestrator: RealtimeService {
     }
 
     // MARK: Transcript
+
+    /// Writes the user row `utterance` after `part` went into it: the row
+    /// itself for a new utterance, or the row it continues after a merge.
+    /// The row's text is rebuilt from its parts, so a part refined before
+    /// the merge keeps its refined text.
+    private func recordUser(_ utterance: Utterance, adding part: Utterance) {
+        var row = userRows[utterance.id] ?? UserRow(utterance: utterance, parts: [])
+        row.parts.append((part.id, part.text))
+        row.utterance = utterance
+        if row.parts.count > 1 {
+            row.utterance.text = Self.joinedText(of: row.parts)
+        }
+        userRows[utterance.id] = row
+        rowOfFinal[part.id] = utterance.id
+        record(row.utterance)
+    }
+
+    /// The parts' texts, trimmed and joined with spaces.
+    static func joinedText(of parts: [(id: UUID, text: String)]) -> String {
+        parts
+            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
 
     private func record(_ utterance: Utterance) {
         let transcript = transcript
@@ -1047,7 +1161,10 @@ public actor TurnOrchestrator: RealtimeService {
         queued.removeAll()
         userPartial = nil
         awaitingResponse.removeAll()
+        timedOutSlotTookAResponse = false
         ignoredResponses.removeAll()
+        userRows.removeAll()
+        rowOfFinal.removeAll()
         truncatedItems.removeAll()
         usage = RealtimeUsageTotals()
         completedTurns = 0
@@ -1079,7 +1196,10 @@ public actor TurnOrchestrator: RealtimeService {
     private func updateTurn(responseID: String?, _ body: (inout Turn) -> Void) {
         guard var turn = turnFor(responseID: responseID) else { return }
         if turn.responseID == nil, let responseID {
+            // Its `response.created` never came: the turn's slot is answered.
             turn.responseID = responseID
+            let number = turn.number
+            awaitingResponse.removeAll { $0.turn == number }
         }
         body(&turn)
         current = turn
@@ -1113,7 +1233,6 @@ extension TurnOrchestrator {
         let isMeasured: Bool
         let turnInterval: SignpostInterval
         var firstAudioInterval: SignpostInterval?
-        var isRequested = false
         var responseID: String?
         var firstAudioAt: Duration?
         var agentItems: [AgentItem] = []
@@ -1167,6 +1286,29 @@ extension TurnOrchestrator {
     struct QueuedUtterance {
         var user: Utterance
         var texts: [String]
+    }
+
+    /// A `response.create` waiting for its `response.created`.
+    struct ResponseSlot: Equatable {
+        enum Status: Equatable {
+            /// Its turn is waiting for the reply.
+            case live
+            /// Its turn was merged, interrupted or stopped: the response is
+            /// ignored (and cancelled) when it is created.
+            case abandoned
+            /// Its turn gave up waiting (``Configuration/responseTimeout``).
+            case timedOut
+        }
+
+        let turn: Int
+        var status: Status = .live
+    }
+
+    /// A stored user utterance and the finals it was built from.
+    struct UserRow {
+        var utterance: Utterance
+        /// Each final's id and text, in order (more than one after a merge).
+        var parts: [(id: UUID, text: String)]
     }
 }
 

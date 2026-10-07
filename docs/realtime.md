@@ -402,7 +402,32 @@ is heard.
 | Commit | `conversation.item.create` with one `input_text` part, then `response.create` with `metadata: {"blau_turn": "<n>"}`, so `response.created` matches its turn even after a cancel (without the echo, responses are matched in order) |
 | Reply | `response.output_audio.delta` → the player, keyed by `item_id` and `content_index`. `response.output_audio_transcript.delta` (and `response.output_text.delta`) → `TurnSnapshot.agentText`. `response.output_audio.done` finishes the item in the player |
 | Done | `response.done` writes the agent utterance (text from the transcript deltas, or from the response's output items if they didn't arrive), adds the response's token usage, ends the signposts |
-| Stale events | Deltas of a cancelled or merged response are dropped by response id |
+| Stale events | Deltas of a cancelled or merged response are dropped by response id; an assistant item it still adds is removed from Grok's history (`conversation.item.delete`), since none of it plays |
+| Refined text | `TranscriptEvent.refined` (the second pass, #30) rewrites the stored user row it belongs to (the merged row, for a part of a merged utterance); Grok keeps the streaming text it was sent |
+
+#### Matching responses to turns
+
+Whether xAI echoes `response.create`'s `metadata` in `response.created` is
+not verified yet (the hand-written `manual-text-turn` fixture echoes a
+`turn` key, so its replay runs on the fallback below). With the echo, a
+response is matched to the turn its `blau_turn` names. Without it, the
+server creates responses in the order they were asked for, so each untagged
+`response.created` answers the oldest outstanding `response.create`:
+
+- Every `response.create` gets a slot, oldest first, until its
+  `response.created` arrives. A send that fails, or a new connection,
+  removes slots whose response will never come.
+- A turn given up before its response was created (merged, interrupted,
+  stopped or timed out) **keeps its slot, marked abandoned**: the server
+  still creates that response, and removing the slot would hand it to the
+  next turn, whose own reply would then be dropped. When an untagged
+  `response.created` lands on an abandoned slot, the response is ignored and
+  cancelled by id (`response.cancel` with `response_id`).
+- A timed-out turn's response may also never come. If the next turn's
+  response lands on the timed-out slot and that turn then times out too,
+  the response was really its own: its slot is dropped so the turns after
+  it are matched correctly again. (One turn is lost to the ambiguity; the
+  echo avoids it.)
 
 Agent utterances are stored with the wall-clock time of their first audio
 and, on the conversation's timeline, an offset from the start of the
@@ -458,7 +483,7 @@ the same cut on *speech start* (VAD), with the echo guard, is barge-in (#37).
 first audio** (the same span as `realtime.firstAudio`) and **end of utterance
 → `response.done`** (`realtime.turn`) as `RollingLatency`: last, p50, p95.
 Turns sent from the queue (they measure the outage) and turns that were
-merged or interrupted (they never ended) are not sampled. "End of utterance"
+merged, interrupted or timed out (they never ended) are not sampled. "End of utterance"
 is when the final reaches the orchestrator; ASR's own end-of-speech delay
 is `asr.eou`.
 

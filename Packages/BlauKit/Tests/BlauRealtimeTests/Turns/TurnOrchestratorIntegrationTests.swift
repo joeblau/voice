@@ -82,7 +82,12 @@ struct TurnOrchestratorIntegrationTests {
     /// examples), replayed in lockstep through a real client: the
     /// orchestrator's frames line up with the recorded ones and the reply is
     /// played and stored.
-    @Test func replaysTheManualTextTurnFixture() async throws {
+    ///
+    /// The fixture's `response.created` echoes `metadata: {"turn": "1"}`,
+    /// not the orchestrator's `blau_turn` key, so this replays the untagged
+    /// path: the response is matched to the turn by order. Whether xAI
+    /// echoes `metadata` at all is unverified until a live recording exists.
+    @Test func replaysTheManualTextTurnFixtureMatchingByOrder() async throws {
         let transcript = try Fixtures.transcript("manual-text-turn")
         let connector = RealtimeReplayConnector(transcript: transcript)
         let clock = ManualClock(now: turnT0)
