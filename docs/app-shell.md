@@ -159,7 +159,12 @@ backgrounded: it releases what is idle and saves what could be lost. Today
 leaves the foreground (inside a `db.save` signpost); the subsystems add their
 own handling as they are built.
 
-Each return to `active` after launch also calls `xai.refresh()`, which re-reads
-the Keychain so a key added or removed on another device (iCloud Keychain)
-shows up. The first `active` after launch skips it, because `start()` loads the
-key then and a concurrent refresh could race the DEBUG key seeding.
+Each move to `active` also calls `xai.refresh()`, which re-reads the Keychain
+so a key added or removed on another device (iCloud Keychain) shows up. A
+launch goes `launch → inactive → active`, and that first activation usually
+arrives while `start()` (run from the root `.task`) is still seeding the DEBUG
+developer key and loading the stored key. `XAIServices.refresh()` therefore
+does nothing until `start()` has finished (`hasStarted`): a read during the
+seeding could miss the key being written, and `start()`'s own load would then
+be skipped because the account is already loading. `start()` reads the
+Keychain itself once seeding is done, so the skipped refresh loses nothing.

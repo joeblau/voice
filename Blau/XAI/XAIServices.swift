@@ -80,6 +80,10 @@ final class XAIServices {
         #endif
     }
 
+    /// Whether `start()` has finished: the DEBUG developer key is seeded and
+    /// the stored key loaded. `refresh()` does nothing until then.
+    private(set) var hasStarted = false
+
     /// Runs once at launch: seeds the developer key (DEBUG only), then loads
     /// the stored key.
     func start() async {
@@ -87,11 +91,23 @@ final class XAIServices {
             await seedDevelopmentKey()
         #endif
         await account.load()
+        hasStarted = true
     }
 
     /// Re-reads the Keychain, e.g. when the app becomes active, so a key
     /// added or removed on another device shows up.
+    ///
+    /// Does nothing until `start()` has finished. The app's first activation
+    /// (`inactive → active`) arrives while `start()` may still be seeding the
+    /// DEBUG developer key; a read then could miss the key that is about to
+    /// be written and set `noKey`, and `start()`'s own load would be skipped
+    /// because the account is already busy loading. `start()` reads the
+    /// Keychain once it is done, so nothing is lost by skipping.
     func refresh() async {
+        guard hasStarted else {
+            Self.logger.debug("Skipping the xAI key refresh: launch hasn't finished loading the key")
+            return
+        }
         let before = account.status
         await account.load()
         if account.status != before {
@@ -120,7 +136,7 @@ private struct OfflineHTTPTransport: HTTPTransport {
 }
 
 /// A development-key seed marker that lives only as long as the services.
-private final class InMemorySeedMarker: DevelopmentKeySeedMarker {
+final class InMemorySeedMarker: DevelopmentKeySeedMarker {
     private let seeded = Mutex(false)
 
     var hasSeeded: Bool { seeded.withLock { $0 } }

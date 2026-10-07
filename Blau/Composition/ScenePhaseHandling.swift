@@ -22,22 +22,15 @@ extension AppPhase {
     }
 }
 
-extension AppPhaseTransition {
-    /// Whether the app should re-read the xAI key from the Keychain: on every
-    /// return to `active` except the first one after launch, where
-    /// `AppEnvironment.start()` loads it. A launch-time refresh would race
-    /// that load (and the DEBUG key seeding before it) and could leave the
-    /// account showing no key.
-    var refreshesXAIKey: Bool { isBecomingActive && from != nil }
-}
-
 extension AppEnvironment {
     /// Feeds a scene phase change to the services.
     ///
-    /// Becoming active again, it also refreshes the xAI key (see
-    /// `AppPhaseTransition.refreshesXAIKey`). Moving to the background, the app asks iOS for extra running time
-    /// until every service has handled the change, so the store's save and
-    /// any other flushing finish before the process can be suspended.
+    /// Becoming active, it also refreshes the xAI key with `xai.refresh()`,
+    /// which does nothing until `start()` has loaded the key, so the
+    /// launch-time `inactive → active` can't race the DEBUG key seeding.
+    /// Moving to the background, the app asks iOS for extra running
+    /// time until every service has handled the change, so the store's save
+    /// and any other flushing finish before the process can be suspended.
     func handleScenePhase(_ scenePhase: ScenePhase) {
         guard let phase = AppPhase(scenePhase) else {
             Log.ui.error("Ignoring an unknown scene phase: \(String(describing: scenePhase), privacy: .public)")
@@ -46,10 +39,10 @@ extension AppEnvironment {
         guard let transition = lifecycle.update(to: phase) else { return }
         Log.ui.notice("Scene phase \(transition.description, privacy: .public)")
 
-        if transition.refreshesXAIKey {
+        if transition.isBecomingActive {
             // Pick up a key added or removed on another device (iCloud
             // Keychain).
-            Task { await xai.refresh() }
+            xaiRefresh = Task { await xai.refresh() }
         }
 
         #if canImport(UIKit)

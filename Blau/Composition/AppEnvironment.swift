@@ -57,6 +57,10 @@ final class AppEnvironment {
     /// Delivers scene phase changes to the services (see `ScenePhaseHandling`).
     let lifecycle: AppLifecycleCoordinator
 
+    /// The xAI key refresh started by the latest return to `active`, so tests
+    /// can wait for it.
+    @ObservationIgnored var xaiRefresh: Task<Void, Never>?
+
     init(
         kind: Kind,
         config: AppConfig,
@@ -155,7 +159,8 @@ extension AppEnvironment {
                 allowsOverrides: AppConfig.isDebugBuild
             ),
             clock: SystemClock(),
-            // #23 / #24: AudioSessionController and the capture engine.
+            // #24 wires in the capture engine together with the
+            // AudioSessionController from #23.
             audio: UnavailableService(subsystem: "audio"),
             // #29: ParakeetStreamingTranscriber.
             transcriber: UnavailableService(subsystem: "transcription"),

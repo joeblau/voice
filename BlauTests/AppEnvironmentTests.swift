@@ -4,6 +4,7 @@ import BlauRealtime
 import Foundation
 import SwiftData
 import SwiftUI
+import Synchronization
 import Testing
 import UIKit
 
@@ -170,25 +171,63 @@ struct AppEnvironmentXAITests {
         let environment = AppEnvironment.fake(kind: .unitTest, config: config)
         await environment.start()
         #expect(environment.xai.account.hasKey == AppConfig.isDebugBuild)
-        #expect(!AppEnvironment.fake(kind: .unitTest, config: config).xai.account.hasKey)
+
+        // Seeding is per environment: a second one seeds its own in-memory
+        // store, and removing the key there leaves the first one's key alone.
+        let other = AppEnvironment.fake(kind: .unitTest, config: config)
+        await other.start()
+        #expect(other.xai.account.hasKey == AppConfig.isDebugBuild)
+        await other.xai.account.removeKey()
+        #expect(!other.xai.account.hasKey)
+        await environment.xai.refresh()
+        #expect(environment.xai.account.hasKey == AppConfig.isDebugBuild)
     }
 
-    @Test func refreshesOnlyWhenComingBackToActive() {
-        #expect(!AppPhaseTransition(from: nil, to: .active).refreshesXAIKey)
-        #expect(AppPhaseTransition(from: .inactive, to: .active).refreshesXAIKey)
-        #expect(AppPhaseTransition(from: .background, to: .active).refreshesXAIKey)
-        #expect(!AppPhaseTransition(from: .active, to: .inactive).refreshesXAIKey)
-        #expect(!AppPhaseTransition(from: .inactive, to: .background).refreshesXAIKey)
+    /// The real launch order: SwiftUI reports `inactive`, the root `.task`
+    /// runs `start()`, and the scene becomes `active` while the DEBUG
+    /// developer key is still being written. The refresh that activation
+    /// triggers must not read the store before the seed lands.
+    @Test(.enabled(if: AppConfig.isDebugBuild, "The developer key is seeded in DEBUG builds only"))
+    func launchActivationDoesNotRaceTheDevelopmentKeySeeding() async throws {
+        let config = AppConfig(
+            environment: .debug, xaiAPIHost: "api.x.ai", xaiRealtimeModel: "grok-voice-think-fast-2.0",
+            developmentAPIKey: fakeKeyRaw)
+        let store = GatedSaveAPIKeyStore()
+        let xai = XAIServices(
+            config: config, store: store, transport: XAIUITestStub.accept.transport,
+            seedMarker: InMemorySeedMarker())
+        let environment = AppEnvironment.fake(kind: .unitTest, config: config, xai: xai)
+
+        environment.handleScenePhase(.inactive)
+        let start = Task { await environment.start() }
+        await store.waitUntilASaveIsPending()
+
+        environment.handleScenePhase(.active)
+        await environment.xaiRefresh?.value
+        // The refresh left the account alone instead of reading a store that
+        // doesn't hold the seed yet.
+        #expect(!xai.hasStarted)
+        #expect(environment.xai.account.status == .unknown)
+        #expect(environment.xai.account.activity == .idle)
+
+        store.releaseSave()
+        await start.value
+        #expect(xai.hasStarted)
+        #expect(environment.xai.account.hasKey)
+        #expect(try await store.load()?.rawValue == fakeKeyRaw)
     }
 
     @Test func becomingActiveAgainPicksUpAKeyFromAnotherDevice() async throws {
         let store = InMemoryAPIKeyStore()
         let xai = XAIServices(
             config: .fallback, store: store, transport: XAIUITestStub.accept.transport,
-            seedMarker: UserDefaultsSeedMarker(suiteName: "blau.tests.\(UUID().uuidString)"))
+            seedMarker: InMemorySeedMarker())
         let environment = AppEnvironment.fake(kind: .unitTest, xai: xai)
-        environment.handleScenePhase(.active)
+        // Launch: `inactive`, then `start()` from the root `.task`, then `active`.
+        environment.handleScenePhase(.inactive)
         await environment.start()
+        environment.handleScenePhase(.active)
+        await environment.xaiRefresh?.value
         #expect(environment.xai.account.status == .noKey)
 
         // iCloud Keychain delivers a key while the app is in the background.
@@ -199,13 +238,67 @@ struct AppEnvironmentXAITests {
 
         environment.handleScenePhase(.inactive)
         environment.handleScenePhase(.active)
-        let deadline = ContinuousClock.now + .seconds(5)
-        while !environment.xai.account.hasKey, ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        await environment.xaiRefresh?.value
         #expect(environment.xai.account.hasKey)
     }
+}
 
+/// A key store whose `save` waits for `releaseSave()`, to hold the DEBUG
+/// developer key seeding in the middle of its Keychain write.
+private final class GatedSaveAPIKeyStore: APIKeyStore {
+    private struct State {
+        var key: XAIAPIKey?
+        var pendingSave: CheckedContinuation<Void, Never>?
+        var isReleased = false
+    }
+
+    private let state = Mutex(State())
+    private let savePending: AsyncStream<Void>
+    private let savePendingContinuation: AsyncStream<Void>.Continuation
+
+    init() {
+        (savePending, savePendingContinuation) = AsyncStream<Void>.makeStream()
+    }
+
+    func load() async throws(APIKeyStoreError) -> XAIAPIKey? {
+        state.withLock { $0.key }
+    }
+
+    func save(_ newKey: XAIAPIKey) async throws(APIKeyStoreError) {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let resumeNow = state.withLock { state in
+                if state.isReleased { return true }
+                state.pendingSave = continuation
+                return false
+            }
+            if resumeNow {
+                continuation.resume()
+            } else {
+                savePendingContinuation.yield()
+            }
+        }
+        state.withLock { $0.key = newKey }
+    }
+
+    func delete() async throws(APIKeyStoreError) {
+        state.withLock { $0.key = nil }
+    }
+
+    /// Returns once a `save` is waiting to be released.
+    func waitUntilASaveIsPending() async {
+        var pending = savePending.makeAsyncIterator()
+        _ = await pending.next()
+    }
+
+    /// Lets the pending `save` (and every later one) finish.
+    func releaseSave() {
+        let pending = state.withLock { state -> CheckedContinuation<Void, Never>? in
+            state.isReleased = true
+            defer { state.pendingSave = nil }
+            return state.pendingSave
+        }
+        pending?.resume()
+    }
 }
 
 @Suite("Scene phase handling")
