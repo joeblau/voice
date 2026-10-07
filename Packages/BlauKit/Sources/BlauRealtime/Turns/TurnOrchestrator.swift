@@ -42,6 +42,11 @@ import os
 /// interrupts the reply the same way (cut at what was heard, with
 /// `conversation.item.truncate`) and starts a new turn.
 ///
+/// **Barge-in.** ``bargeIn(_:)`` makes the same cut as soon as the user
+/// starts talking over the reply (#37), driven by ``BargeInMonitor`` from
+/// VAD with its echo guard. Replies cut either way are listed in
+/// ``TurnSnapshot/interruptedAgentUtterances``.
+///
 /// **Matching responses.** Each `response.create` carries the turn in its
 /// `metadata` and a client `event_id`. Without a `metadata` echo, responses
 /// are matched by order, so only one `response.create` is outstanding at a
@@ -204,6 +209,10 @@ public actor TurnOrchestrator: RealtimeService {
     /// Agent items cut short, waiting for `conversation.item.truncated` and
     /// the transcript that was kept.
     private var truncatedItems: [String: AgentItem] = [:]
+    /// Stored agent utterances cut short by the user, this conversation.
+    private var interruptedAgentUtterances: Set<UUID> = []
+    private var bargeIns = 0
+    private var lastBargeIn: BargeInRecord?
 
     // Continuity (#39): see TurnOrchestrator+Continuity.swift
     /// The conversation as stored, for reseeding a new server session.
@@ -1221,6 +1230,8 @@ public actor TurnOrchestrator: RealtimeService {
         case merged
         /// The user said something new.
         case interrupted
+        /// The user started talking over the reply (``bargeIn(_:)``).
+        case bargedIn
         /// The conversation was stopped.
         case stopped
         /// `response.created` didn't arrive within
@@ -1228,16 +1239,31 @@ public actor TurnOrchestrator: RealtimeService {
         case timedOut
     }
 
-    /// Stops `turn`'s reply: cancels the response if it is still being
-    /// generated, flushes playback, and cuts Grok's memory of the reply to
-    /// what was heard (`conversation.item.truncate`) or removes it when
-    /// nothing was (`conversation.item.delete`). The heard part is written
-    /// to the transcript.
-    private func abandon(_ turn: Turn, reason: AbandonReason) {
+    /// What ``abandon(_:reason:)`` cut.
+    struct AbandonOutcome {
+        /// Uptime right after playback was flushed.
+        var flushedAt: Duration
+        var cut: [BargeInRecord.CutItem]
+        var cancelledResponse: Bool
+    }
+
+    /// Stops `turn`'s reply: flushes playback first (silence within one
+    /// render cycle), cancels the response if it is still being generated,
+    /// and cuts Grok's memory of the reply to what was heard
+    /// (`conversation.item.truncate`) or removes it when nothing was
+    /// (`conversation.item.delete`). The heard part is written to the
+    /// transcript, and stored agent utterances that were cut short are
+    /// marked interrupted in the snapshot.
+    @discardableResult
+    private func abandon(_ turn: Turn, reason: AbandonReason) -> AbandonOutcome {
+        // Silence first: everything else can wait a few microseconds.
+        let flushed = audio.flush()
+        let flushedAt = clock.uptime
         var events: [RealtimeClientEvent] = []
         // A turn whose `response.create` is still held back has no response
         // to cancel.
-        if !turn.isResponseDone, turn.responseCreateAttempts > 0 {
+        let cancelsResponse = !turn.isResponseDone && turn.responseCreateAttempts > 0
+        if cancelsResponse {
             events.append(.responseCancel(responseID: turn.responseID))
             if let responseID = turn.responseID {
                 ignoredResponses.insert(responseID)
@@ -1249,7 +1275,7 @@ public actor TurnOrchestrator: RealtimeService {
         if let slot = awaitingResponse.firstIndex(where: { $0.turn == turn.number }) {
             awaitingResponse[slot].status = .abandoned
         }
-        let flushed = audio.flush()
+        var cut: [BargeInRecord.CutItem] = []
         for item in turn.agentItems {
             let received = Int(item.receivedFrames * 1000 / Int64(sampleRate))
             let played =
@@ -1258,6 +1284,9 @@ public actor TurnOrchestrator: RealtimeService {
             if played <= 0 {
                 // Never heard: Grok shouldn't think it said it.
                 events.append(.conversationItemDelete(itemID: item.itemID))
+                cut.append(
+                    .init(
+                        itemID: item.itemID, utteranceID: nil, heardMilliseconds: 0, receivedMilliseconds: received))
                 continue
             }
             if played < received {
@@ -1272,6 +1301,14 @@ public actor TurnOrchestrator: RealtimeService {
             } else if !item.isPersisted {
                 persistAgent(item, text: item.transcript, duration: .milliseconds(played))
             }
+            // Cut short: less was heard than arrived, or more was coming.
+            if played < received || cancelsResponse {
+                interruptedAgentUtterances.insert(item.utteranceID)
+                cut.append(
+                    .init(
+                        itemID: item.itemID, utteranceID: item.utteranceID, heardMilliseconds: played,
+                        receivedMilliseconds: received))
+            }
         }
         if !events.isEmpty, isSessionReady {
             send(events, turn: nil)
@@ -1280,6 +1317,42 @@ public actor TurnOrchestrator: RealtimeService {
         Log.realtime.notice("Turn \(turn.number, privacy: .public) \(reason.rawValue, privacy: .public)")
         current = nil
         cancelTimers()
+        return AbandonOutcome(flushedAt: flushedAt, cut: cut, cancelledResponse: cancelsResponse)
+    }
+
+    // MARK: Barge-in
+
+    /// Whether Grok's reply is playing: the state is `agentSpeaking`.
+    public var isAgentSpeaking: Bool { state == .agentSpeaking }
+
+    /// Cuts Grok off because the user started talking over it (#37), usually
+    /// called by ``BargeInMonitor`` on a VAD speech onset.
+    ///
+    /// Playback is flushed first, so the speaker is silent one render cycle
+    /// later. Then, if the reply is still being generated, `response.cancel`;
+    /// and for each item of the reply, `conversation.item.truncate` at the
+    /// milliseconds the user heard, or `conversation.item.delete` when none
+    /// of it was heard, so Grok's next reply only builds on what was
+    /// actually said. The heard part is stored and the agent utterance is
+    /// listed in ``TurnSnapshot/interruptedAgentUtterances``. The state
+    /// moves on to `listening` (`userSpeaking` once partials arrive), and
+    /// the user's final utterance starts the next turn as usual; its
+    /// `response.create` waits for the cancelled response to finish.
+    ///
+    /// - Returns: What was cut, or `nil` when Grok isn't speaking (any state
+    ///   but `agentSpeaking`): nothing is sent then.
+    @discardableResult
+    public func bargeIn(_ trigger: BargeInTrigger) -> BargeInRecord? {
+        guard conversationID != nil, state == .agentSpeaking, let turn = current else { return nil }
+        let outcome = abandon(turn, reason: .bargedIn)
+        let record = BargeInRecord(
+            turn: turn.number, trigger: trigger, cut: outcome.cut, cancelledResponse: outcome.cancelledResponse,
+            reactionTime: max(.zero, outcome.flushedAt - trigger.receivedAt))
+        bargeIns += 1
+        lastBargeIn = record
+        signposter.event("realtime.bargeIn")
+        setState(userPartial == nil ? .listening : .userSpeaking)
+        return record
     }
 
     /// The words of `text` in its first `fraction`, cut back to a word
@@ -1423,7 +1496,10 @@ public actor TurnOrchestrator: RealtimeService {
             completedTurns: completedTurns,
             latency: latency,
             usage: usage,
-            session: continuitySnapshot()
+            session: continuitySnapshot(),
+            bargeIns: bargeIns,
+            lastBargeIn: lastBargeIn,
+            interruptedAgentUtterances: interruptedAgentUtterances
         )
     }
 
@@ -1438,6 +1514,9 @@ public actor TurnOrchestrator: RealtimeService {
         userRows.removeAll()
         rowOfFinal.removeAll()
         truncatedItems.removeAll()
+        interruptedAgentUtterances.removeAll()
+        bargeIns = 0
+        lastBargeIn = nil
         usage = RealtimeUsageTotals()
         completedTurns = 0
         latency = TurnLatencyStatistics(capacity: configuration.latencyWindow)
@@ -1604,3 +1683,5 @@ extension TurnFailure {
         self.init(kind: .connection, message: error.description, requiresUserAction: error.requiresUserAction)
     }
 }
+
+extension TurnOrchestrator: BargeInTarget {}

@@ -419,7 +419,7 @@ log stream --level debug --predicate 'subsystem == "com.joeblau.blau" && categor
 | 7 | Media services reset | Settings → Developer → Reset Media Services mid-session | `Media services were reset` log; `running` again with a new engine | Pending |
 | 8 | Echo | Speaker route, play agent audio while silent | Captured level stays near the noise floor (voice processing removes the playback) | Pending |
 | 9 | Gapless reply | Ask Grok for a two-minute answer on the speaker and on AirPods | No clicks, gaps or stutter; no `Playback underrun` logs on a good network | Pending |
-| 10 | Barge-in | Talk over the agent mid-sentence | Agent audio stops within ~50 ms with no click; a `Flushed playback` log with the played ms | Pending |
+| 10 | Barge-in | Talk over the agent mid-sentence (the `BargeInMonitor`, [realtime.md](realtime.md#barge-in), triggers the flush) | Agent audio stops within ~50 ms with no click; a `Flushed playback` log with the played ms | Pending |
 | 11 | Played ms | Barge in, then compare `audio_end_ms` in the truncate event with a screen recording's audio | Within ±20 ms | Pending |
 | 12 | Route change mid-reply | Connect AirPods while the agent speaks | Playback continues after the rebuild at the same loudness | Pending |
 

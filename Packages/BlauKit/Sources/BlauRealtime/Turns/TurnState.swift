@@ -123,6 +123,15 @@ public struct TurnSnapshot: Sendable, Equatable {
     /// The realtime session's continuity: live, reconnecting, resuming or
     /// being renewed, its age, and how often it was renewed (#39).
     public var session: RealtimeSessionContinuity
+    /// How many times the user barged in on Grok this conversation (#37).
+    public var bargeIns: Int
+    /// The latest barge-in: what was cut and how fast it went silent.
+    public var lastBargeIn: BargeInRecord?
+    /// The stored agent utterances (`Utterance.id`) the user cut short this
+    /// conversation, by barging in or by saying something new, so the
+    /// transcript can mark them as interrupted. Their stored text is what
+    /// was heard.
+    public var interruptedAgentUtterances: Set<UUID>
 
     public init(
         state: TurnState = .paused,
@@ -134,7 +143,10 @@ public struct TurnSnapshot: Sendable, Equatable {
         completedTurns: Int = 0,
         latency: TurnLatencyStatistics = TurnLatencyStatistics(),
         usage: RealtimeUsageTotals = RealtimeUsageTotals(),
-        session: RealtimeSessionContinuity = RealtimeSessionContinuity()
+        session: RealtimeSessionContinuity = RealtimeSessionContinuity(),
+        bargeIns: Int = 0,
+        lastBargeIn: BargeInRecord? = nil,
+        interruptedAgentUtterances: Set<UUID> = []
     ) {
         self.state = state
         self.connection = connection
@@ -146,5 +158,8 @@ public struct TurnSnapshot: Sendable, Equatable {
         self.latency = latency
         self.usage = usage
         self.session = session
+        self.bargeIns = bargeIns
+        self.lastBargeIn = lastBargeIn
+        self.interruptedAgentUtterances = interruptedAgentUtterances
     }
 }
