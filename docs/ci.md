@@ -53,11 +53,17 @@ because runner images keep some release builds in folders named `_beta`.
 
 [`scripts/ci/simulator-destination.sh`](../scripts/ci/simulator-destination.sh)
 resolves the test simulator (default **iPhone 17**) to a UDID on the newest
-iOS runtime that has one, and boots it before the tests start. A UDID instead
-of `name=iPhone 17,OS=latest` because `OS=latest` means the selected Xcode's
-SDK version, and images often only ship an older runtime (Xcode 27.1 with only
-the iOS 27.0 runtime), which leaves xcodebuild with no destination. If the
-model is missing, the job fails and lists the iPhones that are available.
+iOS runtime that has one. A UDID instead of `name=iPhone 17,OS=latest`
+because `OS=latest` means the selected Xcode's SDK version, and images often
+only ship an older runtime (Xcode 27.1 with only the iOS 27.0 runtime), which
+leaves xcodebuild with no destination. If the model is missing, the job fails
+and lists the iPhones that are available.
+
+The simulator is **not** booted ahead of the build: xcodebuild boots it when
+testing starts, and a later step shuts it down. Booting it first starved the
+runner; with the freshly booted simulator's background work competing,
+xcodebuild took about four minutes just to start and the job took 14 minutes
+instead of 7.5.
 
 Override any of these without a code change through repository variables
 (**Settings > Secrets and variables > Actions > Variables**):
@@ -97,14 +103,21 @@ FluidAudio release inside the allowed range reaches `app-tests` before
 
 ## Runtime
 
-Measured locally on an M-series Mac with Xcode 27.1, from a clean checkout:
-`swift build --build-tests` + `swift test` about 40 s; package resolution,
-build and the `Blau` test plan about 2 min. GitHub's standard runners are
-slower, and each job also pays for checkout, Xcode selection and (for
-`app-tests`) installing XcodeGen and booting the simulator. The target is
-under 15 minutes per run with a warm cache; check a run's job durations on its
-summary page. Each job's `timeout-minutes` (15 to 40, 60 for `perf`) is a
-safety net for a hung simulator, not the budget.
+The budget is under 15 minutes per run with a warm cache. The jobs run in
+parallel, so a run takes as long as `app-tests`. Measured on the pull request
+that added CI (#15), `xcode-27` image, Xcode 27.1, warm cache:
+
+| Job             | Duration | Where the time goes |
+| --------------- | -------- | ------------------- |
+| `lint`          | ~15 s    | swift-format, script tests |
+| `package-tests` | 1 to 1.7 min | cache restore (~580 MB), build, about 5 s of tests |
+| `app-tests`     | ~7.5 min | 40 s build; then about 6 min of testing, mostly booting the simulator and launching the UI-test runner |
+
+Booting the simulator and UI testing dominate. They grow with the number of UI
+tests, not with the code. If `app-tests` approaches the budget, move UI tests
+into their own job before reaching for a larger runner. Each job's
+`timeout-minutes` (15 to 40, 60 for `perf`) is a safety net for a hung
+simulator, not the budget.
 
 ## Secrets
 

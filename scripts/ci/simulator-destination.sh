@@ -4,10 +4,7 @@
 # prints the xcodebuild destination ("id=<udid>"). Used by
 # .github/workflows/ci.yml; see docs/ci.md.
 #
-# Usage: scripts/ci/simulator-destination.sh [--boot]
-#
-#   --boot   Also boot the device and wait until it has finished booting, so
-#            the first UI test doesn't spend its launch timeout on a cold boot.
+# Usage: scripts/ci/simulator-destination.sh
 #
 # A UDID instead of "platform=iOS Simulator,name=iPhone 17,OS=latest" because
 # "OS=latest" means the selected Xcode's SDK version, and runner images often
@@ -15,9 +12,10 @@
 # makes xcodebuild fail to find a destination. Here the newest installed iOS
 # runtime that has a matching device wins.
 #
-# The device must exist already: this script never creates or deletes
-# simulators. It fails, listing the available iPhones, rather than silently
-# testing on a different model.
+# The device must exist already: this script never creates, boots or deletes
+# simulators (xcodebuild boots it when testing starts; booting it before the
+# build starves a CI runner). It fails, listing the available iPhones, rather
+# than silently testing on a different model.
 #
 # Environment:
 #   SIMULATOR_NAME        Device name to look for (default "iPhone 17").
@@ -29,12 +27,10 @@
 
 set -euo pipefail
 
-boot=0
 for arg in "$@"; do
     case "$arg" in
-        --boot) boot=1 ;;
         -h | --help)
-            sed -n '7,10p' "$0" | sed 's/^# \{0,1\}//' >&2
+            sed -n '3,26p' "$0" | sed 's/^# \{0,1\}//' >&2
             exit 0
             ;;
         *)
@@ -91,21 +87,6 @@ fi
 IFS=$'\t' read -r version udid <<<"$(printf '%s' "$chosen" | sort -t $'\t' -k1,1V -k2,2 | tail -n 1)"
 destination="id=$udid"
 echo "simulator-destination: $name, iOS $version, $udid" >&2
-
-if [[ $boot -eq 1 ]]; then
-    # -b boots the device if needed and blocks until it has finished booting.
-    # It prints a progress line a second; keep it out of the log unless it fails.
-    boot_log="$(mktemp "${TMPDIR:-/tmp}/simulator-boot.XXXXXX")"
-    SECONDS=0
-    if ! xcrun simctl bootstatus "$udid" -b >"$boot_log" 2>&1; then
-        cat "$boot_log" >&2
-        rm -f "$boot_log"
-        echo "simulator-destination: failed to boot $udid." >&2
-        exit 1
-    fi
-    rm -f "$boot_log"
-    echo "simulator-destination: booted in ${SECONDS}s" >&2
-fi
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     {
