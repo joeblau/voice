@@ -46,6 +46,13 @@ public struct SignpostIntervalToken: Sendable {
     /// The `os` state for intervals from `OSSignpostBackend`.
     let state: OSSignpostIntervalState?
 
+    /// The `mxSignpost` ID when `MetricKitSignpostBackend` also reported the
+    /// interval to MetricKit.
+    var metricKitID: UInt64?
+
+    /// Whether `MetricKitSignpostBackend`'s base backend began this interval.
+    var baseActive = true
+
     /// A token for a custom backend.
     public init(id: UInt64) {
         self.id = id

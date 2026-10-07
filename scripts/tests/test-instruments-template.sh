@@ -117,20 +117,40 @@ expect "check-instruments fails when the list differs" 1 \
 # Writes an OSSignpostIntervals export with one row per canonical interval.
 # xctrace writes each distinct value once with an id and refers back to it
 # with ref=, so every second row uses refs. $1 = output, $2 = interval to
-# leave out, $3 = category to use for every row ("" = documented one).
+# leave out, $3 = category to use for every row ("" = documented one),
+# $4 = intervals to also write under MetricKit's subsystem, as mxSignpost
+# does: "" = none, "table" = the "Intervals reported to MetricKit" table,
+# "table-<name>" = the table without <name>, "table+<name>" = the table
+# plus <name>.
 write_intervals() {
-    python3 -I - "$doc" "$1" "$2" "$3" <<'PY'
+    python3 -I - "$doc" "$1" "$2" "$3" "${4:-}" <<'PY'
 import sys
 
-doc, out, skip, forced = sys.argv[1:5]
+doc, out, skip, forced, metrickit = sys.argv[1:6]
 rows = []
-in_section = False
+documented = {}
+reported = []
+section = None
 for line in open(doc, encoding="utf-8"):
-    if line.startswith("## "):
-        in_section = line.startswith("## Canonical intervals")
-    elif in_section and line.startswith("| `"):
+    if line.startswith("## Canonical intervals"):
+        section = "canonical"
+    elif line.startswith("### Intervals reported to MetricKit"):
+        section = "metrickit"
+    elif line.startswith("#"):
+        section = None
+    elif section and line.startswith("| `"):
         cells = [c.strip().strip("`") for c in line.strip().strip("|").split("|")]
-        rows.append((cells[0], forced or cells[1]))
+        if section == "canonical":
+            rows.append((cells[0], forced or cells[1]))
+            documented[cells[0]] = cells[1]
+        else:
+            reported.append(cells[0])
+if metrickit.startswith("table-"):
+    reported.remove(metrickit[len("table-"):])
+elif metrickit.startswith("table+"):
+    reported.append(metrickit[len("table+"):])
+elif metrickit != "table":
+    reported = []
 with open(out, "w", encoding="utf-8") as handle:
     handle.write('<?xml version="1.0"?>\n<trace-query-result><node>\n')
     next_id = 1
@@ -151,6 +171,14 @@ with open(out, "w", encoding="utf-8") as handle:
                     f'<category ref="{next_id + 2}"/><signpost-name ref="{next_id + 3}"/></row>\n'
                 )
         next_id += 4
+    for name in reported:
+        category = documented[name]
+        handle.write(
+            '<row><duration fmt="2 ms">2000000</duration>'
+            '<subsystem fmt="com.apple.metrickit.log">com.apple.metrickit.log</subsystem>'
+            f'<category fmt="{category}">{category}</category>'
+            f'<signpost-name fmt="{name}">{name}</signpost-name></row>\n'
+        )
     # Another subsystem's interval with a Blau name must not count.
     handle.write(
         '<row><duration fmt="1 ms">1</duration><subsystem fmt="com.example">com.example</subsystem>'
@@ -171,6 +199,23 @@ expect "check-intervals fails when an interval is missing" 1 \
 write_intervals "$work/category.xml" "" "ui"
 expect "check-intervals fails when a category is wrong" 1 \
     python3 -I "$lib" check-intervals "$work/category.xml" "$doc"
+
+expect "check-intervals --metrickit fails when nothing reached MetricKit" 1 \
+    python3 -I "$lib" check-intervals --metrickit "$work/all.xml" "$doc"
+
+write_intervals "$work/metrickit.xml" "" "" "table"
+expect "check-intervals --metrickit passes when exactly the listed intervals reached MetricKit" 0 \
+    python3 -I "$lib" check-intervals --metrickit "$work/metrickit.xml" "$doc"
+expect "check-intervals ignores MetricKit rows without --metrickit" 0 \
+    python3 -I "$lib" check-intervals "$work/metrickit.xml" "$doc"
+
+write_intervals "$work/metrickit-missing.xml" "" "" "table-realtime.firstAudio"
+expect "check-intervals --metrickit fails when a listed interval is missing" 1 \
+    python3 -I "$lib" check-intervals --metrickit "$work/metrickit-missing.xml" "$doc"
+
+write_intervals "$work/metrickit-extra.xml" "" "" "table+capture.frame"
+expect "check-intervals --metrickit fails when an unlisted interval reached MetricKit" 1 \
+    python3 -I "$lib" check-intervals --metrickit "$work/metrickit-extra.xml" "$doc"
 
 # --- tracetemplate.py check-toc --------------------------------------------------
 

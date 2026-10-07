@@ -20,10 +20,13 @@ Subcommands:
       Prints the subsystems the template's os_signpost instrument enables
       dynamic tracing for, one per line.
 
-  check-intervals <intervals.xml> <performance.md>
+  check-intervals [--metrickit] <intervals.xml> <performance.md>
       Checks an exported OSSignpostIntervals table: every interval in the
       "Canonical intervals" table of docs/performance.md must appear under
-      the com.joeblau.blau subsystem with its documented category.
+      the com.joeblau.blau subsystem with its documented category. With
+      --metrickit, exactly the intervals in the "Intervals reported to
+      MetricKit" table must also appear under MetricKit's
+      com.apple.metrickit.log subsystem (mxSignpost), with their category.
 
   check-instruments <file.tracetemplate> <instruments.txt>
       Checks a template, or the form.template of a trace recorded with it,
@@ -49,6 +52,7 @@ import sys
 import xml.etree.ElementTree as ET
 
 SUBSYSTEM = "com.joeblau.blau"
+METRICKIT_SUBSYSTEM = "com.apple.metrickit.log"
 OS_SIGNPOST_ID = "com.apple.dt.os-log-signpost-instrument"
 
 # $top keys that belong to a recording, not to a template.
@@ -227,25 +231,49 @@ def make_template(form_path, out_path, description):
 # MARK: - checks
 
 
-def canonical_intervals(doc_path):
-    """The "Canonical intervals" table in docs/performance.md: name -> category."""
+def interval_table(doc_path, heading):
+    """The interval table under `heading` in docs/performance.md: name -> category.
+
+    The section ends at the next heading of the same or a higher level.
+    """
+    level = len(heading) - len(heading.lstrip("#"))
     expected = {}
     in_section = False
     with open(doc_path, encoding="utf-8") as handle:
         for line in handle:
-            if line.startswith("## "):
-                in_section = line.startswith("## Canonical intervals")
-                continue
+            hashes = len(line) - len(line.lstrip("#"))
+            if hashes and line[hashes:hashes + 1] == " ":
+                if line.rstrip("\n") == heading:
+                    in_section = True
+                    continue
+                if hashes <= level:
+                    in_section = False
+                    continue
             if in_section and line.startswith("| `"):
                 cells = [cell.strip().strip("`") for cell in line.strip().strip("|").split("|")]
                 expected[cells[0]] = cells[1]
+    return expected
+
+
+def canonical_intervals(doc_path):
+    """The "Canonical intervals" table in docs/performance.md: name -> category."""
+    expected = interval_table(doc_path, "## Canonical intervals")
     if not expected:
         sys.exit(f"No canonical intervals found in {doc_path}")
     return expected
 
 
-def check_intervals(xml_path, doc_path):
+def metrickit_intervals(doc_path):
+    """The "Intervals reported to MetricKit" table in docs/performance.md."""
+    expected = interval_table(doc_path, "### Intervals reported to MetricKit")
+    if not expected:
+        sys.exit(f"No MetricKit intervals found in {doc_path}")
+    return expected
+
+
+def check_intervals(xml_path, doc_path, metrickit=False):
     expected = canonical_intervals(doc_path)
+    expected_metrickit = metrickit_intervals(doc_path) if metrickit else {}
 
     # xctrace writes each distinct value once with an id and refers back to
     # it with ref=, so resolve refs while walking the rows in document order.
@@ -263,6 +291,7 @@ def check_intervals(xml_path, doc_path):
         return value
 
     found = collections.defaultdict(list)
+    found_metrickit = collections.defaultdict(set)
     for _, element in ET.iterparse(xml_path, events=("end",)):
         if element.tag != "row":
             # Register ids on leaf values as they stream past.
@@ -275,6 +304,8 @@ def check_intervals(xml_path, doc_path):
         duration = element.find("duration")
         if subsystem == SUBSYSTEM:
             found[name].append((category, text_of(duration)))
+        elif subsystem == METRICKIT_SUBSYSTEM and name in expected:
+            found_metrickit[name].add(category)
 
     print(f"\n{'interval':<22} {'category':<10} {'count':>5}  example duration")
     failures = []
@@ -288,10 +319,26 @@ def check_intervals(xml_path, doc_path):
         elif categories != {category}:
             failures.append(f"{name}: categories {sorted(categories)}, expected {category}")
 
+    if metrickit:
+        reported = ", ".join(sorted(found_metrickit)) or "none"
+        print(f"\nReported to MetricKit ({METRICKIT_SUBSYSTEM}): {reported}")
+        for name, category in expected_metrickit.items():
+            if name not in found_metrickit:
+                failures.append(f"{name}: not reported to MetricKit")
+            elif found_metrickit[name] != {category}:
+                failures.append(
+                    f"{name}: MetricKit categories {sorted(found_metrickit[name])}, expected {category}"
+                )
+        for name in sorted(set(found_metrickit) - set(expected_metrickit)):
+            failures.append(f"{name}: reported to MetricKit but not listed in {doc_path}")
+
     if failures:
         print("\nFAILED:\n  " + "\n  ".join(failures), file=sys.stderr)
         return 1
-    print(f"\nOK: all {len(expected)} canonical intervals recorded under {SUBSYSTEM}.")
+    message = f"\nOK: all {len(expected)} canonical intervals recorded under {SUBSYSTEM}"
+    if metrickit:
+        message += f", {len(expected_metrickit)} of them also reported to MetricKit"
+    print(message + ".")
     return 0
 
 
@@ -375,6 +422,8 @@ def main(argv):
     if command == "signpost-subsystems" and len(args) == 1:
         print("\n".join(signpost_subsystems(load(args[0]))))
         return 0
+    if command == "check-intervals" and args[:1] == ["--metrickit"] and len(args) == 3:
+        return check_intervals(*args[1:], metrickit=True)
     if command == "check-intervals" and len(args) == 2:
         return check_intervals(*args)
     if command == "check-instruments" and len(args) == 2:
