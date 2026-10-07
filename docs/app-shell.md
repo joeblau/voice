@@ -231,7 +231,8 @@ NavigationStack {
   least as tall as the area between the bars (a `GeometryReader` around the
   scroll view, which respects the safe area while the scroll view inside
   still runs under the bars), so it stays centered and scrolls rather than
-  clips at large Dynamic Type sizes.
+  clips at large Dynamic Type sizes. Once there is a conversation it shows
+  the chat transcript instead ([chat.md](chat.md)).
 - Until onboarding (#44) exists, the speech-model setup card
   (`SpeechModelSetupView`, `blau.models.setup`) shows while the required
   models aren't ready. It is a `.safeAreaInset(edge: .bottom)` on

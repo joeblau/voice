@@ -1499,7 +1499,12 @@ public actor TurnOrchestrator: RealtimeService {
             session: continuitySnapshot(),
             bargeIns: bargeIns,
             lastBargeIn: lastBargeIn,
-            interruptedAgentUtterances: interruptedAgentUtterances
+            interruptedAgentUtterances: interruptedAgentUtterances,
+            agentSpeech: current?.agentItems.map {
+                TurnSnapshot.AgentSpeech(
+                    utteranceID: $0.utteranceID, playbackID: $0.playbackID, transcript: $0.transcript,
+                    startedAt: $0.startedAt)
+            } ?? []
         )
     }
 

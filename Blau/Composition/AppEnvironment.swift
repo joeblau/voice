@@ -135,6 +135,16 @@ final class AppEnvironment {
     /// start it.
     let voiceLoop: VoiceLoop
 
+    /// Every transcript write the turn orchestrator makes, as it happens
+    /// (the live app wraps its SwiftData transcript in it).
+    let transcriptFeed: TranscriptFeed
+
+    /// What the chat transcript (#42) shows on top of the store: the
+    /// speech in progress, Grok's reply as it plays, and the utterances
+    /// just written. Lives as long as the app, so a rebuilt main screen
+    /// keeps the running conversation's rows.
+    let chat: ChatTranscriptModel
+
     /// The xAI key refresh started by the latest return to `active`, so tests
     /// can wait for it.
     @ObservationIgnored var xaiRefresh: Task<Void, Never>?
@@ -163,7 +173,8 @@ final class AppEnvironment {
         backgroundInference: BackgroundInferenceMonitor = BackgroundInferenceMonitor(),
         textEmbeddings: TextEmbeddingService = TextEmbeddings.unavailable(),
         performance: PerformancePolicy = PerformancePolicy(source: ManualDeviceConditionsSource()),
-        topicLifecycle: TopicLifecycle? = nil
+        topicLifecycle: TopicLifecycle? = nil,
+        transcriptFeed: TranscriptFeed = TranscriptFeed()
     ) {
         self.kind = kind
         self.config = config
@@ -193,6 +204,9 @@ final class AppEnvironment {
         self.voiceLoop = VoiceLoop(
             realtime: realtime, speechModels: speechModels, audio: conversationAudio,
             backgroundInference: backgroundInference, performance: performance)
+        self.transcriptFeed = transcriptFeed
+        self.chat = ChatTranscriptModel(
+            realtime: realtime, feed: transcriptFeed, player: conversationAudio?.player)
         self.lifecycle = AppLifecycleCoordinator(
             participants: Self.lifecycleOrder(
                 persistence: persistence, audio: audio, transcriber: transcriber,
@@ -215,9 +229,12 @@ final class AppEnvironment {
         startPerformancePolicy()
         // #63: indexes the store once `PersistenceGate` has opened it.
         memoryIndexing.start()
+        // Previews and UI tests only: a canned conversation (#42).
+        async let fixture: Void = ChatTranscriptFixture.seedIfRequested(in: self)
         async let models: Void = speechModels.start()
         await xai.start()
         await models
+        await fixture
     }
 
     /// Wires what keeps a conversation going off screen (#26): the Live
@@ -326,6 +343,7 @@ extension AppEnvironment {
         let transcript = PersistenceTranscriptRecorder(persistence: persistence)
         let topics = TopicLifecycle.app(
             transcript: transcript, labeling: .app(xai: xai), textEmbeddings: textEmbeddings)
+        let transcriptFeed = TranscriptFeed()
         return AppEnvironment(
             kind: .live,
             config: config,
@@ -348,7 +366,7 @@ extension AppEnvironment {
                 // The transcript also supplies the current topic when a new
                 // realtime session has to be given the conversation again (#39).
                 reseedContext: transcript,
-                player: conversationAudio.player),
+                player: conversationAudio.player, feed: transcriptFeed),
             // The SwiftData stores with CloudKit sync (#20).
             persistence: persistence,
             // #52 - #54: topic segmentation, labels and the topic lifecycle.
@@ -364,7 +382,8 @@ extension AppEnvironment {
             textEmbeddings: textEmbeddings,
             // The device's thermal state, Low Power Mode and battery (#75).
             performance: PerformancePolicy(),
-            topicLifecycle: topics
+            topicLifecycle: topics,
+            transcriptFeed: transcriptFeed
         )
     }
 
