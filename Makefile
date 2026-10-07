@@ -6,14 +6,17 @@
 #                      DESTINATION='id=<simulator udid>'
 #   BUILD_DESTINATION  xcodebuild destination for `make build`
 #   DERIVED_DATA       DerivedData location (kept inside the repo)
+#   XCODEBUILD_FLAGS   Extra xcodebuild arguments, e.g. CI's
+#                      XCODEBUILD_FLAGS='-resultBundlePath .build/results/app.xcresult'
 
 PROJECT           := Blau.xcodeproj
 DERIVED_DATA      ?= .build/DerivedData
 DESTINATION       ?= platform=iOS Simulator,name=iPhone 17,OS=latest
 BUILD_DESTINATION ?= generic/platform=iOS Simulator
+XCODEBUILD_FLAGS  ?=
 
 XCODEGEN   ?= xcodegen
-XCODEBUILD := xcodebuild -project $(PROJECT) -derivedDataPath $(DERIVED_DATA)
+XCODEBUILD := xcodebuild -project $(PROJECT) -derivedDataPath $(DERIVED_DATA) $(XCODEBUILD_FLAGS)
 SIM_FLAGS  := CODE_SIGNING_ALLOWED=NO
 
 .DEFAULT_GOAL := help
@@ -61,8 +64,9 @@ secrets: ## Create Config/Secrets.xcconfig from the example (kept if it exists)
 	env -u XAI_DEV_API_KEY scripts/write-secrets-xcconfig.sh
 
 .PHONY: test-scripts
-test-scripts: ## Test the secrets and Instruments template scripts
+test-scripts: ## Test the secrets, CI and Instruments template scripts
 	scripts/tests/test-secrets-scripts.sh
+	scripts/tests/test-ci-scripts.sh
 	scripts/tests/test-instruments-template.sh
 
 # Instruments template (Tools/Instruments; see docs/performance.md).

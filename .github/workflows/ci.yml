@@ -1,0 +1,238 @@
+# CI for Blau: lint, BlauKit package tests and app tests on every pull request
+# and every push to main, plus a nightly performance run. See docs/ci.md.
+#
+# Secrets: none. Tests are hermetic and never call xAI, and this workflow
+# uploads .xcresult bundles, inside which GitHub does not mask secrets. Never
+# map secrets.XAI_DEV_API_KEY (or any other secret) into a job here; see
+# docs/configuration.md#ci. scripts/tests/test-ci-scripts.sh enforces it.
+#
+# Repository variables (Settings > Secrets and variables > Actions > Variables)
+# override the defaults without a code change:
+#   BLAU_CI_RUNNER         runner label (default xcode-27)
+#   BLAU_CI_XCODE_VERSION  pin an Xcode, e.g. "27.2" (default: newest release on the image)
+#   BLAU_CI_SIMULATOR      simulator model for app and perf tests (default "iPhone 17")
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+  schedule:
+    # Nightly on main: the full suite against the current runner image, plus perf.
+    - cron: "23 8 * * *"
+  workflow_dispatch:
+    inputs:
+      perf:
+        description: Also run the performance suite
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# A new push to a pull request cancels its in-flight run. Runs on main are not
+# cancelled, so every merged commit gets a result; GitHub still drops a queued
+# main run when a newer one arrives.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  XCODE_VERSION: ${{ vars.BLAU_CI_XCODE_VERSION }}
+  SIMULATOR_NAME: ${{ vars.BLAU_CI_SIMULATOR || 'iPhone 17' }}
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+  HOMEBREW_NO_ENV_HINTS: "1"
+  # Stream xcodebuild output instead of buffering it.
+  NSUnbufferedIO: "YES"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ${{ vars.BLAU_CI_RUNNER || 'xcode-27' }}
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode
+        run: scripts/ci/select-xcode.sh
+
+      # swift-format from the selected Xcode toolchain (CONTRIBUTING.md: "the
+      # one in the CI Xcode wins").
+      - name: swift-format lint
+        run: |
+          echo "swift-format: $(xcrun --find swift-format)"
+          make lint
+
+      - name: Script tests
+        run: make test-scripts
+
+  package-tests:
+    name: package-tests
+    runs-on: ${{ vars.BLAU_CI_RUNNER || 'xcode-27' }}
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode
+        id: xcode
+        run: scripts/ci/select-xcode.sh
+
+      # The whole SwiftPM scratch directory: dependency clones, the FluidAudio
+      # binary artifacts and FluidAudio's build products, which are the slow
+      # part. The key changes with the toolchain or the dependency graph only,
+      # so it is saved once per change. BlauKit's own sources always rebuild.
+      - name: Cache SwiftPM build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: Packages/BlauKit/.build
+          key: kit-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/BlauKit/Package.swift', 'Packages/BlauKit/Package.resolved') }}
+          restore-keys: |
+            kit-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.build }}-
+
+      - name: Build
+        working-directory: Packages/BlauKit
+        run: swift build --build-tests
+
+      - name: Test
+        working-directory: Packages/BlauKit
+        run: |
+          mkdir -p ../../.build/results
+          swift test --skip-build --xunit-output ../../.build/results/package-tests.xml
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: package-tests-results-${{ github.run_attempt }}
+          path: .build/results/
+          if-no-files-found: warn
+          retention-days: 14
+
+  app-tests:
+    name: app-tests
+    runs-on: ${{ vars.BLAU_CI_RUNNER || 'xcode-27' }}
+    timeout-minutes: 40
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode
+        id: xcode
+        run: scripts/ci/select-xcode.sh
+
+      - name: Install XcodeGen
+        run: |
+          command -v xcodegen >/dev/null || brew install xcodegen
+          xcodegen --version
+
+      - name: Generate project
+        run: make generate
+
+      # Package clones and binary artifacts Xcode resolves into DerivedData.
+      # Build products are not cached: a cold app build is about a minute.
+      - name: Cache Swift packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build/DerivedData/SourcePackages
+          key: spm-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/BlauKit/Package.swift', 'Packages/BlauKit/Package.resolved') }}
+          restore-keys: |
+            spm-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.build }}-
+
+      - name: Resolve packages
+        run: |
+          for attempt in 1 2 3; do
+            xcodebuild -resolvePackageDependencies -project Blau.xcodeproj -scheme Blau \
+              -derivedDataPath .build/DerivedData && exit 0
+            echo "::warning::Package resolution failed (attempt $attempt); retrying"
+            sleep $((attempt * 10))
+          done
+          exit 1
+
+      - name: Boot simulator
+        id: simulator
+        run: scripts/ci/simulator-destination.sh --boot
+
+      # The Blau scheme's Blau test plan: BlauTests (unit) and BlauUITests.
+      # Parallel testing is off: it would clone the booted simulator per
+      # worker, which costs more than it saves for a suite this size.
+      - name: Test
+        env:
+          DESTINATION: ${{ steps.simulator.outputs.destination }}
+          XCODEBUILD_FLAGS: "-resultBundlePath .build/results/app-tests.xcresult -parallel-testing-enabled NO"
+        run: make test
+
+      - name: Upload xcresult
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: app-tests-xcresult-${{ github.run_attempt }}
+          path: .build/results/app-tests.xcresult
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Nightly (and on demand) performance run: the Blau-Perf scheme in Release.
+  # Baselines and regression gating are wired up by the perf-suite issue (#73).
+  perf:
+    name: perf
+    if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.perf) }}
+    runs-on: ${{ vars.BLAU_CI_RUNNER || 'xcode-27' }}
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode
+        id: xcode
+        run: scripts/ci/select-xcode.sh
+
+      - name: Install XcodeGen
+        run: |
+          command -v xcodegen >/dev/null || brew install xcodegen
+          xcodegen --version
+
+      - name: Generate project
+        run: make generate
+
+      - name: Cache Swift packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build/DerivedData/SourcePackages
+          key: spm-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/BlauKit/Package.swift', 'Packages/BlauKit/Package.resolved') }}
+          restore-keys: |
+            spm-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.build }}-
+
+      - name: Boot simulator
+        id: simulator
+        run: scripts/ci/simulator-destination.sh --boot
+
+      - name: Performance tests
+        env:
+          DESTINATION: ${{ steps.simulator.outputs.destination }}
+          XCODEBUILD_FLAGS: "-resultBundlePath .build/results/perf.xcresult -parallel-testing-enabled NO"
+        run: make perf
+
+      - name: Upload xcresult
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: perf-xcresult-${{ github.run_attempt }}
+          path: .build/results/perf.xcresult
+          if-no-files-found: warn
+          retention-days: 30
