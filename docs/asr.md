@@ -159,22 +159,24 @@ Parakeet model):
 - The fifth `conversation-quiet` utterance uses macOS's "Fred", a formant
   synthesizer: Parakeet decodes no words from it at all (also with the raw
   FluidAudio manager), and the transcriber drops the blank utterance.
-- Partials: the decoded audio ends 0.31–0.33 s behind the input (one chunk
-  shift), plus 18–45 ms of compute per chunk; a word appears 0.33–0.65 s
-  after it is spoken.
+- Partials: when a partial comes out, its decoded audio ends 0.33–0.35 s
+  behind the input (one 320 ms chunk shift plus 18–45 ms of compute), so a
+  word appears 0.33–0.65 s after it is spoken.
 
 `ParakeetLiveTests.anHourOfSpeechKeepsMemoryAndChunkTimeFlat`
 (`BLAU_ASR_SOAK=1`): 60 minutes of the fixtures looped, 704 utterances,
-8,576 chunks, replayed in 224 s.
+8,576 chunks per run. Two runs, the second on the final code with the host
+busier:
 
-| | Minutes 6–11 | Minutes 55–60 |
-| --- | --- | --- |
-| Mean time per chunk | 18.5 ms | 21.6 ms |
-| Process footprint | 286 MB | 271 MB |
+| | Run 1, minutes 6–11 | Run 1, minutes 55–60 | Run 2, early | Run 2, late |
+| --- | --- | --- | --- | --- |
+| Mean time per chunk | 18.5 ms | 21.6 ms | 32.3 ms | 35.4 ms |
+| Process footprint | 286 MB | 271 MB | 288 MB | 264 MB |
 
-The chunk time varied between 18 and 56 ms in the middle of the run with
-the host's load (other builds), with no trend; the footprint peaked at
-289 MB in minute 15 and ended lower than it started.
+Within a run the chunk time moved between about 18 and 56 ms with the
+host's load (other builds ran in parallel) and showed no trend. The
+footprint never grew: it peaked in the first quarter of an hour and ended
+15 MB below where it started.
 
 ## Tests
 
