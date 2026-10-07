@@ -2,9 +2,11 @@ import BlauPersistence
 import Foundation
 
 extension PersistenceController {
-    /// An in-memory controller for SwiftUI previews. Never touches iCloud or
-    /// the disk.
-    static func preview() -> PersistenceController {
+    /// A fresh, empty in-memory controller that never touches iCloud or the
+    /// disk. The preview, unit-test and UI-test `AppEnvironment`s use one.
+    /// It starts opening its store right away; `await start()` to wait for
+    /// it.
+    static func inMemory() -> PersistenceController {
         let controller = PersistenceController(
             options: PersistenceOptions(
                 location: StoreLocation(directory: URL.temporaryDirectory.appending(path: "BlauPreview")),
@@ -15,5 +17,10 @@ extension PersistenceController {
         )
         Task { await controller.start() }
         return controller
+    }
+
+    /// An in-memory controller for SwiftUI previews (see `inMemory()`).
+    static func preview() -> PersistenceController {
+        inMemory()
     }
 }

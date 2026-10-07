@@ -9,7 +9,7 @@ for module dependencies.
 
 | Path               | Contents                                                                  |
 | ------------------ | ------------------------------------------------------------------------- |
-| `Blau/`            | App target: SwiftUI views and the composition root that wires modules together |
+| `Blau/`            | App target: SwiftUI views and the composition root that wires modules together ([app-shell.md](app-shell.md)) |
 | `Packages/BlauKit` | Local Swift package, one library per subsystem, each with a Swift Testing target |
 
 The app links every BlauKit library (see `packages:` and the `Blau` target's
@@ -21,7 +21,7 @@ complete.
 
 | Layer | Module              | Owns                                                                                          |
 | ----- | ------------------- | --------------------------------------------------------------------------------------------- |
-| 0     | `BlauCore`          | Shared value types (`Utterance`, `Speaker`, `SpeakerDecision`, `AudioFrame`, `TimeRange`, `ConversationID`), protocols shared across siblings (`TextEmbedder`, `TextGenerator`), the `BlauClock` abstraction |
+| 0     | `BlauCore`          | Shared value types (`Utterance`, `Speaker`, `SpeakerDecision`, `AudioFrame`, `TimeRange`, `ConversationID`), the service protocols and their fakes, protocols shared across siblings (`TextEmbedder`, `TextGenerator`), feature flags, the app lifecycle, the `BlauClock` abstraction |
 | 1     | `BlauTelemetry`     | Logger categories, `OSSignposter` intervals, MetricKit, the performance HUD model             |
 | 2     | `BlauAudio`         | `AVAudioSession` / `AVAudioEngine`, 16 kHz capture and fan-out, 24 kHz playback, resampling   |
 | 2     | `BlauPersistence`   | SwiftData schemas (CloudKit compatible, see [data-model.md](data-model.md)), migrations, iCloud sync and history ([sync.md](sync.md)), `ModelActor` writes |

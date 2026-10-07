@@ -70,7 +70,7 @@ the same `make` targets as above. See [docs/ci.md](docs/ci.md).
 | `project.yml`    | XcodeGen spec: targets, settings, Info.plist keys, entitlements, schemes |
 | `Blau/`          | App target sources and resources                                |
 | `Packages/BlauKit` | Local Swift package with the business logic, one module per subsystem (see [`docs/architecture.md`](docs/architecture.md)) |
-| `docs/`          | Architecture and engineering docs                               |
+| `docs/`          | Architecture and engineering docs ([app shell, environment and feature flags](docs/app-shell.md)) |
 | `BlauTests/`     | Unit tests (Swift Testing), hosted in the app                   |
 | `BlauUITests/`   | UI tests (XCTest)                                               |
 | `BlauPerfTests/` | Performance tests (XCTest UI-testing bundle, launch metrics)    |

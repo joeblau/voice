@@ -9,11 +9,13 @@ import SwiftUI
 /// new mode. `content` is rebuilt for the new container (`.id(generation)`),
 /// because SwiftData models fetched from the old container are invalid once
 /// it is released.
+///
+/// The app refreshes the account status when it becomes active from
+/// `AppEnvironment.handleScenePhase`, which also saves pending edits when it
+/// leaves the foreground.
 struct PersistenceGate<Content: View>: View {
     let persistence: PersistenceController
     @ViewBuilder let content: () -> Content
-
-    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
@@ -30,13 +32,6 @@ struct PersistenceGate<Content: View>: View {
         .environment(persistence)
         .task {
             await persistence.run()
-        }
-        .onChange(of: scenePhase) { _, phase in
-            // Account changes made in the Settings app while Blau was in the
-            // background don't always post CKAccountChanged.
-            if phase == .active {
-                Task { await persistence.refresh() }
-            }
         }
     }
 }
