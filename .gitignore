@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# XcodeGen output: generated from project.yml, never committed
+*.xcodeproj
+Blau/Supporting/Info.plist
+Blau/Supporting/*.entitlements
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+DerivedData/
+*.xcresult
+
+# Swift Package Manager / local build output
+.build/
+.swiftpm/
+
+# Secrets (see Secrets.xcconfig handling)
+Secrets.xcconfig

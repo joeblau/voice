@@ -1,0 +1,45 @@
+{
+  "configurations" : [
+    {
+      "id" : "3F0B9C1E-6A2D-4E8B-9C51-2D7A4F1B8E01",
+      "name" : "Default",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "codeCoverage" : {
+      "targets" : [
+        {
+          "containerPath" : "container:Blau.xcodeproj",
+          "identifier" : "B7AD843E63F08167B6A61353",
+          "name" : "Blau"
+        }
+      ]
+    },
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:Blau.xcodeproj",
+      "identifier" : "B7AD843E63F08167B6A61353",
+      "name" : "Blau"
+    }
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:Blau.xcodeproj",
+        "identifier" : "CCD3AF03E86EDE38C0A6CBD3",
+        "name" : "BlauTests"
+      }
+    },
+    {
+      "target" : {
+        "containerPath" : "container:Blau.xcodeproj",
+        "identifier" : "DF9CF808239A19939C6A19AF",
+        "name" : "BlauUITests"
+      }
+    }
+  ],
+  "version" : 1
+}
