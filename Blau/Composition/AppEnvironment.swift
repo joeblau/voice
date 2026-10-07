@@ -66,6 +66,12 @@ final class AppEnvironment {
     /// so no preview or test ever starts a real download.
     let speechModels: ModelManager
 
+    /// The realtime session configuration (#35): the voice settings Settings
+    /// edits and the configurator that builds each `session.update`. Live
+    /// launches keep the settings in `UserDefaults`; every other kind keeps
+    /// them in memory.
+    let realtimeSession: RealtimeSessionServices
+
     /// Delivers scene phase changes to the services (see `ScenePhaseHandling`).
     let lifecycle: AppLifecycleCoordinator
 
@@ -90,7 +96,8 @@ final class AppEnvironment {
         topics: any TopicService,
         memory: any MemoryService,
         xai: XAIServices,
-        speechModels: ModelManager
+        speechModels: ModelManager,
+        realtimeSession: RealtimeSessionServices
     ) {
         self.kind = kind
         self.config = config
@@ -105,6 +112,7 @@ final class AppEnvironment {
         self.memory = memory
         self.xai = xai
         self.speechModels = speechModels
+        self.realtimeSession = realtimeSession
         self.lifecycle = AppLifecycleCoordinator(
             participants: Self.lifecycleOrder(
                 persistence: persistence, audio: audio, transcriber: transcriber, voiceGate: voiceGate,
@@ -202,7 +210,8 @@ extension AppEnvironment {
             memory: UnavailableService(subsystem: "memory"),
             xai: xai ?? XAIServices.make(config: config),
             // #27: the on-device speech model download manager.
-            speechModels: speechModels ?? SpeechModels.makeManager()
+            speechModels: speechModels ?? SpeechModels.makeManager(),
+            realtimeSession: RealtimeSessionServices.make()
         )
     }
 
@@ -256,7 +265,8 @@ extension AppEnvironment {
             topics: FakeTopicService(),
             memory: FakeMemoryService(memories: memories),
             xai: xai ?? XAIServices.hermetic(config: config),
-            speechModels: speechModels ?? fakeSpeechModels(kind: kind)
+            speechModels: speechModels ?? fakeSpeechModels(kind: kind),
+            realtimeSession: RealtimeSessionServices(persistence: InMemoryVoiceSettingsPersistence())
         )
     }
 

@@ -19,6 +19,10 @@ in tests of anything built on `RealtimeClient`.
 | `mcp-tools.jsonl` | Remote MCP discovery and calls, including failures |
 | `drop-and-resume.jsonl` | A drop without a close frame (1006), then a second connection with `?conversation_id=` replaying history as `conversation.item.created` |
 
+`Snapshots/` holds the `session.update` and instruction snapshots checked by
+`SessionUpdateSnapshotTests` (see `docs/realtime.md`, "Snapshot tests"). They
+are not transcripts; `RealtimeFixtureTests` only reads `.jsonl` files.
+
 ## Where they come from
 
 The files above are **hand-written** from the event examples in xAI's

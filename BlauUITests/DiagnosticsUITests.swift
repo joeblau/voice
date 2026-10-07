@@ -15,15 +15,21 @@ final class DiagnosticsUITests: XCTestCase {
     func testSamplePayloadsShowUpAndExportOpensTheShareSheet() throws {
         let app = XCUIApplication()
         app.launchEnvironment["BLAU_UI_TEST_XAI"] = "offline"
+        // Fixture speech models, so the launch never starts a real download.
+        app.launchEnvironment["BLAU_MODEL_FIXTURES"] = "1"
         app.launch()
 
         let settings = app.buttons["blau.settings.open"]
         XCTAssertTrue(settings.waitForExistence(timeout: 10), "Settings button missing")
         settings.tap()
 
+        // Developer is the last section and the Form is lazy, so the row may
+        // only exist once it has been scrolled into view.
+        let form = app.collectionViews.firstMatch
+        XCTAssertTrue(form.waitForExistence(timeout: 5), "Settings did not open")
         let diagnostics = app.descendants(matching: .any)["settings.developer.diagnostics"]
-        XCTAssertTrue(diagnostics.waitForExistence(timeout: 5), "Settings has no Developer → Diagnostics row")
-        scrollTo(diagnostics, in: app.collectionViews.firstMatch)
+        scrollTo(diagnostics, in: form)
+        XCTAssertTrue(diagnostics.exists, "Settings has no Developer → Diagnostics row")
         diagnostics.tap()
 
         let screen = app.descendants(matching: .any)["diagnostics.view"]
@@ -46,14 +52,5 @@ final class DiagnosticsUITests: XCTestCase {
         let copy = app.buttons["Copy"]
         let opened = shareSheet.waitForExistence(timeout: 10) || copy.waitForExistence(timeout: 2)
         XCTAssertTrue(opened, "Share sheet did not open")
-    }
-
-    private func scrollTo(_ element: XCUIElement, in container: XCUIElement) {
-        var attempts = 0
-        while !(element.exists && element.isHittable) && attempts < 8 {
-            container.swipeUp()
-            attempts += 1
-        }
-        XCTAssertTrue(element.waitForExistence(timeout: 2), "\(element) not found")
     }
 }

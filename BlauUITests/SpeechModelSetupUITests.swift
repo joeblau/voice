@@ -17,8 +17,13 @@ final class SpeechModelSetupUITests: XCTestCase {
         let gear = app.buttons["blau.settings.open"]
         XCTAssertTrue(gear.waitForExistence(timeout: 10), "Settings gear missing")
         gear.tap()
+        // The Settings Form is lazy and Speech Models sits below xAI Account,
+        // Voice and iCloud, so the link may only exist once scrolled to.
+        let form = app.collectionViews.firstMatch
+        XCTAssertTrue(form.waitForExistence(timeout: 10), "Settings did not open")
         let link = app.buttons["blau.models.settingsLink"]
-        XCTAssertTrue(link.waitForExistence(timeout: 10), "Settings has no Speech Models link")
+        scrollTo(link, in: form)
+        XCTAssertTrue(link.exists, "Settings has no Speech Models link")
         link.tap()
     }
 
