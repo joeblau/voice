@@ -1,0 +1,27 @@
+{
+  "name": "Owner recordings",
+  "consent": "Recorded by the owner for Blau's voice ID evaluation on 2026-10-12. Other people's voices recorded with their written consent (see consent.md). Broadcast clips are short excerpts used for evaluation only.",
+  "description": "iPhone 16 Pro, Voice Memos, mono. Rooms: kitchen, living room, office, car. Distances: 0.3 m (handheld), 1 m (desk), 3 m (across the room).",
+  "recordings": [
+    {"path": "owner/enroll/01.m4a", "speaker": "owner", "role": "enrollment"},
+    {"path": "owner/enroll/02.m4a", "speaker": "owner", "role": "enrollment"},
+    {"path": "owner/enroll/03.m4a", "speaker": "owner", "role": "enrollment"},
+    {"path": "owner/enroll/04.m4a", "speaker": "owner", "role": "enrollment"},
+    {"path": "owner/probe/kitchen-0.3m-01.m4a", "speaker": "owner", "role": "probe", "source": "person",
+     "tags": {"room": "kitchen", "distance": "0.3m"}},
+    {"path": "owner/probe/living-3m-01.m4a", "speaker": "owner", "role": "probe", "source": "person",
+     "tags": {"room": "living", "distance": "3m"}},
+    {"path": "people/partner-living-1m-01.m4a", "speaker": "partner", "role": "probe", "source": "person",
+     "tags": {"room": "living", "distance": "1m"}},
+    {"path": "media/tv-news-01.m4a", "speaker": "tv-news-anchor-1", "role": "probe", "source": "tv",
+     "tags": {"room": "living", "distance": "3m"}},
+    {"path": "media/podcast-01.m4a", "speaker": "podcast-host-1", "role": "probe", "source": "podcast",
+     "tags": {"room": "office", "distance": "1m"}},
+    {"path": "media/music-vocals-01.m4a", "speaker": "singer-1", "role": "probe", "source": "music",
+     "tags": {"room": "car", "distance": "1m"}},
+    {"path": "people/friend-es-01.m4a", "speaker": "friend-es", "role": "probe", "source": "other-language",
+     "tags": {"room": "kitchen", "distance": "1m", "language": "es"}},
+    {"path": "mixes/owner-over-tv-01.m4a", "speaker": "owner", "role": "probe", "source": "overlap",
+     "tags": {"room": "living", "distance": "1m"}}
+  ]
+}

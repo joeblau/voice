@@ -527,7 +527,9 @@ on the Mac (`cpuAndNeuralEngine`), 2026-10-07:
 
 Every same-speaker pair scores above every different-speaker pair at all
 three windows. The hardest different-speaker pairs are the two female
-speakers (`clb`/`slt`). Thresholds are calibrated on real recordings in #48.
+speakers (`clb`/`slt`). The gate's thresholds are calibrated on a larger,
+cross-session set with simulated rooms and noise in
+[voice-id-eval.md](voice-id-eval.md) (#48).
 
 ## After the numbers land
 
