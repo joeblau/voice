@@ -28,6 +28,7 @@ struct TopicLabelBenchmarkTests {
     /// that hasn't finished doesn't help).
     final class FakeGenerator: TopicLabelGenerator {
         struct Request: Hashable {
+            var request: TopicLabelRequest
             var prewarm: Bool
             var createdAt: Duration
             var startedAt: Duration?
@@ -46,9 +47,9 @@ struct TopicLabelBenchmarkTests {
 
         func unavailableReason() async -> String? { unavailable }
 
-        func makeSession(prewarm: Bool) async -> any TopicLabelSession {
+        func makeSession(for request: TopicLabelRequest, prewarm: Bool) async -> any TopicLabelSession {
             let index = requests.withLock { requests in
-                requests.append(Request(prewarm: prewarm, createdAt: clock.uptime))
+                requests.append(Request(request: request, prewarm: prewarm, createdAt: clock.uptime))
                 return requests.count - 1
             }
             return Session(generator: self, index: index)
@@ -58,7 +59,7 @@ struct TopicLabelBenchmarkTests {
             let generator: FakeGenerator
             let index: Int
 
-            func label(_ window: TopicBoundaryWindow) async throws -> TopicLabelDraft {
+            func label() async throws -> TopicShift {
                 let clock = generator.clock
                 let request = generator.requests.withLock { requests in
                     requests[index].startedAt = clock.uptime
@@ -68,8 +69,9 @@ struct TopicLabelBenchmarkTests {
                 let cost: Duration = warm ? .milliseconds(200) : .milliseconds(300)
                 clock.advance(by: index == 0 ? .milliseconds(1_200) : cost)
                 // Every third title is too long.
-                return TopicLabelDraft(
-                    isNewTopic: true, title: (index + 1) % 3 == 0 ? "A title that is far too long" : "Weekend plans")
+                return TopicShift(
+                    isNewTopic: true, title: (index + 1) % 3 == 0 ? "A title that is far too long" : "Weekend Plans",
+                    summary: "")
             }
         }
     }
@@ -100,6 +102,12 @@ struct TopicLabelBenchmarkTests {
         #expect(abs((result.metric("titles.withinWordLimit")?.value ?? 0) - 600.0 / 9) < 1e-9)
         let requests = generator.requests.withLock { $0 }
         #expect(requests.map(\.prewarm) == [false, false, true, false, true, false, true, false, true])
+        // The cold request uses the first fixture, then each iteration labels
+        // the next one twice (plain, then prewarmed), wrapping around.
+        let fixtures = TopicLabelRequest.benchmarkRequests
+        #expect(
+            requests.map(\.request)
+                == [fixtures[0]] + [1, 2, 3, 0].flatMap { [fixtures[$0], fixtures[$0]] })
         // Every timed request after the cold one starts a full lead after its
         // session was created (and prewarmed), so the prewarm runs outside
         // the timed interval and has time to finish.
@@ -130,15 +138,26 @@ struct TopicLabelBenchmarkTests {
         #expect(result.outcome == .skipped(reason: "Foundation Models unavailable: Apple Intelligence is turned off"))
     }
 
-    @Test func countsTitleWords() {
-        #expect(TopicLabelDraft(isNewTopic: true, title: "  Launch  plan ").titleWordCount == 2)
-        #expect(TopicLabelDraft(isNewTopic: false, title: "").titleWordCount == 0)
-    }
-
-    @Test func fixtureWindowsHaveTextOnBothSides() {
-        #expect(TopicBoundaryWindow.benchmarkWindows.count >= 4)
-        for window in TopicBoundaryWindow.benchmarkWindows {
-            #expect(!window.before.isEmpty && !window.after.isEmpty)
+    @Test func fixtureRequestsAreShapedLikeTheSegmentersBoundaryRequests() throws {
+        let fixtures = TopicLabelRequest.benchmarkRequests
+        #expect(fixtures.count >= 4)
+        for request in fixtures {
+            #expect(request.kind == .boundary)
+            #expect(request.confirmsBoundary)
+            #expect(request.previousTitle != nil)
+            // TopicLabelRequest.boundary's default six context units, split
+            // evenly around the boundary, each with both sides of the exchange.
+            #expect(request.before.count == 3 && request.after.count == 3)
+            for unit in request.before + request.after {
+                #expect(!unit.userText.isEmpty && !unit.agentText.isEmpty)
+            }
+            let times = (request.before + request.after).map(\.timeRange.start)
+            #expect(times == times.sorted())
+            // Rendered with the production prompt, every fixture fits the
+            // labeler's budget without trimming.
+            let prompt = TopicLabelPrompt.render(request)
+            #expect(TopicLabelPrompt.estimatedTokens(prompt) < 1_000)
+            #expect(prompt.contains("Before the possible topic change:"))
         }
     }
 }

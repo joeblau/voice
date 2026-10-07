@@ -85,11 +85,47 @@
         }
 
         public func label(_ request: TopicLabelRequest) async throws -> TopicShift {
+            try await label(request, preparedSession: nil)
+        }
+
+        // MARK: Prewarming seam
+
+        /// A guided-generation session made ahead of a request, optionally
+        /// prewarmed. The on-device benchmark (#22) uses it to measure
+        /// `LanguageModelSession.prewarm(promptPrefix:)` on exactly the
+        /// session production creates. Use it for one request only.
+        struct PreparedSession: Sendable {
+            /// The instructions the session was made with.
+            let instructions: String
+            let session: LanguageModelSession
+
+            /// The session, if it was made for `instructions`.
+            func session(for instructions: String) -> LanguageModelSession? {
+                instructions == self.instructions ? session : nil
+            }
+        }
+
+        /// The session `label(_:)` makes for `request`'s first guided
+        /// attempt (same model, same instructions). With `prewarm`, it starts
+        /// loading the model and the instructions now and returns at once.
+        func prepareSession(for request: TopicLabelRequest, prewarm: Bool) -> PreparedSession {
+            let instructions = TopicLabelPrompt.instructions(for: request)
+            let session = makeGuidedSession(instructions: instructions)
+            if prewarm {
+                session.prewarm()
+            }
+            return PreparedSession(instructions: instructions, session: session)
+        }
+
+        /// `label(_:)`, running the first guided attempt in `preparedSession`
+        /// when it was made for the same instructions. Retries (a smaller
+        /// prompt, or plain text after a refusal) always use fresh sessions.
+        func label(_ request: TopicLabelRequest, preparedSession: PreparedSession?) async throws -> TopicShift {
             guard model.isAvailable else {
                 throw TopicLabelerError.unavailable(String(describing: model.availability))
             }
             do {
-                return try await respond(to: request)
+                return try await respond(to: request, preparedSession: preparedSession)
             } catch TopicLabelerError.contextWindowExceeded {
                 // The counts were off. One more try with half the units.
                 var smaller = request
@@ -100,18 +136,22 @@
                 }
                 guard smaller != request else { throw TopicLabelerError.contextWindowExceeded }
                 Log.topics.info("Topic label prompt exceeded the context window; retrying with fewer units")
-                return try await respond(to: smaller)
+                return try await respond(to: smaller, preparedSession: nil)
             }
         }
 
-        private func respond(to request: TopicLabelRequest) async throws -> TopicShift {
+        private func respond(
+            to request: TopicLabelRequest, preparedSession: PreparedSession?
+        ) async throws -> TopicShift {
             let instructions = TopicLabelPrompt.instructions(for: request)
             let budget = try await promptBudget(instructions: instructions)
             let fitted = try await TopicLabelPrompt.fit(request, budget: budget) { prompt in
                 try await countTokens(prompt)
             }
             do {
-                return try await generateGuided(prompt: fitted.prompt, instructions: instructions)
+                let session =
+                    preparedSession?.session(for: instructions) ?? makeGuidedSession(instructions: instructions)
+                return try await generateGuided(prompt: fitted.prompt, session: session)
             } catch is SensitiveContent {
                 Log.topics.info("Topic label refused as sensitive; retrying as a content transformation")
                 return try await generateText(prompt: fitted.prompt, instructions: instructions)
@@ -122,8 +162,11 @@
             GenerationOptions(samplingMode: .greedy, maximumResponseTokens: maximumResponseTokens)
         }
 
-        private func generateGuided(prompt: String, instructions: String) async throws -> TopicShift {
-            let session = LanguageModelSession(model: model, instructions: instructions)
+        private func makeGuidedSession(instructions: String) -> LanguageModelSession {
+            LanguageModelSession(model: model, instructions: instructions)
+        }
+
+        private func generateGuided(prompt: String, session: LanguageModelSession) async throws -> TopicShift {
             do {
                 let response = try await session.respond(
                     to: prompt, generating: GeneratedTopicShift.self, options: options)

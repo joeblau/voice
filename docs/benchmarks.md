@@ -23,7 +23,7 @@ them by filling in the tables.
 | `voiceid.wespeaker` | WeSpeaker ResNet34-LM (FluidAudio `wespeaker_v2`, 256-d) | `load`, `embed.1.5s`, `embed.3s`, `cosine.sameSpeaker`, memory | Voice ID gate (#45, #47) |
 | `voiceid.campplus` | CAM++ (FluidAudio, beta, 192-d) | same as above | The challenger named in #1 |
 | `memory.embeddinggemma` | EmbeddingGemma-300M as Core ML, truncated to 256-d and quantized to int8 | `load`, `embed.64tok`, `embed.128tok`, `embed.256tok`, memory | Memory index (#59, #60) |
-| `topics.label.foundationModels` | On-device Foundation Models, `@Generable` label | `label.cold`, `label`, `label.prewarmed`, `titles.withinWordLimit` | Topic confirmation and titles (#53) |
+| `topics.label.foundationModels` | On-device Foundation Models through Blau's production `FoundationModelsTopicLabeler` (#53) | `label.cold`, `label`, `label.prewarmed`, `titles.withinWordLimit` | Topic confirmation and titles (#53) |
 | Background probe | Parakeet EOU 320 ms on the Neural Engine, with a CPU-only baseline | Per-window latency by app phase, errors, Neural Engine availability, verdict, mitigation | iOS 27 background Neural Engine restrictions (#26) |
 
 Every latency is reported as a distribution (p50, p95, p99, min, max, mean,
@@ -175,16 +175,24 @@ an iPhone; they validate the harness and catch gross regressions.
 - **Text embeddings** use synthetic token IDs (latency depends on sequence
   length, not content) and include Matryoshka truncation to 256-d,
   L2 normalization and int8 quantization (`MatryoshkaEmbedding`).
-- **Topic labels** use a new `LanguageModelSession` per request (each
-  boundary is independent), temperature 0, and fixture windows of two
-  exchanges either side of a boundary. `label.cold` is the first request in
-  the process, session creation included. For `label` and `label.prewarmed`
-  the session is created outside the timed region (and, for
-  `label.prewarmed`, `prewarm()` is called on it), then both wait the same
-  lead (`prewarmLead`, 1.5 s by default, about how early the segmenter knows
-  a boundary is coming) and only `respond` is timed. `prewarm()` returns at
-  once and loads in the background, so it needs that lead to have any
-  effect. Titles are never logged.
+- **Topic labels** time the labeler Blau ships, `FoundationModelsTopicLabeler`
+  (#53), through `FoundationModelsLabelBenchmarkGenerator`: the same
+  instructions and prompt (`TopicLabelPrompt`), token budget and
+  `TopicLabelPrompt.fit`, greedy sampling, and retries (a smaller prompt, or
+  plain text after a refusal). The fixtures (`TopicLabelRequest.benchmarkRequests`)
+  are boundary requests shaped like the segmenter's: three exchanges, user
+  turn and assistant reply, either side of the boundary, plus the previous
+  title. `label.cold` is the first request in the process, session creation
+  included. For `label` and `label.prewarmed` the labeler's first guided
+  session is made outside the timed region through its prewarming seam
+  (`prepareSession(for:prewarm:)`; for `label.prewarmed`, `prewarm()` is
+  called on it), then both wait the same lead (`prewarmLead`, 1.5 s by
+  default, about how early the segmenter knows a boundary is coming) and
+  only the labeler's `label` is timed: token counting, fitting, generation
+  and any retry. `prewarm()` returns at once and loads in the background, so
+  it needs that lead to have any effect. `titles.withinWordLimit` counts
+  the model's raw titles, before `TopicTitleFormatter` enforces the limit.
+  Titles are never logged.
 - **Device and conditions.** Every report records the model identifier,
   chip, OS build, memory, build configuration, and thermal state at the
   start and end of each case.
@@ -263,18 +271,20 @@ runs end to end against the real models, and the relative costs.
 | CAM++ | `embed.1.5s` p50 / p95 | 1,632 / 3,317 ms |
 | | `embed.3s` p50 / p95 | 916 / 1,322 ms |
 | | `cosine.sameSpeaker` | 0.91 |
-| Foundation Models | `label.cold` | 1,369 ms |
-| | `label` p50 / p95 | 783 / 1,257 ms |
-| | `label.prewarmed` p50 / p95 | 1,044 / 1,252 ms |
+| Foundation Models | `label.cold` | 3,136 ms |
+| | `label` p50 / p95 | 2,107 / 2,456 ms |
+| | `label.prewarmed` p50 / p95 | 2,063 / 2,394 ms |
 | | `titles.withinWordLimit` | 100% |
 
-The Foundation Models rows were re-measured on 2026-10-07 after the method
-fix above (`BLAU_DEVICE_TESTS=1 swift test -c release --filter
-RealModelTopicLabelBenchmarkTests`, same Mac, load average 100 to 500). A
-second run gave `label` p50 865 ms and `label.prewarmed` p50 1,149 ms. The
-first run's `label.prewarmed` (p50 1,194 ms) is **invalid**: it called
-`prewarm()` inside the timed request with no lead, so the prewarm competed
-with the request instead of preceding it.
+The Foundation Models rows time the production labeler (#53) and were
+measured on 2026-10-07 (`BLAU_DEVICE_TESTS=1 swift test -c release --filter
+RealModelTopicLabelBenchmarkTests`, same Mac, load average 260 to 450). A
+second run gave `label` p50 2,649 ms and `label.prewarmed` p50 2,816 ms
+(cold 3,213 ms), but a device test shared the model for its first 5 s.
+These agree with the 2.26 to 2.70 s p50 that docs/topics.md reports for the
+labeler. Earlier rows in this PR (`label` p50 783 to 865 ms) timed a
+benchmark-only copy of the labeler with a shorter prompt and no token
+counting, and are superseded.
 
 What the Mac run already shows, independent of the device:
 
@@ -297,13 +307,16 @@ What the Mac run already shows, independent of the device:
   once the OS had cached it: the copy-to-a-new-path method does force the
   compile. The footprint barely moved (34 MB) while the kernel's neural
   ledger grew 468 MB, which is why both are recorded.
-- **Foundation Models labels take about a second** (p50 783 to 865 ms,
-  cold 1.4 s). That is fine off the critical path (#53 labels after a
-  boundary is detected), but too slow to run per exchange. With a 1.5 s
-  lead outside the timed region, a prewarmed session was still about
-  300 ms slower than a plain one in both Mac runs, so prewarming showed no
-  benefit on this (loaded) Mac. Don't build #52/#53 around `prewarm()`
-  until the iPhone runs say otherwise.
+- **Foundation Models labels take about two seconds** with the production
+  labeler (p50 2.1 to 2.6 s, cold 3.1 s on the loaded Mac). That is fine off
+  the critical path (#53 labels after a boundary is detected), but too slow
+  to run per exchange. With a 1.5 s lead outside the timed region,
+  prewarming made no consistent difference (±170 ms either way across the
+  two runs). The method can only show this for a model that is already
+  resident: each plain request follows the previous prewarmed one by about
+  1.5 s, so the plain row is warm too. So the Mac shows no benefit when the
+  model is already loaded, and says nothing about a prewarm after the model
+  was evicted; the iPhone runs decide whether #52/#53 should prewarm.
 - **WeSpeaker costs the same for 1.5 s and 3 s windows.** FluidAudio's
   export takes a fixed 10 s input and repeat-pads shorter audio (verified
   in `EmbeddingExtractor.fillWaveformBuffer`), so the "score at 1.5 s,

@@ -36,7 +36,7 @@
                 SpeakerEmbeddingBenchmark.weSpeaker(audio: audio),
                 SpeakerEmbeddingBenchmark.camPlusPlus(audio: audio),
                 TextEmbeddingBenchmark.embeddingGemma(searching: [modelsDirectory, directory]),
-                TopicLabelBenchmark(generator: FoundationModelsTopicLabeler()),
+                TopicLabelBenchmark(generator: FoundationModelsLabelBenchmarkGenerator()),
             ]
         }
 

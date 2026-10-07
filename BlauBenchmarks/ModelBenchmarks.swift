@@ -52,6 +52,6 @@ final class EmbeddingBenchmarks: BenchmarkTestCase {
 /// On-device Foundation Models for topic labels.
 final class TopicLabelBenchmarks: BenchmarkTestCase {
     func testFoundationModelsTopicLabel() async throws {
-        try await measure(TopicLabelBenchmark(generator: FoundationModelsTopicLabeler()))
+        try await measure(TopicLabelBenchmark(generator: FoundationModelsLabelBenchmarkGenerator()))
     }
 }

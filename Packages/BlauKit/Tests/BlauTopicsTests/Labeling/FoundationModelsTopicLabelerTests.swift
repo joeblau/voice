@@ -78,6 +78,17 @@
                 """)
         }
 
+        @Test func labelsInAPrewarmedSession() async throws {
+            let labeler = FoundationModelsTopicLabeler()
+            guard await labeler.isAvailable() else { return }
+            let request = try #require(TopicLabelRequest.benchmarkRequests.first)
+            let prepared = labeler.prepareSession(for: request, prewarm: true)
+            try await Task.sleep(for: .seconds(1))
+            let shift = try await labeler.label(request, preparedSession: prepared)
+            #expect(!shift.title.isEmpty)
+            #expect(TopicTitleFormatter.title(shift.title) != nil)
+        }
+
         @Test func respectsTheContextWindowWithAHugeTopic() async throws {
             let labeler = FoundationModelsTopicLabeler()
             guard await labeler.isAvailable() else { return }
