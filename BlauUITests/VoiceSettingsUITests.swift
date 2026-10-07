@@ -11,6 +11,8 @@ final class VoiceSettingsUITests: XCTestCase {
     private func launchIntoSettings() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["BLAU_UI_TEST_XAI"] = "accept"
+        // Fixture speech models, so the launch never starts a real download.
+        app.launchEnvironment["BLAU_MODEL_FIXTURES"] = "1"
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
         let open = app.buttons["blau.settings.open"]

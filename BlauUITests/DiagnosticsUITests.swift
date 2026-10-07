@@ -15,6 +15,8 @@ final class DiagnosticsUITests: XCTestCase {
     func testSamplePayloadsShowUpAndExportOpensTheShareSheet() throws {
         let app = XCUIApplication()
         app.launchEnvironment["BLAU_UI_TEST_XAI"] = "offline"
+        // Fixture speech models, so the launch never starts a real download.
+        app.launchEnvironment["BLAU_MODEL_FIXTURES"] = "1"
         app.launch()
 
         let settings = app.buttons["blau.settings.open"]
@@ -50,14 +52,5 @@ final class DiagnosticsUITests: XCTestCase {
         let copy = app.buttons["Copy"]
         let opened = shareSheet.waitForExistence(timeout: 10) || copy.waitForExistence(timeout: 2)
         XCTAssertTrue(opened, "Share sheet did not open")
-    }
-
-    private func scrollTo(_ element: XCUIElement, in container: XCUIElement) {
-        var attempts = 0
-        while !(element.exists && element.isHittable) && attempts < 8 {
-            container.swipeUp()
-            attempts += 1
-        }
-        XCTAssertTrue(element.waitForExistence(timeout: 2), "\(element) not found")
     }
 }

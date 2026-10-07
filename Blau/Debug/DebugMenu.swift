@@ -74,7 +74,7 @@
                 LabeledContent("Services", value: environment.kind.rawValue)
                 LabeledContent("Build", value: environment.config.environment.rawValue)
                 LabeledContent("xAI host", value: environment.config.xaiAPIHost)
-                LabeledContent("Realtime model", value: environment.config.xaiRealtimeModel)
+                LabeledContent("Realtime model", value: realtimeModelDescription)
                 // Only whether a key exists; never the key.
                 LabeledContent("Developer key", value: environment.config.hasDevelopmentAPIKey ? "Configured" : "None")
                 LabeledContent("Store", value: storeDescription)
@@ -84,6 +84,14 @@
                         .foregroundStyle(.red)
                 }
             }
+        }
+
+        /// The model the realtime WebSocket actually connects to: the
+        /// run-time override when one is set (#35), otherwise the pin.
+        private var realtimeModelDescription: String {
+            let config = environment.config
+            guard config.xaiRealtimeModelOverride != nil else { return config.xaiRealtimeModel }
+            return "\(config.effectiveRealtimeModel) (override)"
         }
 
         private var lifecycleSection: some View {
