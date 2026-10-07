@@ -105,6 +105,7 @@ struct AppEnvironmentModifier: ViewModifier {
             .environment(environment.flags)
             .environment(environment.lifecycle)
             .environment(environment.xai.account)
+            .environment(environment.realtimeSession.voiceSettings)
             .environment(environment.persistence)
             .environment(environment.speechModels)
     }

@@ -33,6 +33,12 @@ include (`BLAU_ENVIRONMENT`, `BLAU_INFO_XAI_DEV_API_KEY`,
 | `XAI_REALTIME_MODEL` | `BlauXAIRealtimeModel` | `xaiRealtimeModel` | `grok-voice-think-fast-2.0` |
 | `XAI_DEV_API_KEY` → `BLAU_INFO_XAI_DEV_API_KEY` | `BlauXAIDevAPIKey` | `developmentAPIKey` | empty |
 
+The realtime model can also be overridden at run time, without a build:
+managed app configuration (MDM), or the app's defaults or a launch argument,
+under the key `BlauXAIRealtimeModel` (`AppConfig.xaiRealtimeModelOverride`,
+`effectiveRealtimeModel`). See
+[realtime.md](realtime.md#model-pin-and-remote-override).
+
 `//` starts a comment in an xcconfig file, which is why the host is stored
 rather than a URL. `AppConfig` builds `https://<host>` and
 `wss://<host>/v1/realtime?model=<model>` itself.
@@ -57,9 +63,12 @@ Info.plist keys.
   (`DevelopmentKeySeeder`, called from `Blau/XAI/XAIServices.swift`) reads
   this property; see [xai-auth.md](xai-auth.md#debug-pre-fill).
 - `description`, `debugDescription` and `dump()` redact the key.
+- `applyingOverrides(_:)` applies run-time overrides from a
+  `ConfigurationOverrideSource` (BlauCore). `AppConfig.current` uses
+  `UserDefaultsConfigurationOverrides`; an invalid override is ignored.
 
-`AppConfig` is plain Foundation with no app dependencies, so it moves into
-`BlauKit/BlauCore` unchanged once that package lands (#13).
+`AppConfig` is plain Foundation plus `BlauCore`, with no app dependencies, so
+it can move into `BlauKit/BlauCore` unchanged.
 
 ## Developer key (optional)
 

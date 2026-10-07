@@ -1,3 +1,4 @@
+import BlauCore
 import Foundation
 import os
 
@@ -7,8 +8,8 @@ import os
 /// `project.yml`) and are parsed here once, so the rest of the app never reads
 /// raw Info.plist strings. See `docs/configuration.md`.
 ///
-/// Pure Foundation with no app dependencies, so it can move into `BlauCore`
-/// unchanged once the `BlauKit` package exists.
+/// Plain Foundation plus `BlauCore` (for the run-time overrides), with no app
+/// dependencies, so it can move into `BlauCore` unchanged.
 struct AppConfig: Sendable, Equatable {
     /// Build flavour, from `BLAU_ENVIRONMENT`.
     enum Environment: String, Sendable, CaseIterable {
@@ -59,6 +60,11 @@ struct AppConfig: Sendable, Equatable {
     /// Pinned Grok realtime voice model, e.g. `grok-voice-think-fast-2.0`.
     let xaiRealtimeModel: String
 
+    /// A run-time replacement for the pinned model (managed app
+    /// configuration or a launch argument, see
+    /// ``applyingOverrides(_:)``). `nil` uses the pin.
+    let xaiRealtimeModelOverride: String?
+
     /// Developer API key from `Config/Secrets.xcconfig`, used only to pre-fill
     /// the Keychain on first launch (issue #33). Always `nil` in non-DEBUG
     /// builds and when no key is configured; callers must then fall back to
@@ -69,11 +75,13 @@ struct AppConfig: Sendable, Equatable {
         environment: Environment,
         xaiAPIHost: String,
         xaiRealtimeModel: String,
+        xaiRealtimeModelOverride: String? = nil,
         developmentAPIKey: String?
     ) {
         self.environment = environment
         self.xaiAPIHost = xaiAPIHost
         self.xaiRealtimeModel = xaiRealtimeModel
+        self.xaiRealtimeModelOverride = xaiRealtimeModelOverride
         self.developmentAPIKey = developmentAPIKey
     }
 
@@ -100,7 +108,7 @@ struct AppConfig: Sendable, Equatable {
         }
 
         let model = try Self.requiredString(InfoKey.xaiRealtimeModel, in: infoDictionary)
-        guard !model.contains(where: { $0.isWhitespace || $0 == "/" }) else {
+        guard Self.isValidModel(model) else {
             throw .invalidValue(key: InfoKey.xaiRealtimeModel, value: model)
         }
 
@@ -123,14 +131,18 @@ struct AppConfig: Sendable, Equatable {
         return components.url!
     }
 
-    /// Realtime WebSocket endpoint with the pinned model:
+    /// The realtime model sessions use: the override if there is one,
+    /// otherwise the pin.
+    var effectiveRealtimeModel: String { xaiRealtimeModelOverride ?? xaiRealtimeModel }
+
+    /// Realtime WebSocket endpoint with the effective model:
     /// `wss://<host>/v1/realtime?model=<model>`.
     var xaiRealtimeURL: URL {
         var components = URLComponents()
         components.scheme = "wss"
         components.host = xaiAPIHost
         components.path = "/v1/realtime"
-        components.queryItems = [URLQueryItem(name: "model", value: xaiRealtimeModel)]
+        components.queryItems = [URLQueryItem(name: "model", value: effectiveRealtimeModel)]
         return components.url!
     }
 
@@ -143,8 +155,10 @@ struct AppConfig: Sendable, Equatable {
 extension AppConfig {
     private static let logger = Logger(subsystem: "com.joeblau.blau", category: "config")
 
-    /// Configuration of the running app, read once from `Bundle.main`.
-    static let current = load(from: .main)
+    /// Configuration of the running app, read once from `Bundle.main`, with
+    /// the run-time overrides in `UserDefaults` applied. An override changed
+    /// while the app runs takes effect at the next launch.
+    static let current = load(from: .main).applyingOverrides(UserDefaultsConfigurationOverrides())
 
     /// Reads the configuration from `bundle`, falling back to ``fallback`` if
     /// its Info.plist is missing or malformed so the app still launches.
@@ -171,6 +185,40 @@ extension AppConfig {
     }
 }
 
+// MARK: - Run-time overrides
+
+extension AppConfig {
+    /// Applies the overrides in `source`. Today that is the realtime model,
+    /// under the same key as its Info.plist entry (`BlauXAIRealtimeModel`),
+    /// so xAI can be switched to a newer model on managed devices (managed
+    /// app configuration) or a development device (a launch argument)
+    /// without a build. An invalid override is ignored with a fault.
+    func applyingOverrides(_ source: any ConfigurationOverrideSource) -> AppConfig {
+        var model: String?
+        if let override = source.overrideValue(forKey: InfoKey.xaiRealtimeModel) {
+            if Self.isValidModel(override) {
+                model = override == xaiRealtimeModel ? nil : override
+            } else {
+                Self.logger.fault(
+                    "Ignoring invalid realtime model override \(override, privacy: .public)")
+            }
+        }
+        guard model != xaiRealtimeModelOverride else { return self }
+        if let model {
+            Self.logger.notice(
+                "Realtime model overridden: \(model, privacy: .public) instead of \(xaiRealtimeModel, privacy: .public)"
+            )
+        }
+        return AppConfig(
+            environment: environment,
+            xaiAPIHost: xaiAPIHost,
+            xaiRealtimeModel: xaiRealtimeModel,
+            xaiRealtimeModelOverride: model,
+            developmentAPIKey: developmentAPIKey
+        )
+    }
+}
+
 // MARK: - Parsing helpers
 
 extension AppConfig {
@@ -188,6 +236,13 @@ extension AppConfig {
             throw .missingValue(key: key)
         }
         return value
+    }
+
+    /// A model id that is safe in the `model` query item: 1–128 ASCII
+    /// letters, digits, `.`, `_` and `-` (e.g. `grok-voice-think-fast-2.0`).
+    static func isValidModel(_ model: String) -> Bool {
+        !model.isEmpty && model.count <= 128
+            && model.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "._-".contains($0)) }
     }
 
     /// A bare host name: letters, digits, dots and hyphens, no scheme, path,
@@ -213,6 +268,7 @@ extension AppConfig: CustomStringConvertible, CustomDebugStringConvertible, Cust
     var description: String {
         "AppConfig(environment: \(environment.rawValue), xaiAPIHost: \(xaiAPIHost), "
             + "xaiRealtimeModel: \(xaiRealtimeModel), "
+            + "xaiRealtimeModelOverride: \(xaiRealtimeModelOverride ?? "nil"), "
             + "developmentAPIKey: \(hasDevelopmentAPIKey ? "<redacted>" : "nil"))"
     }
 
@@ -225,6 +281,7 @@ extension AppConfig: CustomStringConvertible, CustomDebugStringConvertible, Cust
                 "environment": environment,
                 "xaiAPIHost": xaiAPIHost,
                 "xaiRealtimeModel": xaiRealtimeModel,
+                "xaiRealtimeModelOverride": xaiRealtimeModelOverride ?? "nil",
                 "developmentAPIKey": hasDevelopmentAPIKey ? "<redacted>" : "nil",
             ],
             displayStyle: .struct
