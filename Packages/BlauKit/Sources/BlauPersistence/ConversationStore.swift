@@ -35,8 +35,11 @@ import os
 /// and are never written to SwiftData. Only committed, final utterances are.
 ///
 /// One store owns one active conversation at a time, and keeps references to
-/// the models it wrote during it, so committing and re-committing (refining)
-/// utterances needs no fetches.
+/// every utterance in it (seeded once when a conversation is resumed), so
+/// committing and re-committing (refining) utterances in the active
+/// conversation needs no fetches. Commits to any other conversation, such as
+/// a second ASR pass that lands after the conversation ended, look the
+/// utterance up by id first, so they never add a duplicate row.
 public actor ConversationStore: ModelActor {
     public nonisolated let modelContainer: ModelContainer
     public nonisolated let modelExecutor: any ModelExecutor
@@ -57,10 +60,17 @@ public actor ConversationStore: ModelActor {
     private var currentTopic: Topic?
     private var conversationsByID: [ConversationID: Conversation] = [:]
     private var topicsByID: [UUID: Topic] = [:]
-    /// Utterances committed while the current conversation was active, so a
-    /// refinement (second-pass ASR) updates the stored row instead of adding
-    /// a duplicate.
+    /// Every utterance of the active conversation, by id, so a refinement
+    /// (second-pass ASR) updates the stored row instead of adding a
+    /// duplicate. Complete for the active conversation: filled as utterances
+    /// are committed, and seeded from the stored rows when a conversation is
+    /// resumed. Empty when no conversation is active.
     private var utterancesByID: [UUID: StoredUtterance] = [:]
+    /// Utterances of the active conversation that belong to no topic (they
+    /// were committed before the first topic or after `closeTopic`), so
+    /// `openTopic(at:)` with a past boundary can adopt the ones that started
+    /// after it without walking the whole conversation.
+    private var topiclessUtterances: [UUID: StoredUtterance] = [:]
 
     private var deferredSave: Task<Void, Never>?
 
@@ -141,12 +151,15 @@ public actor ConversationStore: ModelActor {
             conversation = existing
             conversation.endedAt = nil
             currentTopic = (conversation.topics ?? []).filter(\.isOpen).max { $0.ordinal < $1.ordinal }
+            seedUtteranceCaches(from: conversation)
             Log.data.notice("Resumed conversation \(id, privacy: .public)")
         } else {
             conversation = Conversation(id: id.rawValue, startedAt: startedAt, title: title)
             modelContext.insert(conversation)
             conversationsByID[id] = conversation
             currentTopic = nil
+            utterancesByID.removeAll()
+            topiclessUtterances.removeAll()
             Log.data.notice("Started conversation \(id, privacy: .public)")
         }
         activeConversation = conversation
@@ -179,6 +192,19 @@ public actor ConversationStore: ModelActor {
         try save()
     }
 
+    /// Fills the active conversation's lookup caches from its stored
+    /// utterances, once, when it is resumed. Keeps later commits fetch-free
+    /// and lets `openTopic(at:)` adopt topicless utterances from before the
+    /// relaunch.
+    private func seedUtteranceCaches(from conversation: Conversation) {
+        utterancesByID.removeAll()
+        topiclessUtterances.removeAll()
+        for utterance in conversation.utterances ?? [] {
+            utterancesByID[utterance.id] = utterance
+            if utterance.topic == nil { topiclessUtterances[utterance.id] = utterance }
+        }
+    }
+
     private func endActive(at endedAt: Date) {
         guard let conversation = activeConversation else { return }
         if let currentTopic {
@@ -191,6 +217,7 @@ public actor ConversationStore: ModelActor {
         // Drop the lookup caches so a long-lived store doesn't keep every
         // conversation's models alive. Later calls fetch by id.
         utterancesByID.removeAll()
+        topiclessUtterances.removeAll()
         topicsByID.removeAll()
         conversationsByID.removeAll()
         noteChanges()
@@ -218,9 +245,10 @@ public actor ConversationStore: ModelActor {
     ///
     /// The utterance joins its conversation and, if that is the active
     /// conversation, its open topic. Committing an utterance with the same
-    /// `id` again during the conversation (for example after the second ASR
-    /// pass adds punctuation) updates the stored text instead of adding a
-    /// row. Blank utterances are not stored.
+    /// `id` again (for example after the second ASR pass adds punctuation,
+    /// even when that lands after the conversation ended or after a
+    /// relaunch) updates the stored text instead of adding a row. Blank
+    /// utterances are not stored.
     ///
     /// - Parameters:
     ///   - utterance: The committed pipeline utterance.
@@ -245,7 +273,12 @@ public actor ConversationStore: ModelActor {
         }
         let source = source ?? Self.defaultSource(for: utterance.speaker)
 
-        if let stored = utterancesByID[utterance.id] {
+        let isActive = activeConversation?.id == utterance.conversationID.rawValue
+        // The active conversation's cache is complete, so a miss there is a
+        // new utterance. Other conversations' utterances are not cached: look
+        // the id up in the store before inserting.
+        let existing = isActive ? utterancesByID[utterance.id] : try storedUtteranceIfExists(utterance.id)
+        if let stored = existing {
             stored.text = utterance.text
             stored.sourceRaw = source.rawValue
             stored.endedAt = utterance.startedAt.addingTimeInterval(utterance.duration.timeInterval)
@@ -253,8 +286,7 @@ public actor ConversationStore: ModelActor {
             if let voiceScore { stored.voiceScore = voiceScore }
         } else {
             let conversation = try self.conversation(utterance.conversationID)
-            let topic =
-                conversation === activeConversation ? self.topic(at: utterance.startedAt, in: conversation) : nil
+            let topic = isActive ? self.topic(at: utterance.startedAt, in: conversation) : nil
             let stored = StoredUtterance(
                 utterance,
                 source: source,
@@ -268,8 +300,9 @@ public actor ConversationStore: ModelActor {
             modelContext.insert(stored)
             stored.conversation = conversation
             if let topic { stored.topic = topic }
-            if conversation === activeConversation {
+            if isActive {
                 utterancesByID[utterance.id] = stored
+                if topic == nil { topiclessUtterances[utterance.id] = stored }
             }
             statistics.insertedUtteranceCount += 1
         }
@@ -284,7 +317,9 @@ public actor ConversationStore: ModelActor {
     /// The topic segmenter finds a boundary after the fact, so `startedAt`
     /// may be in the past: the previous open topic is closed at `startedAt`,
     /// and its utterances that started at or after `startedAt` move to the
-    /// new topic. Utterances committed from now on join the new topic.
+    /// new topic, as do the conversation's topicless utterances (committed
+    /// before the first topic or after `closeTopic`) that started at or after
+    /// `startedAt`. Utterances committed from now on join the new topic.
     ///
     /// - Parameters:
     ///   - startedAt: The boundary. Defaults to the clock's `now`.
@@ -305,6 +340,10 @@ public actor ConversationStore: ModelActor {
             for utterance in previous.utterances ?? [] where utterance.startedAt >= startedAt {
                 utterance.topic = topic
             }
+        }
+        for (id, utterance) in topiclessUtterances where utterance.startedAt >= startedAt {
+            utterance.topic = topic
+            topiclessUtterances[id] = nil
         }
         currentTopic = topic
         topicsByID[topic.id] = topic
@@ -454,6 +493,13 @@ public actor ConversationStore: ModelActor {
             throw ConversationStoreError.conversationNotFound(id)
         }
         return conversation
+    }
+
+    /// Looks up a stored utterance by id, including unsaved inserts.
+    private func storedUtteranceIfExists(_ id: UUID) throws -> StoredUtterance? {
+        var descriptor = FetchDescriptor<StoredUtterance>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first
     }
 
     private func topic(_ id: UUID) throws -> Topic {

@@ -154,8 +154,8 @@ The live pipeline writes through one actor, `ConversationStore`
 | `startConversation(id:at:title:)`         | Inserts a conversation, or reopens an existing one with that id (relaunch); ends any other active one | at once               |
 | `appendPartial(utteranceID:text:)`        | Keeps the latest streaming ASR hypothesis **in memory only**                                 | never                 |
 | `discardPartial(utteranceID:)`            | Forgets a partial (for example speech the voice ID gate rejected)                            | never                 |
-| `commitUtterance(_:source:asrConfidence:voiceScore:)` | Stores a final `BlauCore.Utterance` in its conversation and the open topic; re-committing the same id (second pass) updates it; blank text is skipped | batched |
-| `openTopic(at:title:)`                    | Opens the next topic; closes the previous one at `at` and moves its utterances from `at` on   | batched               |
+| `commitUtterance(_:source:asrConfidence:voiceScore:)` | Stores a final `BlauCore.Utterance` in its conversation and the open topic; re-committing the same id (second pass) updates it, even after the conversation ended or the app relaunched; blank text is skipped | batched |
+| `openTopic(at:title:)`                    | Opens the next topic; closes the previous one at `at` and moves its utterances from `at` on, plus topicless ones (before the first topic or after `closeTopic`) from `at` on | batched |
 | `closeTopic(_:title:summary:at:)`         | Closes a topic with the labeler's final title (non-provisional) and summary                  | batched               |
 | `retitle(_:to:isProvisional:)`            | Renames a topic (provisional guess or manual edit)                                           | batched               |
 | `endConversation(_:at:)`                  | Closes the open topic and the conversation, drops partials                                   | at once               |
@@ -163,6 +163,14 @@ The live pipeline writes through one actor, `ConversationStore`
 
 **Partials are never persisted.** Only committed utterances are, always with
 `isFinal == true`.
+
+**No duplicate utterances.** CloudKit forbids `.unique`, so the store
+de-duplicates by utterance id itself. For the active conversation it keeps
+every utterance in memory (seeded once from the stored rows when a
+conversation is resumed), so commits there need no fetch. A commit to any
+other conversation, such as the second ASR pass for the last utterance
+landing after the user taps stop, fetches the id (`fetchLimit` 1, including
+unsaved inserts) and updates that row instead of inserting.
 
 **Batched saves.** Every save is a SQLite transaction and, with CloudKit on,
 an export, so `ConversationStoreSavePolicy.coalesced` (the default) saves a

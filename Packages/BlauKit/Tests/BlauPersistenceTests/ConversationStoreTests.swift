@@ -198,6 +198,79 @@ struct ConversationStoreUtteranceTests {
         #expect(saved.conversation?.id == conversation.rawValue)
         #expect(saved.topic == nil)
     }
+
+    /// The second ASR pass for the last utterance usually finishes after the
+    /// user taps stop.
+    @Test func recommittingAfterTheConversationEndedRefinesInsteadOfDuplicating() async throws {
+        let fixture = try StoreFixture()
+        let store = fixture.store
+        let conversation = try await store.startConversation()
+        try await store.openTopic(at: storeT0)
+        var utterance = makeUtterance("so bye", in: conversation, at: 1)
+        try await store.commitUtterance(utterance, asrConfidence: 0.7)
+        try await store.endConversation(at: storeT0 + 5)
+
+        utterance.text = "So, bye."
+        try await store.commitUtterance(utterance, asrConfidence: 0.9)
+        try await store.flush()
+
+        let saved = try fixture.saved(StoredUtterance.self)
+        #expect(saved.count == 1)
+        #expect(saved.first?.text == "So, bye.")
+        #expect(saved.first?.asrConfidence == 0.9)
+        #expect(saved.first?.topic != nil)
+        #expect(await store.statistics.insertedUtteranceCount == 1)
+    }
+
+    @Test func recommittingToAnEndedConversationBeforeASaveRefinesTheUnsavedRow() async throws {
+        let fixture = try StoreFixture()
+        let store = fixture.store
+        let conversation = try await store.startConversation()
+        try await store.endConversation(at: storeT0 + 30)
+
+        var late = makeUtterance("bye", in: conversation, at: 29, speaker: .agent)
+        try await store.commitUtterance(late)
+        late.text = "Bye!"
+        try await store.commitUtterance(late)
+        try await store.flush()
+
+        #expect(try fixture.saved(StoredUtterance.self).map(\.text) == ["Bye!"])
+        #expect(await store.statistics.insertedUtteranceCount == 1)
+    }
+
+    @Test func recommittingAfterARelaunchAndResumeRefinesInsteadOfDuplicating() async throws {
+        let fixture = try StoreFixture()
+        let id = try await fixture.store.startConversation(at: storeT0)
+        var utterance = makeUtterance("where were we", in: id, at: 1)
+        try await fixture.store.commitUtterance(utterance)
+        try await fixture.store.flush()
+
+        let relaunched = ConversationStore(modelContainer: fixture.container, clock: fixture.clock)
+        try await relaunched.startConversation(id: id, at: storeT0 + 120)
+        utterance.text = "Where were we?"
+        try await relaunched.commitUtterance(utterance)
+        try await relaunched.flush()
+
+        let saved = try fixture.saved(StoredUtterance.self)
+        #expect(saved.count == 1)
+        #expect(saved.first?.text == "Where were we?")
+        #expect(await relaunched.statistics.insertedUtteranceCount == 0)
+    }
+
+    @Test func recommittingAfterARelaunchWithoutResumingRefinesInsteadOfDuplicating() async throws {
+        let fixture = try StoreFixture()
+        let id = try await fixture.store.startConversation(at: storeT0)
+        var utterance = makeUtterance("where were we", in: id, at: 1)
+        try await fixture.store.commitUtterance(utterance)
+        try await fixture.store.flush()
+
+        let relaunched = ConversationStore(modelContainer: fixture.container, clock: fixture.clock)
+        utterance.text = "Where were we?"
+        try await relaunched.commitUtterance(utterance)
+        try await relaunched.flush()
+
+        #expect(try fixture.saved(StoredUtterance.self).map(\.text) == ["Where were we?"])
+    }
 }
 
 @Suite("ConversationStore topics")
@@ -239,6 +312,71 @@ struct ConversationStoreTopicTests {
         #expect(utterances.map(\.topic?.id) == [first, first, second, second])
         let topics = try #require(try fixture.saved(Conversation.self).first).orderedTopics
         #expect(topics.first?.endedAt == storeT0 + 9)
+    }
+
+    /// The segmenter opens the first topic after a minimum window, so its
+    /// boundary is usually before utterances that were already committed.
+    @Test func openingTheFirstTopicAtAPastBoundaryAdoptsEarlierUtterances() async throws {
+        let fixture = try StoreFixture()
+        let store = fixture.store
+        let conversation = try await store.startConversation()
+        try await store.commitUtterance(makeUtterance("one", in: conversation, at: 1))
+        try await store.commitUtterance(makeUtterance("five", in: conversation, at: 5))
+        fixture.clock.advance(by: .seconds(60))
+        let topic = try await store.openTopic(at: storeT0)
+        try await store.commitUtterance(makeUtterance("sixty", in: conversation, at: 60))
+        try await store.flush()
+
+        let utterances = try #require(try fixture.saved(Conversation.self).first).orderedUtterances
+        #expect(utterances.map(\.topic?.id) == [topic, topic, topic])
+    }
+
+    @Test func openingTheFirstTopicOnlyAdoptsUtterancesFromTheBoundaryOn() async throws {
+        let fixture = try StoreFixture()
+        let store = fixture.store
+        let conversation = try await store.startConversation()
+        try await store.commitUtterance(makeUtterance("small talk", in: conversation, at: 1))
+        try await store.commitUtterance(makeUtterance("down to business", in: conversation, at: 5))
+        let topic = try await store.openTopic(at: storeT0 + 5)
+        try await store.flush()
+
+        let utterances = try #require(try fixture.saved(Conversation.self).first).orderedUtterances
+        #expect(utterances.map(\.topic?.id) == [nil, topic])
+    }
+
+    @Test func openingATopicAtAPastBoundaryAfterCloseTopicAdoptsLaterCommits() async throws {
+        let fixture = try StoreFixture()
+        let store = fixture.store
+        let conversation = try await store.startConversation()
+        let first = try await store.openTopic(at: storeT0)
+        try await store.commitUtterance(makeUtterance("in the first", in: conversation, at: 5))
+        try await store.closeTopic(first, title: "Intro", at: storeT0 + 10)
+        try await store.commitUtterance(makeUtterance("between topics", in: conversation, at: 12))
+        try await store.commitUtterance(makeUtterance("new subject", in: conversation, at: 20))
+        fixture.clock.advance(by: .seconds(30))
+        // The segmenter decides at t=30 that a new topic began at t=15.
+        let second = try await store.openTopic(at: storeT0 + 15)
+        try await store.commitUtterance(makeUtterance("still new", in: conversation, at: 31))
+        try await store.flush()
+
+        let utterances = try #require(try fixture.saved(Conversation.self).first).orderedUtterances
+        #expect(utterances.map(\.topic?.id) == [first, nil, second, second])
+    }
+
+    @Test func openingATopicInAResumedConversationAdoptsItsTopiclessUtterances() async throws {
+        let fixture = try StoreFixture()
+        let id = try await fixture.store.startConversation(at: storeT0)
+        try await fixture.store.commitUtterance(makeUtterance("before the relaunch", in: id, at: 1))
+        try await fixture.store.endConversation(at: storeT0 + 10)
+
+        let relaunched = ConversationStore(modelContainer: fixture.container, clock: fixture.clock)
+        try await relaunched.startConversation(id: id, at: storeT0 + 120)
+        try await relaunched.commitUtterance(makeUtterance("after it", in: id, at: 125))
+        let topic = try await relaunched.openTopic(at: storeT0)
+        try await relaunched.flush()
+
+        let utterances = try #require(try fixture.saved(Conversation.self).first).orderedUtterances
+        #expect(utterances.map(\.topic?.id) == [topic, topic])
     }
 
     @Test func aLateCommitFromBeforeTheBoundaryJoinsThePreviousTopic() async throws {
