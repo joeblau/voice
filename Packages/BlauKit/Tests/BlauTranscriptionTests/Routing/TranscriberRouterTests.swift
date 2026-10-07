@@ -399,6 +399,152 @@ struct TranscriberRouterTests {
         await router.finish()
     }
 
+    // MARK: Inputs that change while an engine is being built
+
+    @Test func aPreferenceChangeWhileTheFirstEngineLoadsStartsOnlyOneEngine() async throws {
+        let engines = FakeEngines()
+        let gate = Gate()
+        // Apple's engine downloads its assets on first use.
+        engines.setMakeGate(.apple, gate)
+        let router = makeRouter(engines, preference: .apple)
+        let log = TranscriptLog(router.events)
+        let started = Task { try await router.start() }
+        try await waitUntil { engines.blockedMakes(.apple) == 1 }
+
+        await router.setPreference(.automatic)
+        // Nothing is built in parallel while Apple's engine loads.
+        #expect(engines.built(.parakeet).isEmpty)
+        #expect(router.status.engine == nil)
+
+        engines.setMakeGate(.apple, nil)
+        gate.open()
+        try await started.value
+        // The start re-decides from the new preference and hands over.
+        try await waitForEngine(.parakeet, on: router)
+        #expect(router.status.reason == .primary)
+        #expect(router.status.isRunning)
+        let running = await engines.running()
+        #expect(running.map(\.engine) == [.parakeet])
+        #expect(engines.built(.parakeet).count == 1)
+        #expect(await engines.latest(.apple)?.finishes == 1)
+
+        // Each utterance comes through once.
+        let parakeet = try #require(engines.latest(.parakeet))
+        await parakeet.commit("hello", from: 0.2, to: 0.8)
+        try await log.waitForFinals(1)
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(log.finals.map(\.text) == ["hello"])
+    }
+
+    @Test func memoryPressureWhileTheFirstEngineLoadsStartsOnlyOneEngine() async throws {
+        let engines = FakeEngines()
+        let gate = Gate()
+        engines.setMakeGate(.parakeet, gate)
+        let router = makeRouter(engines)
+        let started = Task { try await router.start() }
+        try await waitUntil { engines.blockedMakes(.parakeet) == 1 }
+
+        await router.setMemoryPressure(true)
+        await router.availabilityDidChange()
+        #expect(engines.built(.apple).isEmpty)
+
+        engines.setMakeGate(.parakeet, nil)
+        gate.open()
+        try await started.value
+        try await waitForEngine(.apple, on: router)
+        #expect(router.status.reason == .memoryPressure)
+        #expect(await engines.running().map(\.engine) == [.apple])
+        #expect(engines.built(.parakeet).count == 1)
+    }
+
+    @Test func theMonitorsRequestWhileTheFirstEngineLoadsIsHonoured() async throws {
+        let engines = FakeEngines()
+        let gate = Gate()
+        engines.setMakeGate(.parakeet, gate)
+        let router = makeRouter(engines)
+        let started = Task { try await router.start() }
+        try await waitUntil { engines.blockedMakes(.parakeet) == 1 }
+
+        // The monitor waits for the router to settle rather than reading
+        // "not on Apple's engine yet" as a failure.
+        let switched = Task { try await router.switchInferenceBackend(to: .systemSpeech) }
+        try await waitUntil { await router.routingInputs.systemSpeechRequested }
+        #expect(engines.built(.apple).isEmpty)
+
+        engines.setMakeGate(.parakeet, nil)
+        gate.open()
+        try await started.value
+        try await switched.value
+        #expect(router.status.engine == .apple)
+        #expect(router.status.reason == .background)
+        #expect(await engines.running().map(\.engine) == [.apple])
+    }
+
+    @Test func anInputChangeDuringASwitchsFallbackStartsOnlyOneEngine() async throws {
+        let engines = FakeEngines()
+        engines.setStartError(.apple, FakeEngineError.cannotStart)
+        let router = makeRouter(engines)
+        try await router.start()
+
+        // Apple's engine fails to start; the fallback rebuilds Parakeet,
+        // which takes a while. Engines become available again meanwhile.
+        let gate = Gate()
+        engines.setMakeGate(.parakeet, gate)
+        await router.setPreference(.apple)
+        try await waitUntil { engines.blockedMakes(.parakeet) == 1 }
+        await router.availabilityDidChange()
+        #expect(engines.blockedMakes(.parakeet) == 1)
+
+        engines.setMakeGate(.parakeet, nil)
+        gate.open()
+        // The switch re-decides when it ends: Apple's engine gets another
+        // chance, fails again, and Parakeet stays.
+        try await waitUntil { router.statistics.failedActivations == 2 }
+        await router.waitForSwitch()
+        try await waitForEngine(.parakeet, on: router)
+        #expect(router.status.reason == .fallback)
+        #expect(await engines.running().map(\.engine) == [.parakeet])
+    }
+
+    @Test func stoppingWhileTheFirstEngineLoadsLeavesNothingRunning() async throws {
+        let engines = FakeEngines()
+        let gate = Gate()
+        engines.setMakeGate(.parakeet, gate)
+        let router = makeRouter(engines)
+        let started = Task { try await router.start() }
+        try await waitUntil { engines.blockedMakes(.parakeet) == 1 }
+
+        await router.stop()
+        #expect(router.status.isRunning == false)
+        engines.setMakeGate(.parakeet, nil)
+        gate.open()
+        try await started.value
+        #expect(await engines.running().isEmpty)
+        #expect(router.status.isRunning == false)
+
+        // The next start reuses the engine that was built.
+        try await router.start()
+        #expect(engines.built(.parakeet).count == 1)
+        #expect(await engines.latest(.parakeet)?.startPositions == [nil, nil])
+        #expect(await engines.running().map(\.engine) == [.parakeet])
+    }
+
+    @Test func finishingWhileTheFirstEngineLoadsReleasesIt() async throws {
+        let engines = FakeEngines()
+        let gate = Gate()
+        engines.setMakeGate(.parakeet, gate)
+        let router = makeRouter(engines)
+        let started = Task { try await router.start() }
+        try await waitUntil { engines.blockedMakes(.parakeet) == 1 }
+
+        await router.finish()
+        gate.open()
+        try await started.value
+        #expect(await engines.running().isEmpty)
+        #expect(await engines.latest(.parakeet)?.finishes == 1)
+        #expect(router.status.isRunning == false)
+    }
+
     // MARK: Lifecycle
 
     @Test func stopAndStartReuseTheEngine() async throws {

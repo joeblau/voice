@@ -45,6 +45,14 @@ import os
 /// history. If no boundary comes within `maximumSwitchDelay` (a very long
 /// monologue), it switches anyway: the old engine's `stop()` commits what
 /// was said so far.
+///
+/// **One engine at a time.** Building an engine can take seconds (Apple's
+/// may download its language assets first). While the router builds and
+/// starts one (`start()`, or a retry after every engine failed) or hands
+/// over to another, input changes are only recorded: the activation or
+/// switch in progress re-decides from them when it ends, so the router
+/// never builds two engines in parallel. Only the active engine's events,
+/// and those of the one being drained on its way out, reach `events`.
 public actor TranscriberRouter: Transcriber {
     /// How the router gets an engine.
     public struct EngineProvider: Sendable {
@@ -124,6 +132,17 @@ public actor TranscriberRouter: Transcriber {
 
     private var pending: PendingSwitch?
     private var isSwitching = false
+    /// Whether `start()` or a retry is building and starting an engine.
+    /// Input changes meanwhile are deferred to the end of the activation.
+    private var isActivating = false
+    /// Whether an input changed while an activation or a switch was in
+    /// progress, so it must re-decide when it ends.
+    private var reevaluationDeferred = false
+    /// Callers of `start()` waiting for an activation in progress to end.
+    private var activationWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Engines on their way out (`release()`): what their `stop()` commits
+    /// is still forwarded.
+    private var drainingIDs: Set<Int> = []
     /// The switch in progress. It runs in a task of its own, never inline
     /// from the event forwarding it waits on.
     private var switchTask: Task<Void, Never>?
@@ -205,10 +224,16 @@ public actor TranscriberRouter: Transcriber {
     // MARK: Transcriber
 
     public func start() async throws {
+        // A `stop()` during an earlier `start()` lets that one finish
+        // building its engine; this start then reuses it.
+        while isActivating {
+            await withCheckedContinuation { activationWaiters.append($0) }
+        }
         guard !isRunning, !isFinished else { return }
         isRunning = true
-        await refreshAvailability()
+        isActivating = true
         do {
+            await refreshAvailability()
             if let active, active.engine == TranscriberRoutingPolicy.choose(inputs)?.engine {
                 // Restart after `stop()`: the engine is still built.
                 try await active.transcriber.start(resumingAt: nil)
@@ -218,10 +243,11 @@ public actor TranscriberRouter: Transcriber {
             }
         } catch {
             isRunning = false
-            publishStatus()
+            await endActivation()
             throw error
         }
-        publishStatus()
+        // The inputs may have changed while the engine was being built.
+        await endActivation()
     }
 
     public func stop() async {
@@ -331,6 +357,18 @@ public actor TranscriberRouter: Transcriber {
     private func reevaluate() async {
         await refreshAvailability()
         guard isRunning, !isFinished else { return }
+        guard !isActivating, !isSwitching else {
+            // The activation or switch in progress re-decides when it ends.
+            reevaluationDeferred = true
+            return
+        }
+        await decide()
+    }
+
+    /// Starts or cancels a switch for the current inputs, or starts an
+    /// engine if none runs. The caller has refreshed availability and made
+    /// sure no other activation or switch is in progress.
+    private func decide() async {
         guard let choice = TranscriberRoutingPolicy.choose(inputs) else {
             logger.error(
                 "No transcription engine can run; keeping \(self.active?.engine.rawValue ?? "none", privacy: .public)")
@@ -338,13 +376,14 @@ public actor TranscriberRouter: Transcriber {
         }
         guard let active else {
             // Nothing running (every engine failed earlier): try again now.
+            isActivating = true
             do {
                 try await activateBest(resumingAt: resumePosition)
             } catch {
                 logger.error(
                     "Transcriber router couldn't start an engine: \(String(describing: error), privacy: .public)")
             }
-            publishStatus()
+            await endActivation()
             return
         }
         if choice.engine == active.engine {
@@ -506,11 +545,43 @@ public actor TranscriberRouter: Transcriber {
             }
         }
         isSwitching = false
+        reevaluationDeferred = false
         publishStatus()
-        if !isRunning {
+        if isFinished {
+            await release()
+        } else if !isRunning {
             await active?.transcriber.stop()
         } else {
             // The inputs may have changed again while switching.
+            await reevaluate()
+        }
+    }
+
+    /// Ends an activation (`start()` or `decide()`'s retry): applies a
+    /// `stop()` or `finish()` that came meanwhile, re-decides from inputs
+    /// that changed meanwhile, and lets a waiting `start()` go on.
+    private func endActivation() async {
+        await refreshAvailability()
+        if isFinished {
+            await release()
+        } else if !isRunning {
+            await active?.transcriber.stop()
+        } else if active != nil {
+            // Still marked as activating, so no other activation can slip
+            // in, and a monitor waiting in `switchInferenceBackend` sees
+            // the switch this may request rather than a settled router.
+            await decide()
+        }
+        let again = reevaluationDeferred && isRunning && !isFinished
+        reevaluationDeferred = false
+        isActivating = false
+        publishStatus()
+        let waiters = activationWaiters
+        activationWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+        if again {
             await reevaluate()
         }
     }
@@ -591,16 +662,25 @@ public actor TranscriberRouter: Transcriber {
     /// it emits on the way out.
     private func release() async {
         guard let old = active else { return }
+        drainingIDs.insert(old.id)
         await old.transcriber.stop()
         await old.transcriber.finish()
         await old.forwarding.value
+        drainingIDs.remove(old.id)
         if active?.id == old.id {
             active = nil
         }
     }
 
-    /// Forwards one event and tracks where utterances end.
+    /// Forwards one event from the active engine (or one being drained)
+    /// and tracks where utterances end. Events from any other engine are
+    /// dropped, so a stray engine can never put a second copy of an
+    /// utterance on `events`.
     private func receive(_ event: TranscriptEvent, from id: Int) async {
+        guard id == active?.id || drainingIDs.contains(id) else {
+            logger.error("Transcriber router dropped an event from engine #\(id, privacy: .public), which isn't active")
+            return
+        }
         continuation.yield(event)
         if case .final(let utterance) = event {
             resumePosition = max(resumePosition ?? .zero, utterance.timeRange.end)
@@ -629,8 +709,9 @@ public actor TranscriberRouter: Transcriber {
         resumeSettleWaiters()
     }
 
-    /// Whether no switch is pending or running.
-    private var isSettled: Bool { pending == nil && !isSwitching }
+    /// Whether no switch is pending or running and no engine is being
+    /// started.
+    private var isSettled: Bool { pending == nil && !isSwitching && !isActivating }
 
     /// Suspends until no switch is pending or running.
     private func waitUntilSettled() async {
