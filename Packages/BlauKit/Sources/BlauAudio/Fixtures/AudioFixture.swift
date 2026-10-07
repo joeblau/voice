@@ -159,7 +159,11 @@ public struct AudioFixture: Hashable, Sendable {
     /// A deterministic speech-shaped signal: a voiced source at 110 to
     /// 220 Hz with five harmonics, an envelope at a syllable rate of about
     /// 4 Hz, short pauses, and a little noise. Identical for the same `seed`.
-    public static func syntheticSignal(duration: Duration, seed: UInt64 = 0x5EED) -> AudioFixture {
+    ///
+    /// - Parameter pauses: `false` leaves out the pauses (100-500 ms after
+    ///   about one syllable in five), for one fluent utterance that voice
+    ///   activity detection never splits. The syllables are the same.
+    public static func syntheticSignal(duration: Duration, seed: UInt64 = 0x5EED, pauses: Bool = true) -> AudioFixture {
         let count = Int(duration.sampleCount(sampleRate: sampleRate))
         var generator = SplitMix64(seed: seed)
         var samples = [Float](repeating: 0, count: count)
@@ -170,7 +174,8 @@ public struct AudioFixture: Hashable, Sendable {
         while index < count {
             // One "syllable": 150-350 ms of voicing, sometimes followed by a pause.
             let syllableLength = Int(rate * (0.15 + 0.2 * generator.nextUnit()))
-            let pauseLength = generator.nextUnit() < 0.2 ? Int(rate * (0.1 + 0.4 * generator.nextUnit())) : 0
+            let pauseDraw = generator.nextUnit() < 0.2 ? Int(rate * (0.1 + 0.4 * generator.nextUnit())) : 0
+            let pauseLength = pauses ? pauseDraw : 0
             let pitch = 110 + 110 * generator.nextUnit()
             let end = min(count, index + syllableLength)
             for sampleIndex in index..<end {
@@ -186,7 +191,7 @@ public struct AudioFixture: Hashable, Sendable {
             }
             index = min(count, end + pauseLength)
         }
-        return AudioFixture(samples: samples, source: "synthetic signal (seed \(seed))")
+        return AudioFixture(samples: samples, source: "synthetic signal (seed \(seed)\(pauses ? "" : ", no pauses"))")
     }
 }
 

@@ -361,6 +361,242 @@ thread during a live session, need a physical device:
 | 10 x 1,000, coalesced (release)     | iPhone | pending | pending |       |
 | 1 x 10,000, coalesced (release)     | iPhone | pending | pending |       |
 
+## Performance suite
+
+Automated regression detection (#73) has two halves, each with its own
+committed baseline and a gate that fails when something gets more than 10%
+worse:
+
+| Half | What it measures | Where it runs | Gate | Baseline |
+| --- | --- | --- | --- | --- |
+| [XCTest suite](#xctest-suite) | App launch; the app's CPU, memory and wall time over a scripted five-minute session; the `voiceid.verify`, `topics.segment`, `memory.search` and `db.save` intervals (and `asr.chunk` with real models) | Nightly `perf` CI job (and on demand), `make perf` | `make perf-check` (`scripts/perf/perf-gate.py`) | `BlauPerfTests/Baselines/ci-simulator.json` |
+| [Micro-benchmarks](#micro-benchmarks) | The topic engine, RRF fusion and the int8 vector search, in BlauKit on the macOS host | `perf-kit` CI job on **every pull request** and nightly, `make microbench` | `make microbench-check` (package-benchmark's `thresholds check`) | `Packages/BlauKitBenchmarks/Thresholds/` |
+
+### XCTest suite
+
+`BlauPerfTests` is a UI-testing bundle run by the `Blau-Perf` scheme with
+the `BlauPerf` test plan in **Release**:
+
+| Test | Metrics |
+| --- | --- |
+| `LaunchPerformanceTests/testColdLaunch()` | `XCTApplicationLaunchMetric` |
+| `LaunchPerformanceTests/testLaunchUntilResponsive()` | `XCTApplicationLaunchMetric(waitUntilResponsive:)` |
+| `ReplaySessionPerformanceTests/testScriptedSession()` | `XCTCPUMetric` and `XCTMemoryMetric` of the app, `XCTClockMetric`, and `XCTOSSignpostMetric` for `voiceid.verify`, `topics.segment`, `memory.search` and `db.save` (plus `asr.chunk` with `BLAU_PERF_REPLAY_ASR=parakeet`) |
+
+```sh
+make perf                         # Release + BLAU_PERF, into .build/results/perf.xcresult
+make perf-check                   # compare with BlauPerfTests/Baselines/ci-simulator.json
+make perf DESTINATION='id=<udid>' TEST_RUNNER_BLAU_PERF_ITERATIONS=3
+```
+
+`make perf` adds the `BLAU_PERF` compilation condition, which compiles the
+scripted session into the app (`Blau/Performance/Replay/`, also compiled in
+Debug, never in an App Store build), and builds the active architecture
+only. Running the `Blau-Perf` scheme from Xcode without the condition skips
+the session test with a message saying so.
+
+#### The scripted session
+
+`PerfReplay` runs the voice loop's real pipeline from the capture hub to the
+stored transcript, in the app process, on a scripted conversation. The
+perf test launches the app with `BLAU_PERF_REPLAY=1`, which shows the
+replay screen instead of the app (and none of the app's own launch work),
+runs one unmeasured session to warm up, then measures five more.
+
+| Stage | In the session | Real or stand-in |
+| --- | --- | --- |
+| Microphone | `ConversationAudioScript`: the user's side of a `ScriptedConversation` (eight topics, a change every six exchanges) laid out on the 16 kHz timeline with room for each reply, speech-shaped audio for every line and -54 dBFS room noise between them; played into the real `CaptureHub` by `CaptureReplayFeeder` | Audio is synthetic (see below) |
+| VAD | `VoiceActivitySegmenter` with the energy model (Silero with real models) | Real segmenter |
+| ASR | `ParakeetStreamingTranscriber` on `AlignedTranscriptRecognizer`, which "decodes" the script's word alignment with Parakeet's chunk timing and end-of-utterance rule (Parakeet itself with `BLAU_PERF_REPLAY_ASR=parakeet`) | Real transcriber, stand-in model |
+| Voice ID | Every VAD segment scored against a voiceprint with `VoiceprintScorer.verify` (`voiceid.verify`) | Real scoring; synthetic 256-d embeddings |
+| Grok | The real `TurnOrchestrator` and `RealtimeClient`, talking to `ScriptedRealtimeServer`, which answers each line with the script's reply as streamed 24 kHz PCM16 and transcript deltas; replies go to `DiscardingAgentAudioOutput` | Fake server, no network |
+| Transcript | `ConversationStore` on a temporary on-disk SwiftData store (`db.save`) | Real |
+| Topics | Each exchange through `StreamingTopicSegmenter` with the lexical embedder (`topics.segment`); confirmed boundaries open a topic in the store | Real |
+| Memory | Each exchange indexed in a temporary `MemoryIndex` (FTS5 and an int8 vector); each user line runs a hybrid search, BM25 and vector fused with RRF (`memory.search`) | Real index and fusion |
+
+Nothing touches the user's data, the network, the Keychain or the
+microphone, and the temporary stores are deleted after each session. The
+session is deterministic: with the scripted recognizer every count in its
+report (lines, replies, topic units and boundaries, searches,
+verifications) is identical run after run, so the measurements only move
+when the code does. `BlauTests/PerfReplayTests` checks that, and that every
+stage ran.
+
+Launch environment (pass through the test runner with a `TEST_RUNNER_`
+prefix on the `make perf` command line):
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BLAU_PERF_ITERATIONS` | 5 | Measured sessions |
+| `BLAU_PERF_REPLAY_SECONDS` | 300 | The session's length on the audio timeline |
+| `BLAU_PERF_REPLAY_SPEED` | 10 | How much faster than real time the audio plays: a factor, `realtime` or `max` |
+| `BLAU_PERF_REPLAY_ASR` | `scripted` | `parakeet` transcribes with the installed models (a device with them downloaded) and adds `asr.chunk` |
+
+**Turn-taking.** Like a person, the script waits for Blau's answer to a line
+before saying the next one: faster than real time a reply takes longer on
+the audio timeline than the gap the script leaves for it. Barge-in is
+therefore not part of the session; `BargeInMonitor` and the orchestrator's
+interruption path have their own tests (#37).
+
+**Where this differs from the issue's plan, and why:**
+
+- *Recorded audio.* The session uses the deterministic, speech-shaped
+  `AudioFixture.syntheticSignal` (without pauses, so each line is one VAD
+  segment) rather than a recording. It needs no LFS checkout or bundled
+  asset in the app, is identical on every run, and with the scripted
+  recognizer the words don't depend on what the audio says. For a run on
+  Parakeet the model's per-chunk cost depends on the audio's length, not
+  its words, so `asr.chunk` stays meaningful; decoder cost is slightly
+  underestimated (fewer tokens), as `AudioFixture` documents.
+- *`asr.chunk`.* Only Parakeet emits it, and Parakeet needs its Core ML
+  models, which a hermetic CI run doesn't download. The CI baseline
+  therefore has no `asr.chunk`; it is measured on a device with
+  `BLAU_PERF_REPLAY_ASR=parakeet` (pending table below). The streaming
+  transcriber's own work (onset look-back, chunk feeding, commits) is in the
+  CPU and memory numbers either way.
+- *`voiceid.verify`.* The verification gate (#47) isn't built yet. The
+  interval now comes from `VoiceprintScorer.verify(_:config:)`, the scoring
+  and decision step the gate will call; the embeddings are synthetic because
+  WeSpeaker needs a model (its cost is `voiceid.embed`, measured by the
+  model benchmarks, docs/benchmarks.md).
+- *`memory.search`.* Hybrid retrieval (#64) isn't built yet. The session
+  composes what exists (`MemoryIndex.keywordSearch`, `vectorSearch` and
+  `reciprocalRankFusion`) inside the interval; switch it to the real search
+  when #64 lands.
+- *Baselines in CI.* XCTest's own baselines live in the `.xcodeproj`
+  (`xcshareddata/xcbaselines`), which is generated and never committed, and
+  are keyed by the exact machine. The gate is therefore a script over the
+  `.xcresult` (`xcresulttool get test-results metrics`) with committed JSON
+  baselines per machine type, which also lets the nightly job put a report
+  on the run's summary page.
+
+#### The regression gate
+
+`scripts/perf/perf-gate.py check` reads every metric of the run, takes the
+**median** of each metric's iterations, and compares it with the baseline:
+
+- **Worse by more than the tolerance fails** (10% unless the metric sets
+  `tolerancePercent`). "Worse" follows the metric's polarity, so a drop in
+  a prefers-larger metric fails too. An optional `minimumDelta` (in the
+  metric's unit) ignores changes too small to matter on tiny values.
+- **A baselined metric that wasn't measured fails** (a test that stopped
+  running can't pass the gate).
+- Better results and metrics without a baseline pass and are listed in the
+  report.
+
+What the session's metrics are good for, from local runs on the simulator:
+
+| Metric | Run-to-run spread | Gate |
+| --- | --- | --- |
+| CPU instructions retired | about 0.02% | 10% |
+| CPU time, CPU cycles | about 1% | 10% |
+| Peak and absolute physical memory | about 0.3% | 10% |
+| Clock time of the session | under 1% (the scripted server's pacing dominates it) | 10% |
+| Physical memory growth during a session | hundreds of kB, about 30% | 10% plus a `minimumDelta` of 2 MB |
+| `XCTOSSignpostMetric` durations | 10% to over 90% | wide tolerance plus a `minimumDelta`, see below |
+
+`XCTOSSignpostMetric` reports one interval's duration per iteration, not a
+total over the many intervals of a session, so a microsecond-scale
+`voiceid.verify` or a first `memory.search` on a fresh index swings far
+more than 10% between runs. Those metrics stay in the suite (they show up
+in Xcode's test report and the history) with a `tolerancePercent` and
+`minimumDelta` in the baseline, and a `note` saying so, so that only a gross
+regression of a single stage trips them. A real slowdown in any stage of the
+session moves the CPU instruction count, which is gated at 10%.
+
+The report is a Markdown table (on the nightly run's summary page, and in
+`.build/results/perf-report.md` locally). The extracted results
+(`perf-results.json`) are kept with the `.xcresult` as a 90-day artifact:
+the history, night by night.
+
+Baselines describe one kind of machine. `ci-simulator.json` is the CI
+runner's iPhone simulator; numbers from a Mac or a phone aren't comparable
+with it. To compare your own runs, record a personal baseline (they are
+gitignored) and check against it:
+
+```sh
+make perf perf-baseline PERF_BASELINE=local-m3     # BlauPerfTests/Baselines/local-m3.json
+make perf perf-check PERF_BASELINE=local-m3
+```
+
+### Micro-benchmarks
+
+`Packages/BlauKitBenchmarks` is a package of its own (so neither the app nor
+`swift test` in BlauKit resolves the tooling) with one
+[package-benchmark](https://github.com/ordo-one/benchmark) target,
+`KitBenchmarks`, run on the macOS host on deterministic data:
+
+| Benchmark | What one iteration does |
+| --- | --- |
+| `topics.segment-240-exchanges` | `TopicSegmenter` over a 240-exchange `ScriptedConversation` (about an hour of talk) on precomputed lexical embeddings: depth scores, statistics, hysteresis |
+| `topics.lexical-embed-240-exchanges` | `LexicalTextEmbedder` over the same 240 exchanges |
+| `memory.rrf-1000-queries-2x50-hits` | `reciprocalRankFusion` of a BM25 and a vector ranking (50 hits each, half shared) for 1,000 queries |
+| `memory.int8-top10-of-10k-256d-20-queries` | `VectorMatrix.nearest` (int8 dot products with vDSP plus a top-k heap) over 10,000 256-d rows, for 20 queries |
+
+```sh
+make microbench             # run and print p0...p100 per metric
+make microbench-check       # the gate: fails on a >10% regression
+make microbench-baseline    # rewrite Thresholds/ from this run
+```
+
+Each benchmark measures instructions retired, allocations, wall-clock and
+CPU time and throughput. **Only instructions and allocations are gated**
+(p90 within 10% of `Thresholds/<target>.<benchmark>.p90.json`): they come out
+the same on every run of the same build (p0 equals p100 in the tables
+above), while wall-clock and CPU time move by tens of percent on a shared CI
+machine. A real slowdown in this code shows up as more instructions or more
+allocations. package-benchmark exits 4 when a result is *better* than its
+threshold; `microbench.sh` treats that as a pass and suggests tightening the
+thresholds.
+
+The counts depend on the compiler and the OS libraries, so the committed
+thresholds are recorded on the CI runner (below). On a Mac with another
+Xcode the check may report deviations either way; record your own with
+`make microbench-baseline` to compare branches locally, and don't commit
+them.
+
+### Catching a regression in a pull request
+
+`perf-kit` runs on every pull request, so a change that makes the topic
+engine, the fusion or the vector search more than 10% more expensive fails
+its checks before it merges. Changes to the app pipeline (the session) are
+caught by the nightly `perf` job, or before merging by running **Actions >
+CI > Run workflow** on the pull request's branch with **Also run the
+performance suite** ticked.
+
+### Updating baselines
+
+When a change makes something slower on purpose, or the runner image or
+Xcode changes:
+
+1. **Actions > CI > Run workflow** on the branch, with **Also run the
+   performance suite** and **Record new performance baselines** ticked.
+2. Download `perf-results-<n>` (`ci-simulator.json`) and
+   `perf-kit-results-<n>` (`Thresholds/`), copy them to
+   `BlauPerfTests/Baselines/` and `Packages/BlauKitBenchmarks/Thresholds/`,
+   and commit them with a note in the pull request on why the numbers moved.
+3. A metric that is noisier than 10% on the runner gets a `tolerancePercent`
+   (or `minimumDelta`) in `ci-simulator.json` with a `note` saying why;
+   re-recording keeps both.
+
+### Baseline history
+
+PERF_HISTORY_TABLE
+
+**On device: pending.** The session on an iPhone with Parakeet needs a
+physical device with the models downloaded and a development-signed build
+(`make perf` builds unsigned for the simulator; run the same `xcodebuild
+test -scheme Blau-Perf -testPlan BlauPerf` with
+`'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) BLAU_PERF'`,
+`-destination 'id=<udid>' -allowProvisioningUpdates` and
+`TEST_RUNNER_BLAU_PERF_REPLAY_ASR=parakeet
+TEST_RUNNER_BLAU_PERF_REPLAY_SPEED=realtime`):
+
+| Run | Device | CPU time | Peak memory | `asr.chunk` | Notes |
+| --- | --- | --- | --- | --- | --- |
+| Scripted session, Parakeet, real time | iPhone | pending | pending | pending | |
+| Launch until responsive | iPhone | pending | | | |
+
 ## MetricKit and diagnostics
 
 MetricKit is how Blau hears about hangs, crashes, memory and launch time from
@@ -678,7 +914,7 @@ pending table there.
 
 ## What comes next
 
-The rest of the performance epic (#11) builds on these names: the XCTest
-performance suite with `XCTOSSignpostMetric` baselines (#73), the end-to-end
-latency budget (#74), the soak test (#76) and the debug HUD (#71). Thermal
-and power adaptation (#75) is described above.
+The rest of the performance epic (#11) builds on these names: the end-to-end
+latency budget (#74), the soak test (#76) and the debug HUD (#71). The XCTest
+performance suite and its CI baselines (#73) and thermal and power
+adaptation (#75) are described above.

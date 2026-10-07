@@ -3,7 +3,7 @@
 Every pull request and every push to `main` runs
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) on GitHub Actions.
 A nightly run on `main` repeats the suite against the current runner image and
-adds the performance tests and the ASR evaluation.
+adds the XCTest performance suite and the ASR evaluation.
 
 ## Jobs
 
@@ -12,24 +12,30 @@ adds the performance tests and the ASR evaluation.
 | `lint`          | swift-format (`make lint`), then the shell-script tests    | `make lint test-scripts` | nothing |
 | `package-tests` | `swift build --build-tests` and `swift test` in `Packages/BlauKit` on the macOS host | `make test-kit` | Swift Testing xUnit report |
 | `app-tests`     | XcodeGen, then the `Blau` scheme's `Blau` test plan (`BlauTests` + `BlauUITests`) on an iOS Simulator | `make test` | `app-tests.xcresult` |
-| `perf`          | Nightly (and on demand) only: `Blau-Perf` scheme, `BlauPerf` test plan, Release | `make perf` | `perf.xcresult` |
+| `perf-kit`      | The BlauKit micro-benchmarks (package-benchmark) on the macOS host; fails when an instruction or allocation count is more than 10% above `Packages/BlauKitBenchmarks/Thresholds` ([performance.md](performance.md#micro-benchmarks)) | `make microbench-check` | `perf-kit-results` (the check's output), 30 days; the output on the summary page |
+| `perf`          | Nightly (and on demand) only: `Blau-Perf` scheme, `BlauPerf` test plan, Release with the scripted session, then the regression gate against `BlauPerfTests/Baselines/ci-simulator.json` ([performance.md](performance.md#performance-suite)) | `make perf perf-check` | `perf-results` (`perf.xcresult`, `perf-report.md`, `perf-results.json`), 90 days; the report on the summary page |
 | `asr-eval`      | Nightly (and on demand) only: every ASR engine on the LFS fixtures with the real models; fails on the regression gate ([asr-eval.md](asr-eval.md#nightly-ci)) | `make eval-asr` | `asr-eval-report` (`report.json`, `report.md`, `summary.txt`), 90 days; `report.md` on the summary page |
 
-The three PR checks run in parallel, each on its own runner, so a lint failure
+The four PR checks run in parallel, each on its own runner, so a lint failure
 does not hide a test failure. Artifacts are on the run's summary page for 14
 days (30 for perf), named `<job>-…-<attempt>` so a re-run never collides with
 the first attempt. Open an `.xcresult` with Xcode, or run
 `xcrun xcresulttool get test-results summary --path app-tests.xcresult`.
 
 Run the perf job on demand from **Actions > CI > Run workflow** and tick
-**Also run the performance suite**. It has no baselines or regression gate
-yet; those come with the XCTest performance suite (#73). Simulator numbers are
-a smoke check only; real baselines come from a device.
+**Also run the performance suite**; run it on a pull request's branch to check
+a change the micro-benchmarks don't cover. Tick **Record new performance
+baselines** as well to have `perf` and `perf-kit` record baselines instead of
+checking them: the run uploads `ci-simulator.json` and `Thresholds/` as
+artifacts to commit (see [performance.md](performance.md#updating-baselines)).
+The suite runs on the runner's simulator, so its baselines describe that
+machine; device numbers are a separate, manual table.
 
 ## Triggers and cancellation
 
 - `pull_request`, `push` to `main`, `merge_group` (GitHub merge queue) and
-  `workflow_dispatch` run `lint`, `package-tests` and `app-tests`.
+  `workflow_dispatch` run `lint`, `package-tests`, `app-tests` and
+  `perf-kit`.
 - `schedule` (08:23 UTC daily, `main`) runs those plus `perf` and `asr-eval`.
   **Run workflow** has a checkbox for each of the two.
 - A new push to a pull request cancels that PR's in-flight run. Runs on `main`
@@ -85,6 +91,7 @@ When GitHub promotes Xcode 27 to a general-availability `macos-27` image, set
 | --------------- | ------------------------------------- | ----------------------------------------- |
 | `package-tests` | `Packages/BlauKit/.build`: clones, FluidAudio's binary artifacts and build products | Xcode build + `Package.swift` + `Package.resolved` |
 | `app-tests`, `perf` | `.build/DerivedData/SourcePackages`: package clones and binary artifacts | Xcode build + `Package.swift` + `Package.resolved` |
+| `perf-kit`      | `Packages/BlauKitBenchmarks/.build`: clones and build products | Xcode build + the benchmark package's `Package.swift` and `Package.resolved` + BlauKit's `Package.swift` |
 | `asr-eval`      | `Packages/BlauKit/.build` (shared with `package-tests`) and `.build/models`: the pinned Core ML models, about 700 MB | The same as `package-tests`; the models by `PinnedModelManifest.swift` |
 
 Each key changes only with the toolchain or the dependency graph, so a cache
@@ -119,8 +126,8 @@ that added CI (#15), `xcode-27` image, Xcode 27.1, warm cache:
 Booting the simulator and UI testing dominate. They grow with the number of UI
 tests, not with the code. If `app-tests` approaches the budget, move UI tests
 into their own job before reaching for a larger runner. Each job's
-`timeout-minutes` (15 to 40, 60 for `perf`) is a safety net for a hung
-simulator, not the budget.
+`timeout-minutes` (15 to 40, 60 for `asr-eval`, 90 for `perf`) is a safety
+net for a hung simulator, not the budget.
 
 ## Secrets
 
@@ -134,9 +141,9 @@ to a full commit SHA.
 
 ## Required checks
 
-To block merging on red CI, add `lint`, `package-tests` and `app-tests` as
-required status checks for `main` under **Settings > Branches** (or a
-ruleset). That is a repository setting, not part of the workflow.
+To block merging on red CI, add `lint`, `package-tests`, `app-tests` and
+`perf-kit` as required status checks for `main` under **Settings > Branches**
+(or a ruleset). That is a repository setting, not part of the workflow.
 
 ## Changing the workflow
 

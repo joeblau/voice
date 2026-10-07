@@ -55,9 +55,49 @@ test-ui: generate ## Run only the UI tests
 test-kit: ## Run the BlauKit package tests on the macOS host
 	cd Packages/BlauKit && swift test
 
+# XCTest performance suite (#73): launch metrics and the scripted five-minute
+# session, in Release with the BLAU_PERF condition (which compiles the replay
+# into the app), for the active architecture only. The result bundle goes to
+# PERF_RESULT; `make perf-check` compares it with the committed baseline for
+# PERF_BASELINE (BlauPerfTests/Baselines/<name>.json). See
+# docs/performance.md, "Performance suite".
+PERF_RESULT   ?= .build/results/perf.xcresult
+PERF_BASELINE ?= ci-simulator
+PERF_REPORT   ?= .build/results/perf-report.md
+PERF_RESULTS  ?= .build/results/perf-results.json
+PERF_FLAGS    := 'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$$(inherited) BLAU_PERF' ONLY_ACTIVE_ARCH=YES
+
 .PHONY: perf
-perf: generate ## Run performance tests (Blau-Perf scheme, Release)
-	$(XCODEBUILD) test -scheme Blau-Perf -testPlan BlauPerf -destination '$(DESTINATION)' $(SIM_FLAGS) XAI_DEV_API_KEY=
+perf: generate ## Run performance tests (Blau-Perf scheme, Release + BLAU_PERF) into PERF_RESULT
+	rm -rf '$(PERF_RESULT)'
+	$(XCODEBUILD) test -scheme Blau-Perf -testPlan BlauPerf -destination '$(DESTINATION)' \
+		-resultBundlePath '$(PERF_RESULT)' $(SIM_FLAGS) $(PERF_FLAGS) XAI_DEV_API_KEY=
+
+.PHONY: perf-check
+perf-check: ## Compare PERF_RESULT with the PERF_BASELINE baseline; fails on a >10% regression
+	scripts/perf/perf-gate.py check --xcresult '$(PERF_RESULT)' \
+		--baseline BlauPerfTests/Baselines/$(PERF_BASELINE).json --report '$(PERF_REPORT)' \
+		--results-output '$(PERF_RESULTS)'
+
+.PHONY: perf-baseline
+perf-baseline: ## Record PERF_RESULT as the PERF_BASELINE baseline (commit it)
+	scripts/perf/perf-gate.py record --xcresult '$(PERF_RESULT)' \
+		--baseline BlauPerfTests/Baselines/$(PERF_BASELINE).json --environment $(PERF_BASELINE)
+
+# BlauKit micro-benchmarks (#73): package-benchmark in Packages/BlauKitBenchmarks
+# on this Mac. The check gates instructions and allocations at 10% against
+# Packages/BlauKitBenchmarks/Thresholds. See scripts/perf/microbench.sh.
+.PHONY: microbench
+microbench: ## Run the BlauKit micro-benchmarks (topic engine, RRF, int8 search) on this Mac
+	scripts/perf/microbench.sh run
+
+.PHONY: microbench-check
+microbench-check: ## Run the micro-benchmarks and fail on a >10% regression against Thresholds/
+	scripts/perf/microbench.sh check
+
+.PHONY: microbench-baseline
+microbench-baseline: ## Rewrite the micro-benchmark thresholds from a run on this Mac (commit them)
+	scripts/perf/microbench.sh update
 
 # On-device model benchmarks (#22): a physical iPhone (DEVICE=<udid> from
 # `xcrun devicectl list devices`) with signing set up. Results land in the
@@ -96,10 +136,11 @@ secrets: ## Create Config/Secrets.xcconfig from the example (kept if it exists)
 	env -u XAI_DEV_API_KEY scripts/write-secrets-xcconfig.sh
 
 .PHONY: test-scripts
-test-scripts: ## Test the secrets, CI and Instruments template scripts
+test-scripts: ## Test the secrets, CI, Instruments template and perf gate scripts
 	scripts/tests/test-secrets-scripts.sh
 	scripts/tests/test-ci-scripts.sh
 	scripts/tests/test-instruments-template.sh
+	scripts/tests/test-perf-gate.sh
 
 # Instruments template (Tools/Instruments; see docs/performance.md).
 #   TRACE_DEVICE  device name or UDID for `make trace`

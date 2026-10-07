@@ -33,6 +33,8 @@ struct BlauApp: App {
             .environment(diagnostics)
             .task { await environment.start() }
             .debugBenchmarksEntry()
+            // The perf suite's scripted session (#73): only with BLAU_PERF_REPLAY=1.
+            .perfReplayEntry(models: environment.speechModels)
         }
         .onChange(of: scenePhase, initial: true) { _, phase in
             environment.handleScenePhase(phase)
