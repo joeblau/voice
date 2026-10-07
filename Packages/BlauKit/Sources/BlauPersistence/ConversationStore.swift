@@ -243,8 +243,13 @@ public actor ConversationStore: ModelActor {
     /// Stores a final utterance and drops its partial. The save is batched
     /// by `savePolicy`.
     ///
-    /// The utterance joins its conversation and, if that is the active
-    /// conversation, its open topic. Committing an utterance with the same
+    /// The utterance joins its conversation and the topic whose span covers
+    /// its `startedAt`: usually the open topic, or for a late commit (one
+    /// that started before the current boundary, after `closeTopic`, or
+    /// after the conversation ended) the topic that was current then. A late
+    /// commit after stop joins the conversation's last topic, which the stop
+    /// closed. An utterance outside every topic stays topicless until
+    /// `openTopic(at:)` adopts it. Committing an utterance with the same
     /// `id` again (for example after the second ASR pass adds punctuation,
     /// even when that lands after the conversation ended or after a
     /// relaunch) updates the stored text instead of adding a row. Blank
@@ -286,7 +291,7 @@ public actor ConversationStore: ModelActor {
             if let voiceScore { stored.voiceScore = voiceScore }
         } else {
             let conversation = try self.conversation(utterance.conversationID)
-            let topic = isActive ? self.topic(at: utterance.startedAt, in: conversation) : nil
+            let topic = self.topic(at: utterance.startedAt, in: conversation, isActive: isActive)
             let stored = StoredUtterance(
                 utterance,
                 source: source,
@@ -513,13 +518,27 @@ public actor ConversationStore: ModelActor {
         return topic
     }
 
-    /// The topic an utterance that started at `date` belongs to: the open
-    /// topic, unless the utterance started before it (a late commit across a
-    /// boundary), in which case the topic that was current at `date`.
-    private func topic(at date: Date, in conversation: Conversation) -> Topic? {
-        guard let currentTopic else { return nil }
-        if date >= currentTopic.startedAt { return currentTopic }
-        return (conversation.topics ?? []).filter { $0.startedAt <= date }.max { $0.startedAt < $1.startedAt }
+    /// The topic an utterance that started at `date` belongs to.
+    ///
+    /// In the active conversation that is the open topic, unless the
+    /// utterance started before it (a late commit across a boundary).
+    /// Otherwise, including after `closeTopic` and in a conversation that
+    /// isn't active, it is the latest topic that started at or before `date`
+    /// and hadn't closed by then. A topic closed by the end of the
+    /// conversation still takes utterances that start after that end: they
+    /// are the late commits after stop (the agent's final transcript, the
+    /// user's last end-of-utterance). Topics are walked only off the hot
+    /// path, when there is no open topic or the commit is late.
+    private func topic(at date: Date, in conversation: Conversation, isActive: Bool) -> Topic? {
+        if isActive, let currentTopic, date >= currentTopic.startedAt { return currentTopic }
+        let latest = (conversation.topics ?? [])
+            .filter { $0.startedAt <= date }
+            .max { $0.startedAt < $1.startedAt }
+        guard let latest, let topicEnd = latest.endedAt, date >= topicEnd else { return latest }
+        // `date` is after `latest` closed. That is a gap between topics
+        // unless the conversation's end closed it.
+        if let conversationEnd = conversation.endedAt, topicEnd >= conversationEnd { return latest }
+        return nil
     }
 
     private static func defaultSource(for speaker: Speaker) -> TranscriptSource {

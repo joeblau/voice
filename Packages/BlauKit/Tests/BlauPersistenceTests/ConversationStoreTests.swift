@@ -199,6 +199,67 @@ struct ConversationStoreUtteranceTests {
         #expect(saved.topic == nil)
     }
 
+    /// The agent's final transcript and the user's last end-of-utterance
+    /// usually commit after the user taps stop, which closes the last topic.
+    @Test func aLateCommitAfterStopJoinsTheLastTopic() async throws {
+        let fixture = try StoreFixture()
+        let store = fixture.store
+        let conversation = try await store.startConversation()
+        let topic = try await store.openTopic(at: storeT0)
+        try await store.commitUtterance(makeUtterance("hello", in: conversation, at: 1))
+        try await store.endConversation(at: storeT0 + 30)
+        try await store.commitUtterance(makeUtterance("Bye!", in: conversation, at: 29, speaker: .agent))
+        try await store.commitUtterance(makeUtterance("see you", in: conversation, at: 31))
+        try await store.flush()
+
+        let utterances = try #require(try fixture.saved(Conversation.self).first).orderedUtterances
+        #expect(utterances.map(\.topic?.id) == [topic, topic, topic])
+    }
+
+    @Test func aLateCommitToAnEndedConversationJoinsTheTopicCoveringItsStart() async throws {
+        let fixture = try StoreFixture()
+        let store = fixture.store
+        let conversation = try await store.startConversation()
+        let first = try await store.openTopic(at: storeT0)
+        let second = try await store.openTopic(at: storeT0 + 10)
+        try await store.endConversation(at: storeT0 + 30)
+        try await store.commitUtterance(makeUtterance("from the first", in: conversation, at: 5))
+        try await store.commitUtterance(makeUtterance("from the second", in: conversation, at: 25))
+        try await store.flush()
+
+        let utterances = try #require(try fixture.saved(Conversation.self).first).orderedUtterances
+        #expect(utterances.map(\.topic?.id) == [first, second])
+    }
+
+    @Test func aLateCommitToAnEndedConversationBetweenTopicsStaysTopicless() async throws {
+        let fixture = try StoreFixture()
+        let store = fixture.store
+        let conversation = try await store.startConversation()
+        let first = try await store.openTopic(at: storeT0)
+        try await store.closeTopic(first, at: storeT0 + 10)
+        let second = try await store.openTopic(at: storeT0 + 20)
+        try await store.endConversation(at: storeT0 + 30)
+        try await store.commitUtterance(makeUtterance("in the gap", in: conversation, at: 12))
+        try await store.commitUtterance(makeUtterance("after stop", in: conversation, at: 31))
+        try await store.flush()
+
+        let utterances = try #require(try fixture.saved(Conversation.self).first).orderedUtterances
+        #expect(utterances.map(\.topic?.id) == [nil, second])
+    }
+
+    @Test func aLateCommitAfterARelaunchWithoutResumingJoinsTheOpenTopic() async throws {
+        let fixture = try StoreFixture()
+        let id = try await fixture.store.startConversation(at: storeT0)
+        let topic = try await fixture.store.openTopic(at: storeT0)
+        try await fixture.store.flush()
+
+        let relaunched = ConversationStore(modelContainer: fixture.container, clock: fixture.clock)
+        try await relaunched.commitUtterance(makeUtterance("late", in: id, at: 5, speaker: .agent))
+        try await relaunched.flush()
+
+        #expect(try fixture.saved(StoredUtterance.self).first?.topic?.id == topic)
+    }
+
     /// The second ASR pass for the last utterance usually finishes after the
     /// user taps stop.
     @Test func recommittingAfterTheConversationEndedRefinesInsteadOfDuplicating() async throws {
@@ -391,6 +452,20 @@ struct ConversationStoreTopicTests {
 
         let utterances = try #require(try fixture.saved(Conversation.self).first).orderedUtterances
         #expect(utterances.map(\.topic?.id) == [first, second])
+    }
+
+    @Test func aLateCommitAfterCloseTopicJoinsTheClosedTopicItStartedIn() async throws {
+        let fixture = try StoreFixture()
+        let store = fixture.store
+        let conversation = try await store.startConversation()
+        let topic = try await store.openTopic(at: storeT0)
+        try await store.closeTopic(topic, at: storeT0 + 10)
+        try await store.commitUtterance(makeUtterance("started inside", in: conversation, at: 8))
+        try await store.commitUtterance(makeUtterance("between topics", in: conversation, at: 12))
+        try await store.flush()
+
+        let utterances = try #require(try fixture.saved(Conversation.self).first).orderedUtterances
+        #expect(utterances.map(\.topic?.id) == [topic, nil])
     }
 
     @Test func openingATopicNeedsAnActiveConversation() async throws {
