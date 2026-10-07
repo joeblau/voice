@@ -58,7 +58,7 @@ perf: generate ## Run performance tests (Blau-Perf scheme, Release)
 
 .PHONY: secrets
 secrets: ## Create Config/Secrets.xcconfig from the example (kept if it exists)
-	scripts/write-secrets-xcconfig.sh
+	env -u XAI_DEV_API_KEY scripts/write-secrets-xcconfig.sh
 
 .PHONY: test-scripts
 test-scripts: ## Test the secrets build scripts

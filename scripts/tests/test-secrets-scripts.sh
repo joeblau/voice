@@ -92,12 +92,32 @@ case "$(ls -l "$secrets")" in
     -rw-------*) pass "writer: file is private (0600)" ;;
     *) fail "writer: file is private (0600)" ;;
 esac
+if grep -q -F "warning: Xcode copies XAI_DEV_API_KEY" "$work/out"; then
+    pass "writer: warns that Xcode copies a set key into build products and logs"
+else
+    fail "writer: warns that Xcode copies a set key into build products and logs"
+fi
+
+rm -f "$secrets"
+echo "old" >"$secrets"
+chmod 644 "$secrets"
+expect "writer: rewrites an existing world-readable file" 0 \
+    env XAI_DEV_API_KEY="$fake_key" "$write" "$secrets"
+case "$(ls -l "$secrets")" in
+    -rw-------*) pass "writer: existing 0644 file becomes private (0600)" ;;
+    *) fail "writer: existing 0644 file becomes private (0600)" ;;
+esac
 
 expect "writer: empty secret writes an empty key" 0 env XAI_DEV_API_KEY= "$write" "$secrets"
 if grep -q -x "XAI_DEV_API_KEY = " "$secrets"; then
     pass "writer: empty key assignment"
 else
     fail "writer: empty key assignment"
+fi
+if grep -q -F "warning:" "$work/out"; then
+    fail "writer: no warning for an empty key"
+else
+    pass "writer: no warning for an empty key"
 fi
 
 expect "writer: rejects xcconfig comment sequence" 1 env XAI_DEV_API_KEY="abc//def" "$write" "$secrets"
@@ -116,6 +136,36 @@ if [ "$(cat "$secrets")" = "keep" ]; then
     pass "writer: existing file unchanged"
 else
     fail "writer: existing file unchanged"
+fi
+
+# --- repo guards ---------------------------------------------------------------
+
+repo="$scripts_dir/.."
+
+# The documented CI recipe must not map the Actions secret into the build: with
+# the key set, Xcode copies it into .xcresult/DerivedData/.app artifacts.
+for file in "$repo/docs/configuration.md" "$write"; do
+    if grep -q -F 'secrets.XAI_DEV_API_KEY }}' "$file"; then
+        fail "$(basename "$file"): no CI recipe maps secrets.XAI_DEV_API_KEY"
+    else
+        pass "$(basename "$file"): no CI recipe maps secrets.XAI_DEV_API_KEY"
+    fi
+done
+
+if grep -E -q '^[[:space:]]+env -u XAI_DEV_API_KEY scripts/write-secrets-xcconfig.sh$' "$repo/Makefile"; then
+    pass "make secrets never writes a key from the shell environment"
+else
+    fail "make secrets never writes a key from the shell environment"
+fi
+
+# The embedded-secrets phase must not log its environment (XAI_DEV_API_KEY).
+if awk '/- name: Check for embedded secrets/ { inphase = 1; next }
+        inphase && /^ *- name:|^    [a-z]/ { inphase = 0 }
+        inphase && /showEnvVars: false/ { found = 1 }
+        END { exit !found }' "$repo/project.yml"; then
+    pass "project.yml: embedded-secrets phase sets showEnvVars: false"
+else
+    fail "project.yml: embedded-secrets phase sets showEnvVars: false"
 fi
 
 # --- example file -------------------------------------------------------------

@@ -72,6 +72,25 @@ Keychain on first launch, which saves typing it on every simulator. Without it
 the app behaves exactly like a user's install: it asks for a key in onboarding
 or Settings, and features that need xAI stay unavailable until one is entered.
 
+### Where a configured key ends up
+
+`XAI_DEV_API_KEY` is an ordinary build setting, so while it is set Xcode
+copies it, in clear text, into:
+
+- the Debug app's `Info.plist` (`BlauXAIDevAPIKey`), and so the `.app`, any
+  `.ipa` and the simulator's installed copy;
+- DerivedData, including the build manifests under `XCBuildData/`;
+- the build log and `.xcresult` bundle of any run script phase that logs its
+  environment. Xcode exports every build setting to every script phase and,
+  by default, prints each `export` line. Blau's own **Check for embedded
+  secrets** phase turns that off (`showEnvVars: false` in `project.yml`), but
+  a script phase added later, or one from a package plugin, may not.
+
+So never share or upload build logs, `.xcresult` bundles, DerivedData or
+`.app` files from a machine (or CI job) that has a key configured. The scripts
+themselves print only the key's length, but that does not stop Xcode from
+writing the key elsewhere.
+
 ## Release builds fail on embedded keys
 
 The `Blau` target has a post-build phase, **Check for embedded secrets**, which
@@ -86,30 +105,51 @@ build if:
 
 As defence in depth, `Release.xcconfig` also forces
 `BLAU_INFO_XAI_DEV_API_KEY` to empty, so the key never reaches a release
-Info.plist even if the check were bypassed. The script prints only the key's
-length, never the key.
+Info.plist even if the check were bypassed. The check script reports only the
+key's length; see [Where a configured key ends up](#where-a-configured-key-ends-up)
+for what Xcode itself writes.
 
-The `Blau-Perf` scheme builds Release. `make perf` passes `XAI_DEV_API_KEY=`
-on the command line so it works with a local key; running that scheme from
-Xcode with a key configured fails, by design.
+The `Blau-Perf` scheme and the `Blau` scheme's Profile action (Product >
+Profile) build Release. `make perf` passes `XAI_DEV_API_KEY=` on the command
+line so it works with a local key; running either from Xcode with a key
+configured fails, by design.
 
 ## CI
 
-CI creates `Config/Secrets.xcconfig` from a GitHub Actions secret before
-building:
+**CI does not need the key, and test jobs must leave it unset.** Unit, UI and
+performance tests are hermetic and never call xAI, and `#include?` means a
+missing `Secrets.xcconfig` is fine. Do not map `secrets.XAI_DEV_API_KEY` into
+any workflow, job or step `env:`. Either skip the secrets step entirely, or,
+if a later step expects the file to exist, write the empty template:
 
 ```yaml
-- name: Write Secrets.xcconfig
-  run: scripts/write-secrets-xcconfig.sh
-  env:
-    XAI_DEV_API_KEY: ${{ secrets.XAI_DEV_API_KEY }}
+- name: Write Secrets.xcconfig (empty key)
+  run: env -u XAI_DEV_API_KEY scripts/write-secrets-xcconfig.sh
 ```
 
-The secret is optional. Tests are hermetic and never call xAI, so an unset
-secret just writes an empty key. **Never set it for Release, TestFlight or App
-Store jobs** (#83): those builds would fail the embedded-secrets check.
-The script writes the file with mode 0600, rejects values that would break the
-xcconfig syntax, and never prints the key.
+`env -u` guarantees the empty template even if a workflow-level `env:` ever
+sets the variable.
+
+Why: this is a public repository, and CI uploads `.xcresult` bundles as
+artifacts (#15). GitHub masks secrets in the console log but **not inside
+uploaded artifacts**. With the key set, it would be in the Debug `.app`, in
+DerivedData and in any script phase's logged environment (see
+[Where a configured key ends up](#where-a-configured-key-ends-up)), so anyone
+who can download an artifact could read it.
+
+If a job ever genuinely needs the key (none does today), it must:
+
+- map the secret into the `env:` of the one step that runs
+  `scripts/write-secrets-xcconfig.sh`, in that job only;
+- **never upload** `.xcresult` bundles, build logs, DerivedData, `.app` or
+  `.ipa` files, or anything else built while the key was set, and never cache
+  DerivedData across jobs;
+- never be a Release, TestFlight or App Store job (#83): those builds fail the
+  embedded-secrets check while the key is non-empty.
+
+The writer sets the file's mode to 0600 (also when it replaces an existing
+file), rejects values that would break the xcconfig syntax, and prints only
+the key's length plus a warning about the above.
 
 `make test-scripts` runs `scripts/tests/test-secrets-scripts.sh`, the
 hermetic tests for both scripts.

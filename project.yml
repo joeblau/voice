@@ -99,6 +99,8 @@ targets:
     postBuildScripts:
       # Release only (BLAU_FORBID_EMBEDDED_SECRETS): fail if XAI_DEV_API_KEY
       # is set or an xAI key is found in the built executable or Info.plist.
+      # showEnvVars: false keeps Xcode from printing every build setting,
+      # XAI_DEV_API_KEY included, into the build log and .xcresult.
       - name: Check for embedded secrets
         script: /bin/sh "${SCRIPT_INPUT_FILE_0}" "${SCRIPT_INPUT_FILE_1}" "${SCRIPT_INPUT_FILE_2}"
         inputFiles:
@@ -106,6 +108,7 @@ targets:
           - $(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)
           - $(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)
         basedOnDependencyAnalysis: false
+        showEnvVars: false
     entitlements:
       path: Blau/Supporting/Blau.entitlements
       properties:
