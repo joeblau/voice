@@ -39,12 +39,31 @@ activity="$work/activity.xml"
 hud="$work/hud.json"
 log="$work/xctrace.log"
 xctrace_pid=""
+test_pid=""
+target=""
 
-cleanup() {
+# Stops a recording and a workload left over from a failed attempt, so a
+# retry doesn't wait on SwiftPM's lock or attach to the old process.
+stop_attempt() {
     if [[ -n "$xctrace_pid" ]] && kill -0 "$xctrace_pid" 2>/dev/null; then
         kill -INT "$xctrace_pid" 2>/dev/null || true
         wait "$xctrace_pid" 2>/dev/null || true
     fi
+    xctrace_pid=""
+    if [[ -n "$target" ]]; then
+        kill "$target" 2>/dev/null || true
+    fi
+    target=""
+    if [[ -n "$test_pid" ]] && kill -0 "$test_pid" 2>/dev/null; then
+        pkill -P "$test_pid" 2>/dev/null || true
+        kill "$test_pid" 2>/dev/null || true
+        wait "$test_pid" 2>/dev/null || true
+    fi
+    test_pid=""
+}
+
+cleanup() {
+    stop_attempt
     if [[ $keep -eq 0 ]]; then
         rm -rf "$work"
     fi
@@ -77,7 +96,8 @@ record() {
     xcrun xctrace record --instrument os_signpost --instrument "Activity Monitor" --attach "$target" \
         --time-limit 300s --output "$trace" >"$log" 2>&1 &
     xctrace_pid=$!
-    for _ in $(seq 1 120); do
+    # Starting can take minutes on a heavily loaded host.
+    for _ in $(seq 1 600); do
         grep -q "Ctrl-C to stop" "$log" 2>/dev/null && break
         kill -0 "$xctrace_pid" 2>/dev/null || { cat "$log" >&2; return 1; }
         sleep 0.5
@@ -106,6 +126,8 @@ record() {
     fi
     wait "$xctrace_pid" || true
     xctrace_pid=""
+    test_pid=""
+    target=""
     grep -q "Output file saved" "$log" || { echo "xctrace did not save the trace" >&2; cat "$log" >&2; return 1; }
     [[ -s "$hud" ]] || { echo "The workload wrote no HUD readings" >&2; return 1; }
 
@@ -125,6 +147,7 @@ for attempt in 1 2; do
         break
     fi
     echo "==> The trace has no Blau signposts (attempt $attempt)" >&2
+    stop_attempt
 done
 [[ $recorded -eq 1 ]] || { echo "Could not record the workload" >&2; exit 1; }
 
