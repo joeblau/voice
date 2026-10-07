@@ -73,6 +73,33 @@ struct XAIAccountConnectionTests {
         #expect(problem.kind == .offline)
     }
 
+    @Test func aTransientFailureKeepsAVerifiedKeyVerified() async throws {
+        let account = makeAccount()
+        await account.connect(apiKey: TestKeys.primaryRaw)
+        let verified = XAIAccount.Status.connected(.init(redacted: "•••• a1b2", name: "blau-dev", verified: true))
+        #expect(account.status == verified)
+
+        let transient: [XAIError] = [
+            .network(code: URLError.timedOut.rawValue), .server(status: 503, message: nil),
+            .rateLimited(retryAfter: nil),
+        ]
+        for error in transient {
+            validator.setOutcome(.failure(error))
+            #expect(!(await account.testConnection(now: now)))
+            // The check reports the failure; the key is still verified.
+            guard case .failed = account.connectionCheck else {
+                Issue.record("Expected a failure for \(error)")
+                return
+            }
+            #expect(account.status == verified)
+        }
+
+        // A key-level failure does unverify it.
+        validator.setOutcome(.failure(.invalidAPIKey(message: nil)))
+        #expect(!(await account.testConnection(now: now)))
+        #expect(account.status == .connected(.init(redacted: "•••• a1b2", name: "blau-dev", verified: false)))
+    }
+
     @Test func withoutAKeyThereIsNothingToTest() async {
         let account = makeAccount()
         await account.load()

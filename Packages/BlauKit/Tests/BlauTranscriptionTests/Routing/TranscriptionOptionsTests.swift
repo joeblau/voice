@@ -82,6 +82,33 @@ struct TranscriptionOptionsTests {
         #expect(settings.appleAvailability == nil)
     }
 
+    @Test func aSlowCheckForTheOldLanguageIsDropped() async {
+        // The check waits until the test releases it, so the language can
+        // change while it is in flight.
+        let (started, startedContinuation) = AsyncStream.makeStream(of: Void.self)
+        let (release, releaseContinuation) = AsyncStream.makeStream(of: Void.self)
+        let settings = TranscriptionSettings(
+            store: InMemoryTranscriptionPreferencesStore(), options: InMemoryTranscriptionOptionsStore(),
+            availability: {
+                startedContinuation.yield()
+                for await _ in release { break }
+                return .installed(locale: "en_US")
+            })
+
+        let check = Task { await settings.refreshAvailability() }
+        for await _ in started { break }
+        settings.language = .locale("fr_FR")
+        releaseContinuation.yield()
+        await check.value
+        #expect(settings.appleAvailability == nil)
+
+        // A check for the current language still lands.
+        let current = Task { await settings.refreshAvailability() }
+        releaseContinuation.yield()
+        await current.value
+        #expect(settings.appleAvailability == .installed(locale: "en_US"))
+    }
+
     @Test func optionsDecodeLeniently() throws {
         let decoder = JSONDecoder()
         #expect(try decoder.decode(TranscriptionOptions.self, from: Data("{}".utf8)) == .default)

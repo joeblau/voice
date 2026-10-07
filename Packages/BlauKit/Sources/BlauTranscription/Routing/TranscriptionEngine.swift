@@ -197,8 +197,15 @@ public final class TranscriptionSettings {
     }
 
     /// Re-checks Apple's engine for the user's language.
+    ///
+    /// A check that finishes after the language changed (or after its task
+    /// was cancelled) is dropped, so a slow check for the old language can't
+    /// overwrite the new language's result.
     public func refreshAvailability() async {
-        appleAvailability = await availabilityCheck()
+        let language = options.language
+        let availability = await availabilityCheck()
+        guard !Task.isCancelled, options.language == language else { return }
+        appleAvailability = availability
     }
 
     /// The current effective preference (`effectiveEnginePreference`),

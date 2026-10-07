@@ -360,10 +360,22 @@ public final class XAIAccount {
             return true
         } catch {
             Self.logger.notice("xAI connection test failed: \(String(describing: error), privacy: .public)")
-            status = .connected(ConnectedKey(redacted: key.redacted, name: knownName, verified: false))
+            // Only a problem with the key or the account (invalid, switched
+            // off, no credits) unverifies it. A transient failure (offline,
+            // a timeout, a server error) says nothing about the key, so a
+            // key that was verified stays verified; `connectionCheck` still
+            // reports the failure.
+            if error.requiresUserAction || !Self.isCurrent(status, key) {
+                status = .connected(ConnectedKey(redacted: key.redacted, name: knownName, verified: false))
+            }
             connectionCheck = .failed(XAIAccountProblem(error))
             return false
         }
+    }
+
+    /// Whether `status` already describes `key` as connected.
+    private static func isCurrent(_ status: Status, _ key: XAIAPIKey) -> Bool {
+        if case .connected(let current) = status { current.redacted == key.redacted } else { false }
     }
 
     /// Hides the current problem.
