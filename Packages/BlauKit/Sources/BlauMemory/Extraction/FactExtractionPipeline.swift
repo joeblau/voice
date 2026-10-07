@@ -416,7 +416,7 @@ public actor FactExtractionPipeline {
             guard window.contains(where: { $0.utterance.speaker == .user }) else { continue }
             try Task.checkCancellation()
 
-            let known = try await store.entities()
+            let known = EntityResolver.settingAsideEmptyDuplicates(try await store.entities())
             let text = window.map(\.utterance.text).joined(separator: "\n")
             let mentioned = FactExtractionPrompt.mentionedEntities(
                 known, in: text, limit: configuration.knownEntityLimit)

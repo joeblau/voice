@@ -109,12 +109,79 @@ struct SwiftDataMemoryFactStoreTests {
         #expect(result.mergedEntityCount == 1)
 
         let entities = try fixture.storedEntities()
-        #expect(entities.map(\.id) == [canonical.id])
-        #expect(entities[0].aliasNames == ["Acme Robotics"])
-        #expect(entities[0].summary == "Robots")
+        let merged = try #require(entities.first { $0.id == canonical.id })
+        #expect(merged.aliasNames == ["Acme Robotics"])
+        #expect(merged.summary == "Robots")
         let facts = try fixture.storedFacts()
         #expect(facts.count == 2)
         #expect(facts.allSatisfy { $0.subject?.id == canonical.id })
+
+        // Add-only: the duplicate is emptied, not deleted.
+        let emptied = try #require(entities.first { $0.id == duplicate.id })
+        #expect(emptied.facts?.isEmpty ?? true)
+        let known = try await fixture.facts.entities()
+        #expect(known.first { $0.id == canonical.id }?.factCount == 2)
+        #expect(known.first { $0.id == duplicate.id }?.factCount == 0)
+    }
+
+    /// The merge exists for the same entity created on two devices while
+    /// offline. The other device can still add facts to its copy after this
+    /// one merged it (or this device may not have imported them yet).
+    /// Deleting the duplicate would cascade to those facts once synced, and
+    /// a fact imported after its subject is gone would read as a fact about
+    /// the user. So the duplicate is kept, and its late facts survive.
+    @Test func aFactAddedToAMergedDuplicateSurvives() async throws {
+        let fixture = try TopicFixture()
+        let context = ModelContext(fixture.container)
+        let canonical = MemoryEntity(name: "Acme", type: .organization, createdAt: Support.t0)
+        let duplicate = MemoryEntity(name: "Acme", type: .organization, createdAt: Support.t0.addingTimeInterval(10))
+        context.insert(canonical)
+        context.insert(duplicate)
+        context.insert(
+            Fact(
+                subject: duplicate, predicate: "makes", objectText: "anvils", validFrom: Support.t0,
+                origin: .extracted))
+        try context.save()
+        let duplicateID = duplicate.id
+        let canonicalID = canonical.id
+
+        var merge = MemoryWritePlan(recordedAt: Support.t0.addingTimeInterval(100))
+        merge.merges = [.init(canonicalID: canonicalID, duplicateIDs: [duplicateID])]
+        _ = try await fixture.facts.apply(merge)
+
+        // The other device's fact, written to its copy, arrives afterwards.
+        let importing = ModelContext(fixture.container)
+        let synced = try #require(
+            try importing.fetch(FetchDescriptor<MemoryEntity>(predicate: #Predicate { $0.id == duplicateID })).first)
+        let lateID = UUID()
+        importing.insert(
+            Fact(
+                id: lateID, subject: synced, predicate: "raised", objectText: "$5M",
+                validFrom: Support.t0.addingTimeInterval(50), origin: .extracted))
+        try importing.save()
+        // And this device's own pipeline writes one with the duplicate's id
+        // (an extraction planned before the merge was read back).
+        var late = MemoryWritePlan(recordedAt: Support.t0.addingTimeInterval(200))
+        let planned = newFact("hired", "Ada", subject: duplicateID, at: 60)
+        late.newFacts = [planned]
+        #expect(try await fixture.facts.apply(late).insertedFactIDs == [planned.id])
+
+        var facts = try fixture.storedFacts()
+        #expect(facts.count == 3)
+        let raised = try #require(facts.first { $0.id == lateID })
+        #expect(raised.subject?.id == duplicateID)
+        let hired = try #require(facts.first { $0.id == planned.id })
+        #expect(hired.subject?.id == duplicateID)
+        #expect(facts.allSatisfy { $0.subject != nil })
+
+        // The next merge picks them up.
+        var again = MemoryWritePlan(recordedAt: Support.t0.addingTimeInterval(300))
+        again.merges = [.init(canonicalID: canonicalID, duplicateIDs: [duplicateID])]
+        #expect(try await fixture.facts.apply(again).mergedEntityCount == 1)
+        facts = try fixture.storedFacts()
+        #expect(facts.count == 3)
+        #expect(facts.allSatisfy { $0.subject?.id == canonicalID })
+        #expect(try fixture.storedEntities().count == 2)
     }
 
     @Test func readsMergeCloudKitCopiesOfOneEntity() async throws {

@@ -88,8 +88,17 @@ didn't list:
    ignoring case, diacritics, width and whitespace; then one matching an
    extracted alias. If several known records match the name (the same
    entity created on two devices while offline), the oldest is kept and the
-   others are merged into it: their facts move, their names become aliases,
-   the duplicates are deleted.
+   others are merged into it: their facts move and their names become
+   aliases. The duplicates are **kept, empty, never deleted**:
+   `MemoryEntity.facts` cascades, so deleting one would, once synced, also
+   delete the facts the other device added to its copy that this device
+   hadn't seen yet, and a fact imported after its subject is gone would read
+   as a fact about the user. Every device picks the same canonical record
+   (oldest, then by id), so a fact that lands on a duplicate later is moved
+   by the next merge. A duplicate with no facts is set aside before matching
+   (`EntityResolver.settingAsideEmptyDuplicates`, its names folded into the
+   record it duplicates), so it isn't merged again on every extraction or
+   listed twice in the prompt.
 2. **Embedding similarity.** Otherwise the name is embedded with the shared
    text embedding service (#60) and compared with known entities of a
    compatible type (the 500 most recent); the best cosine similarity at or
@@ -105,7 +114,8 @@ resolves to the same new entity.
 ## Add-only, validity-dated facts
 
 `FactReconciler` turns the reply into a `MemoryWritePlan`. Nothing is ever
-deleted by extraction; only the user deletes facts.
+deleted by extraction, neither facts nor entities (an entity delete would
+cascade to its facts); only the user deletes facts.
 
 | Case | Result |
 | --- | --- |

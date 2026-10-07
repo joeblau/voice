@@ -37,18 +37,20 @@ public actor SwiftDataMemoryFactStore: ModelActor, MemoryFactStoring {
         var order: [UUID] = []
         var byID: [UUID: KnownEntity] = [:]
         for record in records {
+            let factCount = record.facts?.count ?? 0
             if var existing = byID[record.id] {
                 for alias in [record.name] + record.aliasNames where !existing.matches(alias) {
                     existing.aliases.append(alias)
                 }
                 existing.summary = existing.summary ?? record.summary
+                existing.factCount = (existing.factCount ?? 0) + factCount
                 byID[record.id] = existing
                 continue
             }
             order.append(record.id)
             byID[record.id] = KnownEntity(
                 id: record.id, name: record.name, type: record.type, aliases: record.aliasNames,
-                summary: record.summary, createdAt: record.createdAt)
+                summary: record.summary, createdAt: record.createdAt, factCount: factCount)
         }
         return order.compactMap { byID[$0] }
     }
@@ -81,7 +83,11 @@ public actor SwiftDataMemoryFactStore: ModelActor, MemoryFactStoring {
                 + plan.newFacts.compactMap(\.subjectID))
 
         // Merge duplicate records into the canonical one before adding
-        // facts, so nothing new lands on a record about to be deleted.
+        // facts, so this plan's new facts land on the canonical record.
+        // Add-only: the duplicate is emptied, never deleted. Its `facts`
+        // cascade, so deleting it would, once synced, also delete the facts
+        // another device added to it that haven't reached this one (see
+        // `MemoryWritePlan.EntityMerge`).
         for merge in plan.merges {
             guard let canonical = entitiesByID[merge.canonicalID]?.first else { continue }
             for duplicateID in merge.duplicateIDs where duplicateID != merge.canonicalID {
@@ -89,13 +95,11 @@ public actor SwiftDataMemoryFactStore: ModelActor, MemoryFactStoring {
                     for fact in duplicate.facts ?? [] {
                         fact.subject = canonical
                     }
-                    duplicate.facts = []
                     canonical.aliasNames += [duplicate.name] + duplicate.aliasNames
                     if canonical.summary == nil {
                         canonical.summary = duplicate.summary
                     }
                     canonical.updatedAt = plan.recordedAt
-                    modelContext.delete(duplicate)
                     result.mergedEntityCount += 1
                 }
                 entitiesByID[duplicateID] = [canonical]

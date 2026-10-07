@@ -10,10 +10,15 @@ public struct KnownEntity: Identifiable, Hashable, Sendable {
     public var aliases: [String]
     public var summary: String?
     public var createdAt: Date
+    /// How many facts (current or not) have the entity as their subject on
+    /// this device, or `nil` when unknown. A duplicate merged into another
+    /// record is kept with no facts (see `MemoryWritePlan.EntityMerge`), and
+    /// `EntityResolver` uses this to set it aside.
+    public var factCount: Int?
 
     public init(
         id: UUID, name: String, type: MemoryEntityType?, aliases: [String] = [], summary: String? = nil,
-        createdAt: Date
+        createdAt: Date, factCount: Int? = nil
     ) {
         self.id = id
         self.name = name
@@ -21,6 +26,7 @@ public struct KnownEntity: Identifiable, Hashable, Sendable {
         self.aliases = aliases
         self.summary = summary
         self.createdAt = createdAt
+        self.factCount = factCount
     }
 
     /// The name and aliases.
@@ -124,6 +130,14 @@ public struct MemoryWritePlan: Hashable, Sendable {
 
     /// Two or more records for the same thing (created on two devices
     /// while offline): `duplicateIDs` are merged into `canonicalID`.
+    ///
+    /// Add-only: a merge moves the duplicates' facts and names to the
+    /// canonical record but never deletes a duplicate. `MemoryEntity.facts`
+    /// cascades, so deleting one would, once synced, delete the facts
+    /// another device added to it that this device hasn't seen yet, and a
+    /// fact imported after its subject is gone would read as a fact about
+    /// the user. The emptied record stays; the next merge picks up any fact
+    /// that lands on it later.
     public struct EntityMerge: Hashable, Sendable {
         public var canonicalID: UUID
         public var duplicateIDs: [UUID]

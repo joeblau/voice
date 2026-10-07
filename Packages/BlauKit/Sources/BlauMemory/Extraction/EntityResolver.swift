@@ -94,8 +94,10 @@ public struct EntityResolver: Sendable {
 
         var resolution = EntityResolution()
         // Known records plus the ones created so far, so a name repeated
-        // in the same reply resolves to the same new entity.
-        var pool = known
+        // in the same reply resolves to the same new entity. Duplicates
+        // already merged (kept, empty) are set aside, so they aren't merged
+        // again on every extraction and can't win a match.
+        var pool = Self.settingAsideEmptyDuplicates(known)
         let embedder = await embedder()
         for entity in entities {
             if let id = resolution.entityID(for: entity.name) {
@@ -135,7 +137,9 @@ public struct EntityResolver: Sendable {
         if !byName.isEmpty {
             let ordered = byName.sorted(by: Self.canonicalOrder)
             let canonical = ordered[0]
-            let duplicates = ordered.dropFirst().map(\.id).filter { $0 != canonical.id }
+            // A duplicate with no facts has nothing to move: merging it
+            // again would only count it again (merges never delete it).
+            let duplicates = ordered.dropFirst().filter { $0.factCount != 0 }.map(\.id).filter { $0 != canonical.id }
             // Only records that already exist are merged; a duplicate that
             // was just created in this resolution is impossible (its name
             // would have resolved first).
@@ -175,6 +179,42 @@ public struct EntityResolver: Sendable {
             Log.memory.error(
                 "Entity similarity unavailable, matching by name only: \(String(describing: error), privacy: .public)")
             return nil
+        }
+    }
+
+    /// `known` without the duplicate records that hold no facts: a record
+    /// with `factCount == 0` whose name is the name or an alias of an
+    /// older compatible record (in `canonicalOrder`). Merges keep the
+    /// duplicate and empty it rather than delete it (deleting would cascade
+    /// to facts another device hasn't synced yet), so without this every
+    /// extraction would merge it again, and the prompt would list the
+    /// entity twice. Its names are folded into the record it duplicates.
+    /// A duplicate that gains a fact later (from another device) is no
+    /// longer empty, so the next extraction that names it merges it.
+    public static func settingAsideEmptyDuplicates(_ known: [KnownEntity]) -> [KnownEntity] {
+        guard known.contains(where: { $0.factCount == 0 }) else { return known }
+        var kept: [KnownEntity] = []
+        var setAside = Set<UUID>()
+        var keptIndexByID: [UUID: Int] = [:]
+        for entity in known.sorted(by: canonicalOrder) {
+            if entity.factCount == 0,
+                let index = kept.firstIndex(where: {
+                    $0.id != entity.id && areCompatible($0.type, entity.type) && $0.matches(entity.name)
+                })
+            {
+                for name in entity.names where !kept[index].matches(name) {
+                    kept[index].aliases.append(name)
+                }
+                setAside.insert(entity.id)
+                continue
+            }
+            keptIndexByID[entity.id] = kept.count
+            kept.append(entity)
+        }
+        guard !setAside.isEmpty else { return known }
+        // The caller's order (most callers rely on it), with folded names.
+        return known.compactMap { entity in
+            setAside.contains(entity.id) ? nil : keptIndexByID[entity.id].map { kept[$0] }
         }
     }
 

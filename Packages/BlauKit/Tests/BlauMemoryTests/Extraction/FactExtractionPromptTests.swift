@@ -60,6 +60,26 @@ struct FactExtractionParsingTests {
         #expect(extraction.summary == "Likes essays.")
     }
 
+    /// The reply is untrusted. `Int(1e20)` traps, so a line number that
+    /// can't exist must become "no source", never a crash.
+    @Test(arguments: [
+        "1e20", "-3", "0", "-1e20", "1e308", "9223372036854775807", #""1e20""#, #""-3""#, #""inf""#, #""nan""#,
+    ])
+    func anImpossibleSourceLineIsDropped(_ source: String) throws {
+        let reply = """
+            {"facts":[{"subject":"user","predicate":"likes","object":"tea","confidence":0.9,"source":\(source),
+                       "replaces":[]}]}
+            """
+        let extraction = try FactExtraction.parse(reply)
+        #expect(extraction.facts.count == 1)
+        #expect(extraction.facts.first?.source == nil)
+    }
+
+    @Test func aFractionalSourceLineIsRoundedDown() throws {
+        let reply = #"{"facts":[{"subject":"user","predicate":"likes","object":"tea","source":3.7,"replaces":[]}]}"#
+        #expect(try FactExtraction.parse(reply).facts.first?.source == 3)
+    }
+
     @Test func emptyListsAreAValidReply() throws {
         let extraction = try FactExtraction.parse(Support.reply())
         #expect(extraction == FactExtraction())

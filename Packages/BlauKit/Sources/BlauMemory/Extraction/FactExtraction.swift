@@ -141,7 +141,7 @@ extension FactExtraction {
                     predicate: predicate,
                     object: value,
                     confidence: Self.number(raw["confidence"]).map(Self.clampedConfidence) ?? 1,
-                    source: Self.number(raw["source"]).flatMap { $0.isFinite && $0 >= 1 ? Int($0) : nil },
+                    source: Self.number(raw["source"]).flatMap(Self.lineNumber),
                     replaces: (raw["replaces"] as? [Any] ?? []).compactMap { Self.text($0).map(Self.clean) }
                         .filter { !$0.isEmpty }
                 ))
@@ -175,6 +175,14 @@ extension FactExtraction {
         case let string as String: Double(string.trimmingCharacters(in: .whitespaces))
         default: nil
         }
+    }
+
+    /// A source line number, or `nil` when the value can't be one. The reply
+    /// is untrusted and `Int(_:)` traps on an out-of-range `Double` (`1e20`),
+    /// so the value is bounded before it is converted.
+    static func lineNumber(_ value: Double) -> Int? {
+        guard value.isFinite, value >= 1, value <= Double(Int32.max) else { return nil }
+        return Int(exactly: value.rounded(.down))
     }
 
     private static func clampedConfidence(_ value: Double) -> Double {

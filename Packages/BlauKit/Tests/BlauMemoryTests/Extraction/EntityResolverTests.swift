@@ -127,4 +127,49 @@ struct EntityResolverTests {
         #expect(resolution.entityID(for: "Acme") == older.id)
         #expect(resolution.merges == [.init(canonicalID: older.id, duplicateIDs: [newer.id])])
     }
+
+    /// Merges keep the duplicate record, emptied (deleting it would cascade
+    /// to facts another device hasn't synced yet). An empty duplicate is
+    /// not merged again on every extraction, and it can't win a match.
+    @Test func anEmptyDuplicateIsNotMergedAgain() async {
+        let older = KnownEntity(
+            id: UUID(), name: "Acme", type: .organization, createdAt: Support.t0, factCount: 2)
+        let emptied = KnownEntity(
+            id: UUID(), name: "acme", type: .organization, aliases: ["Acme Robotics"],
+            createdAt: Support.t0.addingTimeInterval(60), factCount: 0)
+        let resolver = EntityResolver(embedder: { nil })
+        let resolution = await resolver.resolve(
+            extraction([.init(name: "Acme", type: .organization), .init(name: "Acme Robotics", type: .organization)]),
+            known: [emptied, older])
+        #expect(resolution.merges.isEmpty)
+        #expect(resolution.entityID(for: "Acme") == older.id)
+        // Its names were folded into the record it duplicates.
+        #expect(resolution.entityID(for: "Acme Robotics") == older.id)
+        #expect(resolution.newEntities.isEmpty)
+    }
+
+    @Test func aDuplicateThatGainedAFactIsMergedAgain() async {
+        let older = KnownEntity(
+            id: UUID(), name: "Acme", type: .organization, createdAt: Support.t0, factCount: 2)
+        let synced = KnownEntity(
+            id: UUID(), name: "Acme", type: .organization, createdAt: Support.t0.addingTimeInterval(60), factCount: 1)
+        let resolver = EntityResolver(embedder: { nil })
+        let resolution = await resolver.resolve(
+            extraction([.init(name: "Acme", type: .organization)]), known: [synced, older])
+        #expect(resolution.merges == [.init(canonicalID: older.id, duplicateIDs: [synced.id])])
+    }
+
+    @Test func settingAsideKeepsAnEmptyEntityThatDuplicatesNothing() {
+        let fresh = KnownEntity(id: UUID(), name: "Initech", type: .organization, createdAt: Support.t0, factCount: 0)
+        let acme = KnownEntity(id: UUID(), name: "Acme", type: .organization, createdAt: Support.t0, factCount: 0)
+        // Same name, incompatible type: not a duplicate.
+        let person = KnownEntity(
+            id: UUID(), name: "Acme", type: .person, createdAt: Support.t0.addingTimeInterval(1), factCount: 0)
+        let emptied = KnownEntity(
+            id: UUID(), name: "ACME", type: .organization, aliases: ["Acme Inc"],
+            createdAt: Support.t0.addingTimeInterval(2), factCount: 0)
+        let kept = EntityResolver.settingAsideEmptyDuplicates([fresh, acme, person, emptied])
+        #expect(kept.map(\.id) == [fresh.id, acme.id, person.id])
+        #expect(kept[1].aliases == ["Acme Inc"])
+    }
 }
