@@ -171,6 +171,11 @@ final class AppEnvironment {
     /// path to the turn orchestrator (offline mode).
     let issues: IssueCenter
 
+    /// What the record button (#41) starts, pauses and ends: the live
+    /// `voiceLoop` with its conversation audio (`VoiceLoopSession`), or a
+    /// `FakeConversationSession` over the fake `audio` everywhere else.
+    let conversation: any ConversationSession
+
     /// The xAI key refresh started by the latest return to `active`, so tests
     /// can wait for it.
     @ObservationIgnored var xaiRefresh: Task<Void, Never>?
@@ -252,6 +257,12 @@ final class AppEnvironment {
             })
         self.issues = IssueCenter(
             realtime: realtime, keeper: conversationAudio?.keeper, persistence: persistence, network: networkMonitor)
+        self.conversation =
+            if let conversationAudio {
+                VoiceLoopSession(voiceLoop: voiceLoop, audio: conversationAudio)
+            } else {
+                FakeConversationSession(audio: audio, startDelay: kind == .preview ? .milliseconds(400) : .zero)
+            }
         self.lifecycle = AppLifecycleCoordinator(
             participants: Self.lifecycleOrder(
                 persistence: persistence, audio: audio, transcriber: transcriber,

@@ -490,7 +490,7 @@ struct AudioSessionControllerKeeperSupportTests {
 
 @Suite("ConversationAudio", .timeLimit(.minutes(1)))
 struct ConversationAudioTests {
-    @Test func theKeeperBringsUpCaptureAndPlaybackTogether() async throws {
+    @Test func theKeeperBringsUpCapturePlaybackAndMuteTogether() async throws {
         let engines = FakeEngineFactory()
         let controller = AudioSessionController(
             session: FakeAudioSession(), permission: FakeMicrophonePermission(), clock: ManualClock(),
@@ -500,7 +500,9 @@ struct ConversationAudioTests {
 
         try await audio.keeper.startCapture()
         #expect(
-            engines.current.installedComponents == [ObjectIdentifier(audio.capture), ObjectIdentifier(audio.player)])
+            engines.current.installedComponents == [
+                ObjectIdentifier(audio.capture), ObjectIdentifier(audio.player), ObjectIdentifier(audio.microphoneMute),
+            ])
         #expect(await audio.keeper.isCapturing)
         await audio.keeper.stopCapture()
     }

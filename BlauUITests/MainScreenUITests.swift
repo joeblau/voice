@@ -197,25 +197,60 @@ final class MainScreenUITests: XCTestCase {
             "Settings has no xAI account status")
     }
 
-    func testRecordButtonStartsAndStopsRecording() {
+    private func waitForValue(
+        _ value: String, of element: XCUIElement, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", value), object: element)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [expectation], timeout: 10), .completed,
+            "Expected \(value), value: \(String(describing: element.value))", file: file, line: line)
+    }
+
+    /// Tap starts a conversation and tap ends it (#41). The `ui-test`
+    /// environment runs a `FakeConversationSession` over the fake
+    /// microphone, so it listens at once.
+    func testRecordButtonStartsAndEndsTheConversation() {
         let app = launch()
         let record = recordButton(app)
-        XCTAssertEqual(record.label, "Record")
-        XCTAssertEqual(record.value as? String, "Not recording")
+        XCTAssertEqual(record.label, "Start Conversation")
+        XCTAssertEqual(record.value as? String, "Not listening")
 
         record.tap()
-        let recording = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", "Recording"), object: record)
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [recording], timeout: 10), .completed, "value: \(String(describing: record.value))")
-        XCTAssertEqual(record.label, "Stop Recording")
-        assertBottomBarLayout(app, "recording")
+        waitForValue("Listening", of: record)
+        XCTAssertEqual(record.label, "End Conversation")
+        assertBottomBarLayout(app, "listening")
 
         record.tap()
-        let stopped = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", "Not recording"), object: record)
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [stopped], timeout: 10), .completed, "value: \(String(describing: record.value))")
-        XCTAssertEqual(record.label, "Record")
+        waitForValue("Not listening", of: record)
+        XCTAssertEqual(record.label, "Start Conversation")
+    }
+
+    /// Touch and hold offers Pause Listening while a conversation runs; the
+    /// conversation keeps going, muted, until Resume Listening.
+    func testLongPressPausesAndResumesListening() {
+        let app = launch()
+        let record = recordButton(app)
+        record.tap()
+        waitForValue("Listening", of: record)
+
+        record.press(forDuration: 1.0)
+        let pause = app.buttons["Pause Listening"]
+        XCTAssertTrue(pause.waitForExistence(timeout: 5), "No Pause Listening in the long-press menu")
+        XCTAssertTrue(app.buttons["End Conversation"].exists, "No End Conversation in the long-press menu")
+        pause.tap()
+        waitForValue("Paused, microphone muted", of: record)
+        XCTAssertEqual(record.label, "End Conversation")
+        assertBottomBarLayout(app, "paused")
+
+        record.press(forDuration: 1.0)
+        let resume = app.buttons["Resume Listening"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 5), "No Resume Listening in the long-press menu")
+        resume.tap()
+        waitForValue("Listening", of: record)
+
+        // A tap while paused or listening ends the conversation.
+        record.tap()
+        waitForValue("Not listening", of: record)
     }
 }

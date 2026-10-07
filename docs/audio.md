@@ -243,6 +243,40 @@ hook) while it drives the sink node's receiver block thousands of times,
 with the real capture thread draining concurrently and the ring
 overflowing now and then, and expects zero.
 
+## Pause listening (#41)
+
+`MicrophoneMute` is the record button's "pause listening": a graph component
+registered with the conversation's controller (`ConversationAudio`
+registers capture, playback and the mute) that sets
+`AVAudioInputNode.isVoiceProcessingInputMuted`.
+
+```swift
+audio.microphoneMute.setMuted(true)
+for await activity in audio.microphoneMute.speechActivity() { ... }   // .started / .ended
+```
+
+- Muting inside voice processing keeps the session, the engine and the
+  capture stream running: resuming is instant, the Live Activity stays up,
+  and the keeper's watchdog still sees (silent) audio arriving. VAD, ASR and
+  voice ID get digital silence, so nothing said while paused reaches the
+  transcript or Grok.
+- `setMutedSpeechActivityEventListener` (iOS 17) reports speech while muted;
+  Apple documents that it only works when the mute is done through
+  `voiceProcessingInputMuted`, which is why the mute lives here rather than
+  in the hub. Repeated reports are collapsed, and unmuting ends a `.started`
+  with an `.ended`.
+- Each `install(on:)` applies the current mute to the new input node, so it
+  survives route changes, interruptions and media-services resets;
+  `uninstall` leaves the node unmuted. `VoiceProcessingInputMuting` is the
+  seam the unit tests use instead of a real input node.
+- The meter: `LevelMeter` smooths `AudioLevel.normalized(floor:)` and the
+  new `PlaybackLevel.normalized(floor:)` (same decibel scale) for the record
+  button's rings.
+
+Still to check on an iPhone: that the sink node keeps receiving buffers
+(silence) while muted, and that the listener fires for the user's voice and
+not for Grok's playback.
+
 ## Playback (#25)
 
 `StreamingAudioPlayer` (in `BlauAudio/Playback`) plays Grok's streamed

@@ -184,6 +184,10 @@ targets:
     platform: iOS
     sources:
       - path: BlauTests
+        # Snapshot references are read from the source tree (#41), not
+        # bundled.
+        excludes:
+          - "**/__Snapshots__"
     dependencies:
       - target: Blau
     settings:

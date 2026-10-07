@@ -17,8 +17,8 @@ import Observation
 /// orchestrator are built once at launch (`ConversationAudio.live`,
 /// `makeOrchestrator`) and live in `AppEnvironment`; the VAD and ASR are
 /// built on each `start()`, because they need the downloaded speech models. Views read `snapshot` (state, live text,
-/// latency, usage) and `phase`. The record button (#41) will call `start()`
-/// and `stop()`; until then the DEBUG menu's Voice Loop screen does.
+/// latency, usage) and `phase`. The record button (#41) starts and stops it
+/// through `VoiceLoopSession`; the DEBUG menu's Voice Loop screen can too.
 @MainActor
 @Observable
 final class VoiceLoop {
@@ -46,6 +46,8 @@ final class VoiceLoop {
     }
 
     private(set) var phase: Phase = .idle
+    /// Why the latest `start()` failed, while `phase` is `.failed`.
+    private(set) var startError: (any Error)?
     /// The orchestrator's latest snapshot.
     private(set) var snapshot = TurnSnapshot()
 
@@ -133,9 +135,11 @@ final class VoiceLoop {
     func start() async {
         guard !phase.isActive else { return }
         guard isAvailable, let orchestrator, let audio else {
+            startError = StartError.unavailable
             phase = .failed(StartError.unavailable.description)
             return
         }
+        startError = nil
         phase = .starting
         do {
             let pipeline = try await LiveVoicePipeline.start(
@@ -150,6 +154,7 @@ final class VoiceLoop {
             Log.ui.error("Voice loop failed to start: \(String(describing: error), privacy: .public)")
             await pipeline?.stop()
             pipeline = nil
+            startError = error
             phase = .failed(String(describing: error))
         }
     }
@@ -226,16 +231,22 @@ final class LiveVoicePipeline {
         self.stopAudio = stopAudio
     }
 
-    /// Loads the models, starts the conversation audio (capture and
-    /// playback on its engine), then the transcriber and VAD. The Silero
-    /// stage is registered with `backgroundInference`, which moves it off
-    /// the Neural Engine while Blau is off screen. The transcriber follows
+    /// Loads the models while the conversation audio (capture and playback
+    /// on its engine) comes up, then starts the transcriber and VAD. The
+    /// Silero stage is registered with `backgroundInference`, which moves it
+    /// off the Neural Engine while Blau is off screen. The transcriber follows
     /// `performance` (#75): between utterances it switches to the 1280 ms
     /// export below `normal` and back to 320 ms, while that export is
     /// installed (`ParakeetEouRecognizer.provider(modelManager:)`). A
     /// `BargeInMonitor` cuts `bargeInTarget` off when VAD hears the user over
     /// the agent's audio, its echo guard reading the player and the capture
     /// history.
+    ///
+    /// Loading and the audio session are independent, so they overlap: the
+    /// record button's tap-to-listening time (#41, `session.start`) is the
+    /// slower of the two rather than their sum. Audio captured before the
+    /// transcriber subscribes isn't transcribed; the button only shows
+    /// listening once this returns.
     static func start(
         audio: ConversationAudio,
         models: ModelManager,
@@ -248,22 +259,34 @@ final class LiveVoicePipeline {
                 let asrDirectory = models.directory(for: .parakeetRealtimeEOU)
             else { throw VoiceLoop.StartError.modelsNotInstalled }
 
-            let silero = try await SileroSpeechProbabilityModel(modelDirectory: vadDirectory)
-            let vad = VoiceActivitySegmenter(model: silero, inferenceObserver: backgroundInference)
+            let keeper = audio.keeper
+            let audioStart = Task { try await keeper.startCapture() }
+
+            let silero: SileroSpeechProbabilityModel
+            let vad: VoiceActivitySegmenter
+            let transcriber: ParakeetStreamingTranscriber
             let hub = audio.capture.hub
-            let transcriber = try await ParakeetStreamingTranscriber.load(
-                modelDirectory: asrDirectory, audio: hub, voiceActivity: vad,
-                chunkSizePolicy: PerformanceASRChunkSizePolicy(performance),
-                recognizerProvider: ParakeetEouRecognizer.provider(modelManager: models))
+            do {
+                silero = try await SileroSpeechProbabilityModel(modelDirectory: vadDirectory)
+                vad = VoiceActivitySegmenter(model: silero, inferenceObserver: backgroundInference)
+                transcriber = try await ParakeetStreamingTranscriber.load(
+                    modelDirectory: asrDirectory, audio: hub, voiceActivity: vad,
+                    chunkSizePolicy: PerformanceASRChunkSizePolicy(performance),
+                    recognizerProvider: ParakeetEouRecognizer.provider(modelManager: models))
+            } catch {
+                // Let the audio finish coming up, then release it.
+                _ = try? await audioStart.value
+                await keeper.stopCapture()
+                throw error
+            }
 
             do {
-                try await audio.keeper.startCapture()
+                try await audioStart.value
             } catch {
                 throw VoiceLoop.StartError.audio(String(describing: error))
             }
             let stage = silero.inferenceStage
             await backgroundInference?.register(silero, budget: .milliseconds(256))
-            let keeper = audio.keeper
             let stopAudio: @Sendable () async -> Void = {
                 await backgroundInference?.unregister(stage: stage)
                 await keeper.stopCapture()

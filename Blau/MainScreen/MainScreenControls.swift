@@ -1,3 +1,4 @@
+import BlauRealtime
 import SwiftUI
 
 /// The accessibility identifiers UI tests use for the main screen.
@@ -11,6 +12,11 @@ enum MainScreenAccessibility {
     static let settingsButton = XAIKeyIdentifiers.openSettings
     /// The record button, bottom-right.
     static let recordButton = "blau.record"
+    /// "You're muted", shown above the record button when the user talks
+    /// while listening is paused.
+    static let mutedHint = "blau.record.mutedHint"
+    /// The hint's Resume button.
+    static let mutedHintResume = "blau.record.mutedHint.resume"
 }
 
 /// Opens Settings. Lives in the leading slot of the main screen's bottom bar.
@@ -27,73 +33,6 @@ struct SettingsButton: View {
     }
 }
 
-/// Starts and stops recording. Lives in the trailing slot of the main
-/// screen's bottom bar, styled as the bar's prominent (tinted glass) control.
-///
-/// This is the scaffold's version: idle shows a microphone, recording shows a
-/// stop glyph, and a spinner covers the moment between. The record button
-/// issue (#41) adds the session states, the level ring and haptics.
-struct RecordButton: View {
-    let phase: RecordingController.Phase
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            label
-        }
-        .brandProminentButtonStyle(phase == .recording || phase == .stopping ? .recordingFill : .accentFill)
-        .disabled(phase.isBusy)
-        .accessibilityIdentifier(MainScreenAccessibility.recordButton)
-        .accessibilityValue(accessibilityValue)
-        .accessibilityHint(accessibilityHint)
-        .accessibilityShowsLargeContentViewer {
-            Label(title, systemImage: systemImage)
-        }
-    }
-
-    @ViewBuilder
-    private var label: some View {
-        if phase.isBusy {
-            ProgressView()
-                .accessibilityLabel(title)
-        } else {
-            Label(title, systemImage: systemImage)
-                .labelStyle(.iconOnly)
-        }
-    }
-
-    private var title: LocalizedStringKey {
-        switch phase {
-        case .idle, .starting: "Record"
-        case .recording, .stopping: "Stop Recording"
-        }
-    }
-
-    private var systemImage: String {
-        switch phase {
-        case .idle, .starting: "mic.fill"
-        case .recording, .stopping: "stop.fill"
-        }
-    }
-
-    private var accessibilityValue: Text {
-        switch phase {
-        case .idle: Text("Not recording")
-        case .starting: Text("Starting")
-        case .recording: Text("Recording")
-        case .stopping: Text("Stopping")
-        }
-    }
-
-    private var accessibilityHint: Text {
-        switch phase {
-        case .idle: Text("Starts a conversation")
-        case .recording: Text("Ends the conversation")
-        case .starting, .stopping: Text("")
-        }
-    }
-}
-
 #Preview("Controls") {
     NavigationStack {
         Color.clear
@@ -103,14 +42,16 @@ struct RecordButton: View {
                 }
                 ToolbarSpacer(.flexible, placement: .bottomBar)
                 ToolbarItem(placement: .bottomBar) {
-                    RecordButton(phase: .idle) {}
+                    RecordButton(model: RecordButtonModel(session: FakeConversationSession()))
                 }
             }
     }
 }
 
-#Preview("Recording") {
-    NavigationStack {
+#Preview("Listening") {
+    let session = FakeConversationSession()
+    session.update(.listening)
+    return NavigationStack {
         Color.clear
             .toolbar {
                 ToolbarItem(placement: .bottomBar) {
@@ -118,7 +59,7 @@ struct RecordButton: View {
                 }
                 ToolbarSpacer(.flexible, placement: .bottomBar)
                 ToolbarItem(placement: .bottomBar) {
-                    RecordButton(phase: .recording) {}
+                    RecordButton(model: RecordButtonModel(session: session))
                 }
             }
     }

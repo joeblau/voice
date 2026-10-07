@@ -25,25 +25,26 @@ struct RootView: View {
     @Environment(AppEnvironment.self) private var environment
 
     var body: some View {
-        MainScreenScaffold(audio: environment.audio)
+        MainScreenScaffold(conversation: environment.conversation)
     }
 }
 
 /// The navigation stack, its toolbars and the sheets they present. Separate
-/// from `RootView` so it can own the `RecordingController` built from the
-/// environment's audio service.
+/// from `RootView` so it can own the `RecordButtonModel` built from the
+/// environment's conversation session.
 struct MainScreenScaffold: View {
     @Environment(ModelManager.self) private var models
     @Environment(AppEnvironment.self) private var environment
     @Environment(\.scenePhase) private var scenePhase
-    @State private var recording: RecordingController
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var record: RecordButtonModel
     @State private var isShowingSettings = false
     @State private var isShowingKeyOnboarding = false
 
-    init(audio: any AudioService) {
+    init(conversation: any ConversationSession) {
         // Evaluated on every init but only kept the first time; building a
-        // controller has no side effects.
-        _recording = State(initialValue: RecordingController(audio: audio))
+        // model has no side effects.
+        _record = State(initialValue: RecordButtonModel(session: conversation))
     }
 
     var body: some View {
@@ -78,9 +79,25 @@ struct MainScreenScaffold: View {
                     }
                     ToolbarSpacer(.flexible, placement: .bottomBar)
                     ToolbarItem(placement: .bottomBar) {
-                        RecordButton(phase: recording.phase) {
-                            Task { await recording.toggle() }
+                        RecordButton(model: record)
+                    }
+                }
+                // Above the bar, at the record button's end, while the user
+                // talks with listening paused.
+                .overlay(alignment: .bottomTrailing) {
+                    if record.isMutedSpeechHintVisible {
+                        MutedSpeechHint {
+                            Task { await record.resumeListening() }
                         }
+                        .padding()
+                        .transition(
+                            reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .animation(reduceMotion ? nil : .snappy, value: record.isMutedSpeechHintVisible)
+                .onChange(of: record.isMutedSpeechHintVisible) { _, isVisible in
+                    if isVisible {
+                        AccessibilityNotification.Announcement("You're muted").post()
                     }
                 }
                 // Inside the stack, after the toolbar, so the card is inset
@@ -99,30 +116,30 @@ struct MainScreenScaffold: View {
         }
         // Over the whole stack, bars included, so it can be dragged anywhere.
         .performanceHUD()
+        // Follows the conversation (including what ends or starts it
+        // without the button: the Live Activity's Stop, an interruption,
+        // the debug Voice Loop screen) while the screen exists.
         .task {
-            await recording.synchronize()
+            await record.run()
         }
-        // Capture can stop without the button: the Live Activity's Stop
-        // (`AppEnvironment.stopConversation()`) or an audio interruption
-        // (`AudioSessionKeeper` is then not `.live`). Both happen while Blau is
-        // in the background or inactive, so re-read the audio on every return
-        // to the foreground. Observing the keeper's status directly is #41.
-        .onChange(of: scenePhase) { _, phase in
+        // Levels only while Blau is on screen; re-read the status on return.
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            record.setVisible(phase == .active)
             if phase == .active {
-                Task { await recording.synchronize() }
+                record.synchronize()
             }
         }
         .alert(
-            recording.failure?.title ?? "",
+            "Couldn't Start the Conversation",
             isPresented: Binding(
-                get: { recording.failure != nil },
-                set: { if !$0 { recording.failure = nil } }
+                get: { record.startFailureMessage != nil },
+                set: { if !$0 { record.startFailureMessage = nil } }
             ),
-            presenting: recording.failure
+            presenting: record.startFailureMessage
         ) { _ in
             Button("OK", role: .cancel) {}
-        } message: { failure in
-            Text(failure.message)
+        } message: { message in
+            Text(message)
         }
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
