@@ -393,7 +393,10 @@ Before the probe has run on a device:
    running when the screen locks (#23, #26).
 4. **#26 adds a runtime monitor** that watches per-window latency and Core
    ML errors while off screen and applies the mitigation the probe
-   recommends. `BackgroundInferenceMitigation.recommended(for:hop:)`
+   recommends (`BackgroundInferenceMonitor`, see
+   [background.md](background.md); it ships with
+   `BackgroundInferenceMitigation.shipping = .keepNeuralEngine` until the
+   verdict below is in). `BackgroundInferenceMitigation.recommended(for:hop:)`
    encodes the table:
 
 | Probe verdict | Meaning | Mitigation |

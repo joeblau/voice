@@ -5,6 +5,7 @@
 *.xcodeproj
 Blau/Supporting/Info.plist
 Blau/Supporting/*.entitlements
+BlauWidgets/Supporting/Info.plist
 
 # Xcode
 xcuserdata/

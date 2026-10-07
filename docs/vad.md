@@ -142,7 +142,10 @@ and runs its own state machine.
   (`VoiceActivitySegmenterTests.ownOverheadInSilenceIsFarBelowThreePercent`).
   The model runs on the Neural Engine with CPU fallback (the compute units
   `ModelManager` warmed it up for); wall time per call varies with Neural
-  Engine load and isn't CPU.
+  Engine load and isn't CPU. Off screen, `BackgroundInferenceMonitor` can
+  move it to the CPU only and back (`SileroSpeechProbabilityModel` is
+  `InferenceBackendSwitchable`; pass the monitor as the segmenter's
+  `inferenceObserver`), see [background.md](background.md).
 
 ## Telemetry
 
@@ -201,5 +204,5 @@ These need a physical iPhone and are recorded here when run.
 | --- | --- | --- |
 | CPU during silence < 3% | Release build, a session running in a quiet room for 2 minutes with nobody speaking. Instruments **Time Profiler** (or **CPU Profiler**) on Blau: CPU of the VAD's threads and the whole process while silent; `statistics.chunksSkipped` vs `chunksAnalyzed` | Pending |
 | Boundaries on real speech | Speak 20 short and long utterances at arm's length on the speaker route and on AirPods; compare `Speech segment` log ranges with a waveform of the history audio | Pending |
-| Background and screen locked (iOS 27 Neural Engine restriction, #26) | Lock the screen mid-session; segments keep arriving (Core ML falls back to the CPU); check CPU again | Pending |
+| Background and screen locked (iOS 27 Neural Engine restriction, #26) | Lock the screen mid-session; segments keep arriving (Core ML falls back to the CPU, or the monitor moves the model there); check CPU again. Procedure: [background.md](background.md), B1 and B3 | Pending |
 | Noisy room | Café or street noise: no segments while nobody speaks, every utterance found | Pending |

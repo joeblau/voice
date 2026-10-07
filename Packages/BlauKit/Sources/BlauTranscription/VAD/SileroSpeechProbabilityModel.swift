@@ -1,3 +1,4 @@
+import BlauCore
 @preconcurrency import CoreML
 import FluidAudio
 import Foundation
@@ -18,32 +19,45 @@ import Foundation
 /// guard let directory = modelManager.directory(for: .sileroVAD) else { return }
 /// let model = try await SileroSpeechProbabilityModel(modelDirectory: directory)
 /// ```
-public actor SileroSpeechProbabilityModel: SpeechProbabilityModel {
+///
+/// **Backends (#26).** A model loaded from a directory can move between the
+/// Neural Engine and the CPU while it runs (`InferenceBackendSwitchable`),
+/// which `BackgroundInferenceMonitor` does when iOS restricts the Neural
+/// Engine off screen (docs/background.md). The LSTM state carries over: both
+/// backends run the same weights.
+public actor SileroSpeechProbabilityModel: SpeechProbabilityModel, InferenceBackendSwitchable {
     public nonisolated let chunkLength = VadManager.chunkSize
+    public nonisolated let inferenceStage = "vad"
+    public nonisolated let supportedBackends: [InferenceBackend]
 
-    private let manager: VadManager
+    private var manager: VadManager
     private var state: VadStreamState
+    private var backend: InferenceBackend
+    /// The compiled bundle, when the model was loaded from disk (the only
+    /// way it can be reloaded on another backend).
+    private let bundleURL: URL?
 
-    /// Wraps an already constructed `VadManager`.
+    /// Wraps an already constructed `VadManager`. It can't change backend.
     public init(manager: VadManager) {
         self.manager = manager
         self.state = VadStreamState.initial()
+        self.backend = .neuralEngine
+        self.bundleURL = nil
+        self.supportedBackends = [.neuralEngine]
     }
 
     /// Loads the model from an installed `.sileroVAD` directory, on the
     /// compute units `ModelManager` warmed it up for (Neural Engine with CPU
-    /// fallback).
+    /// fallback) or, with `backend: .cpu`, on the CPU only.
     ///
     /// - Throws: Core ML's error if the bundle is missing or can't load.
-    public init(modelDirectory: URL) async throws {
-        let configuration = MLModelConfiguration()
-        configuration.computeUnits =
-            CoreMLModelWarmer.computeUnits(for: .sileroVAD, bundle: FluidAudioModels.vadModelBundle).coreML
-        let model = try await MLModel.load(
-            contentsOf: modelDirectory.appending(path: FluidAudioModels.vadModelBundle),
-            configuration: configuration
-        )
-        self.init(manager: VadManager(config: VadConfig(computeUnits: configuration.computeUnits), vadModel: model))
+    public init(modelDirectory: URL, backend: InferenceBackend = .neuralEngine) async throws {
+        let bundleURL = modelDirectory.appending(path: FluidAudioModels.vadModelBundle)
+        self.manager = try await Self.loadManager(bundleURL: bundleURL, backend: backend)
+        self.state = VadStreamState.initial()
+        self.backend = backend
+        self.bundleURL = bundleURL
+        self.supportedBackends = [.neuralEngine, .cpu]
     }
 
     public func speechProbability(of samples: [Float], at sampleOffset: Int64) async throws -> Float {
@@ -54,5 +68,46 @@ public actor SileroSpeechProbabilityModel: SpeechProbabilityModel {
 
     public func reset() {
         state = VadStreamState.initial()
+    }
+
+    // MARK: InferenceBackendSwitchable
+
+    public var inferenceBackend: InferenceBackend { backend }
+
+    /// Loads the model for `backend` while chunks keep running on the
+    /// current one, then swaps. A chunk already running finishes on the old
+    /// model; the stream state carries over.
+    public func switchInferenceBackend(to backend: InferenceBackend) async throws {
+        guard backend != self.backend else { return }
+        guard supportedBackends.contains(backend), let bundleURL else {
+            throw InferenceBackendError.unsupported(stage: inferenceStage, backend: backend)
+        }
+        let replacement = try await Self.loadManager(bundleURL: bundleURL, backend: backend)
+        manager = replacement
+        self.backend = backend
+    }
+
+    /// Core ML compute units for `backend`: the warm-up's units for the
+    /// Neural Engine (so the compiled model it cached is reused), `.cpuOnly`
+    /// for the CPU.
+    static func computeUnits(for backend: InferenceBackend) -> MLComputeUnits? {
+        switch backend {
+        case .neuralEngine:
+            CoreMLModelWarmer.computeUnits(for: .sileroVAD, bundle: FluidAudioModels.vadModelBundle).coreML
+        case .cpu:
+            .cpuOnly
+        case .systemSpeech:
+            nil
+        }
+    }
+
+    private static func loadManager(bundleURL: URL, backend: InferenceBackend) async throws -> VadManager {
+        guard let computeUnits = computeUnits(for: backend) else {
+            throw InferenceBackendError.unsupported(stage: "vad", backend: backend)
+        }
+        let configuration = MLModelConfiguration()
+        configuration.computeUnits = computeUnits
+        let model = try await MLModel.load(contentsOf: bundleURL, configuration: configuration)
+        return VadManager(config: VadConfig(computeUnits: computeUnits), vadModel: model)
     }
 }

@@ -1,3 +1,4 @@
+import BlauAudio
 import BlauCore
 import BlauPersistence
 import BlauRealtime
@@ -75,6 +76,20 @@ final class AppEnvironment {
     /// Delivers scene phase changes to the services (see `ScenePhaseHandling`).
     let lifecycle: AppLifecycleCoordinator
 
+    /// The conversation's audio (#26): capture and playback on one
+    /// voice-processing engine, kept alive off screen by the
+    /// `AudioSessionKeeper` that is `audio` in the live app. `nil` on fakes.
+    let conversationAudio: ConversationAudio?
+
+    /// Moves on-device model stages off the Neural Engine while Blau is off
+    /// screen, and back (#26, docs/background.md). Stages register with it
+    /// as they are built (the VAD, ASR #29, voice ID #47).
+    let backgroundInference: BackgroundInferenceMonitor
+
+    /// Reports device lock and unlock to the keeper and the monitor (live
+    /// app only).
+    @ObservationIgnored private var deviceLock: DeviceLockObserver?
+
     /// The xAI key refresh started by the latest return to `active`, so tests
     /// can wait for it.
     @ObservationIgnored var xaiRefresh: Task<Void, Never>?
@@ -97,7 +112,9 @@ final class AppEnvironment {
         memory: any MemoryService,
         xai: XAIServices,
         speechModels: ModelManager,
-        realtimeSession: RealtimeSessionServices
+        realtimeSession: RealtimeSessionServices,
+        conversationAudio: ConversationAudio? = nil,
+        backgroundInference: BackgroundInferenceMonitor = BackgroundInferenceMonitor()
     ) {
         self.kind = kind
         self.config = config
@@ -113,10 +130,13 @@ final class AppEnvironment {
         self.xai = xai
         self.speechModels = speechModels
         self.realtimeSession = realtimeSession
+        self.conversationAudio = conversationAudio
+        self.backgroundInference = backgroundInference
         self.lifecycle = AppLifecycleCoordinator(
             participants: Self.lifecycleOrder(
-                persistence: persistence, audio: audio, transcriber: transcriber, voiceGate: voiceGate,
-                realtime: realtime, topics: topics, memory: memory)
+                persistence: persistence, audio: audio, transcriber: transcriber,
+                backgroundInference: backgroundInference, voiceGate: voiceGate, realtime: realtime, topics: topics,
+                memory: memory)
         )
     }
 
@@ -130,9 +150,36 @@ final class AppEnvironment {
     /// DEBUG developer xAI key, then loads the stored key; alongside, checks
     /// the installed speech models and starts any downloads they need.
     func start() async {
+        startBackgroundServices()
         async let models: Void = speechModels.start()
         await xai.start()
         await models
+    }
+
+    /// Wires what keeps a conversation going off screen (#26): the Live
+    /// Activity's Stop button, and (live app only) device lock reports and
+    /// clearing a recording Live Activity left behind by a previous run.
+    private func startBackgroundServices() {
+        ConversationControl.stopHandler = { [weak self] in await self?.stopConversation() }
+        guard kind == .live, deviceLock == nil else { return }
+        let keeper = conversationAudio?.keeper
+        let inference = backgroundInference
+        deviceLock = DeviceLockObserver { locked in
+            Task {
+                await keeper?.setDeviceLocked(locked)
+                await inference.setDeviceLocked(locked)
+            }
+        }
+        deviceLock?.start()
+        Task { await LiveActivityRecordingIndicator.endAll() }
+    }
+
+    /// Ends the conversation: what the Live Activity's Stop button does.
+    /// Today that is turning the microphone off; the turn orchestrator (#36)
+    /// will also close the realtime session here.
+    func stopConversation() async {
+        Log.ui.notice("Stopping the conversation from the Live Activity")
+        await audio.stopCapture()
     }
 
     /// The services in the order they are told the app became active, lowest
@@ -142,12 +189,13 @@ final class AppEnvironment {
         persistence: PersistenceController,
         audio: any AudioService,
         transcriber: any Transcriber,
+        backgroundInference: BackgroundInferenceMonitor,
         voiceGate: any VoiceGate,
         realtime: any RealtimeService,
         topics: any TopicService,
         memory: any MemoryService
     ) -> [any AppLifecycleParticipant] {
-        [persistence, audio, transcriber, voiceGate, realtime, topics, memory]
+        [persistence, audio, transcriber, backgroundInference, voiceGate, realtime, topics, memory]
     }
 }
 
@@ -170,7 +218,8 @@ extension AppEnvironment {
 
     /// The real app: the on-disk store mirrored to iCloud
     /// (`PersistenceController.live`), `UserDefaults` flags with DEBUG
-    /// overrides, the Keychain-backed xAI services, and an
+    /// overrides, the Keychain-backed xAI services, the conversation audio
+    /// with its keeper and Live Activity (#26), and an
     /// `UnavailableService` for each subsystem not built yet.
     ///
     /// A DEBUG launch with `BLAU_UI_TEST_XAI` set still gets the hermetic xAI
@@ -185,7 +234,11 @@ extension AppEnvironment {
         xai: XAIServices? = nil,
         speechModels: ModelManager? = nil
     ) -> AppEnvironment {
-        AppEnvironment(
+        // Capture (#24) and playback (#25) on the AudioSessionController
+        // (#23), kept alive off screen with a lock-screen indicator (#26).
+        // Nothing touches the microphone until `audio.startCapture()`.
+        let conversationAudio = ConversationAudio.live(indicator: LiveActivityRecordingIndicator())
+        return AppEnvironment(
             kind: .live,
             config: config,
             flags: FeatureFlags(
@@ -193,9 +246,7 @@ extension AppEnvironment {
                 allowsOverrides: AppConfig.isDebugBuild
             ),
             clock: SystemClock(),
-            // #24 wires in the capture engine together with the
-            // AudioSessionController from #23.
-            audio: UnavailableService(subsystem: "audio"),
+            audio: conversationAudio.keeper,
             // ParakeetStreamingTranscriber (#29) reads the capture hub and
             // the VAD segmenter, so it is wired in together with the live
             // audio pipeline (see docs/asr.md).
@@ -213,7 +264,8 @@ extension AppEnvironment {
             xai: xai ?? XAIServices.make(config: config),
             // #27: the on-device speech model download manager.
             speechModels: speechModels ?? SpeechModels.makeManager(),
-            realtimeSession: RealtimeSessionServices.make()
+            realtimeSession: RealtimeSessionServices.make(),
+            conversationAudio: conversationAudio
         )
     }
 

@@ -5,7 +5,10 @@ voice-processing `AVAudioEngine` for the whole conversation. It brings them
 up, publishes their state and route for the UI, and keeps them running
 through phone calls, route changes and media-server resets. Capture (#24)
 and playback (#25, [below](#playback-25)) plug into its engine as graph
-components; backgrounding and screen lock are #26.
+components. Backgrounding and screen lock (#26) are handled one level up by
+`AudioSessionKeeper`, the app's `AudioService`, which keeps this controller
+running off screen and recovers silent stalls: see
+[background.md](background.md).
 
 ```swift
 import BlauAudio
@@ -321,6 +324,7 @@ pipeline stages, so they are not in the canonical interval table in
 | `audio.routeChange` | event | Route change notifications |
 | `audio.engineConfigurationChange` | event | `AVAudioEngineConfigurationChange` for the current engine |
 | `audio.mediaServicesLost`, `audio.mediaServicesReset` | event | Media-server notifications |
+| `audio.captureStall` | event | `recoverFromStall()`: audio stopped flowing while running, the graph is rebuilt ([background.md](background.md)) |
 | `capture.drop` | event | The capture ring overflowed and audio was lost (emitted from the capture thread when the gap is accounted for) |
 
 Capture also uses the canonical `capture.frame` interval (see

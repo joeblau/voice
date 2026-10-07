@@ -64,6 +64,7 @@ public actor AudioSessionController {
         case engineConfigurationChange
         case mediaServicesReset
         case graphChanged
+        case captureStalled
     }
 
     // MARK: Dependencies
@@ -83,6 +84,11 @@ public actor AudioSessionController {
     public private(set) var state: AudioSessionState = .idle
     /// The current route.
     public private(set) var route: AudioRoute
+    /// Whether an interruption ended without `.shouldResume` while
+    /// `interrupted`: nothing will resume the session until `start()`. While
+    /// an interruption is still going on (a call in progress) it is `false`,
+    /// and calling `start()` would only fail to take the microphone back.
+    public private(set) var isAwaitingManualResume = false
 
     private var engine: any AudioEngineBackend
     private var components: [any AudioGraphComponent] = []
@@ -269,6 +275,26 @@ public actor AudioSessionController {
         setState(.idle)
     }
 
+    /// Rebuilds the graph for a caller that noticed audio stopped flowing
+    /// although the controller is `running`: a silent stall, which no
+    /// notification reports (#26, `AudioSessionKeeper`'s watchdog).
+    ///
+    /// The session stays active and is re-applied, and the engine is torn
+    /// down and started again with the same retries as any other rebuild,
+    /// so this works off screen, where activating a recording session from
+    /// scratch is not allowed. If every attempt fails the state becomes
+    /// `failed`.
+    ///
+    /// - Returns: Whether a rebuild was scheduled (only while `running`).
+    @discardableResult
+    public func recoverFromStall() -> Bool {
+        guard wantsRunning, state == .running else { return false }
+        signposter.event("audio.captureStall")
+        logger.error("Audio stopped flowing while running; rebuilding the graph")
+        scheduleRebuild(.captureStalled)
+        return true
+    }
+
     // MARK: Session events
 
     /// Applies one session event. The event loop calls this for everything
@@ -300,6 +326,7 @@ public actor AudioSessionController {
         // session; stopping again keeps our bookkeeping honest.
         engine.stop()
         isSessionActive = false
+        isAwaitingManualResume = false
         setState(.interrupted)
     }
 
@@ -312,6 +339,7 @@ public actor AudioSessionController {
         if shouldResume {
             scheduleRebuild(.interruptionEnded)
         } else {
+            isAwaitingManualResume = true
             logger.notice("Not resuming automatically; waiting for start()")
         }
     }
@@ -533,6 +561,9 @@ public actor AudioSessionController {
     }
 
     private func setState(_ newState: AudioSessionState) {
+        if newState != .interrupted || state != .interrupted {
+            isAwaitingManualResume = false
+        }
         if state != newState {
             logger.notice("State \(self.state, privacy: .public) -> \(newState, privacy: .public)")
         }
