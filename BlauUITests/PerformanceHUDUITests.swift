@@ -97,11 +97,32 @@ final class PerformanceHUDUITests: XCTestCase {
         // button).
         let title = app.descendants(matching: .any)["blau.mainScreen.empty"].staticTexts["Blau"]
         XCTAssertTrue(title.waitForExistence(timeout: 5))
+        // The speech-model setup card re-centres the empty state when it goes
+        // away, which moves the onboarding button to where the title was. Let
+        // that happen first, so no tap lands on the button mid-move and opens
+        // the onboarding sheet instead.
+        let setup = app.descendants(matching: .any)["blau.models.setup"]
+        _ = setup.waitForExistence(timeout: 5)
+        XCTAssertTrue(setup.waitForNonExistence(timeout: 120), "The speech models never became ready")
+        waitForStableFrame(of: title)
         title.tap(withNumberOfTaps: 3, numberOfTouches: 1)
         XCTAssertTrue(hud(app).waitForExistence(timeout: 5), "Triple-tap should show the HUD")
         title.tap(withNumberOfTaps: 3, numberOfTouches: 1)
         let gone = NSPredicate(format: "exists == false")
         expectation(for: gone, evaluatedWith: hud(app))
         waitForExpectations(timeout: 5)
+    }
+
+    /// Waits until `element` stays put for half a second (layout and its
+    /// animations have settled), up to `timeout`.
+    private func waitForStableFrame(of element: XCUIElement, timeout: TimeInterval = 5) {
+        var last = element.frame
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+            let frame = element.frame
+            if frame == last { return }
+            last = frame
+        }
     }
 }
