@@ -141,8 +141,12 @@ Settings → **Markdown Export** (`MarkdownExportSettingsSection`, backed by
     export.
   - Leaving the foreground runs a pending export at once, under a background
     task assertion.
-  - If an automatic export fails (iCloud Drive off, say), the next one
-    exports everything, so the changes it had read are not lost.
+  - If an automatic export fails (iCloud Drive off, say), or Blau is
+    terminated before it finishes (suspended during the background flush,
+    say), the next one exports everything, so the changes it had read are
+    not lost. The "owes a full export" flag (`needsFullExport`) is set
+    *before* the history cursor moves and cleared only once the export
+    succeeds (or there was nothing to export).
 - The section shows the last result: how many conversations are up to date
   and how many files changed, or why it couldn't export.
 

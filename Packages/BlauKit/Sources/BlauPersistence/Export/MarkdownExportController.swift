@@ -14,8 +14,11 @@ public protocol MarkdownExportPreferencesStore: Sendable {
     var isAutoExportEnabled: Bool { get nonmutating set }
     /// When an export last finished without errors.
     var lastExportedAt: Date? { get nonmutating set }
-    /// An automatic export failed after reading which conversations changed,
-    /// so the next one exports everything instead of losing those changes.
+    /// An automatic export read which conversations changed (moving its
+    /// history cursor) but hasn't finished without errors, so the next one
+    /// exports everything instead of losing those changes. It is set before
+    /// the cursor moves and cleared when the export succeeds, so it also
+    /// covers Blau being terminated mid-export.
     var needsFullExport: Bool { get nonmutating set }
 }
 
@@ -314,9 +317,18 @@ public final class MarkdownExportController {
         case .enable:
             // Everything up to now is covered by the full export, so move
             // the cursor first; changes made while it runs are read next time.
+            // Owe a full export before the cursor moves: if Blau is killed
+            // before `finish` (say, suspended during the background flush),
+            // the next launch exports everything again.
+            preferences.needsFullExport = true
             _ = try? await pipeline.tracker.fetchNewChanges()
             finish(.automatic, with: await Self.result { try await pipeline.exporter.exportAll(includeOpen: false) })
         case .automatic:
+            let owedFullExport = preferences.needsFullExport
+            // `fetchNewChanges()` saves the cursor before it returns, so
+            // record the debt first and let `finish` clear it on success.
+            // Otherwise a kill mid-export would lose these changes for good.
+            preferences.needsFullExport = true
             let changes: StoreChangeSet
             do {
                 changes = try await pipeline.tracker.fetchNewChanges()
@@ -325,12 +337,15 @@ public final class MarkdownExportController {
                 finish(.automatic, with: .failure(.storeUnavailable))
                 return
             }
-            if preferences.needsFullExport {
+            if owedFullExport {
                 finish(
                     .automatic, with: await Self.result { try await pipeline.exporter.exportAll(includeOpen: false) })
                 return
             }
-            guard !changes.isEmpty else { return }
+            guard !changes.isEmpty else {
+                preferences.needsFullExport = false
+                return
+            }
             finish(.automatic, with: await Self.result { try await pipeline.exporter.export(affectedBy: changes) })
         }
     }

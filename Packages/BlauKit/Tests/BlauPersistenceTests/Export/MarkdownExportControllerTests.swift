@@ -1,6 +1,7 @@
 import BlauCore
 import Foundation
 import SwiftData
+import Synchronization
 import Testing
 
 @testable import BlauPersistence
@@ -204,6 +205,99 @@ struct MarkdownExportControllerTests {
             return
         }
         #expect(report.created == 1)
+        #expect(!fixture.preferences.needsFullExport)
+    }
+
+    @Test func owesAFullExportWhileAnAutomaticExportRuns() async throws {
+        let fixture = try await ControllerFixture(autoExport: true)
+        // What the flag was when the exporter resolved its folder, i.e.
+        // after the history cursor moved and before the export finished.
+        let seen = Mutex<[Bool]>([])
+        let preferences = fixture.preferences
+        let url = fixture.folder.url
+        fixture.destination = MarkdownExportDestination {
+            seen.withLock { $0.append(preferences.needsFullExport) }
+            return url
+        }
+        let controller = fixture.makeController()
+        try insertConversation(into: fixture.context)
+
+        await controller.flushAutoExport()
+
+        #expect(seen.withLock { $0 } == [true])
+        guard case .success(let report) = controller.lastOutcome?.result else {
+            Issue.record("Expected a successful export")
+            return
+        }
+        #expect(report.created == 1)
+        #expect(!fixture.preferences.needsFullExport)
+    }
+
+    @Test func turningAutoExportOnOwesAFullExportWhileItRuns() async throws {
+        let fixture = try await ControllerFixture()
+        let seen = Mutex<[Bool]>([])
+        let preferences = fixture.preferences
+        let url = fixture.folder.url
+        fixture.destination = MarkdownExportDestination {
+            seen.withLock { $0.append(preferences.needsFullExport) }
+            return url
+        }
+        let controller = fixture.makeController()
+        try insertConversation(into: fixture.context)
+
+        controller.isAutoExportEnabled = true
+        await controller.waitUntilIdle()
+
+        #expect(seen.withLock { $0 } == [true])
+        #expect(controller.lastOutcome?.trigger == .automatic)
+        #expect(!fixture.preferences.needsFullExport)
+    }
+
+    @Test func anAutomaticExportCutShortIsRetriedInFull() async throws {
+        let fixture = try await ControllerFixture(autoExport: true)
+        // The first export reads history (moving the cursor), then never
+        // gets past resolving its folder: Blau suspended and killed during
+        // the background flush.
+        let entered = Mutex(false)
+        let release = DispatchSemaphore(value: 0)
+        let url = fixture.folder.url
+        fixture.destination = MarkdownExportDestination {
+            entered.withLock { $0 = true }
+            release.wait()
+            return url
+        }
+        let killed = fixture.makeController()
+        try insertConversation(into: fixture.context)
+        let stuck = Task { await killed.flushAutoExport() }
+        try await waitFor { entered.withLock { $0 } }
+        #expect(fixture.preferences.needsFullExport)
+
+        // The next launch: no new history to read, but the export it owes
+        // still writes the file.
+        fixture.destination = fixture.folder.destination
+        let relaunched = fixture.makeController()
+        await relaunched.flushAutoExport()
+
+        guard case .success(let report) = relaunched.lastOutcome?.result else {
+            Issue.record("Expected a successful export")
+            release.signal()
+            await stuck.value
+            return
+        }
+        #expect(report.created == 1)
+        #expect(try fixture.folder.names().count == 1)
+        #expect(!fixture.preferences.needsFullExport)
+
+        release.signal()
+        await stuck.value
+    }
+
+    @Test func anAutomaticPassWithNothingToDoOwesNothing() async throws {
+        let fixture = try await ControllerFixture(autoExport: true)
+
+        await fixture.controller.flushAutoExport()
+
+        #expect(fixture.controller.lastOutcome == nil)
         #expect(!fixture.preferences.needsFullExport)
     }
 }
