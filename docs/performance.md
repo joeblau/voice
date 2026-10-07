@@ -96,8 +96,12 @@ Behaviour you can rely on:
   signpost ID, so two `asr.chunk` intervals on different tasks, or an
   interval that begins on one thread and ends on another, are matched
   properly in Instruments.
+- **End messages.** A manual interval can end with a public message that
+  Instruments shows next to it: `interval.end(message: event.type)`.
+  `realtime.event` uses it for the event type. The message is only built
+  when signposting is on. Never pass user content or secrets.
 - **Metadata.** The helpers take names only. For an interval that needs a
-  message (for example a chunk index), use the underlying signposter:
+  begin message (for example a chunk index), use the underlying signposter:
   `OSSignpostBackend(category: .asr).signposter.beginInterval("asr.chunk", id: id, "\(index)")`.
   Keep transcript text out of signpost metadata.
 
@@ -130,6 +134,8 @@ case step.
 | `voiceid.verify`      | `voiceid`  | `.voiceIDVerify`      | Scoring of a segment against the voiceprint starts  | Accept / reject / uncertain is decided          |
 | `realtime.turn`       | `realtime` | `.realtimeTurn`       | A verified utterance's text is committed to Grok    | `response.done`, or the response is cancelled by barge-in |
 | `realtime.firstAudio` | `realtime` | `.realtimeFirstAudio` | Same commit as `realtime.turn`                      | The first `response.output_audio.delta` arrives |
+| `realtime.connect`    | `realtime` | `.realtimeConnect`    | `RealtimeClient` starts a connection attempt (token, then WebSocket upgrade) | The socket is open, or the attempt failed |
+| `realtime.event`      | `realtime` | `.realtimeEvent`      | A frame arrives on the realtime WebSocket            | It is decoded and yielded to `RealtimeClient.events`; the end message is the event type |
 | `playback.firstBuffer` | `audio`   | `.playbackFirstBuffer` | The first audio delta of a response item is enqueued in the player | The item's first frame is rendered (the jitter buffer is primed) |
 | `topics.segment`      | `topics`   | `.topicsSegment`      | A new exchange is scored for a topic boundary       | The depth score and hysteresis decision are out |
 | `topics.label`        | `topics`   | `.topicsLabel`        | A candidate boundary goes to Foundation Models      | The boundary is confirmed or rejected and titled |

@@ -117,7 +117,9 @@ removes stays that way. Release builds never carry the key.
 The WebSocket authenticates with the subprotocol
 `xai-client-secret.<secret>` (`RealtimeClientSecret.webSocketSubprotocol`),
 because `URLSessionWebSocketTask` strips the `Authorization` header from the
-upgrade request.
+upgrade request. `RealtimeClient` asks for a secret on every connection and
+calls `invalidate()` when an upgrade is refused with 401/403; see
+[realtime.md](realtime.md).
 
 If Blau ever ships on a shared xAI account, a minting proxy can implement
 `RealtimeClientSecretMinting` without changing any caller.

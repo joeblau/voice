@@ -29,6 +29,12 @@ public enum PipelineInterval: CaseIterable, Sendable {
     /// Committing the user's text until the first audio delta arrives:
     /// the latency the user hears.
     case realtimeFirstAudio
+    /// Opening the realtime WebSocket: minting (or reusing) a client secret
+    /// and completing the upgrade.
+    case realtimeConnect
+    /// Handling one frame received on the realtime WebSocket: decoding it
+    /// into a typed event and delivering it to the client's event stream.
+    case realtimeEvent
     /// From the first audio delta of a response item reaching the player
     /// to its first frame being rendered: the jitter buffer's delay.
     case playbackFirstBuffer
@@ -54,6 +60,8 @@ public enum PipelineInterval: CaseIterable, Sendable {
         case .voiceIDVerify: "voiceid.verify"
         case .realtimeTurn: "realtime.turn"
         case .realtimeFirstAudio: "realtime.firstAudio"
+        case .realtimeConnect: "realtime.connect"
+        case .realtimeEvent: "realtime.event"
         case .playbackFirstBuffer: "playback.firstBuffer"
         case .topicsSegment: "topics.segment"
         case .topicsLabel: "topics.label"
@@ -69,7 +77,7 @@ public enum PipelineInterval: CaseIterable, Sendable {
         case .captureFrame, .playbackFirstBuffer: .audio
         case .vadChunk, .asrChunk, .asrEndOfUtterance: .asr
         case .voiceIDEmbed, .voiceIDVerify: .voiceID
-        case .realtimeTurn, .realtimeFirstAudio: .realtime
+        case .realtimeTurn, .realtimeFirstAudio, .realtimeConnect, .realtimeEvent: .realtime
         case .topicsSegment, .topicsLabel: .topics
         case .memoryEmbed, .memorySearch: .memory
         case .dbSave: .data
