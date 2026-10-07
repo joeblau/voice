@@ -573,7 +573,8 @@ finishing is two commands (below). **No model is hosted yet** (see
    `.pending(provisional: "embeddinggemma-300m", ...)`, missing only
    EmbeddingGemma's numbers; once they pass, it returns
    `.chosen("embeddinggemma-300m", ...)`.
-2. **Fallback: Qwen3-Embedding-0.6B**, if EmbeddingGemma fails the rule. It
+2. **Fallback: Qwen3-Embedding-0.6B**, if EmbeddingGemma's Neural Engine
+   vectors aren't finite. It
    is the strongest model measured here (Recall@5 0.809 at 256-d int8),
    converts cleanly to fp16 with no NaN on the Neural Engine, and runs a
    128-token chunk in 12 ms on the M3 Max's Neural Engine. Its cost is
@@ -583,13 +584,20 @@ finishing is two commands (below). **No model is hosted yet** (see
    Engine (below). Falling back to it means raising the budget, which is
    the owner's call. The rule makes this explicit
    (`EmbeddingModelSelection.fallback`): when no memory candidate
-   qualifies, it returns `.fallback("qwen3-embedding-0.6b", reasons:,
-   missing:)` as long as Qwen3's vectors are finite. `reasons` lists the
-   budgets Qwen3 breaks (today `download 753 MB > 400 MB`), `missing` its
-   numbers still to measure (its iPhone latency). With
-   `maximumDownloadBytes` raised past its size, Qwen3 qualifies and the
-   rule returns `.chosen("qwen3-embedding-0.6b", ...)`. It never falls back
-   to potion-retrieval-32M (decision 4). EmbeddingGemma is about 100M
+   qualifies **because EmbeddingGemma's vectors aren't finite**, it returns
+   `.fallback("qwen3-embedding-0.6b", reasons:, missing:)` as long as
+   Qwen3's vectors are finite. `reasons` lists the budgets Qwen3 breaks
+   (today `download 753 MB > 400 MB`), `missing` its numbers still to
+   measure (its iPhone latency). With `maximumDownloadBytes` raised past
+   its size, Qwen3 qualifies and the rule returns
+   `.chosen("qwen3-embedding-0.6b", ...)`. Qwen3 can't rescue a latency or
+   download failure (it is about twice as slow and larger), so if
+   EmbeddingGemma's vectors are finite but it misses the latency or
+   download budget, the rule returns `.overBudget("embeddinggemma-300m",
+   reasons:, missing:)` instead: the owner either raises that budget for
+   EmbeddingGemma or keeps looking. Only when nothing is usable is the
+   verdict `.noneQualifies`. It never falls back to potion-retrieval-32M
+   (decision 4). EmbeddingGemma is about 100M
    transformer parameters plus a 201M-parameter table, roughly 300 MB at
    int8 for both.
 3. **Not Apple's `NLContextualEmbedding`** for memory: Recall@5 0.325, below
@@ -773,7 +781,11 @@ use the Neural Engine) and record both; the rule then returns
 `.fallback("qwen3-embedding-0.6b", ...)`, which lists the 400 MB download
 budget Qwen3 breaks. Adopting it means the owner raises
 `maximumDownloadBytes` (and Qwen3's iPhone latency lands), after which the
-rule returns `.chosen("qwen3-embedding-0.6b", ...)`.
+rule returns `.chosen("qwen3-embedding-0.6b", ...)`. If EmbeddingGemma's
+vectors are finite but it misses the 50 ms latency or 400 MB download
+budget, the rule returns `.overBudget("embeddinggemma-300m", ...)` rather
+than switching to the larger, slower Qwen3; raising that budget then makes
+it `.chosen("embeddinggemma-300m", ...)`.
 
 ### Hosting the model
 

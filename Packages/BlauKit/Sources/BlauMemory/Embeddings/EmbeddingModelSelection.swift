@@ -24,12 +24,22 @@
 /// (`TextEmbeddingModelSpec.chosen`) unless a known number already rules it
 /// out.
 ///
-/// If **no** memory candidate qualifies, the verdict is `.fallback` to
-/// `fallback` (Qwen3-Embedding-0.6B) as long as its vectors are finite: it
-/// may break the latency or download budget, and those breaches are listed
-/// in the verdict's reasons, because adopting it means the owner raises the
-/// budget (`maximumDownloadBytes`, `maximumDeviceP95Milliseconds`). With a
-/// raised budget it qualifies and the rule returns `.chosen` for it.
+/// If **no** memory candidate qualifies, what happens depends on why:
+///
+/// - Every candidate other than `fallback` is **unusable** (non-finite
+///   vectors on the Neural Engine, which no budget change can fix): the
+///   verdict is `.fallback` to `fallback` (Qwen3-Embedding-0.6B) as long as
+///   its own vectors are finite. It may break the latency or download
+///   budget; those breaches are listed in the verdict's reasons, because
+///   adopting it means the owner raises the budget (`maximumDownloadBytes`,
+///   `maximumDeviceP95Milliseconds`). With a raised budget it qualifies and
+///   the rule returns `.chosen` for it.
+/// - Some other candidate only breaks a **budget**: the verdict is
+///   `.overBudget` for that candidate (the preferred model when it is one of
+///   them). The fallback is twice EmbeddingGemma's size, so it can't rescue
+///   a latency or download failure; the owner decides whether to raise the
+///   budget for the preferred model instead.
+/// - Nothing is usable: `.noneQualifies`.
 public struct EmbeddingModelSelection: Hashable, Sendable {
     /// What is known about one candidate. `nil` means not measured yet.
     public struct Measurements: Codable, Hashable, Sendable {
@@ -99,13 +109,21 @@ public struct EmbeddingModelSelection: Hashable, Sendable {
         case chosen(String, reasons: [String])
         /// A number the decision depends on is missing.
         case pending(provisional: String?, missing: [String])
-        /// No memory candidate qualifies; `id` is the documented fallback.
-        /// `reasons` lists why each candidate was ruled out, including the
-        /// budgets the fallback itself breaks (the owner has to raise them to
-        /// adopt it); `missing` lists the fallback's numbers still unmeasured.
+        /// No memory candidate qualifies because every candidate other than
+        /// the fallback has non-finite vectors; `id` is the documented
+        /// fallback. `reasons` lists why each candidate was ruled out,
+        /// including the budgets the fallback itself breaks (the owner has to
+        /// raise them to adopt it); `missing` lists the fallback's numbers
+        /// still unmeasured.
         case fallback(String, reasons: [String], missing: [String])
-        /// No memory candidate qualifies and the fallback can't be used
-        /// either (absent, or non-finite vectors).
+        /// No memory candidate qualifies, but `id` (a candidate other than
+        /// the fallback, the preferred model when possible) fails only
+        /// budgets the owner can raise. `reasons` lists every
+        /// disqualification; `missing` lists `id`'s numbers still unmeasured.
+        case overBudget(String, reasons: [String], missing: [String])
+        /// No memory candidate qualifies and none can be adopted by raising
+        /// a budget (every one has non-finite vectors, and the fallback is
+        /// absent or non-finite too).
         case noneQualifies(reasons: [String])
     }
 
@@ -205,9 +223,18 @@ public struct EmbeddingModelSelection: Hashable, Sendable {
         return .chosen(winner.specID, reasons: reasons)
     }
 
-    /// Every memory candidate is ruled out: fall back to `fallback` if it was
-    /// only ruled out by a budget.
+    /// Every memory candidate is ruled out. Fall back to `fallback` only when
+    /// every other candidate is unusable (non-finite vectors): the fallback
+    /// exists for numerics, and it is larger and slower than the preferred
+    /// model, so it can't rescue a budget failure. If another candidate fails
+    /// only budgets, name it so the owner can decide whether to raise them.
     private func fallbackVerdict(_ candidates: [Measurements], ruledOut: [String]) -> Verdict {
+        let usableOthers = candidates.filter { $0.specID != fallback && unusable($0).isEmpty }
+        if let model = usableOthers.first(where: { $0.specID == preferred })
+            ?? usableOthers.max(by: { ($0.recallAt5 ?? 0) < ($1.recallAt5 ?? 0) })
+        {
+            return .overBudget(model.specID, reasons: ruledOut, missing: missing(model))
+        }
         guard let fallback, let model = candidates.first(where: { $0.specID == fallback }),
             unusable(model).isEmpty
         else { return .noneQualifies(reasons: ruledOut) }

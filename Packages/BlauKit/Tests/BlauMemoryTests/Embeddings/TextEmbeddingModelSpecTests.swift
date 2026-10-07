@@ -134,22 +134,93 @@ struct EmbeddingModelSelectionTests {
         #expect(reasons.contains { $0.contains("non-finite") })
     }
 
+    /// A candidate ruled out only by budgets is named as over budget, not
+    /// dropped: raising a budget is the owner's call.
     @Test func budgetsCanRuleOutEveryone() {
         let slow = M(
             specID: "qwen3-embedding-0.6b", recallAt5: 0.82, nonFiniteOutputs: 0, deviceP95Milliseconds: 90,
             downloadBytes: 1_200_000_000)
         var selection = EmbeddingModelSelection()
         selection.fallback = nil
-        guard case .noneQualifies(let reasons) = selection.evaluate([slow]) else {
-            Issue.record("Expected none to qualify")
+        guard case .overBudget(let id, let reasons, let missing) = selection.evaluate([slow]) else {
+            Issue.record("Expected over budget")
             return
         }
+        #expect(id == "qwen3-embedding-0.6b")
         #expect(reasons.count == 2)
+        #expect(missing.isEmpty)
     }
 
     /// The recorded numbers once EmbeddingGemma's arrive.
     static func measured(replacingGemmaWith gemma: M) -> [M] {
         EmbeddingModelSelection.measured.map { $0.specID == gemma.specID ? gemma : $0 }
+    }
+
+    /// Round-2 review: EmbeddingGemma misses only the latency budget, and
+    /// Qwen3 is twice as slow and 2.5x larger. Falling back to Qwen3 would
+    /// recommend a model that is worse on the very budget EmbeddingGemma
+    /// broke, so the rule names EmbeddingGemma as over budget instead.
+    @Test func slowEmbeddingGemmaDoesNotFallBackToASlowerQwen3() {
+        let gemma = M(
+            specID: "embeddinggemma-300m", recallAt5: 0.80, nonFiniteOutputs: 0, deviceP95Milliseconds: 60,
+            downloadBytes: 300_000_000)
+        let measured = Self.measured(replacingGemmaWith: gemma).map { m in
+            var m = m
+            if m.specID == "qwen3-embedding-0.6b" { m.deviceP95Milliseconds = 120 }
+            return m
+        }
+        let verdict = EmbeddingModelSelection().evaluate(measured)
+        guard case .overBudget(let id, let reasons, let missing) = verdict else {
+            Issue.record("Expected EmbeddingGemma over budget, got \(verdict)")
+            return
+        }
+        #expect(id == "embeddinggemma-300m")
+        #expect(
+            reasons == [
+                "embeddinggemma-300m: iPhone p95 60.0 ms > 50.0 ms",
+                "qwen3-embedding-0.6b: iPhone p95 120.0 ms > 50.0 ms",
+                "qwen3-embedding-0.6b: download 753 MB > 400 MB",
+            ])
+        #expect(missing.isEmpty)
+
+        // Raising the latency budget is what adopts EmbeddingGemma.
+        var raised = EmbeddingModelSelection()
+        raised.maximumDeviceP95Milliseconds = 200
+        guard case .chosen(let chosen, _) = raised.evaluate(measured) else {
+            Issue.record("Expected a choice")
+            return
+        }
+        #expect(chosen == "embeddinggemma-300m")
+    }
+
+    /// The same holds for the download budget, and before EmbeddingGemma's
+    /// Recall@5 is measured: the verdict lists what is still missing.
+    @Test func embeddingGemmaOverTheDownloadBudgetIsNamedWithItsMissingNumbers() {
+        let gemma = M(specID: "embeddinggemma-300m", nonFiniteOutputs: 0, downloadBytes: 450_000_000)
+        let verdict = EmbeddingModelSelection().evaluate(Self.measured(replacingGemmaWith: gemma))
+        guard case .overBudget(let id, let reasons, let missing) = verdict else {
+            Issue.record("Expected EmbeddingGemma over budget, got \(verdict)")
+            return
+        }
+        #expect(id == "embeddinggemma-300m")
+        #expect(reasons.contains("embeddinggemma-300m: download 450 MB > 400 MB"))
+        #expect(missing == ["embeddinggemma-300m: Recall@5", "embeddinggemma-300m: iPhone latency"])
+    }
+
+    /// EmbeddingGemma over budget while Qwen3 has non-finite vectors: the
+    /// verdict still names EmbeddingGemma, not `.noneQualifies`.
+    @Test func overBudgetEmbeddingGemmaWithANonFiniteFallback() {
+        let gemma = M(
+            specID: "embeddinggemma-300m", recallAt5: 0.80, nonFiniteOutputs: 0, deviceP95Milliseconds: 60,
+            downloadBytes: 300_000_000)
+        let qwen = M(
+            specID: "qwen3-embedding-0.6b", recallAt5: 0.8, nonFiniteOutputs: 1, deviceP95Milliseconds: 20,
+            downloadBytes: 300_000_000)
+        guard case .overBudget(let id, _, _) = EmbeddingModelSelection().evaluate([gemma, qwen]) else {
+            Issue.record("Expected over budget")
+            return
+        }
+        #expect(id == "embeddinggemma-300m")
     }
 
     /// docs/benchmarks.md, "Finishing EmbeddingGemma": a passing
@@ -169,8 +240,8 @@ struct EmbeddingModelSelectionTests {
         #expect(!reasons.contains { $0.contains("potion") || $0.contains("nl-contextual") })
     }
 
-    /// docs/benchmarks.md, decision 2: if EmbeddingGemma's fp16 vectors
-    /// aren't finite, the rule falls back to Qwen3 (not to potion) and says
+    /// docs/benchmarks.md, decision 2: if EmbeddingGemma's Neural Engine
+    /// vectors aren't finite, the rule falls back to Qwen3 (not to potion) and says
     /// that the download budget has to be raised for it.
     @Test func nonFiniteEmbeddingGemmaFallsBackToQwen3() {
         let gemma = M(specID: "embeddinggemma-300m", nonFiniteOutputs: 3)
