@@ -8,7 +8,7 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 
 | File | What it holds |
 | ---- | ------------- |
-| `Blau/BlauApp.swift` | `@main`: builds the environment, injects it, runs `start()`, forwards `scenePhase` |
+| `Blau/BlauApp.swift` | `@main`: builds the environment, wraps `RootView` in `PersistenceGate`, injects the environment, runs `start()`, forwards `scenePhase` |
 | `Blau/Composition/AppEnvironment.swift` | The composition root, its factories and launch-time environment detection |
 | `Blau/Composition/ScenePhaseHandling.swift` | `ScenePhase` → `AppPhase`, background time, the `.appEnvironment(_:)` modifier |
 | `Blau/RootView.swift` | The (still empty) main screen, the xAI Settings and onboarding entry points, and the DEBUG menu button |
@@ -18,7 +18,8 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `BlauCore/Fakes/` | Fakes for previews and tests, `TranscriptScript` |
 | `BlauCore/FeatureFlags/` | `FeatureFlag`, `FeatureFlags` and their storage |
 | `BlauCore/Lifecycle/` | `AppPhase` and `AppLifecycleCoordinator` |
-| `BlauPersistence/PersistenceService.swift` | `PersistenceService` and `SwiftDataPersistence` |
+| `Blau/Persistence/` | `PersistenceGate` (opens the stores, hands the current container to the views) and the in-memory `PersistenceController` for previews and tests |
+| `BlauPersistence/Sync/PersistenceController.swift` | The SwiftData stores with iCloud sync ([sync.md](sync.md)); saves pending edits when the app leaves the foreground |
 
 ## `AppEnvironment`
 
@@ -33,7 +34,7 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `transcriber` | `any Transcriber` | unavailable until #29 | `FakeTranscriber` |
 | `voiceGate` | `any VoiceGate` | unavailable until #47 | `FakeVoiceGate` |
 | `realtime` | `any RealtimeService` | unavailable until #34 - #36 | `FakeRealtimeService` |
-| `persistence` | `any PersistenceService` | `SwiftDataPersistence.live()` | in-memory `SwiftDataPersistence` |
+| `persistence` | `PersistenceController` | `PersistenceController.live(isDebugBuild:)`: `Application Support/Blau/Blau.store`, mirrored to iCloud when the account allows | `PersistenceController.inMemory()` |
 | `topics` | `any TopicService` | unavailable until #52 - #54 | `FakeTopicService` |
 | `memory` | `any MemoryService` | unavailable until #62 - #68 | `FakeMemoryService` |
 | `xai` | `XAIServices` | Keychain + network (`XAIServices.make`); the `BLAU_UI_TEST_XAI` stub in DEBUG UI tests | in-memory key store + stub transport (`XAIServices.hermetic`) |
@@ -41,9 +42,17 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 
 Views read it with `@Environment(AppEnvironment.self)`. The
 `.appEnvironment(_:)` modifier also injects `FeatureFlags`, the
-`AppLifecycleCoordinator`, the `XAIAccount` (`xai.account`) and the SwiftData
-container (`.modelContainer`), so a view can read just the part it needs and
-`@Query` works.
+`AppLifecycleCoordinator`, the `XAIAccount` (`xai.account`) and the
+`PersistenceController` (Settings reads its iCloud status), so a view can
+read just the part it needs.
+
+The modifier does not set the SwiftData container: the controller opens the
+stores asynchronously and replaces the container when the iCloud account
+changes (`generation`). In the app, `PersistenceGate` sits inside
+`.appEnvironment(_:)`, sets `.modelContainer` to the current container (so
+`@Query` works) and rebuilds `RootView` for a new one. Code outside the view
+tree reads `environment.modelContainer` (`persistence.stack?.container`)
+each time rather than keeping it.
 
 `BlauApp` calls `AppEnvironment.start()` from the root view's `.task` once at
 launch. Today it starts the xAI services: DEBUG builds seed the developer key,
@@ -53,8 +62,9 @@ then the stored key is loaded.
 
 The protocols live in BlauCore, the lowest layer, so one subsystem can use
 another through its protocol without a sibling import (rule 2 in
-[architecture.md](architecture.md)). `PersistenceService` is in
-BlauPersistence because it exposes a SwiftData `ModelContainer`. Each
+[architecture.md](architecture.md)). Persistence is the exception: the slot
+holds BlauPersistence's `PersistenceController` itself, because views need
+its `ModelContainer` and its iCloud sync state. Each
 protocol is deliberately small; **the issue that builds a subsystem adds
 what it needs to its protocol and replaces `UnavailableService` in
 `AppEnvironment.live()`** with the real implementation.
@@ -87,7 +97,9 @@ fakes with in-memory flags (see `BlauUITests/DebugMenuUITests.swift`).
 ```
 
 `AppEnvironment.preview(flags:script:memories:isEnrolled:)` builds fakes over
-a fresh in-memory store. `AppEnvironment.fake(kind:...)` does the same for
+a fresh in-memory store (`PersistenceController.inMemory()`, which never
+touches iCloud or the disk; `await environment.persistence.start()` before
+reading `modelContainer` in a test). `AppEnvironment.fake(kind:...)` does the same for
 tests and takes a clock, so a test can drive the `FakeTranscriber` with a
 `ManualClock`.
 
@@ -155,9 +167,15 @@ finishes before iOS can suspend the process.
 Blau keeps a conversation running in the background (`audio` background
 mode), so a service must not stop a live session just because the app was
 backgrounded: it releases what is idle and saves what could be lost. Today
-`SwiftDataPersistence` saves pending main-context edits whenever the app
-leaves the foreground (inside a `db.save` signpost); the subsystems add their
-own handling as they are built.
+`PersistenceController` saves pending main-context edits of the store that is
+open now whenever the app leaves the foreground (inside a `db.save`
+signpost); the subsystems add their own handling as they are built.
+
+Each move to `active` also calls `persistence.refresh()` in its own task, so
+an iCloud account change made in the Settings app while Blau was in the
+background (which doesn't always post `CKAccountChanged`) is picked up, and
+the store's history is re-read. It runs outside the coordinator so a slow
+account query never holds up the other services.
 
 Each move to `active` also calls `xai.refresh()`, which re-reads the Keychain
 so a key added or removed on another device (iCloud Keychain) shows up. A

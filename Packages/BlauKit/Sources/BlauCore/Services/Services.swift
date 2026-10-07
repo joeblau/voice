@@ -5,8 +5,9 @@
 // docs/architecture.md), and so previews and tests can swap in the fakes in
 // `Fakes/`. Each protocol is deliberately small: the issue that builds the
 // subsystem provides the live implementation and grows its protocol as
-// needed. `PersistenceService` lives in BlauPersistence because it exposes a
-// SwiftData `ModelContainer`.
+// needed. Persistence is BlauPersistence's `PersistenceController`, held
+// directly because views need its SwiftData `ModelContainer` and iCloud sync
+// state.
 
 import Foundation
 

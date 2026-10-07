@@ -11,7 +11,7 @@ import os
 /// and injected into SwiftUI.
 ///
 /// Views read it with `@Environment(AppEnvironment.self)`. Each subsystem is
-/// held behind its BlauCore (or BlauPersistence) protocol, so the same views
+/// held behind its BlauCore protocol, so the same views
 /// run on live services, on the fakes in previews and UI tests, and on
 /// whatever a unit test passes in. Build one with `make(kind:)`, or with
 /// `live()`, `preview(...)` and `fake(kind:...)` directly.
@@ -44,7 +44,11 @@ final class AppEnvironment {
     let transcriber: any Transcriber
     let voiceGate: any VoiceGate
     let realtime: any RealtimeService
-    let persistence: any PersistenceService
+    /// The SwiftData stores, mirrored to iCloud when the account allows it
+    /// (#20, see docs/sync.md). `PersistenceGate` opens them and hands the
+    /// current container to the views; the controller saves pending edits
+    /// when the app leaves the foreground.
+    let persistence: PersistenceController
     let topics: any TopicService
     let memory: any MemoryService
 
@@ -61,6 +65,10 @@ final class AppEnvironment {
     /// can wait for it.
     @ObservationIgnored var xaiRefresh: Task<Void, Never>?
 
+    /// The iCloud account and history refresh started by the latest return to
+    /// `active`, so tests can wait for it.
+    @ObservationIgnored var persistenceRefresh: Task<Void, Never>?
+
     init(
         kind: Kind,
         config: AppConfig,
@@ -70,7 +78,7 @@ final class AppEnvironment {
         transcriber: any Transcriber,
         voiceGate: any VoiceGate,
         realtime: any RealtimeService,
-        persistence: any PersistenceService,
+        persistence: PersistenceController,
         topics: any TopicService,
         memory: any MemoryService,
         xai: XAIServices
@@ -94,8 +102,11 @@ final class AppEnvironment {
         )
     }
 
-    /// The store views read and write through `@Query` and `modelContext`.
-    var modelContainer: ModelContainer { persistence.modelContainer }
+    /// The store views read and write through `@Query` and `modelContext`,
+    /// or `nil` until the stores are open. Read it again rather than keeping
+    /// it: the container is replaced when the iCloud account changes
+    /// (`persistence.generation`).
+    var modelContainer: ModelContainer? { persistence.stack?.container }
 
     /// Launch-time work, run once from the app's root `.task`: seeds the
     /// DEBUG developer xAI key, then loads the stored key.
@@ -107,7 +118,7 @@ final class AppEnvironment {
     /// BlauKit layer first (see docs/architecture.md). Leaving the foreground
     /// goes in reverse, so persistence saves last.
     private static func lifecycleOrder(
-        persistence: any PersistenceService,
+        persistence: PersistenceController,
         audio: any AudioService,
         transcriber: any Transcriber,
         voiceGate: any VoiceGate,
@@ -136,7 +147,8 @@ extension AppEnvironment {
         return environment
     }
 
-    /// The real app: the on-disk store, `UserDefaults` flags with DEBUG
+    /// The real app: the on-disk store mirrored to iCloud
+    /// (`PersistenceController.live`), `UserDefaults` flags with DEBUG
     /// overrides, the Keychain-backed xAI services, and an
     /// `UnavailableService` for each subsystem not built yet.
     ///
@@ -148,7 +160,7 @@ extension AppEnvironment {
     static func live(
         config: AppConfig = .current,
         defaults: UserDefaults = .standard,
-        persistence: any PersistenceService = SwiftDataPersistence.live(),
+        persistence: PersistenceController? = nil,
         xai: XAIServices? = nil
     ) -> AppEnvironment {
         AppEnvironment(
@@ -168,8 +180,8 @@ extension AppEnvironment {
             voiceGate: UnavailableService(subsystem: "voice ID"),
             // #34 - #36: the Grok realtime session.
             realtime: UnavailableService(subsystem: "realtime"),
-            // `SwiftDataPersistence.live()`; #20 turns on CloudKit sync.
-            persistence: persistence,
+            // The SwiftData stores with CloudKit sync (#20).
+            persistence: persistence ?? .live(isDebugBuild: AppConfig.isDebugBuild),
             // #52 - #54: the topic segmenter.
             topics: UnavailableService(subsystem: "topics"),
             // #62 - #68: memory and its tools.
@@ -223,7 +235,7 @@ extension AppEnvironment {
             transcriber: FakeTranscriber(script: script, clock: clock),
             voiceGate: FakeVoiceGate(isEnrolled: isEnrolled),
             realtime: FakeRealtimeService(),
-            persistence: inMemoryPersistence(),
+            persistence: .inMemory(),
             topics: FakeTopicService(),
             memory: FakeMemoryService(memories: memories),
             xai: xai ?? XAIServices.hermetic(config: config)
@@ -236,16 +248,6 @@ extension AppEnvironment {
         "The YC interview practice set has 20 questions",
         "Joe prefers short answers when practicing interview questions",
     ]
-
-    private static func inMemoryPersistence() -> SwiftDataPersistence {
-        do {
-            return try SwiftDataPersistence.inMemory()
-        } catch {
-            // The same schema opens in memory in every BlauPersistence test;
-            // failing here means SwiftData itself is broken.
-            fatalError("Couldn't create an in-memory SwiftData store: \(error)")
-        }
-    }
 
     private static func launchArgumentFlagOverrides() -> [FeatureFlag: Bool] {
         let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)

@@ -77,7 +77,7 @@
                 // Only whether a key exists; never the key.
                 LabeledContent("Developer key", value: environment.config.hasDevelopmentAPIKey ? "Configured" : "None")
                 LabeledContent("Store", value: storeDescription)
-                if let failure = environment.persistence.openFailure {
+                if case .inMemory(.storeFailed(let failure)) = environment.persistence.stack?.mode {
                     Text("The on-disk store couldn't be opened: \(failure)")
                         .font(.caption)
                         .foregroundStyle(.red)
@@ -106,9 +106,11 @@
         }
 
         private var storeDescription: String {
-            switch environment.persistence.storeKind {
-            case .persistent(let url): url.lastPathComponent
-            case .inMemory: "In memory"
+            guard let stack = environment.persistence.stack else { return "Opening" }
+            switch stack.mode {
+            case .cloudKit: return "\(stack.location.syncedStoreURL.lastPathComponent), iCloud"
+            case .localOnly: return "\(stack.location.syncedStoreURL.lastPathComponent), on device"
+            case .inMemory: return "In memory"
             }
         }
     }

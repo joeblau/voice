@@ -50,7 +50,7 @@ struct AppEnvironmentKindTests {
 @Suite("AppEnvironment factories")
 @MainActor
 struct AppEnvironmentFactoryTests {
-    @Test func previewUsesFakesAndAnInMemoryStore() {
+    @Test func previewUsesFakesAndAnInMemoryStore() async {
         let environment = AppEnvironment.preview(flags: [.perfHUD: true])
         #expect(environment.kind == .preview)
         #expect(environment.audio is FakeAudioService)
@@ -59,18 +59,24 @@ struct AppEnvironmentFactoryTests {
         #expect(environment.realtime is FakeRealtimeService)
         #expect(environment.topics is FakeTopicService)
         #expect(environment.memory is FakeMemoryService)
-        #expect(environment.persistence.storeKind == .inMemory)
+        await environment.persistence.start()
+        #expect(environment.persistence.stack?.mode == .inMemory(.requested))
+        #expect(environment.persistence.accountStatus == nil)
+        #expect(environment.modelContainer === environment.persistence.stack?.container)
         #expect(environment.flags.allowsOverrides)
         #expect(environment.flags.isEnabled(.perfHUD))
         #expect(environment.lifecycle.phase == nil)
     }
 
-    @Test func eachEnvironmentGetsItsOwnStoreAndFlags() throws {
+    @Test func eachEnvironmentGetsItsOwnStoreAndFlags() async throws {
         let first = AppEnvironment.preview()
         let second = AppEnvironment.preview()
-        first.modelContainer.mainContext.insert(Conversation(startedAt: .distantPast))
-        try first.modelContainer.mainContext.save()
-        #expect(try second.modelContainer.mainContext.fetchCount(FetchDescriptor<Conversation>()) == 0)
+        await first.persistence.start()
+        await second.persistence.start()
+        let firstContext = try #require(first.modelContainer).mainContext
+        firstContext.insert(Conversation(startedAt: .distantPast))
+        try firstContext.save()
+        #expect(try #require(second.modelContainer).mainContext.fetchCount(FetchDescriptor<Conversation>()) == 0)
 
         first.flags.setOverride(true, for: .perfHUD)
         #expect(!second.flags.isEnabled(.perfHUD))
@@ -97,7 +103,7 @@ struct AppEnvironmentFactoryTests {
         let environment = AppEnvironment.live(
             config: .fallback,
             defaults: defaults,
-            persistence: try SwiftDataPersistence.inMemory()
+            persistence: .inMemory()
         )
         #expect(environment.kind == .live)
         #expect(environment.config == .fallback)
@@ -117,10 +123,11 @@ struct AppEnvironmentFactoryTests {
         await #expect(throws: ServiceUnavailableError.self) { try await environment.realtime.connect() }
     }
 
-    @Test func uiTestEnvironmentKeepsFlagsInMemory() {
+    @Test func uiTestEnvironmentKeepsFlagsInMemory() async {
         let environment = AppEnvironment.make(kind: .uiTest)
         #expect(environment.kind == .uiTest)
-        #expect(environment.persistence.storeKind == .inMemory)
+        await environment.persistence.start()
+        #expect(environment.persistence.stack?.mode == .inMemory(.requested))
         // Compare with what was there before rather than with `nil`: a live
         // run on this simulator may have set the flag from the debug menu.
         let key = FeatureFlag.perfHUD.defaultsKey
@@ -135,7 +142,7 @@ struct AppEnvironmentFactoryTests {
         let environment = AppEnvironment.live(
             config: .fallback,
             defaults: try #require(UserDefaults(suiteName: "com.joeblau.blau.tests.\(UUID().uuidString)")),
-            persistence: try SwiftDataPersistence.inMemory(),
+            persistence: .inMemory(),
             xai: xai
         )
         #expect(environment.xai === xai)
@@ -334,7 +341,8 @@ struct ScenePhaseHandlingTests {
 
     @Test func backgroundingSavesPendingEdits() async throws {
         let environment = AppEnvironment.preview()
-        let context = environment.modelContainer.mainContext
+        await environment.persistence.start()
+        let context = try #require(environment.modelContainer).mainContext
         environment.handleScenePhase(.active)
         context.insert(Conversation(startedAt: .distantPast))
         #expect(context.hasChanges)
@@ -342,6 +350,23 @@ struct ScenePhaseHandlingTests {
         environment.handleScenePhase(.background)
         await environment.lifecycle.waitUntilDelivered()
         #expect(!context.hasChanges)
+        let container = try #require(environment.modelContainer)
+        #expect(try ModelContext(container).fetchCount(FetchDescriptor<Conversation>()) == 1)
+    }
+
+    /// Becoming active re-reads the iCloud account and the store history
+    /// (formerly `PersistenceGate`'s own scene phase hook), without opening a
+    /// second store.
+    @Test func becomingActiveRefreshesPersistence() async throws {
+        let environment = AppEnvironment.preview()
+        environment.handleScenePhase(.active)
+        let refresh = try #require(environment.persistenceRefresh)
+        await refresh.value
+        #expect(environment.persistence.stack?.mode == .inMemory(.requested))
+        #expect(environment.persistence.generation == 1)
+
+        environment.handleScenePhase(.inactive)
+        #expect(environment.persistenceRefresh == refresh)
     }
 }
 
@@ -368,6 +393,13 @@ struct PreviewEnvironmentRenderingTests {
     @Test func rootViewRenders() throws {
         let view = try host(RootView().appEnvironment(.preview()))
         #expect(view.bounds.size == CGSize(width: 393, height: 852))
+        #expect(!view.subviews.isEmpty)
+    }
+
+    /// Settings reads the `PersistenceController` (iCloud section) and the
+    /// `XAIAccount` from the environment `appEnvironment(_:)` injects.
+    @Test func settingsRenders() throws {
+        let view = try host(SettingsView().appEnvironment(.preview()))
         #expect(!view.subviews.isEmpty)
     }
 

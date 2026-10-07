@@ -27,7 +27,10 @@ extension AppEnvironment {
     ///
     /// Becoming active, it also refreshes the xAI key with `xai.refresh()`,
     /// which does nothing until `start()` has loaded the key, so the
-    /// launch-time `inactive → active` can't race the DEBUG key seeding.
+    /// launch-time `inactive → active` can't race the DEBUG key seeding, and
+    /// re-reads the iCloud account status and store history with
+    /// `persistence.refresh()`. Both run in their own tasks so a slow answer
+    /// never holds up the services' phase changes.
     /// Moving to the background, the app asks iOS for extra running
     /// time until every service has handled the change, so the store's save
     /// and any other flushing finish before the process can be suspended.
@@ -43,6 +46,10 @@ extension AppEnvironment {
             // Pick up a key added or removed on another device (iCloud
             // Keychain).
             xaiRefresh = Task { await xai.refresh() }
+            // Account changes made in the Settings app while Blau was in the
+            // background don't always post CKAccountChanged.
+            let persistence = persistence
+            persistenceRefresh = Task { await persistence.refresh() }
         }
 
         #if canImport(UIKit)
@@ -82,7 +89,12 @@ extension AppEnvironment {
 
 /// Puts `environment` and the objects views read most into the SwiftUI
 /// environment: the `AppEnvironment` itself, its `FeatureFlags`, its
-/// `AppLifecycleCoordinator`, its `XAIAccount` and its SwiftData container.
+/// `AppLifecycleCoordinator`, its `XAIAccount` and its
+/// `PersistenceController`.
+///
+/// The SwiftData container is not set here: it is replaced when the iCloud
+/// account changes, so `PersistenceGate` (inside this modifier in the app)
+/// sets the current one and rebuilds its content when it changes.
 struct AppEnvironmentModifier: ViewModifier {
     let environment: AppEnvironment
 
@@ -92,7 +104,7 @@ struct AppEnvironmentModifier: ViewModifier {
             .environment(environment.flags)
             .environment(environment.lifecycle)
             .environment(environment.xai.account)
-            .modelContainer(environment.modelContainer)
+            .environment(environment.persistence)
     }
 }
 

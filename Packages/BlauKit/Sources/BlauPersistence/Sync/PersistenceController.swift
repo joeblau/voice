@@ -18,6 +18,10 @@ import os
 ///   persistent history whenever the store changes underneath the app
 ///   (`NSPersistentStoreRemoteChange`, a finished import, or `refresh()` when
 ///   the app becomes active), publishing a `StoreChangeSet` to subscribers.
+/// - It is the composition root's persistence service: leaving the
+///   foreground saves pending main-context edits (`AppLifecycleParticipant`),
+///   so an edit made in the UI survives the process being suspended or
+///   killed.
 @MainActor
 @Observable
 public final class PersistenceController {
@@ -40,6 +44,7 @@ public final class PersistenceController {
     @ObservationIgnored private let bootstrap: PersistenceBootstrap
     @ObservationIgnored private let clock: any BlauClock
     @ObservationIgnored private let notificationCenter: NotificationCenter
+    @ObservationIgnored private let signposter: Signposter
     @ObservationIgnored private var tracker: PersistentHistoryTracker?
     @ObservationIgnored private var subscribers: [UUID: AsyncStream<StoreChangeSet>.Continuation] = [:]
     @ObservationIgnored private var startTask: Task<Void, Never>?
@@ -59,13 +64,15 @@ public final class PersistenceController {
         accountProvider: (any CloudAccountStatusProviding)?,
         bootstrap: PersistenceBootstrap = .live,
         clock: any BlauClock = .system,
-        notificationCenter: NotificationCenter = .default
+        notificationCenter: NotificationCenter = .default,
+        signposter: Signposter = Signposts.data
     ) {
         self.options = options
         self.accountProvider = accountProvider
         self.bootstrap = bootstrap
         self.clock = clock
         self.notificationCenter = notificationCenter
+        self.signposter = signposter
     }
 
     /// The production controller for the running app.
@@ -283,5 +290,39 @@ public final class PersistenceController {
         } catch {
             Log.data.error("Reading history failed: \(String(describing: error), privacy: .public)")
         }
+    }
+}
+
+// MARK: - App lifecycle
+
+extension PersistenceController: AppLifecycleParticipant {
+    /// Saves pending UI edits whenever the app leaves the foreground.
+    ///
+    /// Becoming active is not handled here: the app calls `refresh()` from
+    /// its own task (see `AppEnvironment.handleScenePhase`), so a slow iCloud
+    /// account query never holds up the other services' phase changes.
+    public nonisolated func appPhaseDidChange(_ transition: AppPhaseTransition) async {
+        guard transition.to != .active else { return }
+        await saveOnLeavingForeground(transition)
+    }
+
+    private func saveOnLeavingForeground(_ transition: AppPhaseTransition) {
+        do {
+            try saveMainContext()
+        } catch {
+            Log.data.error(
+                "Saving on \(transition.description, privacy: .public) failed: \(String(describing: error), privacy: .public)"
+            )
+        }
+    }
+
+    /// Saves the synced store's main context if it has unsaved changes.
+    ///
+    /// Reads the container from the current `stack` every time, so a save
+    /// after a sync-mode switch goes to the store that is open now. Does
+    /// nothing before `start()` has opened the stores.
+    public func saveMainContext() throws {
+        guard let context = stack?.container.mainContext, context.hasChanges else { return }
+        try signposter.withInterval(.dbSave) { try context.save() }
     }
 }
