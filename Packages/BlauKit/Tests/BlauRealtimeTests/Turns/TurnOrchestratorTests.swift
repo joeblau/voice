@@ -172,12 +172,16 @@ struct TurnOrchestratorTests {
 
         // Resumed 300 ms after the first part ended.
         await harness.orchestrator.handle(.final(harness.utterance("about the launch", from: 1.8, to: 2.6)))
-        try await harness.waitForSent("response.create", count: 2, on: socket)
+        try await harness.waitForSent("conversation.item.create", count: 2, on: socket)
 
+        // The new `response.create` waits until the cancelled response is
+        // done: the server runs one response at a time. (If `resp_1`'s
+        // `response.created` is handled after the merge, it is cancelled
+        // again by id.)
         #expect(
-            socket.sentEvents.map(\.type) == [
+            Array(socket.sentEvents.map(\.type).prefix(5)) == [
                 "session.update", "conversation.item.create", "response.create", "response.cancel",
-                "conversation.item.create", "response.create",
+                "conversation.item.create",
             ])
         // `resp_1`, or the response in progress if its `response.created`
         // hadn't been handled yet: either cancels it.
@@ -188,6 +192,8 @@ struct TurnOrchestratorTests {
         // The cancelled response's late audio is dropped.
         socket.push(ServerEvents.audio("item_1", response: "resp_1", milliseconds: 100))
         socket.push(ServerEvents.responseDone("resp_1", status: .cancelled))
+        try await harness.waitForSent("response.create", count: 2, on: socket)
+        #expect(socket.sentEvents.last?.type == "response.create")
         socket.push(ServerEvents.responseCreated("resp_2", turn: socket.turnTag(1)))
         socket.push(ServerEvents.audio("item_2", response: "resp_2", milliseconds: 100))
         try await harness.waitForState(.agentSpeaking)
@@ -219,6 +225,8 @@ struct TurnOrchestratorTests {
 
         // Still in the jitter buffer: nothing heard.
         await harness.orchestrator.handle(.final(harness.utterance("what now", from: 0.7, to: 1.2)))
+        try await harness.waitForSent("conversation.item.create", count: 2, on: socket)
+        socket.push(ServerEvents.responseDone("resp_1", status: .cancelled))
         try await harness.waitForSent("response.create", count: 2, on: socket)
         #expect(socket.sentEvents.contains(.conversationItemDelete(itemID: "item_1")))
         #expect(!socket.sentEvents.contains { $0.type == "conversation.item.truncate" })
@@ -268,6 +276,8 @@ struct TurnOrchestratorTests {
         // Something new, well after the question ended.
         let followUp = harness.utterance("Actually, just the year", from: 5, to: 6)
         await harness.orchestrator.handle(.final(followUp))
+        try await harness.waitForSent("conversation.item.create", count: 2, on: socket)
+        socket.push(ServerEvents.responseDone("resp_1", status: .cancelled))
         try await harness.waitForSent("response.create", count: 2, on: socket)
 
         let types = socket.sentEvents.map(\.type)

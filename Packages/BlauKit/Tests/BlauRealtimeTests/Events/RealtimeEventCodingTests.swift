@@ -123,6 +123,11 @@ struct RealtimeClientEventTests {
                 == json(
                     #"{"type":"response.create","response":{"modalities":["text"],"instructions":"One line.","metadata":{"turn":"7"}}}"#
                 ))
+        #expect(
+            try encoded(.responseCreate(.init(metadata: ["blau_turn": "2"]), eventID: "blau_rc_2_1"))
+                == json(
+                    #"{"type":"response.create","event_id":"blau_rc_2_1","response":{"metadata":{"blau_turn":"2"}}}"#
+                ))
         #expect(try encoded(.responseCancel()) == json(#"{"type":"response.cancel"}"#))
         #expect(
             try encoded(.responseCancel(responseID: "resp_1"))
@@ -158,6 +163,7 @@ struct RealtimeClientEventTests {
         .conversationItemTruncate(itemID: "i", contentIndex: 1, audioEndMilliseconds: 250),
         .responseCreate(),
         .responseCreate(.init(metadata: ["n": 1, "flag": true, "nested": ["a": [1, 2]]])),
+        .responseCreate(eventID: "e"),
         .responseCancel(),
         .responseCancel(responseID: "r"),
     ]

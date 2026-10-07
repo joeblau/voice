@@ -222,6 +222,13 @@ struct TurnHarness {
         }
     }
 
+    /// Waits for the response timeout (or the `response.create` hold limit)
+    /// to be armed, then lets `duration` pass.
+    func elapse(_ duration: Duration) async {
+        await clock.waitForSleepers()
+        clock.advance(by: duration)
+    }
+
     /// Waits until the socket has sent `count` events of `type`.
     func waitForSent(
         _ type: String, count: Int = 1, on socket: FakeSocket, sourceLocation: SourceLocation = #_sourceLocation
@@ -243,10 +250,25 @@ extension FakeSocket {
     /// The turn tag of the `index`th `response.create` this socket sent.
     func turnTag(_ index: Int = 0) -> String? {
         let creates: [RealtimeResponseOptions?] = sentEvents.compactMap { event in
-            if case .responseCreate(let options) = event { options } else { nil }
+            if case .responseCreate(let options, _) = event { options } else { nil }
         }
         guard creates.indices.contains(index) else { return nil }
         return creates[index]?.metadata?[TurnOrchestrator.turnMetadataKey]?.stringValue
+    }
+
+    /// The client `event_id` of each `response.create` this socket sent.
+    var responseCreateEventIDs: [String?] {
+        sentEvents.compactMap { event in
+            if case .responseCreate(_, let eventID) = event { eventID } else { nil }
+        }
+    }
+
+    /// The response ids this socket sent `response.cancel` for (`nil`: the
+    /// response in progress).
+    var cancelledResponses: [String?] {
+        sentEvents.compactMap { event in
+            if case .responseCancel(let responseID) = event { responseID } else { nil }
+        }
     }
 
     /// The user texts sent with `conversation.item.create`, in order.
@@ -267,6 +289,21 @@ enum ServerEvents {
                 response: RealtimeResponse(
                     id: id, status: .inProgress, output: [],
                     metadata: turn.map { [TurnOrchestrator.turnMetadataKey: .string($0)] })))
+    }
+
+    /// An `error` event; `eventID` names the client event that caused it.
+    static func error(
+        _ code: String, eventID: String?, message: String = "Request rejected"
+    ) -> RealtimeServerEvent {
+        .error(
+            .init(error: .init(type: .invalidRequest, code: code, message: message, eventID: eventID)))
+    }
+
+    /// The rejection of a `response.create` sent while a response is active.
+    static func activeResponseError(eventID: String?) -> RealtimeServerEvent {
+        error(
+            TurnOrchestrator.activeResponseErrorCode, eventID: eventID,
+            message: "Conversation already has an active response")
     }
 
     static func itemAdded(_ itemID: String, response: String) -> RealtimeServerEvent {

@@ -58,6 +58,10 @@ struct TurnOrchestratorIntegrationTests {
 
         await harness.orchestrator.handle(.final(harness.utterance("Tell me about", from: 0, to: 1)))
         await harness.orchestrator.handle(.final(harness.utterance("the bridge", from: 1.1, to: 1.6)))
+        try await harness.waitForSent("conversation.item.create", count: 2, on: socket)
+        // The merged turn's response, cancelled; then the continuation's.
+        socket.push(ServerEvents.responseCreated("resp_1", turn: socket.turnTag(0)))
+        socket.push(ServerEvents.responseDone("resp_1", status: .cancelled))
         try await harness.waitForSent("response.create", count: 2, on: socket)
         harness.clock.advance(by: .seconds(2))
         socket.push(ServerEvents.responseCreated("resp_2", turn: socket.turnTag(1)))
@@ -67,6 +71,8 @@ struct TurnOrchestratorIntegrationTests {
         harness.audio.setPlayed(PlaybackItemID(itemID: "item_2"), milliseconds: 600)
 
         await harness.orchestrator.handle(.final(harness.utterance("Who built it?", from: 5, to: 6)))
+        try await harness.waitForSent("conversation.item.create", count: 3, on: socket)
+        socket.push(ServerEvents.responseDone("resp_2", status: .cancelled))
         try await harness.waitForSent("response.create", count: 3, on: socket)
         await harness.orchestrator.stop()
 

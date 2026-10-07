@@ -42,6 +42,15 @@ import os
 /// interrupts the reply the same way (cut at what was heard, with
 /// `conversation.item.truncate`) and starts a new turn.
 ///
+/// **Matching responses.** Each `response.create` carries the turn in its
+/// `metadata` and a client `event_id`. Without a `metadata` echo, responses
+/// are matched by order, so only one `response.create` is outstanding at a
+/// time: a turn's is held until the previous one is answered
+/// (`response.created`, or an `error` rejecting it) and a cancelled
+/// response is done, for at most ``Configuration/responseCreateHoldLimit``.
+/// A request rejected because a response was still active is sent again;
+/// any other rejection fails the turn (docs/realtime.md).
+///
 /// **Connection.** Every new connection is configured
 /// (``RealtimeSessionConfigurator/configure(_:)``) before anything else is
 /// sent, and Settings changes follow the session. Utterances finalized while
@@ -74,19 +83,27 @@ public actor TurnOrchestrator: RealtimeService {
         /// Extra time allowed for the reply to finish playing beyond its
         /// length, before the orchestrator stops waiting for the player.
         public var playbackDrainSlack: Duration
+        /// How long a turn's `response.create` waits for the previous one to
+        /// be answered (`response.created` or a rejection) and for a
+        /// cancelled response to finish (`response.done`), before it is sent
+        /// anyway. Only one `response.create` is outstanding at a time, so an
+        /// untagged `response.created` always answers it.
+        public var responseCreateHoldLimit: Duration
 
         public init(
             mergeWindow: Duration = .milliseconds(400),
             responseTimeout: Duration = .seconds(15),
             latencyWindow: Int = 200,
             outputSampleRate: Int = 24_000,
-            playbackDrainSlack: Duration = .seconds(2)
+            playbackDrainSlack: Duration = .seconds(2),
+            responseCreateHoldLimit: Duration = .seconds(2)
         ) {
             self.mergeWindow = mergeWindow
             self.responseTimeout = responseTimeout
             self.latencyWindow = latencyWindow
             self.outputSampleRate = outputSampleRate
             self.playbackDrainSlack = playbackDrainSlack
+            self.responseCreateHoldLimit = responseCreateHoldLimit
         }
 
         public static let standard = Configuration()
@@ -105,6 +122,14 @@ public actor TurnOrchestrator: RealtimeService {
     /// The metadata key `response.create` carries, so `response.created`
     /// can be matched to its turn even after a cancel.
     static let turnMetadataKey = "blau_turn"
+
+    /// The `error.code` a server sends when `response.create` arrives while
+    /// another response is still active.
+    static let activeResponseErrorCode = "conversation_already_has_active_response"
+
+    /// How many times a turn's `response.create` is sent before a rejection
+    /// fails the turn.
+    static let maxResponseCreateAttempts = 3
 
     public nonisolated let client: RealtimeClient
     public nonisolated let configurator: RealtimeSessionConfigurator
@@ -134,19 +159,22 @@ public actor TurnOrchestrator: RealtimeService {
     private var completedTurns = 0
 
     // Matching server events to turns
-    /// One slot per `response.create` sent this session, oldest first, until
-    /// its `response.created` arrives. A turn given up before then keeps its
-    /// slot, marked abandoned: the server still creates that response, and
-    /// an untagged `response.created` (no `metadata` echo) is matched to the
-    /// oldest slot, so removing it would hand the late response to the next
-    /// turn.
+    /// The `response.create` sent and not answered yet, by its
+    /// `response.created` or by an `error` rejecting it. The next one is
+    /// held back while this isn't empty (see `takeResponseCreateIfReady()`),
+    /// so it holds at most one slot and an untagged `response.created` (no
+    /// `metadata` echo) always answers that slot. A turn given up before the
+    /// answer keeps its slot, marked abandoned: the server still creates
+    /// that response, which is then ignored and cancelled.
     private var awaitingResponse: [ResponseSlot] = []
-    /// Set when an untagged `response.created` was matched to the slot of a
-    /// turn that timed out, and cleared by the next one matched to a live
-    /// turn. If the turn after it times out too, the response taken was
-    /// really that turn's: the timed-out one never got a response, so its
-    /// slot was stale (see ``responseTimedOut(turn:)``).
-    private var timedOutSlotTookAResponse = false
+    /// The response the server is generating, from its `response.created`
+    /// until its `response.done`. The server runs one at a time, so a new
+    /// `response.create` waits for it (it is being cancelled by then).
+    private var activeResponseID: String?
+    /// A `response.create` was rejected because a response the orchestrator
+    /// didn't see created is active: the next one waits for a
+    /// `response.done`.
+    private var unknownResponseIsActive = false
     /// Responses of turns that were cancelled, merged or abandoned.
     private var ignoredResponses: Set<String> = []
     /// The stored user rows, by the id of each final that went into one, so
@@ -166,6 +194,7 @@ public actor TurnOrchestrator: RealtimeService {
     private var drainTask: Task<Void, Never>?
     private var connectTask: Task<Void, Never>?
     private var responseTimeoutTask: Task<Void, Never>?
+    private var holdTask: Task<Void, Never>?
 
     /// - Parameters:
     ///   - client: The realtime connection. The orchestrator is the single
@@ -206,6 +235,7 @@ public actor TurnOrchestrator: RealtimeService {
         settingsTask?.cancel()
         drainTask?.cancel()
         responseTimeoutTask?.cancel()
+        holdTask?.cancel()
         broadcaster.finish()
     }
 
@@ -543,15 +573,98 @@ public actor TurnOrchestrator: RealtimeService {
             turnInterval: signposter.beginInterval(.realtimeTurn),
             firstAudioInterval: signposter.beginInterval(.realtimeFirstAudio)
         )
-        awaitingResponse.append(ResponseSlot(turn: number))
         setState(.committing)
         Log.realtime.notice(
             "Turn \(number, privacy: .public): committing \(texts.count, privacy: .public) item(s): \(user.text, privacy: .private)"
         )
+        // The user items go out at once; `response.create` with them, or as
+        // soon as nothing blocks it.
         var events = texts.map { RealtimeClientEvent.conversationItemCreate(.userText($0)) }
-        events.append(
-            .responseCreate(RealtimeResponseOptions(metadata: [Self.turnMetadataKey: .string("\(number)")])))
+        if let create = takeResponseCreateIfReady() {
+            events.append(create)
+        }
         send(events, turn: number)
+    }
+
+    // MARK: Requesting responses
+
+    /// Why the current turn's `response.create` has to wait, or `nil` when
+    /// it can go.
+    private var responseCreateBlocker: String? {
+        if let slot = awaitingResponse.first {
+            return "turn \(slot.turn)'s response.create is unanswered"
+        }
+        if let activeResponseID {
+            return "response \(activeResponseID) is still active"
+        }
+        if unknownResponseIsActive {
+            return "a response is still active"
+        }
+        return nil
+    }
+
+    /// Sends the current turn's `response.create` if it is waiting and
+    /// nothing blocks it any more.
+    private func requestResponseIfReady() {
+        guard let number = current?.number, let create = takeResponseCreateIfReady() else { return }
+        send([create], turn: number)
+    }
+
+    /// The current turn's `response.create`, its slot added, when the turn
+    /// waits for one and nothing blocks it. When something does, starts
+    /// the hold limit and returns `nil`.
+    private func takeResponseCreateIfReady() -> RealtimeClientEvent? {
+        guard var turn = current, turn.needsResponseCreate, isSessionReady else { return nil }
+        if let blocker = responseCreateBlocker {
+            if holdTask == nil {
+                Log.realtime.notice(
+                    "Turn \(turn.number, privacy: .public): holding response.create: \(blocker, privacy: .public)")
+                scheduleHoldLimit(for: turn.number)
+            }
+            return nil
+        }
+        holdTask?.cancel()
+        holdTask = nil
+        turn.needsResponseCreate = false
+        turn.responseCreateAttempts += 1
+        let eventID = "blau_rc_\(turn.number)_\(turn.responseCreateAttempts)"
+        current = turn
+        awaitingResponse.append(ResponseSlot(turn: turn.number, eventID: eventID))
+        return .responseCreate(
+            RealtimeResponseOptions(metadata: [Self.turnMetadataKey: .string("\(turn.number)")]), eventID: eventID)
+    }
+
+    private func scheduleHoldLimit(for number: Int) {
+        holdTask?.cancel()
+        let clock = clock
+        let limit = configuration.responseCreateHoldLimit
+        holdTask = Task { [weak self] in
+            do {
+                try await clock.sleep(for: limit)
+            } catch {
+                return
+            }
+            await self?.holdLimitReached(turn: number)
+        }
+    }
+
+    /// The previous `response.create` stayed unanswered (or the cancelled
+    /// response didn't finish) for ``Configuration/responseCreateHoldLimit``:
+    /// stop waiting and send this turn's. If the old `response.created`
+    /// turns up after all, without the echo it is taken for this turn's,
+    /// and this turn's own finds no slot and is ignored. Either way at most
+    /// one slot is ever outstanding, so matching is back in step after that
+    /// one response.
+    private func holdLimitReached(turn number: Int) {
+        holdTask = nil
+        guard let turn = current, turn.number == number, turn.needsResponseCreate else { return }
+        Log.realtime.notice(
+            "Turn \(number, privacy: .public): stopped holding response.create (\(self.responseCreateBlocker ?? "-", privacy: .public))"
+        )
+        awaitingResponse.removeAll()
+        activeResponseID = nil
+        unknownResponseIsActive = false
+        requestResponseIfReady()
     }
 
     /// Sends the queued utterances, oldest first, as one turn.
@@ -611,7 +724,10 @@ public actor TurnOrchestrator: RealtimeService {
         // `response.create` didn't go out: no `response.created` will come
         // for its slot, whether the turn is still current or was abandoned.
         awaitingResponse.removeAll { $0.turn == number }
-        guard let turn = current, turn.number == number, !turn.hasReplyContent else { return }
+        guard let turn = current, turn.number == number, !turn.hasReplyContent else {
+            requestResponseIfReady()
+            return
+        }
         // Nothing of the reply arrived: send the turn again once a session
         // is ready.
         endIntervals(of: turn, message: "requeued")
@@ -650,7 +766,8 @@ public actor TurnOrchestrator: RealtimeService {
             isSessionReady = true
             // A new server session: nothing sent on the old one will answer.
             awaitingResponse.removeAll()
-            timedOutSlotTookAResponse = false
+            activeResponseID = nil
+            unknownResponseIsActive = false
             let configurator = configurator
             let client = client
             let epoch = epoch
@@ -737,6 +854,8 @@ public actor TurnOrchestrator: RealtimeService {
             responseDone(done.response)
         case .conversationItemTruncated(let truncated):
             itemTruncated(truncated)
+        case .error(let event):
+            serverError(event.error)
         default:
             break
         }
@@ -744,31 +863,32 @@ public actor TurnOrchestrator: RealtimeService {
 
     private func responseCreated(_ response: RealtimeResponse) {
         guard let responseID = response.id else { return }
+        activeResponseID = responseID
+        unknownResponseIsActive = false
         let tagged = response.metadata?[Self.turnMetadataKey]?.stringValue.flatMap(Int.init)
-        let number: Int?
+        let slot: ResponseSlot?
         if let tagged {
             // The server echoed the turn: that slot is answered.
-            awaitingResponse.removeAll { $0.turn == tagged }
-            number = tagged
-        } else if awaitingResponse.isEmpty {
-            number = nil
+            slot = awaitingResponse.firstIndex { $0.turn == tagged }.map { awaitingResponse.remove(at: $0) }
         } else {
-            // No echo: the server creates responses in the order it was asked
-            // for them, so this one answers the oldest slot.
-            let slot = awaitingResponse.removeFirst()
-            guard slot.status == .live else {
-                ignoreLateResponse(responseID, of: slot)
-                return
-            }
-            timedOutSlotTookAResponse = false
-            number = slot.turn
+            // No echo: the server answers each `response.create` in order,
+            // and only one is outstanding, so this answers it.
+            slot = awaitingResponse.isEmpty ? nil : awaitingResponse.removeFirst()
         }
-        guard let number, var turn = current, turn.number == number,
-            turn.responseID == nil || turn.responseID == responseID
-        else {
-            // A response for a turn that was cancelled or merged meanwhile,
-            // or one the orchestrator didn't ask for.
+        let number = tagged ?? slot?.turn
+        if let slot, slot.status != .live {
+            ignoreLateResponse(responseID, turn: slot.turn)
+            return
+        }
+        guard let number else {
+            // A response the orchestrator didn't ask for.
             ignoredResponses.insert(responseID)
+            return
+        }
+        guard var turn = current, turn.number == number, turn.responseID == nil || turn.responseID == responseID
+        else {
+            // Asked for by a turn that has ended meanwhile.
+            ignoreLateResponse(responseID, turn: number)
             return
         }
         turn.responseID = responseID
@@ -783,17 +903,63 @@ public actor TurnOrchestrator: RealtimeService {
     /// up had no id to name and may have reached the server before the
     /// response existed (always so after a timeout). If it did cancel it,
     /// the server answers this one with an `error`, which changes nothing.
-    private func ignoreLateResponse(_ responseID: String, of slot: ResponseSlot) {
+    private func ignoreLateResponse(_ responseID: String, turn number: Int) {
         ignoredResponses.insert(responseID)
-        if slot.status == .timedOut {
-            timedOutSlotTookAResponse = true
-        }
         Log.realtime.notice(
-            "Response \(responseID, privacy: .public) belongs to abandoned turn \(slot.turn, privacy: .public); ignoring it"
+            "Response \(responseID, privacy: .public) belongs to ended turn \(number, privacy: .public); ignoring it"
         )
         if isSessionReady {
             send([.responseCancel(responseID: responseID)], turn: nil)
         }
+    }
+
+    /// An `error` event. One that rejects a `response.create` answers that
+    /// request's slot: it is matched by the `event_id` the request carried,
+    /// or, when the server doesn't name it, by its code to the one
+    /// outstanding request. A rejection because another response was still
+    /// active is retried once that response is done; any other fails the
+    /// turn straight away rather than after the response timeout.
+    private func serverError(_ error: RealtimeErrorDetail) {
+        Log.realtime.error(
+            "Server error \(error.code ?? "?", privacy: .public) (event \(error.eventID ?? "-", privacy: .public)): \(error.message ?? "", privacy: .public)"
+        )
+        let index: Int?
+        if let eventID = error.eventID {
+            index = awaitingResponse.firstIndex { $0.eventID == eventID }
+        } else if error.code == Self.activeResponseErrorCode {
+            index = awaitingResponse.indices.first
+        } else {
+            index = nil
+        }
+        guard let index else { return }
+        responseCreateRejected(awaitingResponse.remove(at: index), error: error)
+    }
+
+    private func responseCreateRejected(_ slot: ResponseSlot, error: RealtimeErrorDetail) {
+        let anotherIsActive = error.code == Self.activeResponseErrorCode
+        if anotherIsActive, activeResponseID == nil {
+            unknownResponseIsActive = true
+        }
+        Log.realtime.notice(
+            "Turn \(slot.turn, privacy: .public): response.create \(slot.eventID, privacy: .public) rejected")
+        guard slot.status == .live, var turn = current, turn.number == slot.turn, turn.responseID == nil else {
+            // Its turn has ended: the next turn's request may go now.
+            requestResponseIfReady()
+            return
+        }
+        responseTimeoutTask?.cancel()
+        responseTimeoutTask = nil
+        if anotherIsActive, turn.responseCreateAttempts < Self.maxResponseCreateAttempts {
+            // Ask again once the active response is done.
+            turn.needsResponseCreate = true
+            current = turn
+            requestResponseIfReady()
+            return
+        }
+        endIntervals(of: turn, message: "rejected")
+        current = nil
+        cancelTimers()
+        fail(TurnFailure(kind: .response, message: error.message ?? "Grok couldn't answer"))
     }
 
     private func audioDelta(_ delta: RealtimeServerEvent.AudioDelta) {
@@ -854,9 +1020,19 @@ public actor TurnOrchestrator: RealtimeService {
                 "Response \(response.id ?? "?", privacy: .public) \(response.status?.rawValue ?? "?", privacy: .public): \(usage.inputTokens ?? 0, privacy: .public) in, \(usage.outputTokens ?? 0, privacy: .public) out tokens"
             )
         }
+        // The server can take the next response now.
+        if response.id == nil || response.id == activeResponseID {
+            activeResponseID = nil
+        }
+        unknownResponseIsActive = false
+        defer { requestResponseIfReady() }
         guard let turn = turnFor(responseID: response.id), !turn.isResponseDone else {
             publish()
             return
+        }
+        if turn.responseID == nil {
+            // Its `response.created` never came: the turn's slot is answered.
+            awaitingResponse.removeAll { $0.turn == turn.number }
         }
         finishResponse(of: turn, status: response.status?.rawValue ?? "completed", output: response.output ?? [])
     }
@@ -966,17 +1142,19 @@ public actor TurnOrchestrator: RealtimeService {
     /// to the transcript.
     private func abandon(_ turn: Turn, reason: AbandonReason) {
         var events: [RealtimeClientEvent] = []
-        if !turn.isResponseDone {
+        // A turn whose `response.create` is still held back has no response
+        // to cancel.
+        if !turn.isResponseDone, turn.responseCreateAttempts > 0 {
             events.append(.responseCancel(responseID: turn.responseID))
             if let responseID = turn.responseID {
                 ignoredResponses.insert(responseID)
             }
         }
         // The server still creates the response it was asked for: keep the
-        // slot, so an untagged `response.created` for it isn't matched to
-        // the next turn (see `responseCreated`).
+        // slot, so that response is recognized, ignored and cancelled (see
+        // `responseCreated`), and the next turn's request waits for it.
         if let slot = awaitingResponse.firstIndex(where: { $0.turn == turn.number }) {
-            awaitingResponse[slot].status = reason == .timedOut ? .timedOut : .abandoned
+            awaitingResponse[slot].status = .abandoned
         }
         let flushed = audio.flush()
         for item in turn.agentItems {
@@ -1046,24 +1224,17 @@ public actor TurnOrchestrator: RealtimeService {
         guard let turn = current, turn.number == number, turn.responseID == nil else { return }
         Log.realtime.error("Turn \(number, privacy: .public): no response from Grok")
         // Its response may still be created late, so `abandon` keeps the
-        // slot (marked timed out) to keep untagged responses in order.
+        // slot (marked abandoned): the next turn's `response.create` waits
+        // for it, up to ``Configuration/responseCreateHoldLimit``.
         abandon(turn, reason: .timedOut)
-        if timedOutSlotTookAResponse {
-            // An earlier timed-out turn's slot took a response since, and
-            // now this turn got none either: that response was this turn's,
-            // and the earlier one's never came. Drop this slot instead of
-            // waiting on it, or every later turn would be answered by its
-            // predecessor's slot.
-            timedOutSlotTookAResponse = false
-            awaitingResponse.removeAll { $0.turn == number }
-            Log.realtime.notice("Realigned response matching after turn \(number, privacy: .public) timed out")
-        }
         fail(TurnFailure(kind: .response, message: "Grok didn't respond"))
     }
 
     private func cancelTimers() {
         responseTimeoutTask?.cancel()
         responseTimeoutTask = nil
+        holdTask?.cancel()
+        holdTask = nil
         drainTask?.cancel()
         drainTask = nil
     }
@@ -1161,7 +1332,8 @@ public actor TurnOrchestrator: RealtimeService {
         queued.removeAll()
         userPartial = nil
         awaitingResponse.removeAll()
-        timedOutSlotTookAResponse = false
+        activeResponseID = nil
+        unknownResponseIsActive = false
         ignoredResponses.removeAll()
         userRows.removeAll()
         rowOfFinal.removeAll()
@@ -1188,8 +1360,10 @@ public actor TurnOrchestrator: RealtimeService {
         guard let responseID else { return turn }
         if ignoredResponses.contains(responseID) { return nil }
         if let own = turn.responseID { return own == responseID ? turn : nil }
-        // `response.created` was missed: adopt the response.
-        return turn
+        // `response.created` was missed: adopt the response, if the turn's
+        // `response.create` is out and unanswered.
+        let isAwaited = awaitingResponse.contains { $0.turn == turn.number && $0.status == .live }
+        return isAwaited ? turn : nil
     }
 
     /// Runs `body` on the current turn if the event belongs to it.
@@ -1237,6 +1411,12 @@ extension TurnOrchestrator {
         var firstAudioAt: Duration?
         var agentItems: [AgentItem] = []
         var isResponseDone = false
+        /// Its `response.create` hasn't been sent yet: it waits for the
+        /// previous one to be answered (or for a rejected one to be asked
+        /// again).
+        var needsResponseCreate = true
+        /// How many times its `response.create` has been sent.
+        var responseCreateAttempts = 0
 
         /// Whether any of the reply reached the user: audio, or text.
         var hasReplyContent: Bool {
@@ -1288,19 +1468,21 @@ extension TurnOrchestrator {
         var texts: [String]
     }
 
-    /// A `response.create` waiting for its `response.created`.
+    /// A `response.create` waiting for its `response.created` (or for an
+    /// `error` rejecting it).
     struct ResponseSlot: Equatable {
         enum Status: Equatable {
             /// Its turn is waiting for the reply.
             case live
-            /// Its turn was merged, interrupted or stopped: the response is
-            /// ignored (and cancelled) when it is created.
+            /// Its turn was merged, interrupted, stopped or timed out: the
+            /// response is ignored (and cancelled) when it is created.
             case abandoned
-            /// Its turn gave up waiting (``Configuration/responseTimeout``).
-            case timedOut
         }
 
         let turn: Int
+        /// The request's client `event_id`, which an `error` rejecting it
+        /// names.
+        let eventID: String
         var status: Status = .live
     }
 

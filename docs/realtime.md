@@ -385,7 +385,7 @@ transcriber (see `Blau/VoiceLoop/`). Until the record button (#41) exists,
 paused ──start()──▶ listening ──partial──▶ userSpeaking ──final──▶ committing
 committing ──item + response.create sent──▶ agentThinking ──first audio delta──▶ agentSpeaking
 agentSpeaking ──response.done and the player has drained──▶ listening
-any ──failed response, no response.created within 15 s, connection given up──▶ error ──partial / final──▶ …
+any ──failed response, rejected response.create, no response.created within 15 s, connection given up──▶ error ──partial / final──▶ …
 any ──stop()──▶ paused
 ```
 
@@ -399,7 +399,7 @@ is heard.
 | Step | What happens |
 | ---- | ------------ |
 | Final utterance | `TranscriptEvent.final`, or `send(_:)` from the voice gate (#47). Blank text and utterances the gate didn't `accept` are ignored. It is written to the transcript at once, then sent |
-| Commit | `conversation.item.create` with one `input_text` part, then `response.create` with `metadata: {"blau_turn": "<n>"}`, so `response.created` matches its turn even after a cancel (without the echo, responses are matched in order) |
+| Commit | `conversation.item.create` with one `input_text` part, then `response.create` with `metadata: {"blau_turn": "<n>"}` and a client `event_id`, so `response.created` matches its turn even after a cancel and a rejection names its request (without the echo, responses are matched in order, one request outstanding at a time; see below) |
 | Reply | `response.output_audio.delta` → the player, keyed by `item_id` and `content_index`. `response.output_audio_transcript.delta` (and `response.output_text.delta`) → `TurnSnapshot.agentText`. `response.output_audio.done` finishes the item in the player |
 | Done | `response.done` writes the agent utterance (text from the transcript deltas, or from the response's output items if they didn't arrive), adds the response's token usage, ends the signposts |
 | Stale events | Deltas of a cancelled or merged response are dropped by response id; an assistant item it still adds is removed from Grok's history (`conversation.item.delete`), since none of it plays |
@@ -411,23 +411,44 @@ Whether xAI echoes `response.create`'s `metadata` in `response.created` is
 not verified yet (the hand-written `manual-text-turn` fixture echoes a
 `turn` key, so its replay runs on the fallback below). With the echo, a
 response is matched to the turn its `blau_turn` names. Without it, the
-server creates responses in the order they were asked for, so each untagged
-`response.created` answers the oldest outstanding `response.create`:
+match rests on order: the server answers each `response.create`, in the
+order it got them, with either a `response.created` or an `error`
+rejecting it. So the orchestrator keeps **at most one `response.create`
+outstanding**, and an untagged `response.created` always answers that one:
 
-- Every `response.create` gets a slot, oldest first, until its
-  `response.created` arrives. A send that fails, or a new connection,
-  removes slots whose response will never come.
+- Every `response.create` carries a client `event_id`
+  (`blau_rc_<turn>_<attempt>`) and gets a slot until its answer arrives. A
+  send that fails, or a new connection, removes a slot whose answer will
+  never come.
+- A turn's user items go out at once, but its `response.create` is **held**
+  while a slot is outstanding, or while a response is still active (created
+  and not yet `response.done`: the cancelled reply of a merged or
+  interrupted turn; the server runs one response at a time). It goes out as
+  soon as neither is true. On the merge and interrupt paths that costs the
+  round trip of the cancel (`response.cancel` → `response.done`).
 - A turn given up before its response was created (merged, interrupted,
-  stopped or timed out) **keeps its slot, marked abandoned**: the server
-  still creates that response, and removing the slot would hand it to the
-  next turn, whose own reply would then be dropped. When an untagged
-  `response.created` lands on an abandoned slot, the response is ignored and
-  cancelled by id (`response.cancel` with `response_id`).
-- A timed-out turn's response may also never come. If the next turn's
-  response lands on the timed-out slot and that turn then times out too,
-  the response was really its own: its slot is dropped so the turns after
-  it are matched correctly again. (One turn is lost to the ambiguity; the
-  echo avoids it.)
+  stopped or timed out) **keeps its slot, marked abandoned**, so the next
+  turn's request keeps waiting for it. When its `response.created` arrives,
+  the response is ignored and cancelled by id (`response.cancel` with
+  `response_id`). A turn given up while its request is still held never
+  sends it.
+- An `error` that names a slot's `event_id` (`error.event_id`) is that
+  request's answer: the slot is removed. When the server doesn't name the
+  event, a `conversation_already_has_active_response` error is matched to
+  the outstanding slot. If the rejection was because another response was
+  still active, the turn asks again once a `response.done` arrives, up to 3
+  attempts. Any other rejection fails the turn at once with the server's
+  message, instead of after the 15 s response timeout.
+- A held request waits at most `responseCreateHoldLimit` (2 s). After that
+  the orchestrator stops waiting for the outstanding answer or the active
+  response, and sends it. This covers a request the server never answers
+  (for example a timed-out turn whose response never comes). If the stale
+  response does arrive later, without the echo it is taken for the new
+  turn's reply. The new turn's own response then finds no slot and is
+  ignored. Because only one slot is ever outstanding, matching is back in
+  step after that one response, however the user carries on (interrupting,
+  merging or waiting). With the echo, the late response is recognized by
+  its tag and cancelled.
 
 Agent utterances are stored with the wall-clock time of their first audio
 and, on the conversation's timeline, an offset from the start of the
@@ -442,7 +463,8 @@ every turn (the latency budget, #74, is 1.5 s), so nothing is held:
 - A final that starts less than `mergeWindow` (400 ms) after the previous
   utterance ended **on the audio timeline** continues it. The reply in
   progress is cancelled (`response.cancel`), the new text goes in as a
-  second user item and a new response is requested. Grok sees the two
+  second user item and a new response is requested (once the cancelled
+  one is done; see "Matching responses to turns"). Grok sees the two
   items back to back; the transcript stores **one** user utterance (the
   first one's id, the text joined, the ranges united). While the
   connection is down, a continuation merges into the queued utterance.
@@ -519,7 +541,12 @@ the truncate and the server's corrected transcript; queuing while
 disconnected and sending after `session.update`; requeuing a turn lost
 before its reply; a reply cut off by a drop; connect failures, failed
 responses and the response timeout; stop and restart; settings changes;
-flushing on backgrounding. `TurnOrchestratorIntegrationTests` adds the
+flushing on backgrounding. `TurnOrchestratorResponseMatchingTests` covers
+untagged matching: late responses of merged, interrupted and timed-out
+turns; the hold limit; a timeout followed by an interruption; a
+`response.create` rejected while a response is active (with and without
+`error.event_id`) and asked again; other rejections failing the turn; and
+a late response recognized by its tag. `TurnOrchestratorIntegrationTests` adds the
 real `ConversationStore` over SwiftData (both roles stored, merges and cuts
 stored once), the `manual-text-turn` fixture replayed in lockstep, and the
 real `StreamingAudioPlayer` rendering the reply.
@@ -560,5 +587,6 @@ real `StreamingAudioPlayer` rendering the reply.
 | Spoken filler | With a slow tool, Grok says something like "let me check" before the pause | pending (needs xAI credentials and a device) |
 | Spoken conversation end to end | Install the speech models, add an xAI key, open **Debug menu → Voice Loop**, Start, and hold a ten-turn conversation on the speaker and on AirPods; every reply plays and the Voice Loop screen shows both sides | pending (needs a device and xAI credentials) |
 | Transcript stored for both roles | After the conversation above, the store holds one user and one agent utterance per turn, in order | pending (needs a device and xAI credentials) |
+| Response matching echoes | Record the conversation above with `RealtimeTranscriptRecorder`, interrupting Grok mid-reply a few times. Note whether `response.created` echoes `metadata.blau_turn`, and whether an `error` names the `response.create`'s `event_id` in `error.event_id`. Without either, matching runs on the order fallback | pending (needs xAI credentials) |
 | EOU → first audio p50 | Turn on **Performance HUD** in the debug menu; after 20 turns, record the HUD's p50 / p95 here and compare them with Instruments' `realtime.firstAudio` | pending (needs a device and xAI credentials) |
 | Echo | On the loudspeaker, Grok's own voice never produces a user utterance (VPIO echo cancellation; voice ID is #47) | pending (needs a device) |

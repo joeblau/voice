@@ -32,8 +32,10 @@ public enum RealtimeClientEvent: Sendable, Hashable, Codable {
     /// user actually heard, on barge-in (#37).
     case conversationItemTruncate(itemID: String, contentIndex: Int, audioEndMilliseconds: Int)
     /// `response.create`: asks for a response, optionally with per-response
-    /// options.
-    case responseCreate(RealtimeResponseOptions? = nil)
+    /// options. `eventID` is the client `event_id`: an `error` caused by this
+    /// event names it in `error.event_id`, so a rejected request can be told
+    /// apart from others.
+    case responseCreate(RealtimeResponseOptions? = nil, eventID: String? = nil)
     /// `response.cancel`: cancels `responseID`, or the response in progress
     /// when `nil`.
     case responseCancel(responseID: String? = nil)
@@ -62,6 +64,7 @@ public enum RealtimeClientEvent: Sendable, Hashable, Codable {
         case contentIndex = "content_index"
         case audioEndMilliseconds = "audio_end_ms"
         case responseID = "response_id"
+        case eventID = "event_id"
     }
 
     public init(from decoder: any Decoder) throws {
@@ -88,7 +91,9 @@ public enum RealtimeClientEvent: Sendable, Hashable, Codable {
                 contentIndex: try container.decode(Int.self, forKey: .contentIndex),
                 audioEndMilliseconds: try container.decode(Int.self, forKey: .audioEndMilliseconds))
         case "response.create":
-            self = .responseCreate(try container.decodeIfPresent(RealtimeResponseOptions.self, forKey: .response))
+            self = .responseCreate(
+                try container.decodeIfPresent(RealtimeResponseOptions.self, forKey: .response),
+                eventID: try container.decodeIfPresent(String.self, forKey: .eventID))
         case "response.cancel":
             self = .responseCancel(responseID: try container.decodeIfPresent(String.self, forKey: .responseID))
         default:
@@ -116,7 +121,8 @@ public enum RealtimeClientEvent: Sendable, Hashable, Codable {
             try container.encode(itemID, forKey: .itemID)
             try container.encode(contentIndex, forKey: .contentIndex)
             try container.encode(audioEndMilliseconds, forKey: .audioEndMilliseconds)
-        case .responseCreate(let options):
+        case .responseCreate(let options, let eventID):
+            try container.encodeIfPresent(eventID, forKey: .eventID)
             try container.encodeIfPresent(options, forKey: .response)
         case .responseCancel(let responseID):
             try container.encodeIfPresent(responseID, forKey: .responseID)
