@@ -186,8 +186,10 @@ device. It records an os_signpost trace on the Mac while the opt-in
 `SignpostSmokeTests` suite (`BLAU_SIGNPOST_SMOKE=1`) emits every canonical
 interval through the real `OSSignposter`, exports the paired-intervals table
 Instruments shows, and fails unless every interval above appears under
-`com.joeblau.blau` with its documented category. Pass `--keep` to keep the
-trace and open it in Instruments.
+`com.joeblau.blau` with its documented category. It also checks that
+exactly the intervals in "Intervals reported to MetricKit" below are emitted
+with `mxSignpost` (under MetricKit's `com.apple.metrickit.log` subsystem).
+Pass `--keep` to keep the trace and open it in Instruments.
 
 ### Console and the log command
 
@@ -355,9 +357,141 @@ thread during a live session, need a physical device:
 | 10 x 1,000, coalesced (release)     | iPhone | pending | pending |       |
 | 1 x 10,000, coalesced (release)     | iPhone | pending | pending |       |
 
+## MetricKit and diagnostics
+
+MetricKit is how Blau hears about hangs, crashes, memory and launch time from
+real use, TestFlight included. Everything lives in `BlauTelemetry`; the app
+only starts it and shows it.
+
+| Piece                    | Where                                  | What it does |
+| ------------------------ | -------------------------------------- | ------------ |
+| `MetricKitSubscriber`    | `BlauTelemetry/Diagnostics`            | `MXMetricManager` subscriber. Stores every `MXMetricPayload` and `MXDiagnosticPayload`, plus `pastPayloads` it missed |
+| `FileDiagnosticsStore`   | `BlauTelemetry/Diagnostics`            | Keeps each payload's JSON verbatim with a summary, de-duplicated by SHA-256, and writes the export |
+| `DiagnosticsOverview`    | `BlauTelemetry/Diagnostics`            | Rolls stored payloads up into hangs, memory, stability, launch and signposts |
+| `MetricKitSignpostBackend` | `BlauTelemetry/Diagnostics`          | Sends the intervals below to MetricKit with `mxSignpost`, as well as to Instruments |
+| `AppDiagnostics`, `DiagnosticsView` | `Blau/Diagnostics`          | Starts the subscriber in `BlauApp.init`; the Developer diagnostics screen and share-sheet export |
+
+### What arrives when
+
+- **Metric payloads** (hang time histogram, peak and suspended memory, CPU,
+  disk writes, launch and resume time, exit counts, Blau's signposts) arrive
+  about once a day, covering the previous day.
+- **Diagnostic payloads** (hang, crash, CPU exception, disk-write exception
+  and, on iOS, slow-launch reports, each with a call stack) arrive at the
+  next launch after the event.
+- Only devices deliver payloads, including TestFlight and App Store installs.
+  The Simulator never does. With a device attached, Xcode's **Debug >
+  Simulate MetricKit Payloads** delivers a test payload immediately.
+
+### Storage and privacy
+
+Payloads are written to `Application Support/Diagnostics/MetricKit` as
+`<kind>/<id>.payload.json` (MetricKit's `jsonRepresentation()`, untouched)
+and `<kind>/<id>.record.json` (Blau's summary). They are **local only**: not
+in SwiftData, not synced through CloudKit, and the folder is excluded from
+backups. The store keeps 90 days and at most 120 payloads of each kind.
+Payloads describe the app and device (versions, device model, call stacks),
+not what the user said; a crash's Objective-C exception message stays in the
+raw payload and only leaves the device in an export the user starts.
+
+### Developer diagnostics screen
+
+`DiagnosticsView` summarizes the stored payloads: payload counts and how
+many came from TestFlight, hang reports and the longest hang, hangs in the
+daily metrics, peak and suspended memory, memory terminations, crashes by
+signal or exception, CPU and disk-write exceptions, time to first draw and
+the MetricKit signposts below. Open it from **Settings > Developer >
+Diagnostics** (the gear on the main screen). It is in every build,
+TestFlight included, since that is where real payloads arrive. Debug builds
+add **Add Sample Payloads**, which stores made-up payloads
+(`DiagnosticsSamples`, marked `"blauSample": true`) so the screen and the
+export can be tried in the Simulator.
+
+**Export Diagnostics** opens the share sheet with one JSON file,
+`Blau-Diagnostics-<yyyyMMdd-HHmmss>.json` (UTC):
+
+```json
+{
+  "format": "com.joeblau.blau.diagnostics.v1",
+  "exportedAt": "2026-10-07T12:00:00Z",
+  "context": { "appVersion": "0.1.0", "appBuild": "1", "bundleIdentifier": "com.joeblau.blau",
+               "osVersion": "Version 26.1 (Build 23B85)", "deviceModel": "iPhone17,1" },
+  "overview": { "metricPayloadCount": 12, "hangReportCount": 2, "peakMemoryBytes": 312000000, "...": "..." },
+  "payloads": [
+    { "id": "…", "kind": "metrics", "receivedAt": "…", "summary": { "...": "..." },
+      "payload": { "…": "MetricKit's JSON, as delivered" } }
+  ]
+}
+```
+
+Payloads are oldest first. `jq '.payloads[] | select(.kind == "diagnostics") | .payload'`
+pulls out the raw diagnostic payloads, call stacks included.
+
+### Intervals reported to MetricKit
+
+MetricKit only aggregates intervals emitted with `mxSignpost` on a log
+handle from `MXMetricManager.makeLogHandle(category:)`, and it keeps a
+limited number of them, each with a resource snapshot. So only these
+canonical intervals (`PipelineInterval.reportsToMetricKit`) go to MetricKit,
+under their usual category; everything else stays Instruments-only. They
+show up in `MXMetricPayload.signpostMetrics` with a count, a duration
+histogram, CPU time, memory and disk writes. A unit test keeps this table
+and the code in sync.
+
+| Interval              | Category   | Why it's reported                                   |
+| --------------------- | ---------- | --------------------------------------------------- |
+| `asr.eou`             | `asr`      | End-of-utterance delay, part of every turn's latency |
+| `voiceid.verify`      | `voiceid`  | Gate decision time, once per speech segment         |
+| `realtime.turn`       | `realtime` | Full turn duration                                  |
+| `realtime.firstAudio` | `realtime` | The latency the user hears                          |
+| `topics.label`        | `topics`   | On-device Foundation Models call, rare but slow     |
+| `memory.search`       | `memory`   | Retrieval time behind `search_memory`               |
+
+Per-chunk and per-frame intervals (`capture.frame`, `vad.chunk`,
+`asr.chunk`, `realtime.event`) and the frequent `voiceid.embed`,
+`topics.segment`, `memory.embed` and `db.save` stay out: they would swamp
+MetricKit's signpost budget. `playback.firstBuffer` also stays out: it
+starts where `realtime.firstAudio` ends and only times local jitter-buffer
+priming, so the `audio` category stays Instruments-only. `realtime.connect`
+runs once per session, before any turn, and stays Instruments-only for now.
+End messages (`realtime.event`'s event type) only reach Instruments:
+`mxSignpost` intervals carry none. Use the shared
+`Signposts` statics (or `Signposts.defaultBackend(for:)`) to get both;
+a `Signposter(category:)` built by hand only emits `os_signpost`.
+
+### iOS 27 `MetricManager`
+
+iOS 27 adds a Swift `MetricManager` with `Codable` `MetricReport` and
+`DiagnosticReport` async sequences and marks `MXMetricManager` "to be
+deprecated". Blau targets iOS 26, so it uses `MXMetricManager`, which still
+works on iOS 27 and builds without warnings. Moving to `MetricManager`
+behind `#available(iOS 27, *)` only needs a second adapter that fills the
+same `MetricPayloadSummary` / `DiagnosticPayloadSummary`.
+
+### Verifying on a device
+
+The Mac tests cover storage, retention, summaries, the export format and
+which intervals reach MetricKit. Delivery itself needs a device:
+
+1. Install a TestFlight build (or run on a device from Xcode) and use the app.
+2. In Xcode, **Debug > Simulate MetricKit Payloads**, or wait a day for a
+   real payload.
+3. Open **Settings > Developer > Diagnostics**: the payload counts go up
+   and "From TestFlight" counts TestFlight payloads.
+4. Export Diagnostics, save to Files or AirDrop to a Mac, and check the file
+   with `jq .overview`.
+
+| Check                                              | Result  |
+| -------------------------------------------------- | ------- |
+| Simulated payload stored and shown (device, Xcode) | Pending |
+| Real metric payload on a TestFlight build          | Pending |
+| Real diagnostic payload (hang) on a TestFlight build | Pending |
+| `realtime.firstAudio` in `signpostMetrics`         | Pending (needs #36) |
+| Export opens in Files / AirDrop on device          | Pending |
+
 ## What comes next
 
-The rest of the performance epic (#11) builds on these names: MetricKit and
-diagnostics export (#72), the XCTest performance suite with
-`XCTOSSignpostMetric` baselines (#73), the end-to-end latency budget (#74),
-thermal adaptation (#75), the soak test (#76) and the debug HUD (#71).
+The rest of the performance epic (#11) builds on these names: the XCTest
+performance suite with `XCTOSSignpostMetric` baselines (#73), the end-to-end
+latency budget (#74), thermal adaptation (#75), the soak test (#76) and the
+debug HUD (#71).

@@ -86,7 +86,9 @@ public enum PipelineInterval: CaseIterable, Sendable {
 }
 
 /// Blau's signposters, one `OSSignposter` per `LogCategory`, all in the
-/// `com.joeblau.blau` subsystem.
+/// `com.joeblau.blau` subsystem. Intervals marked
+/// `PipelineInterval.reportsToMetricKit` are also sent to MetricKit with
+/// `mxSignpost` (see `defaultBackend(for:)`).
 ///
 /// ```swift
 /// try Signposts.withInterval(.dbSave) { try context.save() }
@@ -95,14 +97,14 @@ public enum PipelineInterval: CaseIterable, Sendable {
 /// interval.end()
 /// ```
 public enum Signposts {
-    public static let audio = Signposter(category: .audio)
-    public static let asr = Signposter(category: .asr)
-    public static let voiceID = Signposter(category: .voiceID)
-    public static let realtime = Signposter(category: .realtime)
-    public static let topics = Signposter(category: .topics)
-    public static let memory = Signposter(category: .memory)
-    public static let data = Signposter(category: .data)
-    public static let ui = Signposter(category: .ui)
+    public static let audio = Signposter(category: .audio, backend: defaultBackend(for: .audio))
+    public static let asr = Signposter(category: .asr, backend: defaultBackend(for: .asr))
+    public static let voiceID = Signposter(category: .voiceID, backend: defaultBackend(for: .voiceID))
+    public static let realtime = Signposter(category: .realtime, backend: defaultBackend(for: .realtime))
+    public static let topics = Signposter(category: .topics, backend: defaultBackend(for: .topics))
+    public static let memory = Signposter(category: .memory, backend: defaultBackend(for: .memory))
+    public static let data = Signposter(category: .data, backend: defaultBackend(for: .data))
+    public static let ui = Signposter(category: .ui, backend: defaultBackend(for: .ui))
 
     /// The shared signposter for `category`.
     public static func signposter(for category: LogCategory) -> Signposter {

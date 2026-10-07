@@ -108,6 +108,14 @@ struct SettingsView: View {
             Form {
                 XAIAccountSettingsSection()
                 ICloudSettingsSection()
+                Section("Developer") {
+                    NavigationLink {
+                        DiagnosticsView()
+                    } label: {
+                        Label("Diagnostics", systemImage: "waveform.path.ecg")
+                    }
+                    .accessibilityIdentifier(DiagnosticsView.Identifier.open)
+                }
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -125,5 +133,6 @@ struct SettingsView: View {
         SettingsView()
             .environment(XAIAccount.preview())
             .environment(PersistenceController.preview())
+            .environment(AppDiagnostics(store: nil))
     }
 #endif

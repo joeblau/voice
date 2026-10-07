@@ -7,7 +7,9 @@
 # interval through the real OSSignposter backend, exports the trace's paired
 # intervals table, and checks that every interval listed in
 # docs/performance.md appears under the `com.joeblau.blau` subsystem with the
-# documented category.
+# documented category. It also checks that exactly the intervals in the
+# "Intervals reported to MetricKit" table are emitted with mxSignpost (they
+# show up under MetricKit's `com.apple.metrickit.log` subsystem).
 #
 # Usage:
 #   scripts/verify-signposts.sh [--keep]
@@ -72,7 +74,7 @@ echo "==> Exporting the os_signpost intervals table"
 xcrun xctrace export --input "$trace" \
     --xpath '/trace-toc/run[@number="1"]/data/table[@schema="OSSignpostIntervals"]' >"$xml"
 
-python3 -I "$root/scripts/lib/tracetemplate.py" check-intervals "$xml" "$doc"
+python3 -I "$root/scripts/lib/tracetemplate.py" check-intervals --metrickit "$xml" "$doc"
 
 if [[ $keep -eq 1 ]]; then
     echo "Trace kept at $trace (open it with: open '$trace')"

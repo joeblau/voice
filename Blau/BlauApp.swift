@@ -11,6 +11,15 @@ import SwiftUI
 struct BlauApp: App {
     @State private var environment = AppEnvironment.make(kind: .current)
     @Environment(\.scenePhase) private var scenePhase
+    /// MetricKit collection starts here, as early as possible, so payloads
+    /// MetricKit delivers right after launch are caught (#72).
+    @State private var diagnostics: AppDiagnostics
+
+    init() {
+        let diagnostics = AppDiagnostics.live()
+        diagnostics.start()
+        _diagnostics = State(initialValue: diagnostics)
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -21,6 +30,7 @@ struct BlauApp: App {
             // gate's content) neither drops the environment nor reloads the
             // xAI key.
             .appEnvironment(environment)
+            .environment(diagnostics)
             .task { await environment.start() }
         }
         .onChange(of: scenePhase, initial: true) { _, phase in

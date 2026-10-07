@@ -76,4 +76,5 @@ struct MainScreen: View {
 #Preview("Main screen") {
     RootView()
         .appEnvironment(.preview())
+        .environment(AppDiagnostics(store: nil))
 }
