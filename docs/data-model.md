@@ -204,7 +204,9 @@ conversation is roughly twice as expensive per utterance as ten of 1,000.
 since v1 so the first migration is just a new entry.
 `BlauModelContainer.make(configurations:)`, `makeLocal(url:)` and
 `makeInMemory()` always open stores with the current schema and the plan.
-The CloudKit-backed configuration the app uses is set up in #20.
+The app opens the CloudKit-backed store through `PersistenceController`; see
+[sync.md](sync.md) for the sync modes and [release.md](release.md) for
+deploying a schema to production.
 
 Once a schema version is deployed to the CloudKit production environment, the
 CloudKit schema is **additive only**: you can add record types and fields, but
@@ -220,7 +222,7 @@ never rename, retype or delete them. To change the model:
 5. Run `swift test` in `Packages/BlauKit`: the CloudKit compatibility tests
    check every version in the plan.
 6. Deploy the new schema to production in the CloudKit console before
-   shipping the build.
+   shipping the build (checklist in [release.md](release.md)).
 
 The memory models (Document, CollectionItem, Entity, Fact, ProfileBlock) arrive
 in v2 (#61).
