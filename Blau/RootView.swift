@@ -119,7 +119,7 @@ struct MainScreenScaffold: View {
 }
 
 /// The main screen's content: the area the conversation (#42) and topic
-/// timeline (#56) fill. Until they land it shows the app name and, while no
+/// timeline (#56) fill. Until they land it shows the brand lockup and, while no
 /// usable xAI key is stored, the onboarding button.
 ///
 /// It is a scroll view that runs under the bottom bar's glass, anchored to the
@@ -138,9 +138,7 @@ struct MainScreen: View {
         GeometryReader { visible in
             ScrollView {
                 VStack(spacing: 24) {
-                    Text("Blau")
-                        .font(.largeTitle)
-                        .foregroundStyle(.secondary)
+                    BrandLockup()
 
                     if account.needsKeyEntry {
                         Button("Connect Your xAI Account", action: onConnectAccount)

@@ -42,6 +42,7 @@ configured. See [docs/configuration.md](docs/configuration.md).
 | `make bench-kit` | Run the model benchmarks on this Mac (reference numbers, downloads models) |
 | `make eval-noise` | Compare noise suppressors (DeepFilterNet3, Apple voice isolation) on the ASR fixtures: WER and cost (downloads models, [docs](docs/noise-suppression.md)) |
 | `make eval-asr`  | Evaluate the ASR engines on the fixtures: a WER, latency and RTF table per engine (downloads models, [docs](docs/asr-eval.md)) |
+| `make icon-previews` | Render the app icon in every appearance into `.build/AppIcon` ([docs](docs/branding.md)) |
 | `make secrets`   | Create `Config/Secrets.xcconfig` from the example                |
 | `make test-scripts` | Test the secrets, CI and Instruments template scripts         |
 | `make install-instruments-template` | Add the Blau template to Instruments' chooser ([docs](docs/performance.md#instruments-template)) |
@@ -76,7 +77,7 @@ the same `make` targets as above. See [docs/ci.md](docs/ci.md).
 | `Blau/`          | App target sources and resources                                |
 | `BlauWidgets/`   | App extension rendering the recording Live Activity ([docs](docs/background.md)) |
 | `Packages/BlauKit` | Local Swift package with the business logic, one module per subsystem (see [`docs/architecture.md`](docs/architecture.md)) |
-| `docs/`          | Architecture and engineering docs ([app shell, environment and feature flags](docs/app-shell.md)) |
+| `docs/`          | Architecture and engineering docs ([app shell, environment and feature flags](docs/app-shell.md), [branding](docs/branding.md)) |
 | `BlauTests/`     | Unit tests (Swift Testing), hosted in the app                   |
 | `BlauUITests/`   | UI tests (XCTest)                                               |
 | `BlauPerfTests/` | Performance tests (XCTest UI-testing bundle, launch metrics)    |

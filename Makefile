@@ -91,6 +91,12 @@ eval-asr: ## Evaluate the ASR engines on the fixtures: a WER/latency/RTF table p
 eval-noise: ## Compare noise suppressors on the ASR fixtures: WER and cost (docs/noise-suppression.md)
 	scripts/eval-noise-suppression.sh
 
+# App icon previews (#82): every iOS appearance of Blau/Resources/AppIcon.icon,
+# rendered with Icon Composer's ictool into .build/AppIcon (docs/branding.md).
+.PHONY: icon-previews
+icon-previews: ## Render the app icon in every appearance into .build/AppIcon (docs/branding.md)
+	scripts/render-app-icon.sh
+
 .PHONY: secrets
 secrets: ## Create Config/Secrets.xcconfig from the example (kept if it exists)
 	env -u XAI_DEV_API_KEY scripts/write-secrets-xcconfig.sh

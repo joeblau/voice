@@ -14,6 +14,7 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `Blau/Composition/DeviceLockObserver.swift` | Device lock and unlock (protected data) for the conversation keeper and the background inference monitor ([background.md](background.md)) |
 | `Blau/LiveActivity/` | The recording Live Activity: its attributes and Stop intent (shared with the `BlauWidgets` extension) and the `RecordingIndicator` that starts, updates and ends it ([background.md](background.md)) |
 | `Blau/RootView.swift` | The main screen ([below](#main-screen)): navigation stack, bottom bar, content area, the Settings and xAI onboarding sheets, and the DEBUG menu button |
+| `Blau/Branding/` | The brand's color tokens (`BrandColor`, `TopicDotColor`), type scale (`BrandTextStyle`) and the `BrandLockup` the empty main screen shows ([branding.md](branding.md)) |
 | `Blau/MainScreen/` | The bottom bar's `SettingsButton` and `RecordButton`, their accessibility identifiers, and the `RecordingController` behind Record |
 | `Blau/XAI/XAIServices.swift` | The xAI services (#33): `make(config:)` for the app, `hermetic(config:)` for previews and tests |
 | `Blau/VoiceLoop/` | `VoiceLoop` (the spoken conversation: the live audio pipeline feeding the `TurnOrchestrator`, #36), the SwiftData transcript recorder, the HUD rows and the DEBUG Voice Loop screen |
