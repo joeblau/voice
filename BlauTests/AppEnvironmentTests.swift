@@ -2,6 +2,7 @@ import BlauAudio
 import BlauCore
 import BlauPersistence
 import BlauRealtime
+import BlauTopics
 import Foundation
 import SwiftData
 import SwiftUI
@@ -115,12 +116,13 @@ struct AppEnvironmentFactoryTests {
         environment.flags.setOverride(false, for: .memoryTools)
         #expect(defaults.object(forKey: FeatureFlag.memoryTools.defaultsKey) as? Bool == false)
 
-        for service in [
-            environment.transcriber as Any, environment.voiceGate, environment.topics,
-            environment.memory,
-        ] {
+        for service in [environment.transcriber as Any, environment.voiceGate, environment.memory] {
             #expect(service is UnavailableService)
         }
+        // The topic lifecycle (#54) is live, and the same one the topic
+        // edits go through.
+        let topics = try #require(environment.topics as? TopicLifecycle)
+        #expect(topics === environment.topicLifecycle)
         // The conversation audio is real (#26), and idle until a conversation
         // starts: building it never touches the microphone.
         let keeper = try #require(environment.audio as? AudioSessionKeeper)

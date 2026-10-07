@@ -4,6 +4,7 @@ import BlauMemory
 import BlauPersistence
 import BlauRealtime
 import BlauTelemetry
+import BlauTopics
 import BlauTranscription
 import Foundation
 import Observation
@@ -54,6 +55,12 @@ final class AppEnvironment {
     let persistence: PersistenceController
     let topics: any TopicService
     let memory: any MemoryService
+
+    /// Opens, titles and refines topics, and applies the user's rename,
+    /// merge and split (#54). In the live app it is also `topics`, fed by
+    /// the orchestrator's transcript; elsewhere it runs on keyword titles
+    /// over the in-memory store, so topic edits work in previews.
+    let topicLifecycle: TopicLifecycle
 
     /// xAI access (#33): the key store, the REST client, on-device realtime
     /// token minting and the `XAIAccount` the key entry views bind to. The
@@ -148,7 +155,8 @@ final class AppEnvironment {
         conversationAudio: ConversationAudio? = nil,
         backgroundInference: BackgroundInferenceMonitor = BackgroundInferenceMonitor(),
         textEmbeddings: TextEmbeddingService = TextEmbeddings.unavailable(),
-        performance: PerformancePolicy = PerformancePolicy(source: ManualDeviceConditionsSource())
+        performance: PerformancePolicy = PerformancePolicy(source: ManualDeviceConditionsSource()),
+        topicLifecycle: TopicLifecycle? = nil
     ) {
         self.kind = kind
         self.config = config
@@ -161,6 +169,9 @@ final class AppEnvironment {
         self.persistence = persistence
         self.topics = topics
         self.memory = memory
+        self.topicLifecycle =
+            topicLifecycle ?? (topics as? TopicLifecycle)
+            ?? .offline(transcript: PersistenceTranscriptRecorder(persistence: persistence))
         self.xai = xai
         self.speechModels = speechModels
         self.textEmbeddings = textEmbeddings
@@ -299,6 +310,11 @@ extension AppEnvironment {
         let persistence = persistence ?? .live(isDebugBuild: AppConfig.isDebugBuild)
         let xai = xai ?? XAIServices.make(config: config)
         let realtimeSession = RealtimeSessionServices.make()
+        let textEmbeddings = TextEmbeddings.make(models: models)
+        // #54: the topic lifecycle writes through the transcript's store.
+        let transcript = PersistenceTranscriptRecorder(persistence: persistence)
+        let topics = TopicLifecycle.app(
+            transcript: transcript, labeling: .app(xai: xai), textEmbeddings: textEmbeddings)
         return AppEnvironment(
             kind: .live,
             config: config,
@@ -316,12 +332,16 @@ extension AppEnvironment {
             voiceGate: UnavailableService(subsystem: "voice ID"),
             // The Grok realtime session and the turn orchestrator (#34 - #36).
             realtime: VoiceLoop.makeOrchestrator(
-                config: config, xai: xai, realtimeSession: realtimeSession, persistence: persistence,
+                config: config, xai: xai, realtimeSession: realtimeSession,
+                transcript: TopicTrackingTranscript(base: transcript, topics: topics),
+                // The transcript also supplies the current topic when a new
+                // realtime session has to be given the conversation again (#39).
+                reseedContext: transcript,
                 player: conversationAudio.player),
             // The SwiftData stores with CloudKit sync (#20).
             persistence: persistence,
-            // #52 - #54: the topic segmenter.
-            topics: UnavailableService(subsystem: "topics"),
+            // #52 - #54: topic segmentation, labels and the topic lifecycle.
+            topics: topics,
             // #62 - #68: memory and its tools.
             memory: UnavailableService(subsystem: "memory"),
             xai: xai,
@@ -330,9 +350,10 @@ extension AppEnvironment {
             // #31: the Settings toggle that forces Apple's speech engine.
             transcriptionSettings: TranscriptionSettings.make(),
             conversationAudio: conversationAudio,
-            textEmbeddings: TextEmbeddings.make(models: models),
+            textEmbeddings: textEmbeddings,
             // The device's thermal state, Low Power Mode and battery (#75).
-            performance: PerformancePolicy()
+            performance: PerformancePolicy(),
+            topicLifecycle: topics
         )
     }
 

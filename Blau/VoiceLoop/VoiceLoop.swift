@@ -146,24 +146,24 @@ final class VoiceLoop {
 
     /// The live orchestrator: a realtime client minting its secrets on
     /// device, Blau's session configuration, the conversation's 24 kHz
-    /// `player` and the SwiftData transcript. Sessions are resumed after a
-    /// drop and renewed before xAI's 120-minute limit (#39).
+    /// `player` and the SwiftData transcript (with the topic lifecycle
+    /// listening, #54). Sessions are resumed after a drop and renewed before
+    /// xAI's 120-minute limit (#39), reseeded with the current topic from
+    /// `reseedContext`.
     static func makeOrchestrator(
         config: AppConfig,
         xai: XAIServices,
         realtimeSession: RealtimeSessionServices,
-        persistence: PersistenceController,
+        transcript: any TurnTranscriptRecording,
+        reseedContext: any RealtimeReseedContextProviding,
         player: StreamingAudioPlayer
     ) -> TurnOrchestrator {
-        // The transcript also supplies the current topic when a new realtime
-        // session has to be given the conversation again (#39).
-        let transcript = PersistenceTranscriptRecorder(persistence: persistence)
-        return TurnOrchestrator(
+        TurnOrchestrator(
             client: RealtimeClient(endpoint: config.xaiRealtimeURL, tokenProvider: xai.tokenProvider),
             configurator: realtimeSession.configurator,
             audio: player,
             transcript: transcript,
-            reseedContext: transcript
+            reseedContext: reseedContext
         )
     }
 }

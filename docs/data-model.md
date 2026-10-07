@@ -114,6 +114,12 @@ optional and uses `.nullify`.
   `orderedUtterances` (by `startedAt`), or a `FetchDescriptor` with a sort.
 - **Topic color.** `colorSeed` defaults to the first two bytes of `id`, so a
   topic has the same accent color on every device.
+- **Topic titles.** `titleIsProvisional` is `true` for the placeholder and
+  for a labeler's first guess (shown in italics), and `false` once the title
+  is refined when the topic closes or edited by the user. The topic
+  lifecycle only writes over a provisional title
+  (`ConversationStore.applyTopicLabel`), so a manual title is never
+  overwritten. See [topics.md](topics.md#topic-lifecycle).
 - **Voiceprint.** The voiceprint syncs through CloudKit (product decision 2 in
   issue #1), so enrolling once works on every device. Vectors are packed as
   little-endian Float32 with `PackedFloat32` (256 values per WeSpeaker

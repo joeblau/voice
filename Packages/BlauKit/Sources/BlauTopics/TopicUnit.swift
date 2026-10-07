@@ -91,8 +91,20 @@ public struct ExchangeAssembler: Sendable {
 
     /// Adds the next finalized utterance.
     ///
+    /// An utterance with the `id` of one already in the exchange being
+    /// assembled replaces it (the transcript stores merged and refined
+    /// utterances again under the same `id`).
+    ///
     /// - Returns: The exchange this utterance closed, if any.
     public mutating func add(_ utterance: Utterance) -> TopicUnit? {
+        if let index = pending.firstIndex(where: { $0.id == utterance.id }) {
+            if utterance.isBlank {
+                pending.remove(at: index)
+            } else {
+                pending[index] = utterance
+            }
+            return nil
+        }
         guard !utterance.isBlank else { return nil }
         var closed: TopicUnit?
         if utterance.speaker == .user, pending.contains(where: { $0.speaker == .agent }) {

@@ -2,10 +2,11 @@
 
 `BlauTopics` watches the conversation as it streams and decides when it has
 moved to a new topic. This document describes the streaming segmentation
-engine (#52) and how its candidate boundaries are confirmed and titled by a
-language model ([Confirmation and labels](#confirmation-and-labels), #53).
-The topic lifecycle (#54) and offline re-segmentation (#55) build on their
-events.
+engine (#52), how its candidate boundaries are confirmed and titled by a
+language model ([Confirmation and labels](#confirmation-and-labels), #53),
+and the [topic lifecycle](#topic-lifecycle) that turns those decisions into
+stored topics and applies the user's edits (#54). Offline re-segmentation
+(#55) builds on the lifecycle.
 
 The engine is a streaming variant of TextTiling (Hearst, 1997) over exchange
 embeddings, with hysteresis so a brief digression doesn't split a topic.
@@ -359,3 +360,96 @@ To measure on a device, run the same suite on the package scheme with the
 environment variable set in the scheme's test action, or read the
 `topics.label` intervals from an Instruments recording of a real
 conversation (see [performance.md](performance.md)).
+
+## Topic lifecycle
+
+`TopicLifecycle` (BlauTopics, #54) runs the topics of the live conversation:
+it opens them, titles them, refines each one when it closes, and applies the
+user's rename, merge and split. It writes through `ConversationStore`
+(BlauPersistence), the same store that records the transcript, so the
+store's current topic follows every boundary and new utterances join the
+right topic. The code is in `Packages/BlauKit/Sources/BlauTopics/Lifecycle/`
+and `Packages/BlauKit/Sources/BlauPersistence/ConversationStore+Topics.swift`.
+
+```swift
+// Blau/Topics/TopicLifecycle+App.swift and AppEnvironment.live():
+let transcript = PersistenceTranscriptRecorder(persistence: persistence)
+let topics = TopicLifecycle.app(transcript: transcript, labeling: .app(xai: xai), textEmbeddings: textEmbeddings)
+let orchestrator = TurnOrchestrator(..., transcript: TopicTrackingTranscript(base: transcript, topics: topics))
+// The timeline's context menu (Blau/Topics/TopicEditMenu.swift):
+try await topics.rename(topicID, to: "Seed round")
+try await topics.mergeWithPrevious(topicID)
+try await topics.split(topicID, atUtterance: utteranceID)
+```
+
+`TopicTrackingTranscript` stores each utterance, then hands it to the
+lifecycle (`ingest`), which queues the work and returns at once: labeling
+takes seconds and must never hold up the transcript or the audio. The queue
+runs in order, and every store call names its topic, so a decision that
+lands after the conversation ended still changes the right topic.
+
+### What happens when
+
+| Moment | What the lifecycle does |
+| ------ | ----------------------- |
+| Conversation starts | Opens the first topic at the conversation's start, titled "New topic" (`Topic.placeholderTitle`). A resumed conversation with an open topic continues it |
+| Each exchange | `ExchangeAssembler` groups the committed utterances; an exchange is scored when the user speaks again or 1 s after the agent's reply was stored (`exchangeSettleDelay`). Its time range is re-based on the wall clock, so user (ASR timeline) and agent (orchestrator clock) speech always arrive in order |
+| 3rd exchange of a topic without a model title | Labels the topic so far: provisional title and summary (`firstTitleAfterExchanges`) |
+| Candidate the model agreed with | Splits the current topic at the boundary: the new topic appears with the model's provisional title, shown in italics (`titleIsProvisional`) |
+| Candidate vetoed in the same step | Nothing is opened |
+| Boundary confirmed | Moves the new topic's start to the confirmed gap if it moved, keeps the topic, and **refines the closed topic**: labels all of its exchanges and makes that title final, with a summary |
+| Candidate taken back (digression, end of stream) | Merges the provisional topic back into the one before it |
+| Conversation ends | Scores the last exchange, takes back an unconfirmed break, refines the last topic; a topic with no utterances is removed. Utterances that arrive afterwards (late transcripts) never reopen topics |
+
+The new topic appears about two exchanges after a real switch: the
+segmenter raises a candidate once two exchanges after the gap exist
+(`rightWindow`), and the lifecycle shows it then instead of waiting for the
+confirmation, which needs `sustainUnits` more. On the scripted transcripts
+the switch's first exchange is in a new topic one or two exchanges after it
+(`TopicLifecycleTests.aNewTopicAppearsWithinTwoExchangesOfASwitch`), and
+after confirmation every topic starts exactly at the labelled boundary.
+`Configuration.opensTopicsAtCandidates = false` waits for the confirmation
+instead (three to five exchanges).
+
+| Transcript | Switch at exchange | New topic shown after exchange |
+| ---------- | ------------------ | ------------------------------ |
+| `threeTopics` | 6, 12 | 7 (provisional at 4, moved to 6 on confirmation), 13 |
+| `briefDigression` | 12 | 13 (the digression at 6 was shown after 7 and taken back after 9) |
+| `explicitCues` | 5, 10 | 7, 11 |
+| `fourTopics` | 7, 12, 18 | 7 (provisional at 4, moved to 7), 13, 19 |
+| `singleTopic` | none | none kept (two candidates shown and taken back) |
+
+### Titles and manual edits
+
+`Topic.titleIsProvisional` decides who may write a title:
+
+- The lifecycle only ever writes a title through
+  `ConversationStore.applyTopicLabel`, which writes it **only while the title
+  is provisional**. A refinement on close makes it final.
+- A manual rename (`renameTopic`) makes the title final and saves at once,
+  so it is on disk (and queued for CloudKit) before the call returns. A
+  manual title is therefore never overwritten, whatever label lands later.
+  The summary is still refreshed.
+- **Merge with previous** gives the earlier topic the later one's utterances
+  and end, deletes the later topic, and refreshes the summary. A manual
+  title on either side survives. Merging away a provisional topic also
+  ignores the segmenter's later confirmation of that boundary.
+- **Split here** starts a new topic at an utterance (not the first). Both
+  parts are labeled again; a manual title on the first part stays.
+
+Topic order is `ordinal` (renumbered 0, 1, 2... on every split and merge).
+Each closed topic's final title and summary are stored on the `Topic`, and
+`TopicLifecycle.events()` reports them (`.closed`) for session continuity
+(#39) and memory (M3).
+
+Until the timeline (#56) exists, DEBUG builds show recent conversations'
+topics with the edit menu in **Debug → Topics** (`TopicsDebugView`).
+
+### Not covered yet
+
+- A title refined on close and a manual title are both "final"
+  (`titleIsProvisional == false`); the schema can't tell them apart. Offline
+  re-segmentation (#55) must not re-title user-edited topics, so it will need
+  a way to tell them apart, such as a `titleSource` field in a schema v3.
+- Two devices editing the same conversation at once resolve through
+  CloudKit's last-writer-wins per field.

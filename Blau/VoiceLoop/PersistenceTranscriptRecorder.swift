@@ -59,6 +59,15 @@ actor PersistenceTranscriptRecorder: TurnTranscriptRecording, RealtimeReseedCont
         return await store.topicContext(for: conversation)
     }
 
+    /// The store the transcript is written to, for the topic lifecycle
+    /// (#54), which must change topics through the same store so its
+    /// current topic follows every boundary.
+    ///
+    /// - Throws: `StoreUnavailableError` while no store is open.
+    func conversationStore() async throws -> ConversationStore {
+        try await currentStore(reopening: true)
+    }
+
     /// The store over the current container. A new container gets a new
     /// store; with `reopening`, the active conversation is started (or
     /// resumed) in it first.

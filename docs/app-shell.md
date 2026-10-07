@@ -42,7 +42,8 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `realtime` | `any RealtimeService` | `TurnOrchestrator` (#36, [realtime.md](realtime.md#turn-orchestration)): the xAI client, session configuration, a `StreamingAudioPlayer` and the SwiftData transcript | `FakeRealtimeService` |
 | `voiceLoop` | `VoiceLoop` | Starts the conversation audio (through its keeper), builds the VAD and Parakeet on `start()` and feeds the orchestrator; Debug menu → Voice Loop, and the Live Activity Stop button stops it | unavailable (no orchestrator) |
 | `persistence` | `PersistenceController` | `PersistenceController.live(isDebugBuild:)`: `Application Support/Blau/Blau.store`, mirrored to iCloud when the account allows | `PersistenceController.inMemory()` |
-| `topics` | `any TopicService` | unavailable until #52 - #54 | `FakeTopicService` |
+| `topics` | `any TopicService` | `TopicLifecycle` (#54, [topics.md](topics.md#topic-lifecycle)): fed by the orchestrator's transcript (`TopicTrackingTranscript`), writing topics through the transcript's store | `FakeTopicService` |
+| `topicLifecycle` | `TopicLifecycle` | the same lifecycle as `topics`; the timeline's rename, merge and split go through it | keyword titles over the in-memory store (`TopicLifecycle.offline`) |
 | `memory` | `any MemoryService` | unavailable until #62 - #68 | `FakeMemoryService` |
 | `transcriptionSettings` | `TranscriptionSettings` | `UserDefaults` (`blau.transcription.engine`); the `blau.uitests` suite in DEBUG UI tests | in memory, Apple's engine reported installed |
 | `xai` | `XAIServices` | Keychain + network (`XAIServices.make`); the `BLAU_UI_TEST_XAI` stub in DEBUG UI tests | in-memory key store + stub transport (`XAIServices.hermetic`) |
