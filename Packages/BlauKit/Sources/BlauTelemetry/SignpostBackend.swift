@@ -20,6 +20,20 @@ public protocol SignpostBackend: Sendable {
 
     /// Emits a point-in-time event.
     func emitEvent(_ name: StaticString)
+
+    /// Ends the interval `token` came from with a public end message, for
+    /// example the type of the event an interval handled. Called at most
+    /// once per token, instead of ``endInterval(_:_:)``.
+    ///
+    /// The default implementation drops the message and calls
+    /// ``endInterval(_:_:)``.
+    func endInterval(_ name: StaticString, _ token: SignpostIntervalToken, message: String)
+}
+
+extension SignpostBackend {
+    public func endInterval(_ name: StaticString, _ token: SignpostIntervalToken, message: String) {
+        endInterval(name, token)
+    }
 }
 
 /// Identifies one open interval. Overlapping intervals with the same name
@@ -88,6 +102,13 @@ public struct OSSignpostBackend: SignpostBackend {
     public func emitEvent(_ name: StaticString) {
         signposter.emitEvent(name)
     }
+
+    /// The message is metadata Blau generates (an event type, a count), never
+    /// user content, so it is public.
+    public func endInterval(_ name: StaticString, _ token: SignpostIntervalToken, message: String) {
+        guard let state = token.state else { return }
+        signposter.endInterval(name, state, "\(message, privacy: .public)")
+    }
 }
 
 // MARK: - RecordingSignpostBackend
@@ -108,6 +129,7 @@ public final class RecordingSignpostBackend: SignpostBackend {
         var nextID: UInt64 = 1
         var records: [Record] = []
         var open: [UInt64: String] = [:]
+        var endMessages: [UInt64: String] = [:]
     }
 
     private let state: Mutex<State>
@@ -165,5 +187,21 @@ public final class RecordingSignpostBackend: SignpostBackend {
     public func emitEvent(_ name: StaticString) {
         let name = name.description
         state.withLock { $0.records.append(.event(name: name)) }
+    }
+
+    public func endInterval(_ name: StaticString, _ token: SignpostIntervalToken, message: String) {
+        endInterval(name, token)
+        state.withLock { $0.endMessages[token.id] = message }
+    }
+
+    /// The end messages of the intervals named `name` that ended with one,
+    /// in the order they ended.
+    public func endMessages(of name: String) -> [String] {
+        state.withLock { state in
+            state.records.compactMap { record in
+                guard case .end(let ended, let id) = record, ended == name else { return nil }
+                return state.endMessages[id]
+            }
+        }
     }
 }

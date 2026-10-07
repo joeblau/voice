@@ -10,8 +10,8 @@ struct PipelineIntervalTests {
         #expect(
             Self.names == [
                 "capture.frame", "vad.chunk", "asr.chunk", "asr.eou", "voiceid.embed", "voiceid.verify",
-                "realtime.turn", "realtime.firstAudio", "playback.firstBuffer", "topics.segment", "topics.label",
-                "memory.embed", "memory.search", "db.save",
+                "realtime.turn", "realtime.firstAudio", "realtime.connect", "realtime.event", "playback.firstBuffer",
+                "topics.segment", "topics.label", "memory.embed", "memory.search", "db.save",
             ]
         )
     }
@@ -43,6 +43,8 @@ struct PipelineIntervalTests {
         #expect(categories["voiceid.verify"] == .voiceID)
         #expect(categories["realtime.turn"] == .realtime)
         #expect(categories["realtime.firstAudio"] == .realtime)
+        #expect(categories["realtime.connect"] == .realtime)
+        #expect(categories["realtime.event"] == .realtime)
         #expect(categories["playback.firstBuffer"] == .audio)
         #expect(categories["topics.segment"] == .topics)
         #expect(categories["topics.label"] == .topics)

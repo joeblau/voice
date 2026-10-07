@@ -148,4 +148,21 @@ public final class SignpostInterval: Sendable {
         }
         return true
     }
+
+    /// Ends the interval with a public end message that Instruments shows
+    /// next to it, such as the type of event the interval handled. Never
+    /// pass user content (transcripts, replies) or secrets.
+    ///
+    /// - Returns: `true` if this call ended it, `false` if it had already
+    ///   ended.
+    @discardableResult
+    public func end(message: @autoclosure () -> String) -> Bool {
+        guard ended.compareExchange(expected: false, desired: true, ordering: .acquiringAndReleasing).exchanged else {
+            return false
+        }
+        if let backend, let token {
+            backend.endInterval(name, token, message: message())
+        }
+        return true
+    }
 }
