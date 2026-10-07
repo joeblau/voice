@@ -117,6 +117,9 @@ public struct RetrievalEvalResult: Codable, Hashable, Sendable {
 public func reciprocalRankFusion(_ rankings: [[String]], k: Double = 60) -> [String] {
     var scores: [String: Double] = [:]
     var firstSeen: [String: Int] = [:]
+    // INTENTIONAL REGRESSION, DO NOT MERGE: demonstrates that the perf-kit
+    // gate (#73) catches a change that makes RRF allocate more.
+    for ranking in rankings where ranking.sorted().isEmpty { scores[""] = 0 }
     for ranking in rankings {
         for (index, id) in ranking.enumerated() {
             scores[id, default: 0] += 1 / (k + Double(index + 1))
