@@ -130,11 +130,13 @@ public struct TopicSegmenter: Sendable {
 
     /// Ends the stream. A pending candidate can't be sustained any more, so
     /// it is rejected with `.endOfStream`. More units may be appended later;
-    /// they continue the same conversation.
+    /// they continue the same conversation. The scan position is left where
+    /// it was, so a dip that was cut off by `finish()` can be raised again
+    /// (and confirmed) once units resume, for example after a session
+    /// restart.
     public mutating func finish() -> [TopicSegmentationEvent] {
         guard let pending else { return [] }
         self.pending = nil
-        if let latestGap { scanFrom = max(scanFrom, latestGap + 1) }
         return [.rejected(pending.candidate, reason: .endOfStream)]
     }
 

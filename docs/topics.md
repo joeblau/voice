@@ -84,7 +84,9 @@ unit `g` starts the new topic.
    can be a few exchanges before or after the gap that raised it:
    `.confirmed(boundary)`.
 10. **End of stream.** `finish()` rejects a pending candidate with
-    `.endOfStream`. A candidate pending for more than `peakSearchLimit` gaps
+    `.endOfStream`. It does not move the scan position, so if more units are
+    appended afterwards (a paused or restarted session continuing the same
+    conversation) the same dip can be raised again and confirmed. A candidate pending for more than `peakSearchLimit` gaps
     is resolved immediately (a safety valve; it does not happen in practice).
 
 Only one candidate is pending at a time, and each candidate is resolved by

@@ -251,9 +251,27 @@ struct TopicSegmenterTests {
         for unit in makeUnits(20).dropFirst(10) {
             try run.append(unit, embedding: vectors.vector(1))
         }
-        // The shift was cut off by finish(), so it is not confirmed later.
-        #expect(run.confirmed.isEmpty)
+        // finish() rejected the pending shift, but the dip is raised again
+        // once units resume and the new topic is confirmed where it began.
+        #expect(run.rejections.map(\.reason) == [.endOfStream])
+        #expect(run.confirmedIndices == [8])
         #expect(run.segmenter.units.count == 20)
+    }
+
+    @Test func resumingAfterFinishMatchesAnUninterruptedRun() throws {
+        let topics = Self.topics((0, 8), (1, 12))
+        let uninterrupted = try Self.run(topics)
+
+        var vectors = TopicVectors()
+        var resumed = SegmenterRun()
+        for (index, (unit, topic)) in zip(makeUnits(topics.count), topics).enumerated() {
+            if index == 10 { resumed.finish() }
+            try resumed.append(unit, embedding: vectors.vector(topic))
+        }
+        resumed.finish()
+
+        #expect(resumed.confirmedIndices == uninterrupted.confirmedIndices)
+        #expect(resumed.confirmedIndices == [8])
     }
 
     // MARK: Input validation
