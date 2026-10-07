@@ -300,11 +300,18 @@ jobs:
         run: scripts/ci/simulator-destination.sh
 
       # Writes .build/results/perf.xcresult (the Makefile's PERF_RESULT).
+      # One retry: the runner's simulator sometimes crashes the test runner
+      # before any test starts ("never finished bootstrapping"), which would
+      # fail the night with nothing measured. A real failure fails twice.
       - name: Performance tests
         env:
           DESTINATION: ${{ steps.simulator.outputs.destination }}
           XCODEBUILD_FLAGS: "-parallel-testing-enabled NO"
-        run: make perf
+        run: |
+          if ! make perf; then
+            echo "::warning::The performance tests failed; retrying once."
+            make perf
+          fi
 
       - name: Shut down simulator
         if: ${{ always() && steps.simulator.outputs.udid != '' }}
