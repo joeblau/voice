@@ -147,7 +147,7 @@ APIs; never with its downloading convenience loaders.
 | `.sileroVAD` | `VadManager(config:vadModel:)` with `MLModel(contentsOf: directory/FluidAudioModels.vadModelBundle)` |
 | `.parakeetRealtimeEOU` | `StreamingEouAsrManager(chunkSize: .ms320).loadModels(from: directory)` |
 | `.parakeetTDTv3` | `AsrModels.loadLocal(from: directory, version: .v3)` |
-| `.speakerEmbedding` | `MLModel(contentsOf: directory/FluidAudioModels.speakerEmbeddingBundle)` |
+| `.speakerEmbedding` | `MLModel(contentsOf: directory/FluidAudioModels.speakerEmbeddingBundle)`; Blau wraps it as `WeSpeakerEmbedder.load(modelDirectory: directory)` ([voice-id.md](voice-id.md)) |
 
 `ModelDownloadSmokeTests` runs exactly these calls against real downloads.
 

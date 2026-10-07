@@ -137,3 +137,6 @@ The complete list of declared edges:
 - [audio.md](audio.md): the audio session controller, voice processing,
   the mic capture engine (real-time ring, 16 kHz conversion, fan-out,
   history, drop counters) and how playback plugs into the engine.
+- [voice-id.md](voice-id.md): speaker embeddings (WeSpeaker on Core ML),
+  their windows and padding, and how they are tested and benchmarked
+  ([benchmarks.md](benchmarks.md)).
