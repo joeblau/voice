@@ -66,7 +66,9 @@ Beyond formatting:
   need real models or a device behind an environment variable such as
   `BLAU_DEVICE_TESTS=1`.
 - **Logging and signposts** go through BlauTelemetry's Logger categories and
-  signposts, not `print`.
+  signposts, not `print`. Log what the user said with `privacy: .private`,
+  and use the canonical interval names. Both are in
+  [`docs/performance.md`](docs/performance.md).
 - **Third-party APIs** (FluidAudio, GRDB...): check each type and signature
   against the resolved package source before you use it.
 
