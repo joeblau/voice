@@ -95,6 +95,9 @@ enum KitModule: String, CaseIterable {
         case .realtime:
             // Recorded and hand-written realtime sessions (JSON Lines).
             [.copy("Fixtures")]
+        case .persistence:
+            // A store written by schema v1, for the v1 → v2 migration tests.
+            [.copy("Fixtures")]
         default:
             []
         }

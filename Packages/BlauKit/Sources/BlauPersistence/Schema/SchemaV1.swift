@@ -17,6 +17,9 @@ import SwiftData
 /// through computed properties, so a value written by a newer app version
 /// never fails to load.
 ///
+/// Superseded by `SchemaV2`, which copies these models unchanged; v1 stays
+/// so stores written by v1 builds migrate (`BlauMigrationPlan`).
+///
 /// Once this schema is deployed to the CloudKit production environment it
 /// can only change additively, through a new `VersionedSchema` and a stage in
 /// `BlauMigrationPlan`. Never edit a shipped version in place. See

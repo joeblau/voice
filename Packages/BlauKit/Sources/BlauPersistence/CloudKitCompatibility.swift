@@ -29,6 +29,16 @@ public enum CloudKitCompatibility {
             case orderedRelationship
             /// The entity takes part in model inheritance.
             case inheritance
+            /// A newer schema version dropped an entity an older one had.
+            case removedEntity
+            /// A newer schema version dropped a property an older one had.
+            case removedProperty
+            /// A newer schema version changed a property's type, optionality,
+            /// destination, inverse, cardinality or ordering.
+            case changedProperty
+            /// A newer schema version turned an attribute's
+            /// `.allowsCloudEncryption` on or off.
+            case changedEncryption
         }
 
         public let kind: Kind
@@ -92,7 +102,77 @@ public enum CloudKitCompatibility {
                 }
             }
         }
-        return found.sorted { lhs, rhs in
+        return sorted(found)
+    }
+
+    // MARK: - Additive-only evolution
+
+    /// Every change from `older` to `newer` that CloudKit's production schema
+    /// would reject. Empty when `newer` only adds entities and properties.
+    ///
+    /// Once a schema is deployed to production, record types and fields can
+    /// be added but never removed, renamed or retyped, and a field's
+    /// encryption can't change. So every entity of `older` must still exist
+    /// in `newer` with every property unchanged (same Core Data version hash:
+    /// name, type, optionality, and for relationships the destination,
+    /// inverse, cardinality and ordering). Delete rules may change: they are
+    /// local behavior, not part of the CloudKit schema. New properties must
+    /// still be optional or defaulted, which `violations(in:)` checks.
+    public static func breakingChanges(
+        from older: any VersionedSchema.Type,
+        to newer: any VersionedSchema.Type
+    ) -> [Violation] {
+        guard
+            let olderModel = NSManagedObjectModel.makeManagedObjectModel(for: Schema(versionedSchema: older)),
+            let newerModel = NSManagedObjectModel.makeManagedObjectModel(for: Schema(versionedSchema: newer))
+        else {
+            return [Violation(.unconvertibleSchema, entity: "*")]
+        }
+        return breakingChanges(from: olderModel, to: newerModel)
+    }
+
+    /// Every non-additive change between two Core Data models.
+    public static func breakingChanges(from older: NSManagedObjectModel, to newer: NSManagedObjectModel) -> [Violation]
+    {
+        var found: [Violation] = []
+        let newerEntities = newer.entitiesByName
+        for oldEntity in older.entities {
+            let name = oldEntity.name ?? "?"
+            guard let newEntity = newerEntities[name] else {
+                found.append(Violation(.removedEntity, entity: name))
+                continue
+            }
+            let newProperties = newEntity.propertiesByName
+            for (propertyName, oldProperty) in oldEntity.propertiesByName where !oldProperty.isTransient {
+                guard let newProperty = newProperties[propertyName] else {
+                    found.append(Violation(.removedProperty, entity: name, property: propertyName))
+                    continue
+                }
+                if newProperty.versionHash != oldProperty.versionHash {
+                    found.append(Violation(.changedProperty, entity: name, property: propertyName))
+                }
+                if let oldAttribute = oldProperty as? NSAttributeDescription,
+                    let newAttribute = newProperty as? NSAttributeDescription,
+                    oldAttribute.allowsCloudEncryption != newAttribute.allowsCloudEncryption
+                {
+                    found.append(Violation(.changedEncryption, entity: name, property: propertyName))
+                }
+            }
+        }
+        return sorted(found)
+    }
+
+    /// Every non-additive change between consecutive schemas of a migration
+    /// plan, oldest first.
+    public static func breakingChanges(in plan: any SchemaMigrationPlan.Type) -> [Violation] {
+        let schemas = plan.schemas
+        return zip(schemas, schemas.dropFirst()).flatMap { older, newer in
+            breakingChanges(from: older, to: newer)
+        }
+    }
+
+    private static func sorted(_ violations: [Violation]) -> [Violation] {
+        violations.sorted { lhs, rhs in
             (lhs.entity, lhs.property ?? "", lhs.kind.rawValue) < (rhs.entity, rhs.property ?? "", rhs.kind.rawValue)
         }
     }

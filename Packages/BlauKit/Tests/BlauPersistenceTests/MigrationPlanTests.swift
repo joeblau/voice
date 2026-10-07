@@ -5,10 +5,16 @@ import Testing
 
 @Suite("BlauMigrationPlan")
 struct MigrationPlanTests {
-    @Test func startsAtSchemaV1() {
-        #expect(BlauMigrationPlan.schemas.map { $0.versionIdentifier } == [Schema.Version(1, 0, 0)])
-        #expect(BlauMigrationPlan.stages.isEmpty)
+    @Test func startsAtSchemaV1AndListsEveryVersion() {
+        #expect(
+            BlauMigrationPlan.schemas.map { $0.versionIdentifier }
+                == [Schema.Version(1, 0, 0), Schema.Version(2, 0, 0)])
         #expect(SchemaV1.versionIdentifier == Schema.Version(1, 0, 0))
+        #expect(SchemaV2.versionIdentifier == Schema.Version(2, 0, 0))
+    }
+
+    @Test func thereIsOneStagePerConsecutivePairOfVersions() {
+        #expect(BlauMigrationPlan.stages.count == BlauMigrationPlan.schemas.count - 1)
     }
 
     @Test func theCurrentSchemaIsTheNewestInThePlan() {

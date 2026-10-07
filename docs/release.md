@@ -60,9 +60,11 @@ and tick it there.
 
 - [ ] [CloudKit Console](https://icloud.developer.apple.com) → `iCloud.com.joeblau.blau`
       → Development → Schema → Record Types.
-- [ ] Every model has a record type (`CD_<Entity>`, e.g. `CD_Conversation`,
-      `CD_Topic`, `CD_Utterance`, `CD_VoiceProfile`, `CD_VoiceEnrollmentSet`)
-      with a `CD_<property>` field for every new property.
+- [ ] Every model has a record type (`CD_<Entity>`): `CD_Conversation`,
+      `CD_Topic`, `CD_Utterance`, `CD_VoiceProfile`, `CD_VoiceEnrollmentSet`
+      (v1) and `CD_Document`, `CD_CollectionItem`, `CD_MemoryEntity`,
+      `CD_Fact`, `CD_ProfileBlock` (v2), with a `CD_<property>` field for
+      every new property.
 - [ ] Voiceprint vectors (`VoiceProfile.centroid`, `VoiceEnrollmentSet.embeddings`)
       are encrypted fields.
 - [ ] No field you didn't expect (a typo deployed to Production is forever).
@@ -99,4 +101,4 @@ and tick it there.
 
 | Version (build) | Schema version | Schema deployed to Production | Sync test plan run by / result |
 | --------------- | -------------- | ----------------------------- | ------------------------------ |
-| 0.1.0 (first TestFlight) | 1.0.0 | pending | pending |
+| 0.1.0 (first TestFlight) | 2.0.0 | pending | pending |
