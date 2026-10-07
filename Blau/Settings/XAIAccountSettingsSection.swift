@@ -115,13 +115,18 @@ struct SettingsView: View {
                 MemoryIndexSettingsSection()
                 SpeechModelsSettingsSection()
                 SpeechRecognitionSettingsSection()
-                Section("Developer") {
+                Section {
+                    PerformanceHUDToggle()
                     NavigationLink {
                         DiagnosticsView()
                     } label: {
                         Label("Diagnostics", systemImage: "waveform.path.ecg")
                     }
                     .accessibilityIdentifier(DiagnosticsView.Identifier.open)
+                } header: {
+                    Text("Developer")
+                } footer: {
+                    PerformanceHUDToggle.footer
                 }
             }
             .navigationTitle("Settings")
@@ -138,6 +143,7 @@ struct SettingsView: View {
 #if DEBUG
     #Preview("No key") {
         SettingsView()
+            .environment(AppEnvironment.preview())
             .environment(XAIAccount.preview())
             .environment(PersistenceController.preview())
             .environment(AppDiagnostics(store: nil))

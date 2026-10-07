@@ -400,6 +400,9 @@ struct TurnOrchestratorContinuityTests {
         #expect(snapshot.session.reseeds == 1)
         #expect(snapshot.session.resumptions == 0)
         #expect(snapshot.session.phase == .live)
+        // The HUD's cost estimate (#71) bills every user text Grok received:
+        // the first turn, the reseeded copy of it and the queued turn.
+        try await waitUntil("text inputs counted") { await harness.snapshot().usage.textInputs == 3 }
     }
 
     @Test func aResumptionThatIsNeverConfirmedTimesOutAndReseeds() async throws {

@@ -5,8 +5,8 @@ import os
 ///
 /// Production uses `OSSignpostBackend`, which emits `os_signpost` records
 /// that Instruments shows. Tests use `RecordingSignpostBackend` to check that
-/// code begins and ends the intervals it should. The seam also leaves room
-/// for an in-process consumer such as the debug performance HUD.
+/// code begins and ends the intervals it should. `TappedSignpostBackend`
+/// uses the seam to time intervals in process for the debug performance HUD.
 public protocol SignpostBackend: Sendable {
     /// Whether anything is listening. When `false`, `Signposter` skips the
     /// backend entirely and only runs the measured work.
@@ -52,6 +52,14 @@ public struct SignpostIntervalToken: Sendable {
 
     /// Whether `MetricKitSignpostBackend`'s base backend began this interval.
     var baseActive = true
+
+    /// Whether `TappedSignpostBackend`'s base backend began this interval.
+    var tapBaseActive = true
+
+    /// The `SignpostLatencyTap` slot and start time (continuous clock,
+    /// nanoseconds) when `TappedSignpostBackend` timed this interval.
+    var tapIndex: Int?
+    var tapStart: UInt64?
 
     /// A token for a custom backend.
     public init(id: UInt64) {

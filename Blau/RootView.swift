@@ -13,7 +13,8 @@ import SwiftUI
 /// between them, so the system lays them out, gives them Liquid Glass, keeps
 /// them clear of the home indicator on every iPhone size and in landscape, and
 /// lets the conversation scroll under the bar. DEBUG builds add the debug menu
-/// button to the top bar.
+/// button to the top bar, and a triple-tap on the main screen that shows or
+/// hides the performance HUD (#71).
 ///
 /// It also hosts the xAI key entry points (#33): Settings and, while no usable
 /// key is stored (none, or an unreadable one), the onboarding step. UI and
@@ -33,6 +34,7 @@ struct RootView: View {
 /// environment's audio service.
 struct MainScreenScaffold: View {
     @Environment(ModelManager.self) private var models
+    @Environment(AppEnvironment.self) private var environment
     @Environment(\.scenePhase) private var scenePhase
     @State private var recording: RecordingController
     @State private var isShowingSettings = false
@@ -47,11 +49,14 @@ struct MainScreenScaffold: View {
     var body: some View {
         NavigationStack {
             MainScreen(onConnectAccount: { isShowingKeyOnboarding = true })
-                .voiceLoopHUD()
+                #if DEBUG
+                    // Triple-tap anywhere on the main screen to show or hide the
+                    // performance HUD (#71).
+                    .simultaneousGesture(
+                        TapGesture(count: 3).onEnded { environment.performanceHUD.toggleVisible() })
+                #endif
                 // Shown only while the device is hot or short on power (#75).
-                // An inset, not an overlay: the DEBUG voice loop HUD (applied
-                // just before, top-leading on the content) then sits below the
-                // indicator instead of under it, and the conversation scrolls
+                // An inset, not an overlay, so the conversation scrolls
                 // beneath it like it does beneath the bars.
                 .safeAreaInset(edge: .top, spacing: 0) { PerformanceIndicator() }
                 .toolbar {
@@ -84,6 +89,8 @@ struct MainScreenScaffold: View {
                 }
                 .animation(.default, value: models.isReady)
         }
+        // Over the whole stack, bars included, so it can be dragged anywhere.
+        .performanceHUD()
         .task {
             await recording.synchronize()
         }
@@ -170,6 +177,8 @@ struct MainScreen: View {
             .scrollBounceBehavior(.basedOnSize)
             .accessibilityIdentifier(MainScreenAccessibility.content)
         }
+        // The whole screen takes taps (the DEBUG triple-tap for the HUD).
+        .contentShape(Rectangle())
     }
 }
 

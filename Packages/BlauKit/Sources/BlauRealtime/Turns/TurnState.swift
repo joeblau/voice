@@ -86,6 +86,12 @@ public struct RealtimeUsageTotals: Sendable, Hashable {
     public var inputTokens = 0
     public var outputTokens = 0
     public var totalTokens = 0
+    /// User text items sent to Grok (`conversation.item.create` with
+    /// `input_text`). xAI bills each one as a text input.
+    public var textInputs = 0
+    /// Reply audio received (`response.output_audio.delta`), at the
+    /// session's output rate. xAI bills speech-to-speech per minute of audio.
+    public var outputAudio: Duration = .zero
 
     public init() {}
 

@@ -145,6 +145,10 @@ final class AppEnvironment {
     /// keeps the running conversation's rows.
     let chat: ChatTranscriptModel
 
+    /// The debug performance HUD (#71): shown from Settings → Developer, a
+    /// DEBUG triple-tap or the `perfHUD` flag; reads the voice loop.
+    let performanceHUD: PerformanceHUDController
+
     /// The xAI key refresh started by the latest return to `active`, so tests
     /// can wait for it.
     @ObservationIgnored var xaiRefresh: Task<Void, Never>?
@@ -201,12 +205,20 @@ final class AppEnvironment {
         self.performanceStatus = PerformanceStatus(policy: performance)
         self.memoryIndexing = MemoryIndexingController(
             persistence: persistence, embedder: textEmbeddings, performance: performance)
-        self.voiceLoop = VoiceLoop(
+        let voiceLoop = VoiceLoop(
             realtime: realtime, speechModels: speechModels, audio: conversationAudio,
             backgroundInference: backgroundInference, performance: performance)
+        self.voiceLoop = voiceLoop
         self.transcriptFeed = transcriptFeed
         self.chat = ChatTranscriptModel(
             realtime: realtime, feed: transcriptFeed, player: conversationAudio?.player)
+        self.performanceHUD = PerformanceHUDController(
+            flags: flags, preferences: kind == .live ? .userDefaults() : .inMemory(),
+            pipeline: {
+                var readings = voiceLoop.hudReadings()
+                readings.performance = performance.snapshot
+                return readings
+            })
         self.lifecycle = AppLifecycleCoordinator(
             participants: Self.lifecycleOrder(
                 persistence: persistence, audio: audio, transcriber: transcriber,

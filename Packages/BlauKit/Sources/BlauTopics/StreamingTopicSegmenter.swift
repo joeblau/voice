@@ -26,15 +26,20 @@ public actor StreamingTopicSegmenter {
     private var segmenter: TopicSegmenter
     private let embedder: any TextEmbedder
     private let signposter: Signposter
+    private let gauges: PerformanceGauges
 
+    /// - Parameter gauges: Where the newest depth score and the threshold
+    ///   go for the performance HUD.
     public init(
         embedder: any TextEmbedder,
         config: TopicConfig = .default,
-        signposter: Signposter = Signposts.topics
+        signposter: Signposter = Signposts.topics,
+        gauges: PerformanceGauges = .shared
     ) {
         self.segmenter = TopicSegmenter(config: config)
         self.embedder = embedder
         self.signposter = signposter
+        self.gauges = gauges
     }
 
     public var config: TopicConfig { segmenter.config }
@@ -70,8 +75,19 @@ public actor StreamingTopicSegmenter {
         let events = try signposter.withInterval(.topicsSegment) { () throws(TopicSegmenterError) in
             try segmenter.append(unit, embedding: embedding)
         }
+        reportGauges()
         log(events)
         return events
+    }
+
+    /// Publishes the newest depth score and the threshold to the HUD.
+    private func reportGauges() {
+        if let score = segmenter.latestGapScore {
+            gauges.report(.topicDepth, score.depth)
+        }
+        if let threshold = segmenter.threshold {
+            gauges.report(.topicThreshold, threshold)
+        }
     }
 
     /// Ends the stream; a pending candidate is rejected with `.endOfStream`.

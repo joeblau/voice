@@ -55,6 +55,9 @@ struct TurnOrchestratorTests {
         #expect(snapshot.agentText == "Start with the launch checklist.")
         #expect(snapshot.usage.totalTokens == 120)
         #expect(snapshot.usage.responses == 1)
+        // Billed usage for the HUD's cost estimate: one text input, 500 ms of reply audio.
+        #expect(snapshot.usage.textInputs == 1)
+        #expect(snapshot.usage.outputAudio == .milliseconds(500))
         #expect(snapshot.latency.firstAudio.last == .milliseconds(640))
         #expect(snapshot.latency.firstAudio.p50 == .milliseconds(640))
         #expect(snapshot.latency.turn.last == .milliseconds(640))
