@@ -30,6 +30,8 @@ await transcriber.stop()                       // commits what was said so far
 `Transcriber` and `TranscriptEvent` live in `BlauCore`, so the turn
 orchestrator (#36) and the views consume any transcriber (this one, the
 `FakeTranscriber`, the `SpeechAnalyzer` fallback of #31) the same way.
+`TranscriberRouter` runs this one or `AppleTranscriber` and switches
+between them at utterance boundaries; see [apple-asr.md](apple-asr.md).
 Finals carry `speakerDecision: nil`; the voice ID gate (#47) decides who
 spoke.
 

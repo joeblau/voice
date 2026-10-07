@@ -62,6 +62,7 @@ public actor ParakeetStreamingTranscriber: Transcriber {
     private let recognizerProvider: RecognizerProvider?
     private let signposter: Signposter
     private let clock: any BlauClock
+    private let inferenceObserver: (any InferenceObserver)?
     private let logger = Log.asr
     private let shared = Mutex(StreamingTranscriberStatistics())
 
@@ -124,6 +125,10 @@ public actor ParakeetStreamingTranscriber: Transcriber {
     ///   - signposter: Where `asr.eou` intervals go (the recognizer emits
     ///     `asr.chunk`).
     ///   - clock: Wall-clock timestamps for `Utterance.startedAt`.
+    ///   - inferenceObserver: Told about every model chunk (its time, or
+    ///     the error), as the `"asr"` stage: `BackgroundInferenceMonitor`
+    ///     (#26) moves speech-to-text to Apple's engine when Parakeet keeps
+    ///     failing or falling behind off screen.
     public init(
         recognizer: any StreamingSpeechRecognizer,
         audio: any CaptureFrameSource,
@@ -133,7 +138,8 @@ public actor ParakeetStreamingTranscriber: Transcriber {
         chunkSizePolicy: (any ASRChunkSizePolicy)? = nil,
         recognizerProvider: RecognizerProvider? = nil,
         signposter: Signposter = Signposts.asr,
-        clock: any BlauClock = SystemClock()
+        clock: any BlauClock = SystemClock(),
+        inferenceObserver: (any InferenceObserver)? = nil
     ) {
         self.recognizer = recognizer
         self.audio = audio
@@ -144,6 +150,7 @@ public actor ParakeetStreamingTranscriber: Transcriber {
         self.recognizerProvider = recognizerProvider
         self.signposter = signposter
         self.clock = clock
+        self.inferenceObserver = inferenceObserver
         (events, continuation) = AsyncStream.makeStream(of: TranscriptEvent.self, bufferingPolicy: .unbounded)
     }
 
@@ -166,6 +173,10 @@ public actor ParakeetStreamingTranscriber: Transcriber {
 
     /// The end of the audio received so far, as a stream offset.
     public var receivedPosition: Int64? { receivedEnd }
+
+    /// The name `BackgroundInferenceMonitor` knows the speech-to-text stage
+    /// by (`InferenceObservation.stage`).
+    public static let inferenceStage = "asr"
 
     /// Utterances committed from now on belong to `id`.
     public func setConversationID(_ id: ConversationID) {
@@ -195,6 +206,24 @@ public actor ParakeetStreamingTranscriber: Transcriber {
             await self?.audioDidEnd(pending: inbox.drain())
         }
         logger.notice("Streaming ASR started (\(self.recognizer.chunkSize.rawValue, privacy: .public) chunks)")
+    }
+
+    /// Starts like `start()`, but never opens an utterance before
+    /// `position`: `TranscriberRouter` hands the conversation over at the end
+    /// of the last utterance the other engine committed. When VAD already
+    /// has speech open (it began while the engines were switching, so its
+    /// onset was reported before this transcriber listened), an utterance
+    /// opens at `position` at once and its audio is read back from the
+    /// capture history.
+    public func start(resumingAt position: Duration?) async throws {
+        guard let position else { return try await start() }
+        guard driver == nil, !isFinished else { return }
+        committedEnd = max(committedEnd, position.sampleCount(sampleRate: AudioFrame.captureSampleRate))
+        try await start()
+        if voiceActivity.isSpeechActive, utterance == nil, driver != nil {
+            isSpeechActive = true
+            openUtterance(at: committedEnd)
+        }
     }
 
     public func stop() async {
@@ -333,10 +362,17 @@ public actor ParakeetStreamingTranscriber: Transcriber {
                 output = try await recognizer.append(audio)
                 consecutiveFailures = 0
             } catch {
+                inferenceObserver?.record(.failed(Self.inferenceStage, error: error))
                 await recognizerFailed(error)
                 continue
             }
             apply(output, fedFrom: audio.sampleOffset)
+            if let inferenceObserver, output.chunks > 0 {
+                let perChunk = output.modelTime / output.chunks
+                for _ in 0..<output.chunks {
+                    inferenceObserver.record(.completed(Self.inferenceStage, latency: perChunk))
+                }
+            }
 
             if output.isEndOfUtterance {
                 await commit(.endOfUtterance)
@@ -604,13 +640,15 @@ extension ParakeetStreamingTranscriber {
         endOfUtteranceDebounce: Duration = ParakeetEouRecognizer.defaultEndOfUtteranceDebounce,
         conversationID: ConversationID = ConversationID(),
         chunkSizePolicy: (any ASRChunkSizePolicy)? = nil,
-        recognizerProvider: RecognizerProvider? = nil
+        recognizerProvider: RecognizerProvider? = nil,
+        inferenceObserver: (any InferenceObserver)? = nil
     ) async throws -> ParakeetStreamingTranscriber {
         let recognizer = try await ParakeetEouRecognizer.load(
             modelDirectory: modelDirectory, endOfUtteranceDebounce: endOfUtteranceDebounce)
         return ParakeetStreamingTranscriber(
             recognizer: recognizer, audio: audio, voiceActivity: voiceActivity, configuration: configuration,
-            conversationID: conversationID, chunkSizePolicy: chunkSizePolicy, recognizerProvider: recognizerProvider)
+            conversationID: conversationID, chunkSizePolicy: chunkSizePolicy, recognizerProvider: recognizerProvider,
+            inferenceObserver: inferenceObserver)
     }
 }
 

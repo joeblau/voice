@@ -44,14 +44,16 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `persistence` | `PersistenceController` | `PersistenceController.live(isDebugBuild:)`: `Application Support/Blau/Blau.store`, mirrored to iCloud when the account allows | `PersistenceController.inMemory()` |
 | `topics` | `any TopicService` | unavailable until #52 - #54 | `FakeTopicService` |
 | `memory` | `any MemoryService` | unavailable until #62 - #68 | `FakeMemoryService` |
+| `transcriptionSettings` | `TranscriptionSettings` | `UserDefaults` (`blau.transcription.engine`); the `blau.uitests` suite in DEBUG UI tests | in memory, Apple's engine reported installed |
 | `xai` | `XAIServices` | Keychain + network (`XAIServices.make`); the `BLAU_UI_TEST_XAI` stub in DEBUG UI tests | in-memory key store + stub transport (`XAIServices.hermetic`) |
 | `lifecycle` | `AppLifecycleCoordinator` | | |
 
 Views read it with `@Environment(AppEnvironment.self)`. The
 `.appEnvironment(_:)` modifier also injects `FeatureFlags`, the
-`AppLifecycleCoordinator`, the `XAIAccount` (`xai.account`) and the
-`PersistenceController` (Settings reads its iCloud status), so a view can
-read just the part it needs.
+`AppLifecycleCoordinator`, the `XAIAccount` (`xai.account`), the
+`PersistenceController` (Settings reads its iCloud status) and the
+`TranscriptionSettings` (Settings → Speech Recognition), so a view can read
+just the part it needs.
 
 The modifier does not set the SwiftData container: the controller opens the
 stores asynchronously and replaces the container when the iCloud account

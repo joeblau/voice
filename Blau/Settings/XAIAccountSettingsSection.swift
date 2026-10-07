@@ -1,5 +1,6 @@
 import BlauPersistence
 import BlauRealtime
+import BlauTranscription
 import SwiftUI
 
 /// Settings → xAI account: shows whether a key is stored, lets the user add,
@@ -111,6 +112,7 @@ struct SettingsView: View {
                 SearchToolsSettingsSection()
                 ICloudSettingsSection()
                 SpeechModelsSettingsSection()
+                SpeechRecognitionSettingsSection()
                 Section("Developer") {
                     NavigationLink {
                         DiagnosticsView()
@@ -139,5 +141,6 @@ struct SettingsView: View {
             .environment(AppDiagnostics(store: nil))
             .environment(SpeechModels.fixtureManager())
             .environment(RealtimeVoiceSettingsModel.preview())
+            .environment(TranscriptionSettings.preview())
     }
 #endif

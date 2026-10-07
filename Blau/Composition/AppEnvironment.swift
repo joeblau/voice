@@ -79,6 +79,13 @@ final class AppEnvironment {
     /// them in memory.
     let realtimeSession: RealtimeSessionServices
 
+    /// Which speech-to-text engine to run (#31): Settings → Speech
+    /// Recognition binds to it, and the `TranscriberRouter` follows its
+    /// `preferenceChanges()` once the live audio pipeline is composed. Live
+    /// launches keep the choice in `UserDefaults`; every other kind keeps it
+    /// in memory.
+    let transcriptionSettings: TranscriptionSettings
+
     /// Delivers scene phase changes to the services (see `ScenePhaseHandling`).
     let lifecycle: AppLifecycleCoordinator
 
@@ -124,6 +131,7 @@ final class AppEnvironment {
         xai: XAIServices,
         speechModels: ModelManager,
         realtimeSession: RealtimeSessionServices,
+        transcriptionSettings: TranscriptionSettings,
         conversationAudio: ConversationAudio? = nil,
         backgroundInference: BackgroundInferenceMonitor = BackgroundInferenceMonitor(),
         textEmbeddings: TextEmbeddingService = TextEmbeddings.unavailable()
@@ -143,6 +151,7 @@ final class AppEnvironment {
         self.speechModels = speechModels
         self.textEmbeddings = textEmbeddings
         self.realtimeSession = realtimeSession
+        self.transcriptionSettings = transcriptionSettings
         self.conversationAudio = conversationAudio
         self.backgroundInference = backgroundInference
         self.voiceLoop = VoiceLoop(
@@ -289,6 +298,8 @@ extension AppEnvironment {
             xai: xai,
             speechModels: models,
             realtimeSession: realtimeSession,
+            // #31: the Settings toggle that forces Apple's speech engine.
+            transcriptionSettings: TranscriptionSettings.make(),
             conversationAudio: conversationAudio,
             textEmbeddings: TextEmbeddings.make(models: models)
         )
@@ -345,7 +356,9 @@ extension AppEnvironment {
             memory: FakeMemoryService(memories: memories),
             xai: xai ?? XAIServices.hermetic(config: config),
             speechModels: speechModels ?? fakeSpeechModels(kind: kind),
-            realtimeSession: RealtimeSessionServices(persistence: InMemoryVoiceSettingsPersistence())
+            realtimeSession: RealtimeSessionServices(persistence: InMemoryVoiceSettingsPersistence()),
+            transcriptionSettings: TranscriptionSettings(
+                store: InMemoryTranscriptionPreferencesStore(), availability: { .installed(locale: "en_US") })
         )
     }
 

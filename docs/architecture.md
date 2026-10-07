@@ -21,11 +21,11 @@ complete.
 
 | Layer | Module              | Owns                                                                                          |
 | ----- | ------------------- | --------------------------------------------------------------------------------------------- |
-| 0     | `BlauCore`          | Shared value types (`Utterance`, `Speaker`, `SpeakerDecision`, `AudioFrame`, `TimeRange`, `ConversationID`, `SpeechSegment`), the service protocols and their fakes, protocols shared across siblings (`TextEmbedder`, `TextGenerator`, `VoiceActivitySource`), feature flags, the app lifecycle, the `BlauClock` abstraction, run-time configuration overrides |
+| 0     | `BlauCore`          | Shared value types (`Utterance`, `Speaker`, `SpeakerDecision`, `AudioFrame`, `TimeRange`, `ConversationID`, `SpeechSegment`), the service protocols and their fakes, protocols shared across siblings (`TextEmbedder`, `TextGenerator`, `VoiceActivitySource`, `RecognitionVocabularySource`), feature flags, the app lifecycle, the `BlauClock` abstraction, run-time configuration overrides |
 | 1     | `BlauTelemetry`     | Logger categories, `OSSignposter` intervals, MetricKit, the performance HUD model             |
 | 2     | `BlauAudio`         | `AVAudioSession` / `AVAudioEngine`, 16 kHz capture and fan-out, 24 kHz playback, resampling   |
 | 2     | `BlauPersistence`   | SwiftData schemas (CloudKit compatible, see [data-model.md](data-model.md)), migrations, iCloud sync and history ([sync.md](sync.md)), `ModelActor` writes |
-| 3     | `BlauTranscription` | Silero VAD ([vad.md](vad.md)), streaming Parakeet ASR ([asr.md](asr.md)), second pass, `SpeechAnalyzer` fallback, model downloads |
+| 3     | `BlauTranscription` | Silero VAD ([vad.md](vad.md)), streaming Parakeet ASR ([asr.md](asr.md)), second pass, `SpeechAnalyzer` fallback and engine routing ([apple-asr.md](apple-asr.md)), model downloads |
 | 3     | `BlauVoiceID`       | Speaker embeddings, enrollment, accept / reject / uncertain gate, language ID                 |
 | 4     | `BlauRealtime`      | xAI realtime WebSocket client, typed events, token minting, session orchestration, tools      |
 | 4     | `BlauTopics`        | Streaming topic segmentation ([topics.md](topics.md)), boundary confirmation, labeling        |
@@ -167,3 +167,6 @@ The complete list of declared edges:
 - [asr.md](asr.md): streaming ASR with Parakeet realtime EOU (partials,
   end-of-utterance and the VAD fallback, utterance commit, measured
   latencies and the hour-long soak).
+- [apple-asr.md](apple-asr.md): the `SpeechAnalyzer` / `SpeechTranscriber`
+  fallback transcriber and the `TranscriberRouter` that switches engines
+  at utterance boundaries (Settings toggle, background, memory pressure).
