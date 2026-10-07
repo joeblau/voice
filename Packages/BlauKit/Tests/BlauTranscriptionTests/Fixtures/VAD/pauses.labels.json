@@ -1,0 +1,16 @@
+{
+  "description": "A 200 ms pause (shorter than the hangover: one segment) and a 700 ms pause (two segments).",
+  "sampleRate": 16000,
+  "sampleCount": 99680,
+  "noiseDBFS": -55.0,
+  "segments": [
+    {
+      "start": 14400,
+      "end": 50720
+    },
+    {
+      "start": 61920,
+      "end": 77280
+    }
+  ]
+}
