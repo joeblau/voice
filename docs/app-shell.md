@@ -13,7 +13,8 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `Blau/Composition/ScenePhaseHandling.swift` | `ScenePhase` → `AppPhase`, background time, the `.appEnvironment(_:)` modifier |
 | `Blau/Composition/DeviceLockObserver.swift` | Device lock and unlock (protected data) for the conversation keeper and the background inference monitor ([background.md](background.md)) |
 | `Blau/LiveActivity/` | The recording Live Activity: its attributes and Stop intent (shared with the `BlauWidgets` extension) and the `RecordingIndicator` that starts, updates and ends it ([background.md](background.md)) |
-| `Blau/RootView.swift` | The (still empty) main screen, the xAI Settings and onboarding entry points, and the DEBUG menu button |
+| `Blau/RootView.swift` | The main screen ([below](#main-screen)): navigation stack, bottom bar, content area, the Settings and xAI onboarding sheets, and the DEBUG menu button |
+| `Blau/MainScreen/` | The bottom bar's `SettingsButton` and `RecordButton`, their accessibility identifiers, and the `RecordingController` behind Record |
 | `Blau/XAI/XAIServices.swift` | The xAI services (#33): `make(config:)` for the app, `hermetic(config:)` for previews and tests |
 | `Blau/VoiceLoop/` | `VoiceLoop` (the spoken conversation: the live audio pipeline feeding the `TurnOrchestrator`, #36), the SwiftData transcript recorder, the HUD rows and the DEBUG Voice Loop screen |
 | `Blau/Debug/` | The DEBUG menu and the reusable feature flag toggles |
@@ -196,3 +197,92 @@ does nothing until `start()` has finished (`hasStarted`): a read during the
 seeding could miss the key being written, and `start()`'s own load would then
 be skipped because the account is already loading. `start()` reads the
 Keychain itself once seeding is done, so the skipped refresh loses nothing.
+
+## Main screen
+
+`RootView` is the one screen the app opens on (#40). Its layout is a
+product requirement: **Settings bottom-left, Record bottom-right**, on every
+iPhone size, in portrait and landscape.
+
+```swift
+NavigationStack {
+    MainScreen()  // the conversation (#42) and topic timeline (#56)
+        .toolbar {
+            ToolbarItem(placement: .bottomBar) { SettingsButton { ... } }
+            ToolbarSpacer(.flexible, placement: .bottomBar)
+            ToolbarItem(placement: .bottomBar) { RecordButton(phase: ...) { ... } }
+        }
+}
+```
+
+- Both controls are bottom-bar toolbar items with a flexible
+  `ToolbarSpacer` (iOS 26) between them, so the system pins one to each end,
+  keeps them clear of the home indicator and the landscape safe areas, and
+  draws them as Liquid Glass. Record uses the prominent (tinted) style; it
+  turns red while recording. Nothing is positioned by hand, which is what
+  keeps the layout right on every screen size.
+- `MainScreen` is a `ScrollView` anchored to the bottom
+  (`defaultScrollAnchor(.bottom)`) that runs under the bar's glass, with
+  the system scroll edge effect behind the controls. Its empty state is at
+  least as tall as the area between the bars (a `GeometryReader` around the
+  scroll view, which respects the safe area while the scroll view inside
+  still runs under the bars), so it stays centered and scrolls rather than
+  clips at large Dynamic Type sizes.
+- Until onboarding (#44) exists, the speech-model setup card
+  (`SpeechModelSetupView`, `blau.models.setup`) shows while the required
+  models aren't ready. It is a `.safeAreaInset(edge: .bottom)` on
+  `MainScreen` *inside* the navigation stack, after `.toolbar`, so it sits
+  above the bottom bar. On the outside of the stack it would be drawn over
+  Settings and Record.
+- Both buttons are icon-only with text labels for VoiceOver and the large
+  content viewer (long-press a bar button at accessibility text sizes).
+- The app supports portrait and both landscape orientations
+  (`UISupportedInterfaceOrientations` in `project.yml`).
+
+| Control | Identifier | Label | Value |
+| ------- | ---------- | ----- | ----- |
+| Content (scroll view) | `blau.root` | | |
+| Empty state | `blau.mainScreen.empty` | | |
+| Settings | `blau.settings.open` | Settings | |
+| Record | `blau.record` | Record / Stop Recording | Not recording, Starting, Recording, Stopping |
+
+The identifiers live in `MainScreenAccessibility`.
+
+### Record
+
+`RecordButton` shows the `RecordingController`'s `phase`. Tapping toggles
+microphone capture through the environment's `AudioService`: idle → starting
+→ recording → stopping → idle. Taps during a transition are ignored, and a
+failed start returns to idle and shows an alert. In the live app the audio
+slot is the `AudioSessionKeeper` ([background.md](background.md)); previews
+and UI tests use `FakeAudioService`. If the slot is an `UnavailableService`
+the alert says recording isn't available in this build.
+The controller re-reads `isCapturing` (`synchronize()`) when `RootView` is
+rebuilt (an iCloud account change replaces the store) and every time the
+scene becomes active, so the button matches what is running after capture
+stopped without it: the Live Activity's Stop calls
+`AppEnvironment.stopConversation()` directly, and an interruption leaves the
+keeper not `.live`.
+The record button issue (#41) replaces this with the full session control:
+connecting, listening with a level ring, agent speaking, paused, haptics.
+
+### Tests
+
+- `BlauTests/RecordingControllerTests.swift`: the controller's phases,
+  failures and ignored taps against fake audio services.
+- `BlauUITests/MainScreenUITests.swift`: finds both controls by identifier
+  and checks Settings is in the left quarter and Record in the right quarter
+  of the window, on one row in the bottom quarter and clear of the
+  speech-model setup card, in portrait, in landscape and at the largest
+  accessibility text size; that the content runs under the
+  bar; that Settings opens; and that Record starts and stops. Run it on the
+  smallest and the largest iPhone to cover the sizes:
+
+```sh
+make generate
+xcrun simctl create blau-se "iPhone SE (3rd generation)" com.apple.CoreSimulator.SimRuntime.iOS-26-5
+xcrun simctl create blau-max "iPhone 17 Pro Max" com.apple.CoreSimulator.SimRuntime.iOS-26-5
+xcodebuild test -project Blau.xcodeproj -scheme Blau -testPlan Blau \
+  -only-testing:BlauUITests/MainScreenUITests -derivedDataPath .build/DerivedData \
+  -destination 'id=<udid>' CODE_SIGNING_ALLOWED=NO
+```

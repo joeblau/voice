@@ -94,8 +94,12 @@ targets:
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
+        # Landscape too: the main screen's bottom bar keeps Settings left
+        # and Record right in either orientation (#40).
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         # Build configuration from Config/*.xcconfig, read by AppConfig.
         BlauEnvironment: $(BLAU_ENVIRONMENT)
         BlauXAIAPIHost: $(XAI_API_HOST)
