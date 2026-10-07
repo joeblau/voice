@@ -21,7 +21,7 @@ Grok ──function call──▶ TurnOrchestrator ─▶ RealtimeToolRunner ─
 | `SearchMemoryTool`, `GetEntityTool`, `RememberTool`, `ForgetTool`, `MemoryTools` | BlauRealtime | The function tools: schemas, argument checks, output shaping and the token budget |
 | Memory section of `RealtimeInstructions` | BlauRealtime | When to call which tool |
 | `TurnOrchestrator` tool rounds | BlauRealtime | Runs the tools inside a turn and asks for the follow-up |
-| `ChatToolCall`, chips in `ChatTranscriptView` | BlauRealtime, app | "Searched memory" in the chat; the full payload in DEBUG |
+| `ChatToolCall`, `ChatToolChip` (rows under the timeline's bullets) | BlauRealtime, app | "Searched memory" in the chat; the full payload in DEBUG |
 | `MemoryTools.service(indexing:textEmbeddings:)`, `.registry(backend:enabled:)` | app | The composition root: the backend over the indexing controller's current store and index, behind the `memoryTools` flag |
 
 ## The tools

@@ -18,19 +18,24 @@ and the side reads at a glance. Text selection is on, and long-pressing a
 finished row opens a menu headed by when it was said, with **Copy** and
 **Share**.
 
+The transcript is laid out on the topic timeline ([timeline.md](timeline.md),
+#56): the current topic's rows below its bullet, and an older topic's rows
+when the user expands it.
+
 ## Where the rows come from
 
 ```
-SwiftData store ──@Query──▶ ChatFinishedRows ─┐
-                                              ├─▶ LazyVStack in a bottom-anchored ScrollView
-TurnOrchestrator ─snapshots─┐                 │
-TranscriptFeed ──events─────┴▶ ChatTranscriptModel ─▶ ChatLiveRows
+SwiftData store ──@Query──▶ TopicFinishedRows ─┐
+                                               ├─▶ the timeline's LazyVStack, under the topic's bullet
+TurnOrchestrator ─snapshots─┐                  │
+TranscriptFeed ──events─────┴▶ ChatTranscriptModel ─▶ TopicLiveRows (current topic only)
 StreamingAudioPlayer ─playedItem(for:)─▶ streaming row (TimelineView, 20 Hz)
 ```
 
 - **Finished rows** are the conversation's stored utterances
-  (`ChatTranscript.utterances(in:)`, sorted by `startedAt`). The main screen
-  shows the running conversation, or else the latest one
+  (`ChatTranscript.utterances(in:)`, sorted by `startedAt`), kept to the
+  topic's own lines (`TopicMembership`). The main screen opens on the
+  running conversation, or else the latest one
   (`ChatTranscript.latestConversation`).
 - **Just-written rows.** `ConversationStore` saves in batches, up to 2 s
   after a commit, so a `@Query` alone would show a gap between the partial
@@ -112,19 +117,21 @@ before the reply).
 
 ## Scrolling and performance
 
-- A `LazyVStack` in a `ScrollView` anchored to the bottom
+- The timeline's `LazyVStack` in a `ScrollView` anchored to the bottom
   (`defaultScrollAnchor(.bottom)` for the initial offset and alignment), not
-  an inverted scroll view. Only rows on screen are built.
+  an inverted scroll view. Each row is a child of the lazy stack, so only
+  rows on screen are built.
 - While the user is at the bottom, content size changes keep the latest line
   in view (`defaultScrollAnchor(.bottom, for: .sizeChanges)`); scrolled up
   into history, the anchor switches to the top so the reading position
-  holds. `onScrollGeometryChange` tracks which.
+  holds. `onScrollGeometryChange` tracks which (see
+  [timeline.md](timeline.md#scrolling)).
 - The finished rows and the live rows are separate views reading separate
   observable properties. A partial or a reply's words only redraw the rows at
   the bottom; the streaming row's 20 Hz `TimelineView` redraws only that row.
 - The iOS 27 prepend regression (FB24968838) concerns loading older history
-  at the top, which is #57 (timeline pagination); the transcript loads the
-  whole conversation at once.
+  at the top, which is #57 (timeline pagination); a topic's transcript loads
+  its whole conversation at once.
 
 `ChatTranscriptScrollPerformanceTests` (`make perf`) flings through a
 1,000-row conversation and records `XCTHitchMetric` and
@@ -146,7 +153,7 @@ frame rate come from a device run:
 | `ChatToolCallTests` (BlauKit) | tool chip titles, placement between question and answer, live and finished chips |
 | `ChatLiveStateTests`, `TranscriptFeedTests` (BlauKit) | partials resolving to finals, held partials expiring, streaming rows, conversation switches, the feed, the orchestrator's `agentSpeech` |
 | `ChatTranscriptViewTests` (BlauTests) | the live model, the fixture, and a rendered row: on its speaker's side, within 85 %, no filled background |
-| `ChatTranscriptUITests` | user rows right and agent rows left on screen, opening at the latest line, the long-press menu, the largest text size |
+| `ChatTranscriptUITests` | user rows right and agent rows left on screen, opening at the latest line, the long-press menu, the largest text size (the fixture conversation has no topics, so it shows under one stand-in bullet) |
 | `ChatTranscriptScrollPerformanceTests` | scrolling 1,000 rows |
 
 UI and performance tests seed a canned conversation with the launch

@@ -22,7 +22,7 @@ final class ChatTranscriptScrollPerformanceTests: XCTestCase {
         app.launchEnvironment["BLAU_APP_ENVIRONMENT"] = "ui-test"
         app.launchArguments += ["-BlauChatFixture", "\(Self.rows)"]
         app.launch()
-        let transcript = app.descendants(matching: .any)["blau.chat"]
+        let transcript = app.descendants(matching: .any)["blau.timeline"]
         XCTAssertTrue(transcript.waitForExistence(timeout: 60), "The transcript did not appear")
         // The fixture's rows are on screen.
         XCTAssertTrue(

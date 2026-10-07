@@ -5,9 +5,9 @@
 
     /// The topics of recent conversations, with the timeline's edit menu
     /// (#54): long-press a topic to rename it or merge it with the previous
-    /// one, open it and long-press a line to split it there. A stand-in
-    /// until the timeline (#56) and topic detail (#58) exist. DEBUG builds
-    /// only.
+    /// one, open it and long-press a line to split it there. The timeline
+    /// (#56) has the topic menu; this keeps Split Here reachable until the
+    /// topic detail (#58) offers it. DEBUG builds only.
     struct TopicsDebugView: View {
         @Query(sort: \Conversation.startedAt, order: .reverse) private var conversations: [Conversation]
 

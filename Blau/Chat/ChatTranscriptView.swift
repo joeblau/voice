@@ -1,15 +1,15 @@
 import BlauAudio
 import BlauCore
-import BlauPersistence
 import BlauRealtime
-import SwiftData
 import SwiftUI
+
+// The chat transcript's rows (#42): what the user said right-aligned, what
+// Grok said left-aligned, with no bubbles. They are laid out under the
+// current topic's bullet on the topic timeline (#56), and under any older
+// bullet the user expands (`TopicTranscriptRows` in Blau/Timeline).
 
 /// The accessibility identifiers UI tests use for the chat transcript.
 enum ChatTranscriptAccessibility {
-    /// The transcript's rows, inside the main screen's scroll view
-    /// (`MainScreenAccessibility.content`).
-    static let transcript = "blau.chat"
     /// A finished user utterance (right-aligned).
     static let userRow = "blau.chat.user"
     /// A finished agent utterance (left-aligned).
@@ -35,108 +35,6 @@ enum ChatTranscriptLayout {
     /// How close to the end counts as "at the bottom": new rows then keep
     /// the transcript pinned to the latest line.
     static let bottomThreshold: CGFloat = 48
-}
-
-/// The conversation (#42): what the user said right-aligned, what Grok said
-/// left-aligned, with no bubbles. Rows differ by alignment, weight and color
-/// only.
-///
-/// Finished rows come from the store (`@Query` on conversation
-/// `conversationID`), updated by the utterances the app just wrote
-/// (`ChatTranscriptModel.recorded`); below them the live rows show the
-/// user's speech in progress and Grok's reply as it plays.
-///
-/// A lazy stack in a bottom-anchored scroll view (not an inverted one):
-/// only the rows on screen are built, so a 1,000-row conversation scrolls
-/// as smoothly as a short one. While the user is at the bottom, new rows
-/// and growing replies keep it there; scrolled up into history, the
-/// reading position holds.
-struct ChatTranscriptView: View {
-    let conversationID: UUID
-    /// Opens the xAI key onboarding step. Its button follows the rows while
-    /// no usable key is stored.
-    var onConnectAccount: (() -> Void)?
-
-    @Environment(AppEnvironment.self) private var environment
-    @State private var isAtBottom = true
-
-    var body: some View {
-        ScrollView {
-            LazyVStack(spacing: ChatTranscriptLayout.rowSpacing) {
-                ChatFinishedRows(conversationID: conversationID, model: environment.chat)
-                ChatLiveRows(model: environment.chat)
-                if let onConnectAccount, environment.xai.account.needsKeyEntry {
-                    Button("Connect Your xAI Account", action: onConnectAccount)
-                        .buttonStyle(.borderedProminent)
-                        .accessibilityIdentifier(XAIKeyIdentifiers.openOnboarding)
-                        .padding(.top)
-                }
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 12)
-            .textSelection(.enabled)
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier(ChatTranscriptAccessibility.transcript)
-        }
-        .defaultScrollAnchor(.bottom, for: .initialOffset)
-        .defaultScrollAnchor(.bottom, for: .alignment)
-        // Pinned to the latest line only while the user is there.
-        .defaultScrollAnchor(isAtBottom ? .bottom : .top, for: .sizeChanges)
-        .onScrollGeometryChange(for: Bool.self) { geometry in
-            let visibleBottom = geometry.contentOffset.y + geometry.containerSize.height - geometry.contentInsets.bottom
-            return visibleBottom >= geometry.contentSize.height - ChatTranscriptLayout.bottomThreshold
-        } action: { _, atBottom in
-            isAtBottom = atBottom
-        }
-    }
-}
-
-/// The stored rows of one conversation. Rebuilt when the store, the
-/// just-written utterances or the set of playing replies change, never for
-/// a single word of a reply or partial.
-private struct ChatFinishedRows: View {
-    let conversationID: UUID
-    let model: ChatTranscriptModel
-    @Query private var utterances: [StoredUtterance]
-
-    init(conversationID: UUID, model: ChatTranscriptModel) {
-        self.conversationID = conversationID
-        self.model = model
-        _utterances = Query(ChatTranscript.utterances(in: conversationID))
-    }
-
-    var body: some View {
-        let rows = ChatTranscript.rows(
-            stored: utterances.compactMap(ChatLine.init),
-            // The model's lines belong to the running conversation; when
-            // another one is on screen they don't apply.
-            recorded: isLiveConversation ? model.recorded : [:],
-            excluding: isLiveConversation ? model.liveAgentIDs : [],
-            interrupted: isLiveConversation ? model.interruptedAgentIDs : [],
-            waiting: isLiveConversation ? model.waitingUserIDs : [],
-            notSent: isLiveConversation ? model.unsentUserIDs : [],
-            // Tool chips live in memory for the running conversation only.
-            toolCalls: isLiveConversation ? model.finishedToolCalls : [])
-        ForEach(rows) { row in
-            ChatRowView(row: row)
-        }
-    }
-
-    private var isLiveConversation: Bool {
-        model.conversationID?.rawValue == conversationID
-    }
-}
-
-/// The rows below the finished ones: Grok's reply as it plays, then the
-/// user's speech in progress.
-private struct ChatLiveRows: View {
-    let model: ChatTranscriptModel
-
-    var body: some View {
-        ForEach(model.liveRows) { row in
-            ChatRowView(row: row, progress: model.progress)
-        }
-    }
 }
 
 // MARK: - Rows
@@ -434,15 +332,6 @@ private struct ChatRowMenu: ViewModifier {
 
 // MARK: - Previews
 
-#Preview("Transcript") {
-    let environment = AppEnvironment.preview()
-    PersistenceGate(persistence: environment.persistence) {
-        ChatTranscriptPreview()
-    }
-    .appEnvironment(environment)
-    .task { await ChatTranscriptFixture.seed(count: 40, into: environment.persistence) }
-}
-
 #Preview("Rows") {
     let now = Date()
     ScrollView {
@@ -468,16 +357,5 @@ private struct ChatRowMenu: ViewModifier {
             )
         }
         .padding()
-    }
-}
-
-/// The latest conversation in the preview store.
-private struct ChatTranscriptPreview: View {
-    @Query(ChatTranscript.latestConversation) private var conversations: [Conversation]
-
-    var body: some View {
-        if let conversation = conversations.first {
-            ChatTranscriptView(conversationID: conversation.id)
-        }
     }
 }
