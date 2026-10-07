@@ -1,0 +1,29 @@
+{
+  "configurations" : [
+    {
+      "id" : "8C4E2A7D-1B3F-4D6A-A9E2-5F0C7B3D9A02",
+      "name" : "Release",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "codeCoverage" : false,
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:Blau.xcodeproj",
+      "identifier" : "B7AD843E63F08167B6A61353",
+      "name" : "Blau"
+    }
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:Blau.xcodeproj",
+        "identifier" : "98FCF6DBB0D4436F79536531",
+        "name" : "BlauPerfTests"
+      }
+    }
+  ],
+  "version" : 1
+}

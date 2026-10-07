@@ -1,0 +1,161 @@
+# XcodeGen spec for Blau. Generate the project with `make generate`
+# (or `xcodegen generate`). The generated Blau.xcodeproj, Info.plist and
+# entitlements are build artifacts and are never committed.
+#
+# Spec reference: https://github.com/yonaskolb/XcodeGen/blob/master/Docs/ProjectSpec.md
+
+name: Blau
+
+options:
+  bundleIdPrefix: com.joeblau
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+  minimumXcodeGenVersion: 2.42.0
+  xcodeVersion: "26.0"
+  groupSortPosition: top
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    # Swift 6 language mode with complete strict concurrency checking.
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_EMIT_LOC_STRINGS: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+  configs:
+    Debug:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+    Release:
+      SWIFT_COMPILATION_MODE: wholemodule
+
+targets:
+  Blau:
+    type: application
+    platform: iOS
+    sources:
+      - path: Blau
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.blau
+        PRODUCT_NAME: Blau
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ENABLE_PREVIEWS: YES
+    info:
+      path: Blau/Supporting/Info.plist
+      properties:
+        CFBundleDisplayName: Blau
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        NSMicrophoneUsageDescription: >-
+          Blau listens to your voice so it can transcribe what you say
+          and hold a spoken conversation with you.
+        UIBackgroundModes:
+          - audio
+          - remote-notification
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+    entitlements:
+      path: Blau/Supporting/Blau.entitlements
+      properties:
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.com.joeblau.blau
+        com.apple.developer.icloud-services:
+          - CloudKit
+        aps-environment: development
+
+  BlauTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: BlauTests
+    dependencies:
+      - target: Blau
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.blau.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+  BlauUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: BlauUITests
+    dependencies:
+      - target: Blau
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.blau.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Blau
+
+  # A UI-testing bundle (not a unit-test bundle) so it can drive launches and
+  # use XCTApplicationLaunchMetric / XCTOSSignpostMetric.
+  BlauPerfTests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: BlauPerfTests
+    dependencies:
+      - target: Blau
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.blau.perftests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Blau
+
+schemes:
+  Blau:
+    build:
+      targets:
+        Blau: all
+        BlauTests: [test]
+        BlauUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: true
+      coverageTargets:
+        - Blau
+      testPlans:
+        - path: TestPlans/Blau.xctestplan
+          defaultPlan: true
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  Blau-Perf:
+    build:
+      targets:
+        Blau: all
+        BlauPerfTests: [test]
+    run:
+      config: Release
+    test:
+      # Measure the optimized build: perf numbers from Debug are meaningless.
+      config: Release
+      testPlans:
+        - path: TestPlans/BlauPerf.xctestplan
+          defaultPlan: true
+    profile:
+      config: Release
+    analyze:
+      config: Release
+    archive:
+      config: Release
