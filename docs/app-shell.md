@@ -271,13 +271,16 @@ ends a conversation, pauses listening, and shows where the conversation is.
 | `listening` | `stop.fill` in a ring that follows the microphone level | red | Listening (", connecting to Grok" while the session opens) |
 | `agentSpeaking` | `speaker.wave.2.fill` in a ring and halo that follow Grok's level | red | Grok is speaking |
 | `paused` | `mic.slash.fill` | gray | Paused, microphone muted |
+| `reconnecting` | spinner (ellipsis with Reduce Motion) | red | Reconnecting the microphone (label End Conversation) |
 | `stopping` | spinner | red | Ending |
 | `error` | `exclamationmark.triangle.fill` | orange | Couldn't start / Lost the connection to Grok / Microphone in use by another app / ... |
 
 - **Tap** starts a conversation (also after a failed start) and ends a
-  running one, whatever it is doing. Taps while a start or stop is in flight
-  are ignored. The label says what a tap does: Start Conversation or End
-  Conversation.
+  running one, whatever it is doing, including while its audio comes back
+  (`reconnecting`: a stall, a route change, the return to the foreground).
+  Taps while the button's own start or stop is in flight are ignored, and
+  only then is the button disabled (`RecordButtonModel.isTransitioning`).
+  The label says what a tap does: Start Conversation or End Conversation.
 - **Touch and hold** while a conversation runs opens a menu (a `Menu` whose
   primary action is the tap): Pause Listening / Resume Listening and End
   Conversation. VoiceOver gets Pause / Resume as custom actions.
@@ -312,7 +315,9 @@ How it is put together:
   the keeper's `updates()`, input levels from the capture hub, output
   levels from the player, the mute and its speech reports from
   `MicrophoneMute`. Previews and UI tests use `FakeConversationSession`.
-- `RecordButtonState` puts audio problems first (nothing is heard), then a
+- `RecordButtonState` puts audio problems first (nothing is heard: the
+  keeper starting or recovering is `reconnecting`, an interruption or a
+  failed restart is an error), then a
   lost connection, then the user's pause (a muted microphone never shows as
   listening), then who is talking. The microphone counts as listening while
   Grok is still connecting: utterances are queued.
@@ -327,7 +332,8 @@ How it is put together:
 ### Tests
 
 - `RecordButtonModelTests` and `RecordButtonStateTests` (BlauKit,
-  `swift test`): taps, ignored taps, failures and retries, pause and resume,
+  `swift test`): taps, ignored taps, ending while the audio recovers,
+  failures and retries, pause and resume,
   the muted hint, following the session, levels, haptics and the
   `session.start` interval.
 - `BlauTests/RecordButtonSnapshotTests.swift`: a snapshot of the button's

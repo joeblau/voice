@@ -22,10 +22,12 @@ struct RecordButtonSnapshotTests {
         ("listening", .listening),
         ("agentSpeaking", .agentSpeaking),
         ("paused", .paused),
+        ("reconnecting", .reconnecting),
         ("stopping", .stopping),
         ("error-couldNotStart", .error(.couldNotStart(message: "No microphone"))),
         ("error-connection", .error(.connection(requiresUserAction: false))),
         ("error-audioInterrupted", .error(.audioInterrupted)),
+        ("error-audioUnavailable", .error(.audioUnavailable)),
     ]
 
     /// The face on its tint, padded like the bar's capsule.

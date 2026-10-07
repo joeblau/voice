@@ -23,7 +23,9 @@ struct RecordButton: View {
         control(state: state)
             .buttonStyle(.borderedProminent)
             .tint(RecordButtonFace.tint(for: state))
-            .disabled(state.isBusy)
+            // Only while a start or stop is in flight: a running
+            // conversation can always be ended, even while it reconnects.
+            .disabled(model.isTransitioning)
             .accessibilityIdentifier(MainScreenAccessibility.recordButton)
             .accessibilityLabel(accessibility.label)
             .accessibilityValue(accessibility.value)
@@ -161,7 +163,7 @@ struct RecordButtonFace: View {
     static func systemImage(for state: RecordButtonState) -> String {
         switch state {
         case .idle: "mic.fill"
-        case .connecting, .stopping: "ellipsis"
+        case .connecting, .reconnecting, .stopping: "ellipsis"
         case .listening: "stop.fill"
         case .agentSpeaking: "speaker.wave.2.fill"
         case .paused: "mic.slash.fill"
@@ -170,11 +172,12 @@ struct RecordButtonFace: View {
     }
 
     /// The bar button's tint for `state`: the accent color to start, red
-    /// while a conversation is live, gray while paused, orange for errors.
+    /// while a conversation is live (reconnecting included, so it doesn't
+    /// look like a fresh start), gray while paused, orange for errors.
     static func tint(for state: RecordButtonState) -> Color {
         switch state {
         case .idle, .connecting: .accentColor
-        case .listening, .agentSpeaking, .stopping: .red
+        case .listening, .agentSpeaking, .reconnecting, .stopping: .red
         case .paused: .gray
         case .error: .orange
         }
@@ -245,6 +248,10 @@ struct RecordButtonAccessibility: Equatable {
             label = String(localized: "Start Conversation")
             value = String(localized: "Connecting")
             hint = ""
+        case .reconnecting:
+            label = String(localized: "End Conversation")
+            value = String(localized: "Reconnecting the microphone")
+            hint = String(localized: "Ends the conversation.")
         case .listening:
             label = String(localized: "End Conversation")
             value =
@@ -315,7 +322,7 @@ struct MutedSpeechHint: View {
 
 #Preview("Faces") {
     let states: [RecordButtonState] = [
-        .idle, .connecting, .listening, .agentSpeaking, .paused, .stopping,
+        .idle, .connecting, .listening, .agentSpeaking, .paused, .reconnecting, .stopping,
         .error(.connection(requiresUserAction: false)),
     ]
     VStack(spacing: 16) {

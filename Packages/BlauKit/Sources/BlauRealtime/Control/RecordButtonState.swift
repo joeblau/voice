@@ -11,14 +11,21 @@ import Foundation
 ///               ▼                              ▼   │
 ///             error                           paused
 ///
-/// any running state (listening, agentSpeaking, paused, error) ─tap─▶ stopping ─▶ idle
+/// listening ─audio stalls─▶ reconnecting ─audio back─▶ listening
+///
+/// any running state (listening, agentSpeaking, paused, reconnecting, error)
+///     ─tap─▶ stopping ─▶ idle
 /// ```
 public enum RecordButtonState: Sendable, Hashable, CustomStringConvertible {
     /// No conversation. The microphone glyph; tapping starts one.
     case idle
     /// Starting: loading the speech pipeline and bringing up the
-    /// microphone, or getting the audio back after a hiccup. A spinner.
+    /// microphone. A spinner; taps are ignored until it finishes.
     case connecting
+    /// A running conversation whose audio is coming back after a stall, a
+    /// route change or a return to the foreground. A spinner, but the
+    /// conversation is running: tapping ends it.
+    case reconnecting
     /// The microphone is live. The ring follows the input level.
     case listening
     /// Grok's reply is playing. The ring follows the output level.
@@ -37,6 +44,7 @@ public enum RecordButtonState: Sendable, Hashable, CustomStringConvertible {
         switch self {
         case .idle: "idle"
         case .connecting: "connecting"
+        case .reconnecting: "reconnecting"
         case .listening: "listening"
         case .agentSpeaking: "agentSpeaking"
         case .paused: "paused"
@@ -52,9 +60,20 @@ public enum RecordButtonState: Sendable, Hashable, CustomStringConvertible {
         }
     }
 
-    /// Whether a spinner shows (a start or stop is under way).
+    /// Whether a spinner shows (a start or stop is under way, or the audio
+    /// is coming back). Not whether taps are accepted: that is
+    /// `RecordButtonModel.isTransitioning`.
     public var isBusy: Bool {
-        self == .connecting || self == .stopping
+        self == .connecting || self == .reconnecting || self == .stopping
+    }
+
+    /// Whether a conversation is running, so a tap ends it.
+    public var isRunning: Bool {
+        switch self {
+        case .listening, .agentSpeaking, .paused, .reconnecting: true
+        case .error(let failure): !failure.isStartFailure
+        case .idle, .connecting, .stopping: false
+        }
     }
 
     /// Whether the microphone is live and being listened to.
@@ -83,7 +102,7 @@ public enum RecordButtonState: Sendable, Hashable, CustomStringConvertible {
     private static func running(_ status: ConversationStatus) -> RecordButtonState {
         switch status.audio {
         case .inactive, .starting, .recovering:
-            return .connecting
+            return .reconnecting
         case .interrupted:
             return .error(.audioInterrupted)
         case .paused, .failed:
@@ -112,6 +131,12 @@ public enum RecordButtonFailure: Sendable, Hashable, CustomStringConvertible {
     case audioInterrupted
     /// The audio stopped and couldn't restart by itself.
     case audioUnavailable
+
+    /// Whether the conversation never started (as opposed to a running
+    /// conversation that hit a problem).
+    public var isStartFailure: Bool {
+        if case .couldNotStart = self { true } else { false }
+    }
 
     public var description: String {
         switch self {

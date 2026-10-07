@@ -34,10 +34,18 @@ struct RecordButtonStateTests {
         #expect(running { $0.connection = .reconnecting(attempt: 2) } == .listening)
     }
 
-    @Test func audioThatIsntFlowingIsConnectingOrAnError() {
-        #expect(running { $0.audio = .starting } == .connecting)
-        #expect(running { $0.audio = .recovering } == .connecting)
-        #expect(running { $0.audio = .inactive } == .connecting)
+    /// A running conversation whose audio is coming back is
+    /// `reconnecting`, not `connecting`: it is still running, so a tap ends
+    /// it (`connecting` is only the button's own start).
+    @Test func audioThatIsntFlowingIsReconnectingOrAnError() {
+        #expect(running { $0.audio = .starting } == .reconnecting)
+        #expect(running { $0.audio = .recovering } == .reconnecting)
+        #expect(running { $0.audio = .inactive } == .reconnecting)
+        #expect(
+            running {
+                $0.audio = .recovering
+                $0.isListeningPaused = true
+            } == .reconnecting)
         #expect(running { $0.audio = .interrupted } == .error(.audioInterrupted))
         #expect(running { $0.audio = .paused } == .error(.audioUnavailable))
         #expect(running { $0.audio = .failed(.microphonePermissionDenied) } == .error(.audioUnavailable))
@@ -75,11 +83,28 @@ struct RecordButtonStateTests {
 
     @Test func namesAreStable() {
         let states: [RecordButtonState] = [
-            .idle, .connecting, .listening, .agentSpeaking, .paused, .stopping, .error(.audioInterrupted),
+            .idle, .connecting, .listening, .agentSpeaking, .paused, .reconnecting, .stopping,
+            .error(.audioInterrupted),
         ]
         #expect(
-            states.map(\.name) == ["idle", "connecting", "listening", "agentSpeaking", "paused", "stopping", "error"])
-        #expect(states.filter(\.isBusy) == [.connecting, .stopping])
+            states.map(\.name) == [
+                "idle", "connecting", "listening", "agentSpeaking", "paused", "reconnecting", "stopping", "error",
+            ])
+        #expect(states.filter(\.isBusy) == [.connecting, .reconnecting, .stopping])
         #expect(states.filter(\.isListening) == [.listening, .agentSpeaking])
+    }
+
+    /// Which states are a running conversation (a tap ends it).
+    @Test func runningStates() {
+        let running: [RecordButtonState] = [
+            .listening, .agentSpeaking, .paused, .reconnecting, .error(.audioInterrupted), .error(.audioUnavailable),
+            .error(.connection(requiresUserAction: false)),
+        ]
+        for state in running {
+            #expect(state.isRunning, "\(state)")
+        }
+        for state: RecordButtonState in [.idle, .connecting, .stopping, .error(.couldNotStart(message: "x"))] {
+            #expect(!state.isRunning, "\(state)")
+        }
     }
 }

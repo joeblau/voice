@@ -280,9 +280,16 @@ final class LiveVoicePipeline {
                 throw error
             }
 
+            // An audio failure (say, microphone permission denied) surfaces
+            // here, after the models have loaded: loading isn't cancellable
+            // part way, so racing it wouldn't release anything sooner. The
+            // loaded transcriber hasn't started (nothing subscribed to VAD or
+            // the hub yet); finishing it ends its event stream, and the
+            // models are released with it.
             do {
                 try await audioStart.value
             } catch {
+                await transcriber.finish()
                 throw VoiceLoop.StartError.audio(String(describing: error))
             }
             let stage = silero.inferenceStage

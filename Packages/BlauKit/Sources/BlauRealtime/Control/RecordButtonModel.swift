@@ -197,6 +197,13 @@ public final class RecordButtonModel {
         logger.notice("Listening resumed from the record button")
     }
 
+    /// Whether a start or stop is in flight, so taps are ignored. The view
+    /// disables the button only then: a running conversation can always be
+    /// ended, even while its audio comes back (`reconnecting`).
+    public var isTransitioning: Bool {
+        phase == .starting || phase == .stopping
+    }
+
     /// Whether the long-press menu has anything to offer: pause or resume
     /// while a conversation runs.
     public var canPauseOrResume: Bool {
@@ -233,9 +240,17 @@ public final class RecordButtonModel {
                 self?.receive(activity)
             }
         }
+        // Both streams live as long as the session; if one ends anyway, stop
+        // following the other too, so `run()` returns rather than half
+        // following. Cancelling the caller cancels both.
         await withTaskCancellationHandler {
-            await statusTask.value
-            await mutedSpeechTask.value
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { await statusTask.value }
+                group.addTask { await mutedSpeechTask.value }
+                await group.next()
+                statusTask.cancel()
+                mutedSpeechTask.cancel()
+            }
         } onCancel: {
             statusTask.cancel()
             mutedSpeechTask.cancel()
@@ -287,7 +302,8 @@ public final class RecordButtonModel {
     /// What the alert says about a failed start.
     static func message(for error: any Error) -> String {
         if error is ServiceUnavailableError {
-            return "Conversations aren't available in this build of Blau yet."
+            return String(
+                localized: "Conversations aren't available in this build of Blau yet.")
         }
         return error.localizedDescription
     }

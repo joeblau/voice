@@ -126,7 +126,9 @@ struct RecordButtonModelTests {
 
         try await whileRunning(model) {
             await model.tap()
-            #expect(model.state == .connecting)
+            // Running (a tap would end it), the microphone still coming up.
+            #expect(model.state == .reconnecting)
+            #expect(!model.isTransitioning)
             #expect(signposts.openIntervals == ["session.start"])
             #expect(model.feedback == nil)
 
@@ -152,6 +154,52 @@ struct RecordButtonModelTests {
         #expect(model.phase == .idle)
         #expect(model.state == .idle)
         #expect(model.feedback?.kind == .stopped)
+    }
+
+    /// Taps are only ignored while the button's own start or stop is in
+    /// flight; a running conversation can always be ended.
+    @Test func transitioningOnlyWhileStartingOrStopping() async {
+        let session = FakeConversationSession(clock: clock, startDelay: .milliseconds(100))
+        let model = makeModel(session)
+        #expect(!model.isTransitioning)
+
+        let start = Task { await model.tap() }
+        await clock.waitForSleepers()
+        #expect(model.isTransitioning)
+        clock.advance(by: .milliseconds(100))
+        await start.value
+        #expect(!model.isTransitioning)
+
+        session.update { $0.audio = .recovering }
+        model.synchronize()
+        #expect(model.state == .reconnecting)
+        #expect(!model.isTransitioning)
+    }
+
+    /// While the audio recovers (a stall, a route change, the return to the
+    /// foreground) the conversation is still running, and a tap ends it.
+    @Test func aTapWhileTheAudioRecoversEndsTheConversation() async throws {
+        let audio = FakeAudioService()
+        let session = FakeConversationSession(audio: audio)
+        let model = makeModel(session)
+        try await whileRunning(model) {
+            await model.tap()
+            #expect(model.state == .listening)
+
+            for recovering in [AudioSessionKeeper.Status.recovering, .starting, .inactive] {
+                session.update { $0.audio = recovering }
+                try await until("reconnecting (\(recovering))") { model.state == .reconnecting }
+                #expect(model.phase == .running)
+                #expect(model.canPauseOrResume, "the long-press menu stays available")
+            }
+
+            await model.tap()
+            #expect(session.calls == [.start, .stop])
+            #expect(!audio.isCapturing)
+            #expect(model.phase == .idle)
+            #expect(model.state == .idle)
+            #expect(model.feedback?.kind == .stopped)
+        }
     }
 
     @Test func aFailedStartShowsTheErrorAndATapRetries() async {

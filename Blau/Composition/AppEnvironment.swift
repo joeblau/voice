@@ -340,6 +340,10 @@ final class AppEnvironment {
     /// turns the microphone off.
     func stopConversation() async {
         Log.ui.notice("Stopping the conversation from the Live Activity")
+        // The record button's session first (it also unmutes the
+        // microphone; the fake one in previews and UI tests follows too),
+        // then the loop and capture in case anything else started them.
+        await conversation.stop()
         await voiceLoop.stop()
         await audio.stopCapture()
     }

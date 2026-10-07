@@ -24,8 +24,8 @@ struct RecordButtonTests {
         #expect(spoken(.connecting).label == "Start Conversation")
         #expect(spoken(.error(.couldNotStart(message: "x"))).label == "Start Conversation")
         for state: RecordButtonState in [
-            .listening, .agentSpeaking, .paused, .stopping, .error(.audioInterrupted), .error(.audioUnavailable),
-            .error(.connection(requiresUserAction: true)),
+            .listening, .agentSpeaking, .paused, .reconnecting, .stopping, .error(.audioInterrupted),
+            .error(.audioUnavailable), .error(.connection(requiresUserAction: true)),
         ] {
             #expect(spoken(state).label == "End Conversation", "\(state)")
         }
@@ -38,6 +38,7 @@ struct RecordButtonTests {
         #expect(spoken(.listening, awaitingConnection: true).value == "Listening, connecting to Grok")
         #expect(spoken(.agentSpeaking).value == "Grok is speaking")
         #expect(spoken(.paused).value == "Paused, microphone muted")
+        #expect(spoken(.reconnecting).value == "Reconnecting the microphone")
         #expect(spoken(.stopping).value == "Ending")
         #expect(spoken(.error(.couldNotStart(message: "x"))).value == "Couldn't start")
         #expect(spoken(.error(.connection(requiresUserAction: false))).value == "Lost the connection to Grok")
@@ -51,6 +52,7 @@ struct RecordButtonTests {
         #expect(spoken(.listening).hint.contains("pause listening"))
         #expect(spoken(.agentSpeaking).hint.contains("pause listening"))
         #expect(spoken(.paused).hint.contains("resume listening"))
+        #expect(spoken(.reconnecting).hint == "Ends the conversation.")
         #expect(spoken(.connecting).hint.isEmpty)
         #expect(spoken(.stopping).hint.isEmpty)
     }
@@ -59,7 +61,7 @@ struct RecordButtonTests {
     /// can tell them apart.
     @Test func everyStateSoundsDifferent() {
         let states: [RecordButtonState] = [
-            .idle, .connecting, .listening, .agentSpeaking, .paused, .stopping,
+            .idle, .connecting, .listening, .agentSpeaking, .paused, .reconnecting, .stopping,
             .error(.couldNotStart(message: "x")), .error(.connection(requiresUserAction: false)),
             .error(.connection(requiresUserAction: true)), .error(.audioInterrupted), .error(.audioUnavailable),
         ]
@@ -75,7 +77,9 @@ struct RecordButtonTests {
         #expect(RecordButtonFace.systemImage(for: .agentSpeaking) == "speaker.wave.2.fill")
         #expect(RecordButtonFace.systemImage(for: .paused) == "mic.slash.fill")
         #expect(RecordButtonFace.systemImage(for: .error(.audioInterrupted)) == "exclamationmark.triangle.fill")
+        #expect(RecordButtonFace.systemImage(for: .reconnecting) == "ellipsis")
         #expect(RecordButtonFace.tint(for: .listening) == .red)
+        #expect(RecordButtonFace.tint(for: .reconnecting) == .red)
         #expect(RecordButtonFace.tint(for: .paused) == .gray)
         #expect(RecordButtonFace.tint(for: .error(.audioUnavailable)) == .orange)
         #expect(RecordButtonFace.tint(for: .idle) == .accentColor)
