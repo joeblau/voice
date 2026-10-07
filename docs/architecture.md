@@ -128,3 +128,8 @@ The complete list of declared edges:
   `BLAU_DEVICE_TESTS=1`.
 - App-level unit, UI and performance tests stay in `BlauTests`,
   `BlauUITests` and `BlauPerfTests` (see the README).
+
+## Subsystem docs
+
+- [audio.md](audio.md): the audio session controller, voice processing and
+  how capture and playback plug into its engine.
