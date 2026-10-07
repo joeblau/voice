@@ -10,11 +10,11 @@ import Foundation
 /// or Core ML. The app switches to these when launched with
 /// `BLAU_MODEL_FIXTURES=1`.
 public enum ModelFixtures {
-    /// A manifest with every ``ModelID``, three files each, whose contents
-    /// come from ``contents(of:)``.
-    public static func manifest(bytesPerFile: Int = 64 * 1024) -> ModelManifest {
+    /// A manifest with `ids` (every ``ModelID`` by default), three files
+    /// each, whose contents come from ``contents(of:)``.
+    public static func manifest(bytesPerFile: Int = 64 * 1024, ids: [ModelID] = ModelID.allCases) -> ModelManifest {
         ModelManifest(
-            models: ModelID.allCases.map { id in
+            models: ids.map { id in
                 let bundle = "\(id.rawValue).mlmodelc"
                 let files = [
                     ("\(bundle)/coremldata.bin", max(1, bytesPerFile / 64)),

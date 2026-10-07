@@ -86,7 +86,10 @@ struct ModelManagerTests {
         #expect(manager.isReady)
         #expect(manager.setupStatus.phase == .ready)
         #expect(manager.setupStatus.fractionCompleted == 1)
-        #expect(harness.warmer.warmed == [.sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU, .parakeetTDTv3])
+        #expect(
+            harness.warmer.warmed == [
+                .sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU, .parakeetTDTv3, .textEmbedding,
+            ])
         #expect(manager.directory(for: .parakeetRealtimeEOU) == harness.store.directory(for: descriptor))
         #expect(manager.diskUsage[.parakeetRealtimeEOU, default: 0] >= descriptor.totalBytes)
         #expect(manager.totalDiskUsage >= harness.manifest.models.reduce(0) { $0 + $1.totalBytes })
@@ -158,6 +161,10 @@ struct ModelManagerTests {
 
         harness.network.set(.unmetered)
         await waitUntil("downloads resume on Wi-Fi") { manager.isReady && manager.state(of: .parakeetTDTv3) == .ready }
+        await manager.waitUntilIdle()
+        for id in ModelID.allCases {
+            #expect(manager.state(of: id) == .ready, "\(id)")
+        }
         #expect(harness.transport.calls.allSatisfy { !$0.allowsExpensiveNetwork })
     }
 
@@ -385,6 +392,9 @@ struct ModelManagerTests {
         #expect(manager.isReady)
         #expect(manager.state(of: .parakeetTDTv3) == .notDownloaded)
         #expect(!harness.transport.calls.contains { $0.path.hasPrefix("parakeetTDTv3/") })
+        // The text embedding model isn't the high-accuracy second pass: it
+        // downloads whatever that preference says.
+        #expect(manager.state(of: .textEmbedding) == .ready)
 
         await manager.download(.parakeetTDTv3)
         await manager.waitUntilIdle()

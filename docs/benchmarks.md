@@ -23,6 +23,7 @@ them by filling in the tables.
 | `voiceid.wespeaker` | WeSpeaker ResNet34-LM (FluidAudio `wespeaker_v2`, 256-d) | `load`, `embed.1.5s`, `embed.3s`, `cosine.sameSpeaker`, memory | Voice ID gate (#45, #47) |
 | `voiceid.campplus` | CAM++ (FluidAudio, beta, 192-d) | same as above | The challenger named in #1 |
 | `memory.embeddinggemma` | EmbeddingGemma-300M as Core ML, truncated to 256-d and quantized to int8 | `load`, `embed.64tok`, `embed.128tok`, `embed.256tok`, memory | Memory index (#59, #60) |
+| `memory.embed.batch32` | The shared text embedding service (#60) on an installed hosting folder: prompt, Swift tokenizer, token table, Core ML, 256-d int8 | `load`, `embed.batch32` and `embed.batch32.chunk` latency, `tokens.mean`, `budget.batch32`, a within/over-budget note, memory | #60's acceptance criterion: a batch of 32 chunks within #59's budget |
 | `topics.label.foundationModels` | On-device Foundation Models through Blau's production `FoundationModelsTopicLabeler` (#53) | `label.cold`, `label`, `label.prewarmed`, `titles.withinWordLimit` | Topic confirmation and titles (#53) |
 | Background probe | Parakeet EOU 320 ms on the Neural Engine, with a CPU-only baseline | Per-window latency by app phase, errors, Neural Engine availability, verdict, mitigation | iOS 27 background Neural Engine restrictions (#26) |
 
@@ -134,6 +135,12 @@ an iPhone; they validate the harness and catch gross regressions.
   `.mlpackage` is compiled on the device and the compile counts toward
   `load`. The same case measures any other converted candidate: name it
   `EmbeddingGemma*` or pass its URL to `CoreMLTokenEmbeddingModel`.
+- **Shared embedding service** (`memory.embed.batch32`). Copy the whole
+  `hosting/` folder `convert_coreml.py` writes (the one `ModelManager`
+  would download: `blau-embedding.json`, the compiled model, its token
+  table and `tokenizer.json`) into `BlauBenchmarks/Assets/` or the app's
+  `Documents/Benchmarks/Models/`, directly or as a subfolder. Skipped
+  without one.
 
 ## Methodology
 
@@ -232,6 +239,7 @@ go/no-go below.
 | | `embed.3s` p50 / p95 | pending | pending | pending |
 | CAM++ | `embed.1.5s` / `embed.3s` p50 | pending | pending | pending |
 | EmbeddingGemma 256-d int8 | `embed.128tok` p50 / p95 | pending (needs model) | pending (needs model) | pending (needs model) |
+| Shared service, EmbeddingGemma (#60) | `embed.batch32` p50 / p95 (budget 1,600 ms) | pending (needs model) | pending (needs model) | pending (needs model) |
 | | `memory.footprintGrowth` | pending | pending | pending |
 | Qwen3-Embedding-0.6B 256-d int8 (fallback, #59) | `embed.128tok` p50 / p95 | pending | pending | pending |
 | | `memory.neuralGrowth` | pending | pending | pending |
@@ -770,7 +778,9 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r scrip
 .venv/bin/python scripts/embeddings/convert_coreml.py --model embeddinggemma-300m --weights int8
 ```
 
-Then pin `revision` in `candidates.py` to the commit you evaluated, fill
+(`convert_coreml.py` writes the int8 token table by default since #60;
+`--table float16` gives #59's format.) Then pin `revision` in
+`candidates.py` to the commit you evaluated, fill
 the EmbeddingGemma rows above, run `make bench` with
 `EmbeddingGemma300M.mlpackage` and its `.token-embeddings.f16` in
 `BlauBenchmarks/Assets/` on two iPhones, and feed the numbers to
@@ -802,9 +812,12 @@ hf repo create <owner>/blau-embeddinggemma-300m-coreml --type model
 hf upload <owner>/blau-embeddinggemma-300m-coreml .build/Embeddings/EmbeddingGemma300M-fp16-wint8/hosting .
 ```
 
-then pin the resulting commit SHA like every other model
-(`scripts/update-model-manifest.py`, [models.md](models.md)); #60 adds the
-`ModelID` and loads it through `ModelManager`.
+then pin the resulting commit SHA like every other model: uncomment the
+`textEmbedding` entry in `scripts/update-model-manifest.py` with the new
+repository and commit and run it ([models.md](models.md)). #60 added
+`ModelID.textEmbedding` and the service that loads it, so that is all it
+takes for `ModelManager` to download the model and for memory and topics
+to use it.
 
 ### Reproducing
 
@@ -816,6 +829,41 @@ then pin the resulting commit SHA like every other model
 | Script tests (tiny random Gemma3 and Qwen3 models through the real conversion) | `.venv/bin/python scripts/embeddings/test_embeddings.py` |
 | `NLContextualEmbedding` baseline (Swift) | `BLAU_DEVICE_TESTS=1 swift test --filter RealModelEmbeddingEvalTests` in `Packages/BlauKit` |
 | A converted model through the Swift path | add `BLAU_EMBEDDING_MODEL=<dir>/<name>.mlpackage BLAU_EMBEDDING_TOKENS=<dir>/<name>.eval-tokens.json BLAU_EMBEDDING_SPEC=<spec id>` (and optionally `BLAU_EMBEDDING_COMPUTE_UNITS=cpuOnly`) |
+
+## Shared embedding service (#60)
+
+#60 built the service on #59's choice ([embeddings.md](embeddings.md)). Its
+acceptance criterion, **a batch of 32 chunks embeds within the budget from
+the spike**, reads #59's budget (an iPhone `embed.128tok` p95 of at most
+50 ms per chunk, `EmbeddingModelSelection.maximumDeviceP95Milliseconds`)
+as at most **1.6 s per batch of 32**, measured through the whole service:
+prompt, Swift tokenizer, token table, Core ML, Matryoshka 256-d and int8.
+`memory.embed.batch32` fills each of the 32 chunks to about 90% of the
+128-token sequence (124 tokens on average), the case the budget is
+defined for.
+
+**Mac reference** (M3 Max, macOS 27.2, `cpuAndNeuralEngine`, optimized
+build, `RealTextEmbeddingModelTests`). EmbeddingGemma's weights are gated,
+so these use Qwen3-Embedding-0.6B (#59's fallback, int8 weights), which is
+twice EmbeddingGemma's size. The machine was shared with other builds (load
+average 250 to 370), so latencies are upper bounds and the two table
+formats are within noise of each other:
+
+| Table | Retrieval through Swift (Recall@5 / Hit@5 / MRR@10) | `embed.batch32`, 124-token chunks, p50 / p95 | Per chunk p50 | Eval chunks (42–72 tokens), p50 / p95 |
+| --- | --- | --- | --- | --- |
+| float16 | 0.797 / 0.830 / 0.708 | 633 / 688 ms | 12–20 ms | 372 / 374 ms |
+| int8 (#60 default) | 0.797 / 0.830 / 0.711 | 681 / 714 ms | 12–21 ms | 473 / 538 ms |
+
+Both are well inside 1.6 s, and the retrieval numbers equal the Python
+reference conversion's (0.797 / 0.830 / 0.708), which checks the Swift
+tokenizer and the int8 table end to end. Tokenizer load (optimized): 0.43 s
+for Gemma's 32 MB `tokenizer.json`, 0.10 s for Qwen's; encoding about
+1.2 µs per token. Model load with Core ML's cache warm: 0.1 to 0.3 s.
+
+**iPhone: pending.** It needs a device and the hosted EmbeddingGemma
+model. To measure: finish EmbeddingGemma (above), then `make bench` with
+its `hosting/` folder in `BlauBenchmarks/Assets/`, and fill the
+`Shared service` row of the results table.
 
 ## After the numbers land
 

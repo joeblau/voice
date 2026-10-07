@@ -148,6 +148,19 @@ func validateLayering() {
 
 validateLayering()
 
+// MARK: - Cross-module tests
+
+/// Tests that compose sibling modules the way the app's composition root
+/// does, such as the topic segmenter (BlauTopics) running on BlauMemory's
+/// shared text-embedding service (#60). Siblings can't import each other,
+/// so these tests get a target of their own that depends on both. It shares
+/// BlauTopicsTests' scripted transcripts through a symlink in `Fixtures/`.
+let integrationTests: Target = .testTarget(
+    name: "BlauKitIntegrationTests",
+    dependencies: [.target(name: KitModule.topics.rawValue), .target(name: KitModule.memory.rawValue)],
+    swiftSettings: [.enableUpcomingFeature("MemberImportVisibility")]
+)
+
 // MARK: - Package
 
 let package = Package(
@@ -166,6 +179,6 @@ let package = Package(
         // gets speech from Grok, so it opts out with `traits: []`.
         .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.17.5", traits: [])
     ],
-    targets: KitModule.allCases.map(\.target) + KitModule.allCases.map(\.testTarget),
+    targets: KitModule.allCases.map(\.target) + KitModule.allCases.map(\.testTarget) + [integrationTests],
     swiftLanguageModes: [.v6]
 )

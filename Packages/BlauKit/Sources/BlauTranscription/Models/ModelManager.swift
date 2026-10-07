@@ -240,7 +240,7 @@ public final class ModelManager {
             let id = descriptor.id
             if let installation = installations[id] {
                 states[id] = installation.warmedUpOn == systemVersion ? .ready : .preparing
-            } else if id.isRequired || preferences.downloadsOptionalModels {
+            } else if wantsDownload(id) {
                 states[id] = .queued
             } else {
                 states[id] = .notDownloaded
@@ -300,8 +300,9 @@ public final class ModelManager {
     }
 
     /// Stops any download or warm-up of `id` and deletes its files. It is
-    /// downloaded again on the next launch if it is required (or optional
-    /// with ``ModelPreferences/downloadsOptionalModels`` on), or now with
+    /// downloaded again on the next launch if it downloads automatically
+    /// (required, the text embedding model, or the second pass with
+    /// ``ModelPreferences/downloadsOptionalModels`` on), or now with
     /// ``download(_:)``.
     public func delete(_ id: ModelID) async {
         guard manifest[id] != nil else { return }
@@ -373,6 +374,13 @@ public final class ModelManager {
         return nil
     }
 
+    /// Whether `id` downloads without the user asking: required models,
+    /// optional ones that don't follow the "Download High-Accuracy Model"
+    /// preference (the text embedding model), and the rest while it is on.
+    private func wantsDownload(_ id: ModelID) -> Bool {
+        id.isRequired || !id.followsOptionalModelsPreference || preferences.downloadsOptionalModels
+    }
+
     private var allowsExpensiveNetwork: Bool {
         preferences.downloadPolicy == .anyNetwork || allowsExpensiveNetworkThisSession
     }
@@ -398,7 +406,7 @@ public final class ModelManager {
     private func preferencesChanged(from old: ModelPreferences) {
         var stopped: ModelID?
         if preferences.downloadsOptionalModels != old.downloadsOptionalModels {
-            for descriptor in manifest.optional {
+            for descriptor in manifest.optional where descriptor.id.followsOptionalModelsPreference {
                 switch state(of: descriptor.id) {
                 case .notDownloaded where preferences.downloadsOptionalModels:
                     states[descriptor.id] = .queued

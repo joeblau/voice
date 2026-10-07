@@ -87,6 +87,24 @@ MODELS = [
         # `ModelNames.Diarizer.embeddingFile`: WeSpeaker ResNet34, 256-d.
         "entries": ["wespeaker_v2.mlmodelc"],
     },
+    # The shared text embedding model (#59, #60): the `hosting/` folder
+    # `scripts/embeddings/convert_coreml.py` writes, loaded by BlauMemory's
+    # `TextEmbeddingBundle` (not FluidAudio). Uncomment once the converted
+    # EmbeddingGemma is hosted, with its repository and full commit SHA
+    # (docs/models.md, "The text embedding model is not pinned yet").
+    # {
+    #     "id": "textEmbedding",
+    #     "repo": "<owner>/blau-embeddinggemma-300m-coreml",
+    #     "revision": "<full commit SHA>",
+    #     "directory": "",
+    #     "entries": [
+    #         "blau-embedding.json",
+    #         "EmbeddingGemma300M.mlmodelc",
+    #         "EmbeddingGemma300M.token-embeddings.i8",
+    #         "tokenizer.json",
+    #         "NOTICE",
+    #     ],
+    # },
 ]
 
 OUTPUT = (

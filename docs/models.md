@@ -15,10 +15,27 @@ the rest of the app's life.
 | `.speakerEmbedding` | WeSpeaker ResNet34 (`wespeaker_v2`, 256-d) | 8 MB | yes | Voice ID (#45) |
 | `.parakeetRealtimeEOU` | Parakeet realtime EOU 120M, 320 ms chunks | 224 MB | yes | Streaming ASR (#29, [asr.md](asr.md)) |
 | `.parakeetTDTv3` | Parakeet TDT 0.6B v3 (int8 encoder) | 483 MB | no | Second pass (#30, [asr.md](asr.md#second-pass-punctuation-and-accuracy)) |
+| `.textEmbedding` | EmbeddingGemma-300M, Core ML, int8 weights and int8 token table, 128 tokens | about 300 MB | no | Shared text embeddings for memory and topics (#60, [embeddings.md](embeddings.md)). **Not pinned yet** (below) |
 
 Required models download first, during onboarding. The optional second-pass
 model follows when **Download High-Accuracy Model** is on (the default);
-Blau transcribes without it.
+Blau transcribes without it. The text embedding model is optional too
+(Blau listens without it, and topics fall back to Apple's contextual
+embedding), but it doesn't follow that setting: it downloads after the
+required models either way (`ModelID.followsOptionalModelsPreference`).
+
+### The text embedding model is not pinned yet
+
+`ModelID.textEmbedding` exists, and `TextEmbeddingService` loads whatever
+`ModelManager` installs for it, but `ModelManifest.pinned` has no entry:
+#59 converts EmbeddingGemma with `scripts/embeddings/convert_coreml.py`,
+and publishing the converted weights (under the Gemma Terms of Use) is the
+repository owner's call, as is accepting those terms to get the weights.
+Until then the manager doesn't list the model, the service reports
+`notInstalled`, and topics segment on their fallback. To ship it: host the
+`hosting/` folder ([benchmarks.md](benchmarks.md#hosting-the-model)),
+uncomment the `textEmbedding` entry in `scripts/update-model-manifest.py`
+with its repository and commit, run the script and `make format`.
 
 ## Pinning and checksums
 
@@ -148,6 +165,7 @@ APIs; never with its downloading convenience loaders.
 | `.parakeetRealtimeEOU` | `StreamingEouAsrManager(chunkSize: .ms320).loadModels(from: directory)`; Blau wraps it as `ParakeetEouRecognizer.load(modelDirectory: directory)` ([asr.md](asr.md)) |
 | `.parakeetTDTv3` | `AsrModels.loadLocal(from: directory, version: .v3)` |
 | `.speakerEmbedding` | `MLModel(contentsOf: directory/FluidAudioModels.speakerEmbeddingBundle)`; Blau wraps it as `WeSpeakerEmbedder.load(modelDirectory: directory)` ([voice-id.md](voice-id.md)) |
+| `.textEmbedding` | Not FluidAudio: `TextEmbeddingModel.load(bundle: TextEmbeddingBundle(directory: directory))` in BlauMemory, through `TextEmbeddingService` ([embeddings.md](embeddings.md)) |
 
 `ModelDownloadSmokeTests` runs exactly these calls against real downloads.
 

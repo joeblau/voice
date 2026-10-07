@@ -111,6 +111,15 @@ struct ModelDownloadSmokeTests {
             _ = try MLModel(
                 contentsOf: directory.appending(path: FluidAudioModels.speakerEmbeddingBundle),
                 configuration: configuration)
+        case .textEmbedding:
+            // Blau's own model (BlauMemory's TextEmbeddingModel loads it with
+            // its tokenizer and token table); here, just Core ML.
+            let bundles = try FileManager.default.contentsOfDirectory(atPath: directory.path(percentEncoded: false))
+                .filter { $0.hasSuffix(".mlmodelc") }
+            #expect(!bundles.isEmpty)
+            for bundle in bundles {
+                _ = try MLModel(contentsOf: directory.appending(path: bundle), configuration: configuration)
+            }
         }
         print("[smoke] FluidAudio loaded \(id.rawValue)")
     }
