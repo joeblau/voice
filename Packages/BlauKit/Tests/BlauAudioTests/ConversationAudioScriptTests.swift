@@ -71,15 +71,17 @@ import Testing
     @Test func feederPlaysEverySampleAndWaitsBeforeEachLine() async throws {
         let hub = CaptureHub()
         let frames = hub.frames()
+        let received = Mutex<Int64>(0)
         let collector = Task {
-            var count: Int64 = 0
-            for await frame in frames { count += Int64(frame.sampleCount) }
-            return count
+            for await frame in frames { received.withLock { $0 += Int64(frame.sampleCount) } }
+            return received.withLock { $0 }
         }
         let calls = Mutex<[(line: Int, position: Int64)]>([])
         let feeder = CaptureReplayFeeder(script: script, speed: nil)
+        // Paced by the subscriber, so it never falls far enough behind to
+        // lose frames however slow the machine.
         try await feeder.feed(
-            into: hub, consumed: { hub.nextSampleOffset },
+            into: hub, consumed: { received.withLock { $0 } },
             beforeLine: { line in calls.withLock { $0.append((line, hub.nextSampleOffset)) } })
         hub.finish()
 

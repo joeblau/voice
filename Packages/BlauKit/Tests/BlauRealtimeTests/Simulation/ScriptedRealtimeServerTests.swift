@@ -36,8 +36,10 @@ import Testing
         let harness = Harness()
         let lines = ["What should I focus on this week", "And after that what comes next", "Thanks that helps"]
         let script = TranscriptScript.speaking(
-            lines, wordDuration: .milliseconds(5),
-            endOfUtteranceDelay: .milliseconds(5), pauseBetweenLines: .milliseconds(5))
+            // Seconds apart on the audio timeline, so no line continues the
+            // previous one (the orchestrator merges finals 400 ms apart).
+            lines, wordDuration: .milliseconds(200), endOfUtteranceDelay: .milliseconds(600),
+            pauseBetweenLines: .seconds(2))
         try await harness.orchestrator.start()
         for (index, final) in script.finals.enumerated() {
             await harness.orchestrator.handle(.final(final))
