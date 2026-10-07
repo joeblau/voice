@@ -40,6 +40,7 @@ configured. See [docs/configuration.md](docs/configuration.md).
 | `make perf`      | Run `BlauPerfTests` (`Blau-Perf` scheme, Release build)          |
 | `make bench`     | Run the model benchmarks on an iPhone (`DEVICE=<udid>`, [docs](docs/benchmarks.md)) |
 | `make bench-kit` | Run the model benchmarks on this Mac (reference numbers, downloads models) |
+| `make eval-asr`  | Evaluate the ASR engines on the fixtures: a WER, latency and RTF table per engine (downloads models, [docs](docs/asr-eval.md)) |
 | `make secrets`   | Create `Config/Secrets.xcconfig` from the example                |
 | `make test-scripts` | Test the secrets, CI and Instruments template scripts         |
 | `make install-instruments-template` | Add the Blau template to Instruments' chooser ([docs](docs/performance.md#instruments-template)) |
@@ -62,7 +63,8 @@ Formatting, branch naming, commit and pull request conventions are in
 ## Continuous integration
 
 GitHub Actions runs `lint`, `package-tests` and `app-tests` on every pull
-request and push to `main`, and the performance suite nightly. Each job calls
+request and push to `main`, and the performance suite and the ASR evaluation
+nightly. Each job calls
 the same `make` targets as above. See [docs/ci.md](docs/ci.md).
 
 ## Project layout
@@ -80,8 +82,9 @@ the same `make` targets as above. See [docs/ci.md](docs/ci.md).
 | `BlauBenchmarks/` | On-device model benchmarks (XCTest, not hosted in the app; [docs](docs/benchmarks.md)) |
 | `TestPlans/`     | `Blau.xctestplan` (unit + UI, coverage), `BlauPerf.xctestplan` and `BlauBenchmarks.xctestplan` |
 | `Config/`        | xcconfig files; `Secrets.xcconfig` is gitignored ([docs](docs/configuration.md)) |
-| `scripts/`       | `swift-format.sh` (behind `make format` and `make lint`), git hooks, embedded-secrets check, `Secrets.xcconfig` writer, `verify-signposts.sh` and the Instruments template scripts (see [`docs/performance.md`](docs/performance.md)), `update-model-manifest.py` (see [`docs/models.md`](docs/models.md)), `make-vad-fixtures.py` (see [`docs/vad.md`](docs/vad.md)), `voice-id-eval-librispeech.py` (the voice ID calibration set, see [`docs/voice-id-eval.md`](docs/voice-id-eval.md)), `embeddings/` (the text-embedding retrieval eval and Core ML conversion, see [`docs/benchmarks.md`](docs/benchmarks.md#text-embedding-model-59)), and the CI helpers in `scripts/ci/` ([`docs/ci.md`](docs/ci.md)) |
+| `scripts/`       | `swift-format.sh` (behind `make format` and `make lint`), git hooks, embedded-secrets check, `Secrets.xcconfig` writer, `verify-signposts.sh` and the Instruments template scripts (see [`docs/performance.md`](docs/performance.md)), `update-model-manifest.py` (see [`docs/models.md`](docs/models.md)), `make-vad-fixtures.py` (see [`docs/vad.md`](docs/vad.md)), `make-asr-fixtures.py` and `eval-asr.sh` (the ASR evaluation, see [`docs/asr-eval.md`](docs/asr-eval.md)), `voice-id-eval-librispeech.py` (the voice ID calibration set, see [`docs/voice-id-eval.md`](docs/voice-id-eval.md)), `embeddings/` (the text-embedding retrieval eval and Core ML conversion, see [`docs/benchmarks.md`](docs/benchmarks.md#text-embedding-model-59)), and the CI helpers in `scripts/ci/` ([`docs/ci.md`](docs/ci.md)) |
 | `Datasets/voice-id/` | The owner's voice ID evaluation recordings, stored with consent in LFS (see its README and [`docs/voice-id-eval.md`](docs/voice-id-eval.md)) |
+| `Datasets/asr/` | The owner's ASR evaluation recordings, stored with consent in LFS (see its README and [`docs/asr-eval.md`](docs/asr-eval.md)) |
 | `Tools/Instruments/` | `Blau.tracetemplate`, the Instruments template for profiling Blau, and the instrument list and options it is generated from |
 | `docs/`          | Developer documentation, including [on-device models](docs/models.md) |
 | `.github/`       | CI workflow ([docs](docs/ci.md)), pull request and issue templates |

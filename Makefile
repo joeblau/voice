@@ -74,6 +74,16 @@ bench: generate ## Run the model benchmarks on DEVICE=<udid> (Release, docs/benc
 bench-kit: ## Run the model benchmarks on this Mac (reference numbers only, downloads models)
 	cd Packages/BlauKit && BLAU_DEVICE_TESTS=1 swift test -c release --filter RealModel
 
+# ASR evaluation harness (#32): WER, first-partial and end-of-utterance
+# latency and RTF of every engine on the ASR fixtures (Git LFS), with the
+# regression gate in docs/asr-eval/thresholds.json. Downloads the pinned
+# models into ASR_EVAL_MODELS (default .build/models) on first use. The other
+# ASR_EVAL_* variables are documented in scripts/eval-asr.sh and
+# docs/asr-eval.md.
+.PHONY: eval-asr
+eval-asr: ## Evaluate the ASR engines on the fixtures: a WER/latency/RTF table per engine (docs/asr-eval.md)
+	scripts/eval-asr.sh
+
 .PHONY: secrets
 secrets: ## Create Config/Secrets.xcconfig from the example (kept if it exists)
 	env -u XAI_DEV_API_KEY scripts/write-secrets-xcconfig.sh

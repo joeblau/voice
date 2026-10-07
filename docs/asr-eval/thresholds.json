@@ -1,0 +1,38 @@
+{
+  "description": "Regression gate for make eval-asr and the nightly asr-eval job (docs/asr-eval.md). WER and audio-time latency limits are the 2026-10-07 baseline plus a margin of a few words or 150-450 ms; latency with compute and RTF are ceilings with room for the CI virtual machine, which has no Neural Engine. Tighten them once nightly runs have a history.",
+  "engines": {
+    "parakeet-eou-320ms": {
+      "maxWER": 0.13,
+      "maxCategoryWER": {
+        "clean": 0.08,
+        "cafe": 0.07,
+        "tv": 0.33,
+        "accented": 0.1
+      },
+      "maxFirstPartialAudioP95Ms": 1400,
+      "maxFirstPartialP95Ms": 2000,
+      "maxEndOfUtteranceAudioP95Ms": 2600,
+      "maxEndOfUtteranceP95Ms": 3500,
+      "maxRealTimeFactor": 0.5,
+      "maxMissedUtterances": 1,
+      "maxSplitUtterances": 1,
+      "maxUnendedUtterances": 12,
+      "maxFailures": 0
+    },
+    "parakeet-tdt-v3": {
+      "maxWER": 0.03,
+      "maxCategoryWER": {
+        "clean": 0.05,
+        "cafe": 0.05,
+        "tv": 0.05,
+        "accented": 0.05
+      },
+      "maxEndOfUtteranceAudioP95Ms": 250,
+      "maxEndOfUtteranceP95Ms": 5000,
+      "maxRealTimeFactor": 1.0,
+      "maxMissedUtterances": 0,
+      "maxSplitUtterances": 0,
+      "maxFailures": 0
+    }
+  }
+}

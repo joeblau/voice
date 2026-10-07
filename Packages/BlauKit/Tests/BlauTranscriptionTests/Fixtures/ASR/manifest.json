@@ -1,0 +1,532 @@
+{
+  "name": "blau-asr-fixtures",
+  "consent": "Synthesised with macOS text to speech by scripts/make-asr-fixtures.py; no person was recorded.",
+  "description": "Short English utterances for the ASR evaluation harness (#32): clean speech, a cafe, a TV in the room and accented speakers. Speech extents are exact (placed on the timeline by the generator).",
+  "sampleRate": 16000,
+  "fixtures": [
+    {
+      "id": "clean-01",
+      "path": "clean-01.wav",
+      "category": "clean",
+      "description": "1 utterance by Samantha over room tone",
+      "sampleCount": 88320,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 53120,
+          "text": "Can you remind me what we talked about yesterday"
+        }
+      ],
+      "tags": {
+        "background": "room",
+        "voice": "Samantha"
+      }
+    },
+    {
+      "id": "clean-02",
+      "path": "clean-02.wav",
+      "category": "clean",
+      "description": "2 utterances by Voice 1 over room tone",
+      "sampleCount": 140000,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 55360,
+          "text": "I want to practice my answers for the interview on Thursday"
+        },
+        {
+          "start": 82560,
+          "end": 104800,
+          "text": "Start with the hardest question"
+        }
+      ],
+      "tags": {
+        "background": "room",
+        "voice": "Voice 1"
+      }
+    },
+    {
+      "id": "clean-03",
+      "path": "clean-03.wav",
+      "category": "clean",
+      "description": "1 utterance by Voice 1 over room tone",
+      "sampleCount": 91040,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 55840,
+          "text": "The meeting moved to three thirty so I have about twenty minutes"
+        }
+      ],
+      "tags": {
+        "background": "room",
+        "voice": "Voice 1",
+        "rate": "165wpm"
+      }
+    },
+    {
+      "id": "clean-04",
+      "path": "clean-04.wav",
+      "category": "clean",
+      "description": "2 utterances by Samantha over room tone",
+      "sampleCount": 137120,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 44320,
+          "text": "What did I say the budget for the trip was"
+        },
+        {
+          "start": 69920,
+          "end": 101920,
+          "text": "I think it was around two thousand dollars"
+        }
+      ],
+      "tags": {
+        "background": "room",
+        "voice": "Samantha",
+        "rate": "210wpm"
+      }
+    },
+    {
+      "id": "clean-05",
+      "path": "clean-05.wav",
+      "category": "clean",
+      "description": "1 utterance by Voice 1 over room tone",
+      "sampleCount": 83360,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 48160,
+          "text": "Add milk eggs and coffee to my shopping list"
+        }
+      ],
+      "tags": {
+        "background": "room",
+        "voice": "Voice 1",
+        "rate": "200wpm"
+      }
+    },
+    {
+      "id": "clean-06",
+      "path": "clean-06.wav",
+      "category": "clean",
+      "description": "1 utterance by Samantha over room tone",
+      "sampleCount": 93760,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 58560,
+          "text": "Let us switch topics and talk about the product launch"
+        }
+      ],
+      "tags": {
+        "background": "room",
+        "voice": "Samantha",
+        "rate": "160wpm"
+      }
+    },
+    {
+      "id": "cafe-01",
+      "path": "cafe-01.wav",
+      "category": "cafe",
+      "description": "1 utterance by Samantha over a cafe at 12 dB SNR",
+      "sampleCount": 100160,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 64960,
+          "text": "Tell me again why the investors were worried about the timeline"
+        }
+      ],
+      "tags": {
+        "background": "cafe",
+        "voice": "Samantha",
+        "snr": "12dB"
+      }
+    },
+    {
+      "id": "cafe-02",
+      "path": "cafe-02.wav",
+      "category": "cafe",
+      "description": "2 utterances by Voice 1 over a cafe at 12 dB SNR",
+      "sampleCount": 128640,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 46720,
+          "text": "I just ordered a coffee so give me a second"
+        },
+        {
+          "start": 72320,
+          "end": 93440,
+          "text": "Okay go ahead with the summary"
+        }
+      ],
+      "tags": {
+        "background": "cafe",
+        "voice": "Voice 1",
+        "snr": "12dB"
+      }
+    },
+    {
+      "id": "cafe-03",
+      "path": "cafe-03.wav",
+      "category": "cafe",
+      "description": "1 utterance by Daniel (English (UK)) over a cafe at 10 dB SNR",
+      "sampleCount": 95360,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 60160,
+          "text": "Remember that my sister is visiting next weekend"
+        }
+      ],
+      "tags": {
+        "background": "cafe",
+        "voice": "Daniel (English (UK))",
+        "snr": "10dB"
+      }
+    },
+    {
+      "id": "cafe-04",
+      "path": "cafe-04.wav",
+      "category": "cafe",
+      "description": "1 utterance by Samantha over a cafe at 8 dB SNR",
+      "sampleCount": 96320,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 61120,
+          "text": "What were the three things I wanted to finish before Friday"
+        }
+      ],
+      "tags": {
+        "background": "cafe",
+        "voice": "Samantha",
+        "snr": "8dB"
+      }
+    },
+    {
+      "id": "cafe-05",
+      "path": "cafe-05.wav",
+      "category": "cafe",
+      "description": "2 utterances by Voice 1 over a cafe at 6 dB SNR",
+      "sampleCount": 118080,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 37440,
+          "text": "Can you read me the notes from this morning"
+        },
+        {
+          "start": 63040,
+          "end": 82880,
+          "text": "Only the parts about hiring"
+        }
+      ],
+      "tags": {
+        "background": "cafe",
+        "voice": "Voice 1",
+        "rate": "190wpm",
+        "snr": "6dB"
+      }
+    },
+    {
+      "id": "cafe-06",
+      "path": "cafe-06.wav",
+      "category": "cafe",
+      "description": "1 utterance by Karen over a cafe at 6 dB SNR",
+      "sampleCount": 98720,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 63520,
+          "text": "I think the second design was much easier to understand"
+        }
+      ],
+      "tags": {
+        "background": "cafe",
+        "voice": "Karen",
+        "snr": "6dB"
+      }
+    },
+    {
+      "id": "tv-01",
+      "path": "tv-01.wav",
+      "category": "tv",
+      "description": "1 utterance by Samantha over a TV presenter in the room at 12 dB SNR",
+      "sampleCount": 85440,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 50240,
+          "text": "Turn this into a short list of action items"
+        }
+      ],
+      "tags": {
+        "background": "tv",
+        "voice": "Samantha",
+        "snr": "12dB"
+      }
+    },
+    {
+      "id": "tv-02",
+      "path": "tv-02.wav",
+      "category": "tv",
+      "description": "2 utterances by Voice 1 over a TV presenter in the room at 12 dB SNR",
+      "sampleCount": 123200,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 48160,
+          "text": "How long have we been talking about the pricing page"
+        },
+        {
+          "start": 73760,
+          "end": 88000,
+          "text": "Let us wrap that up"
+        }
+      ],
+      "tags": {
+        "background": "tv",
+        "voice": "Voice 1",
+        "snr": "12dB"
+      }
+    },
+    {
+      "id": "tv-03",
+      "path": "tv-03.wav",
+      "category": "tv",
+      "description": "1 utterance by Samantha over a TV presenter in the room at 9 dB SNR",
+      "sampleCount": 96480,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 61280,
+          "text": "Please remember that the dentist appointment is on Tuesday morning"
+        }
+      ],
+      "tags": {
+        "background": "tv",
+        "voice": "Samantha",
+        "rate": "190wpm",
+        "snr": "9dB"
+      }
+    },
+    {
+      "id": "tv-04",
+      "path": "tv-04.wav",
+      "category": "tv",
+      "description": "1 utterance by Karen over a TV presenter in the room at 9 dB SNR",
+      "sampleCount": 92000,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 56800,
+          "text": "What is a good way to explain this to a new customer"
+        }
+      ],
+      "tags": {
+        "background": "tv",
+        "voice": "Karen",
+        "snr": "9dB"
+      }
+    },
+    {
+      "id": "tv-05",
+      "path": "tv-05.wav",
+      "category": "tv",
+      "description": "1 utterance by Voice 1 over a TV presenter in the room at 6 dB SNR",
+      "sampleCount": 82400,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 47200,
+          "text": "Go back to what we said about the onboarding flow"
+        }
+      ],
+      "tags": {
+        "background": "tv",
+        "voice": "Voice 1",
+        "snr": "6dB"
+      }
+    },
+    {
+      "id": "tv-06",
+      "path": "tv-06.wav",
+      "category": "tv",
+      "description": "1 utterance by Daniel (English (UK)) over a TV presenter in the room at 6 dB SNR",
+      "sampleCount": 93600,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 58400,
+          "text": "I need a better answer for why now is the right time"
+        }
+      ],
+      "tags": {
+        "background": "tv",
+        "voice": "Daniel (English (UK))",
+        "snr": "6dB"
+      }
+    },
+    {
+      "id": "accented-01",
+      "path": "accented-01.wav",
+      "category": "accented",
+      "description": "1 utterance by Daniel (English (UK)) over room tone",
+      "sampleCount": 96480,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 61280,
+          "text": "Could you summarize the conversation we had about the budget"
+        }
+      ],
+      "tags": {
+        "background": "room",
+        "voice": "Daniel (English (UK))",
+        "accent": "en-GB"
+      }
+    },
+    {
+      "id": "accented-02",
+      "path": "accented-02.wav",
+      "category": "accented",
+      "description": "2 utterances by Moira (English (Ireland)) over room tone",
+      "sampleCount": 134720,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 56160,
+          "text": "I would like to go over my notes before the call"
+        },
+        {
+          "start": 81760,
+          "end": 99520,
+          "text": "Start from the top"
+        }
+      ],
+      "tags": {
+        "background": "room",
+        "voice": "Moira (English (Ireland))",
+        "accent": "en-IE"
+      }
+    },
+    {
+      "id": "accented-03",
+      "path": "accented-03.wav",
+      "category": "accented",
+      "description": "1 utterance by Karen over room tone",
+      "sampleCount": 93600,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 58400,
+          "text": "Remind me to send the contract to the lawyer tomorrow"
+        }
+      ],
+      "tags": {
+        "background": "room",
+        "voice": "Karen",
+        "accent": "en-AU"
+      }
+    },
+    {
+      "id": "accented-04",
+      "path": "accented-04.wav",
+      "category": "accented",
+      "description": "1 utterance by Rishi (English (India)) over room tone",
+      "sampleCount": 92320,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 57120,
+          "text": "What questions do you think the panel will ask me"
+        }
+      ],
+      "tags": {
+        "background": "room",
+        "voice": "Rishi (English (India))",
+        "accent": "en-IN"
+      }
+    },
+    {
+      "id": "accented-05",
+      "path": "accented-05.wav",
+      "category": "accented",
+      "description": "1 utterance by Tessa (English (South Africa)) over room tone",
+      "sampleCount": 102880,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 67680,
+          "text": "Let us talk about the hiring plan for next quarter"
+        }
+      ],
+      "tags": {
+        "background": "room",
+        "voice": "Tessa (English (South Africa))",
+        "accent": "en-ZA"
+      }
+    },
+    {
+      "id": "accented-06",
+      "path": "accented-06.wav",
+      "category": "accented",
+      "description": "1 utterance by Tara over room tone",
+      "sampleCount": 93600,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 58400,
+          "text": "Can you explain the difference between the two options again"
+        }
+      ],
+      "tags": {
+        "background": "room",
+        "voice": "Tara",
+        "accent": "en-IN"
+      }
+    },
+    {
+      "id": "accented-07",
+      "path": "accented-07.wav",
+      "category": "accented",
+      "description": "1 utterance by Anna over room tone",
+      "sampleCount": 94880,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 59680,
+          "text": "I need to finish the presentation before the weekend"
+        }
+      ],
+      "tags": {
+        "background": "room",
+        "voice": "Anna",
+        "accent": "de-DE"
+      }
+    },
+    {
+      "id": "accented-08",
+      "path": "accented-08.wav",
+      "category": "accented",
+      "description": "1 utterance by Paulina over room tone",
+      "sampleCount": 93760,
+      "utterances": [
+        {
+          "start": 12800,
+          "end": 58560,
+          "text": "Please tell me what we decided about the new office"
+        }
+      ],
+      "tags": {
+        "background": "room",
+        "voice": "Paulina",
+        "accent": "es-MX"
+      }
+    }
+  ]
+}

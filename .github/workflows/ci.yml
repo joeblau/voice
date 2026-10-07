@@ -1,5 +1,6 @@
 # CI for Blau: lint, BlauKit package tests and app tests on every pull request
-# and every push to main, plus a nightly performance run. See docs/ci.md.
+# and every push to main, plus a nightly performance run and ASR evaluation.
+# See docs/ci.md.
 #
 # Secrets: none. Tests are hermetic and never call xAI, and this workflow
 # uploads .xcresult bundles, inside which GitHub does not mask secrets. Never
@@ -26,6 +27,10 @@ on:
     inputs:
       perf:
         description: Also run the performance suite
+        type: boolean
+        default: false
+      asr_eval:
+        description: Also run the ASR evaluation (downloads the models)
         type: boolean
         default: false
 
@@ -241,3 +246,64 @@ jobs:
           path: .build/results/perf.xcresult
           if-no-files-found: warn
           retention-days: 30
+
+  # Nightly (and on demand) ASR evaluation (#32): WER, first-partial and
+  # end-of-utterance latency and RTF of every engine on the ASR fixtures with
+  # the real models, failing on the regression gate in
+  # docs/asr-eval/thresholds.json. The report is kept as an artifact (the
+  # history) and shown on the run's summary page. The pinned models (~700 MB,
+  # public on Hugging Face, no token) are cached by manifest. See
+  # docs/asr-eval.md.
+  asr-eval:
+    name: asr-eval
+    if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.asr_eval) }}
+    runs-on: ${{ vars.BLAU_CI_RUNNER || 'xcode-27' }}
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The fixture audio is in Git LFS.
+          lfs: true
+
+      - name: Select Xcode
+        id: xcode
+        run: scripts/ci/select-xcode.sh
+
+      # The same cache as package-tests: the evaluation runs in the package's
+      # debug build.
+      - name: Cache SwiftPM build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: Packages/BlauKit/.build
+          key: kit-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/BlauKit/Package.swift', 'Packages/BlauKit/Package.resolved') }}
+          restore-keys: |
+            kit-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.build }}-
+
+      - name: Cache models
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build/models
+          key: asr-models-${{ hashFiles('Packages/BlauKit/Sources/BlauTranscription/Models/PinnedModelManifest.swift') }}
+
+      - name: Evaluate
+        env:
+          ASR_EVAL_OUTPUT: .build/results/asr-eval
+        run: make eval-asr
+
+      - name: Job summary
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -f .build/results/asr-eval/report.md ]; then
+            cat .build/results/asr-eval/report.md >>"$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: asr-eval-report-${{ github.run_attempt }}
+          path: .build/results/asr-eval/
+          if-no-files-found: warn
+          retention-days: 90
