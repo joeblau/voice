@@ -29,7 +29,7 @@ complete.
 | 3     | `BlauVoiceID`       | Speaker embeddings, enrollment, accept / reject / uncertain gate, language ID                 |
 | 4     | `BlauRealtime`      | xAI realtime WebSocket client, typed events, token minting, session orchestration, tools      |
 | 4     | `BlauTopics`        | Streaming topic segmentation ([topics.md](topics.md)), boundary confirmation, labeling        |
-| 4     | `BlauMemory`        | The shared text embedding service ([embeddings.md](embeddings.md)), the FTS5 + vector search index ([memory-index.md](memory-index.md)), hybrid retrieval, fact extraction, memory tools |
+| 4     | `BlauMemory`        | The shared text embedding service ([embeddings.md](embeddings.md)), the FTS5 + vector search index ([memory-index.md](memory-index.md)), hybrid retrieval ([memory-search.md](memory-search.md)), fact extraction, memory tools |
 
 Each module exports a `<Module>Module` marker type conforming to
 `BlauCore.BlauModule`, with its name and a one-line summary.
@@ -165,6 +165,9 @@ The complete list of declared edges:
   segment rules, 16 ms boundary refinement, speech-gated audio for ASR).
 - [memory-index.md](memory-index.md): the local search index (chunking,
   FTS5 BM25, the int8 vector matrix, rebuilding from SwiftData).
+- [memory-search.md](memory-search.md): hybrid retrieval (weighted RRF of
+  BM25 and vectors tuned on the eval set, time expressions, entity
+  expansion, the reranker hook, latency).
 - [embeddings.md](embeddings.md): the shared text embedding service
   (EmbeddingGemma 256-d int8): tokenizer, token table, batches, model
   versions, and how topics use it.

@@ -64,6 +64,12 @@ final class MemoryIndexBenchmarks: BenchmarkTestCase {
     func testSearch50k() async throws {
         try await measure(MemoryIndexSearchBenchmark())
     }
+
+    /// Hybrid retrieval (#64): the whole `MemorySearch` pipeline over 50k
+    /// chunks within 50 ms p95.
+    func testHybridSearch50k() async throws {
+        try await measure(MemorySearchBenchmark())
+    }
 }
 
 /// On-device Foundation Models for topic labels.

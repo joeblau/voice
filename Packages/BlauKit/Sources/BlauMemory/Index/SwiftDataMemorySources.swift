@@ -245,6 +245,37 @@ public struct SwiftDataMemorySources: MemorySourceProvider, MemorySourceReader {
         }
     }
 
+    /// Every entity with its aliases and every fact's subject and validity,
+    /// for entity expansion in hybrid retrieval (#64). Entities CloudKit
+    /// duplicated are merged by id (aliases combined); a duplicated fact
+    /// keeps its earliest invalidation, as in `facts()`.
+    public func entityGraph() async throws -> MemoryEntityGraph {
+        let context = ModelContext(container)
+        let entities = try context.fetch(
+            FetchDescriptor<MemoryEntity>(sortBy: [SortDescriptor(\.createdAt), SortDescriptor(\.id)])
+        ).map { entity in
+            MemoryEntityGraph.Entity(id: entity.id, name: entity.name, aliases: entity.aliasNames, type: entity.type)
+        }
+        var order: [UUID] = []
+        var links: [UUID: MemoryEntityGraph.FactLink] = [:]
+        for fact in try context.fetch(
+            FetchDescriptor<Fact>(sortBy: [SortDescriptor(\.validFrom), SortDescriptor(\.id)]))
+        {
+            if var existing = links[fact.id] {
+                if let invalidatedAt = fact.invalidatedAt {
+                    existing.invalidatedAt = min(existing.invalidatedAt ?? invalidatedAt, invalidatedAt)
+                }
+                if existing.subjectID == nil { existing.subjectID = fact.subject?.id }
+                links[fact.id] = existing
+                continue
+            }
+            order.append(fact.id)
+            links[fact.id] = MemoryEntityGraph.FactLink(
+                id: fact.id, subjectID: fact.subject?.id, validFrom: fact.validFrom, invalidatedAt: fact.invalidatedAt)
+        }
+        return MemoryEntityGraph(entities: entities, facts: order.compactMap { links[$0] })
+    }
+
     /// The topic's title, or `nil` while it is still the placeholder.
     static func title(of topic: Topic) -> String? {
         let title = topic.title.trimmingCharacters(in: .whitespacesAndNewlines)

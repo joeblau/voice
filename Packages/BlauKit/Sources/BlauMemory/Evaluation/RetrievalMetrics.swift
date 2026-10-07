@@ -113,18 +113,8 @@ public struct RetrievalEvalResult: Codable, Hashable, Sendable {
 /// Fuses several rankings of the same query by reciprocal rank fusion:
 /// each document scores the sum of `1 / (k + rank)` over the rankings it is
 /// in (rank from 1). Ties keep the order in which documents were first seen.
-/// Blau's hybrid retrieval (#64) fuses BM25 and vector rankings this way.
+/// Equal weights; Blau's hybrid retrieval (#64) uses the weighted
+/// `RankFusion` this delegates to.
 public func reciprocalRankFusion(_ rankings: [[String]], k: Double = 60) -> [String] {
-    var scores: [String: Double] = [:]
-    var firstSeen: [String: Int] = [:]
-    for ranking in rankings {
-        for (index, id) in ranking.enumerated() {
-            scores[id, default: 0] += 1 / (k + Double(index + 1))
-            if firstSeen[id] == nil { firstSeen[id] = firstSeen.count }
-        }
-    }
-    return scores.keys.sorted { lhs, rhs in
-        let (left, right) = (scores[lhs] ?? 0, scores[rhs] ?? 0)
-        return left == right ? (firstSeen[lhs] ?? 0) < (firstSeen[rhs] ?? 0) : left > right
-    }
+    RankFusion(k: k).fuse(rankings.map { RankFusion.Ranking($0) }).map(\.id)
 }
