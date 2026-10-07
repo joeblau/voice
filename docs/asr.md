@@ -21,6 +21,7 @@ for await event in transcriber.events {
     switch event {
     case .partial(let text, let range): ...    // replaces the previous partial
     case .final(let utterance): ...            // Utterance: text, TimeRange, startedAt, speaker .user
+    case .refined: break                       // only from SecondPassTranscriber (below)
     }
 }
 await transcriber.stop()                       // commits what was said so far
@@ -195,6 +196,126 @@ host's load (other builds ran in parallel) and showed no trend. The
 footprint never grew: it peaked in the first quarter of an hour and ended
 15 MB below where it started.
 
+## Second pass: punctuation and accuracy
+
+The streaming EOU model writes lowercase text without punctuation ("i think
+we moved it to the second week of march"). `SecondPassTranscriber` (in
+`BlauTranscription/SecondPass`, #30) re-transcribes every committed
+utterance with **Parakeet TDT 0.6B v3** and replaces the text with the
+punctuated, capitalized and usually more accurate version ("I think we
+moved it to the second week of March.") for display, storage and memory.
+
+```swift
+let transcriber = SecondPassTranscriber(
+    wrapping: streaming,                       // ParakeetStreamingTranscriber
+    audio: capture.hub,                        // the same capture history
+    recognizer: ParakeetTdtRecognizer.provider(modelManager: modelManager),
+    flags: flags)                              // FeatureFlag.secondPassASR
+try await transcriber.start()
+
+for await event in transcriber.events {
+    switch event {
+    case .partial(let text, let range): ...    // as before
+    case .final(let utterance):                // as before: send to Grok now, store, show
+        try await realtime.send(utterance)
+        try await store.commitUtterance(utterance)
+    case .refined(let utterance):              // same id, better text
+        try await store.commitUtterance(utterance)   // updates the row, no duplicate
+        // and replace the shown text; don't send it to Grok again
+    }
+}
+```
+
+It wraps any `Transcriber`, so the turn orchestrator (#36) and the views
+consume it like the streaming transcriber, plus one new event,
+`TranscriptEvent.refined(Utterance)`: the same `id`, `timeRange`, speaker
+and start time as the `.final` it refines, with new text. It can arrive
+after later events. `ConversationStore.commitUtterance` already updates the
+stored row when an utterance with the same `id` is committed again (also
+after the conversation ended or a relaunch). The chat view (#42) should
+swap the text with a subtle animation, for example
+`.contentTransition(.interpolate)` inside a short `withAnimation`, and no
+animation when Reduce Motion is on.
+
+### Turn latency is unchanged
+
+The streaming text goes to Grok exactly as before: each `.partial` and
+`.final` is forwarded the moment the wrapped transcriber emits it, before
+the second pass does anything. Only then is the utterance's audio copied
+out of the capture history (a memcpy of at most 32 s), and the model runs
+on a separate, `.utility` priority task that the forwarding never waits
+for. A second pass that never finishes delays no event
+(`aStuckSecondPassDelaysNoOtherEvent`). On a device, compare
+`realtime.firstAudio` and `asr.eou` with the `secondPassASR` flag on and
+off; the `asr.secondPass` interval shows the second pass running after
+the commit, while the user waits for Grok's reply.
+
+### Audio
+
+The second pass reads the utterance's `timeRange` (VAD's onset to VAD's
+end of speech, or to the last word when the model ended the utterance)
+from the capture history, with **100 ms** before it, never reaching into
+the previous utterance, and **120 ms** after it (short, because when the
+model splits continuous speech the next utterance starts right there).
+FluidAudio pads anything shorter than 0.3 s with silence (Blau pads it
+first) and runs one 15 s encoder window, or overlapping windows for longer
+audio. Each utterance decodes from a fresh decoder state.
+
+An utterance cut at the 30 s maximum is committed just as its start leaves
+a 30 s history, so the capture hub needs
+`SecondPassConfiguration.requiredHistory(for:)` (32.1 s with the defaults)
+of history for those to keep their second pass. Wire the live pipeline
+with `CaptureHub.Configuration(historyDuration: .seconds(33))` or more;
+the extra 3 s costs 192 KB.
+
+### When it keeps the streaming text
+
+| Reason (`SecondPassSkipReason`) | When |
+| --- | --- |
+| `disabled` | The `secondPassASR` flag is off (read for every utterance, so it can be toggled mid-conversation) |
+| `thermalPressure` | `ProcessInfo.thermalState` is `.serious` or `.critical` (checked when the utterance is committed and again when its turn comes) |
+| `modelUnavailable` | Parakeet TDT v3 isn't installed (it is optional; asked again for every utterance, so a download that finishes mid-conversation is picked up), or it failed to load (retried after 10 utterances) |
+| `audioUnavailable` | The utterance's start already left the capture history |
+| `backlog` | More than 4 utterances were waiting; the oldest waiting one is dropped |
+| `failed` | The model threw |
+| `blank` | The model heard no words |
+| `diverged` | The model changed more than 60% of the streaming transcript's words (edit distance over words, ignoring case and punctuation; transcripts under 3 words are exempt). That is a misfire, such as audio from the wrong span, not a correction |
+
+Identical text counts as `utterancesUnchanged` and emits no event.
+`SecondPassStatistics` counts all of it, plus recognizer time, the slowest
+utterance and the real-time factor.
+
+### Model and memory
+
+`ParakeetTdtRecognizer` loads the model from Blau's model store with
+`AsrModels.loadLocal(from:version: .v3)` (FluidAudio's downloader stays
+off, see [models.md](models.md)) on the first utterance that needs it and
+keeps it for the life of the transcriber. A warm load takes about 1.2 s
+(the Neural Engine compile, minutes on a first launch, happens when
+`ModelManager` warms the model after the download). Its Neural Engine
+footprint is large (468 MB of neural ledger on the Mac,
+[benchmarks.md](benchmarks.md)), which the device checks below have to
+confirm next to the other models.
+
+### Results
+
+`SecondPassLiveTests` (real models, recorded 2026-10-07 on an Apple M3 Max,
+macOS 27.2, debug build, other builds running on the host):
+
+| Check | Result |
+| --- | --- |
+| Each labelled fixture sentence through TDT v3 with the second pass's padding | 11 of 11 start with a capital and end in `.`, `?` or `!`; WER 0.009; 33.4 s of audio in 0.98 s (RTF 0.03) |
+| The streaming model's finals on the four fixtures, refined end to end | 11 of 11 refined, none skipped; WER 0.054 (streaming) → 0.027 (refined); 42–106 ms per utterance after the first (526 ms, the warm-up) |
+
+Examples from the end-to-end run:
+
+| Streaming final | Refined |
+| --- | --- |
+| can you remind me what we decided about the launch date | Can you remind me what we decided about the launch date? |
+| i think we moved it to the second week of march | I think we moved it to the second week of March. |
+| should we move the haik to sunday den | Should we move the high to Sunday then? |
+| let me think about the for a moment | Let me think about that for a moment. |
+
 ## Tests
 
 | Where | What | Runs |
@@ -203,6 +324,9 @@ footprint never grew: it peaked in the first quarter of an hour and ended
 | `Tests/BlauTranscriptionTests/ASR/TranscriberSoakTests.swift` | An hour of looped fixtures (2 s): every sentence of every repeat, the recognizer's history bounded by one sentence, work per chunk flat, nothing skipped or repeated | `swift test` |
 | `Tests/BlauTranscriptionTests/ASR/ParakeetEouRecognizerTests.swift` | Chunk geometry against FluidAudio's `StreamingChunkSize`, the installed export, loading errors | `swift test` |
 | `Tests/BlauTranscriptionTests/ASR/ParakeetLiveTests.swift` | The fixtures through the **real model** (WER, latency), the raw EOU timing, and the hour-long soak | `BLAU_ASR_MODEL_DIR` (and `BLAU_ASR_SOAK=1`) |
+| `Tests/BlauTranscriptionTests/SecondPass/SecondPassTranscriberTests.swift` | Finals forwarded before the second pass runs (and with it stuck), `.refined` keeps the identity, audio span and padding, history requirement, flag, thermal skip, model install and load retry, failures, blank/unchanged/diverged, backlog, stream end, `asr.secondPass` messages | `swift test` |
+| `Tests/BlauTranscriptionTests/SecondPass/TranscriptComparisonTests.swift` | Word comparison, TDT input minimum, model files | `swift test` |
+| `Tests/BlauTranscriptionTests/SecondPass/SecondPassLiveTests.swift` | The fixtures through the **real** TDT v3 model: punctuation, capitalization, WER; end to end with the real streaming model | `BLAU_TDT_MODEL_DIR` (and `BLAU_ASR_MODEL_DIR`) |
 
 ```sh
 cd Packages/BlauKit
@@ -210,6 +334,8 @@ BLAU_MODEL_DOWNLOAD_SMOKE=1 BLAU_MODEL_DOWNLOAD_SMOKE_MODELS=parakeetRealtimeEOU
   BLAU_MODEL_DOWNLOAD_SMOKE_DIR=/tmp/blau-models swift test --filter ModelDownloadSmokeTests
 BLAU_ASR_MODEL_DIR=/tmp/blau-models/parakeetRealtimeEOU/<revision> swift test --filter ParakeetLiveTests
 BLAU_ASR_SOAK=1 BLAU_ASR_MODEL_DIR=... swift test --filter ParakeetLiveTests/anHourOfSpeech
+BLAU_TDT_MODEL_DIR=/tmp/blau-models/parakeetTDTv3/<revision> BLAU_ASR_MODEL_DIR=... \
+  swift test --filter SecondPassLiveTests
 ```
 
 `BLAU_ASR_EOU_DEBOUNCE_MS` and `BLAU_ASR_SILENCE_COMMIT_MS` try other
@@ -225,3 +351,6 @@ These need a physical iPhone (A17 or later) and are recorded here when run.
 | Final < 1.2 s after the user stops | `asr.eou` interval (VAD's end of speech → decision) plus VAD's 0.3–0.55 s; `statistics.slowestEndOfSpeechCommit` | Pending |
 | An hour: flat memory and chunk time | Record a one-hour conversation (or play the looped fixtures into the mic) with the **Blau** Instruments template: Allocations growth, `asr.chunk` durations at the start and the end | Pending |
 | Screen locked (iOS 27 Neural Engine restriction, #26) | Lock mid-session: partials keep coming (Core ML falls back to the CPU), check `asr.chunk` durations | Pending |
+| Second pass: stored utterances punctuated | Talk for a few minutes with the TDT v3 model installed; the stored utterances (the SwiftData store) have punctuation and capitals; `SecondPassStatistics` shows no `audioUnavailable` or `backlog` skips | Pending |
+| Second pass: turn latency unchanged | Same scripted conversation (or looped fixtures into the mic) with `secondPassASR` on and off (`-blau.featureFlag.secondPassASR NO`); compare `realtime.firstAudio` and `asr.eou` p50/p95 in Instruments, and check `asr.secondPass` overlaps the wait for Grok, not the next `asr.chunk` | Pending |
+| Second pass: per-utterance time and memory | `asr.secondPass` durations (expect well under the time Grok takes to answer) and the footprint with all models loaded, screen on and locked (CPU fallback) | Pending |

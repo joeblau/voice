@@ -14,7 +14,7 @@ the rest of the app's life.
 | `.sileroVAD` | Silero VAD v6.2.1 (256 ms, unified) | 1 MB | yes | VAD segmenter (#28, [vad.md](vad.md)) |
 | `.speakerEmbedding` | WeSpeaker ResNet34 (`wespeaker_v2`, 256-d) | 8 MB | yes | Voice ID (#45) |
 | `.parakeetRealtimeEOU` | Parakeet realtime EOU 120M, 320 ms chunks | 224 MB | yes | Streaming ASR (#29, [asr.md](asr.md)) |
-| `.parakeetTDTv3` | Parakeet TDT 0.6B v3 (int8 encoder) | 483 MB | no | Second pass (#30) |
+| `.parakeetTDTv3` | Parakeet TDT 0.6B v3 (int8 encoder) | 483 MB | no | Second pass (#30, [asr.md](asr.md#second-pass-punctuation-and-accuracy)) |
 
 Required models download first, during onboarding. The optional second-pass
 model follows when **Download High-Accuracy Model** is on (the default);

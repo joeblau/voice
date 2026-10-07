@@ -19,6 +19,7 @@ import os
 ///     switch event {
 ///     case .partial(let text, let range): ...   // replaces the previous partial
 ///     case .final(let utterance): ...           // commit it
+///     case .refined: break                      // only from SecondPassTranscriber
 ///     }
 /// }
 /// ```
