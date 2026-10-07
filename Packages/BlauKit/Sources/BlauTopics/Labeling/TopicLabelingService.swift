@@ -6,7 +6,7 @@ import os
 /// Labels topics with the best labeler available, falling back down the
 /// chain, and records how long it took.
 ///
-/// The standard chain (`standard(textGenerator:)`):
+/// The standard chain (`standard(textGenerator:onDevice:)`):
 ///
 /// 1. `FoundationModelsTopicLabeler`: Apple's on-device model.
 /// 2. `RemoteTopicLabeler` over `XAITextGenerator`: when Apple Intelligence
@@ -59,21 +59,37 @@ public actor TopicLabelingService {
         self.signposter = signposter
     }
 
-    /// Foundation Models, then `textGenerator` (xAI) if given, then
-    /// keywords.
+    /// `onDevice` (Foundation Models by default), then `textGenerator`
+    /// (xAI) if given, then keywords.
+    ///
+    /// - Parameters:
+    ///   - onDevice: The first labeler tried. Defaults to
+    ///     `defaultOnDeviceLabeler()`. Tests pass a fake so they never run
+    ///     the real model.
     public static func standard(
         textGenerator: (any TextGenerator)?,
+        onDevice: (any TopicLabeler)? = defaultOnDeviceLabeler(),
         policy: TopicLabelingPolicy = .default,
         thermal: any ThermalStateProviding = SystemThermalState()
     ) -> TopicLabelingService {
         var labelers: [any TopicLabeler] = []
-        #if canImport(FoundationModels)
-            labelers.append(FoundationModelsTopicLabeler())
-        #endif
+        if let onDevice {
+            labelers.append(onDevice)
+        }
         if let textGenerator {
             labelers.append(RemoteTopicLabeler(generator: textGenerator))
         }
         return TopicLabelingService(labelers: labelers, policy: policy, thermal: thermal)
+    }
+
+    /// Apple's on-device model where the SDK has FoundationModels, else
+    /// `nil`. Building it runs no inference.
+    public static func defaultOnDeviceLabeler() -> (any TopicLabeler)? {
+        #if canImport(FoundationModels)
+            FoundationModelsTopicLabeler()
+        #else
+            nil
+        #endif
     }
 
     /// What the thermal policy allows right now.

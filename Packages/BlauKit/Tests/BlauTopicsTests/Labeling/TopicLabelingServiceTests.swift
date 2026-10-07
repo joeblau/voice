@@ -186,13 +186,67 @@ struct TopicLabelingServiceTests {
         #expect(strict.mode(for: .serious) == .keywordsOnly)
     }
 
-    @Test func standardChainOrder() async {
-        let generator = FakeTextGenerator(available: false) { _ in "" }
-        let service = TopicLabelingService.standard(textGenerator: generator, thermal: FixedThermalState(.nominal))
-        // Nothing to assert about the on-device model here (it depends on the
-        // Mac); the chain must still produce a label.
+    // The standard chain is built with a scripted on-device labeler, so these
+    // tests never run the real model. Real inference is only exercised by the
+    // BLAU_DEVICE_TESTS-gated tests in FoundationModelsTopicLabelerTests.
+
+    private static let xaiReply = #"{"isNewTopic": true, "title": "Grok Title", "summary": "From xAI."}"#
+
+    @Test func standardChainPrefersTheOnDeviceLabeler() async {
+        let onDevice = ScriptedLabeler(
+            .foundationModels, answer: TopicShift(isNewTopic: false, title: "On Device", summary: "s"))
+        let generator = FakeTextGenerator { _ in Self.xaiReply }
+        let service = TopicLabelingService.standard(
+            textGenerator: generator, onDevice: onDevice, thermal: FixedThermalState(.nominal))
+
+        let result = await service.label(boundaryRequest)
+        #expect(result.label.source == .foundationModels)
+        #expect(result.label.title == "On Device")
+        #expect(onDevice.requests.count == 1)
+        #expect(generator.requests.isEmpty)
+    }
+
+    @Test func standardChainFallsBackToXAIWhenOnDeviceIsUnavailable() async {
+        let onDevice = ScriptedLabeler(
+            .foundationModels, available: false, answer: TopicShift(isNewTopic: false, title: "x", summary: ""))
+        let generator = FakeTextGenerator { _ in Self.xaiReply }
+        let service = TopicLabelingService.standard(
+            textGenerator: generator, onDevice: onDevice, thermal: FixedThermalState(.nominal))
+
+        let result = await service.label(boundaryRequest)
+        #expect(result.label == TopicLabel(title: "Grok Title", summary: "From xAI.", source: .xai))
+        #expect(onDevice.requests.isEmpty)
+        #expect(generator.requests.count == 1)
+    }
+
+    @Test func standardChainEndsWithKeywords() async {
+        let onDevice = ScriptedLabeler(
+            .foundationModels, available: false, answer: TopicShift(isNewTopic: false, title: "x", summary: ""))
+        let generator = FakeTextGenerator(available: false) { _ in Self.xaiReply }
+        let service = TopicLabelingService.standard(
+            textGenerator: generator, onDevice: onDevice, thermal: FixedThermalState(.nominal))
+
         let result = await service.label(.topic(units[0..<1]))
+        #expect(result.label.source == .keywords)
         #expect(!result.label.title.isEmpty)
+        #expect(onDevice.requests.isEmpty)
+        #expect(generator.requests.isEmpty)
+    }
+
+    @Test func standardChainWithoutModelsUsesKeywords() async {
+        let service = TopicLabelingService.standard(
+            textGenerator: nil, onDevice: nil, thermal: FixedThermalState(.nominal))
+        let result = await service.label(boundaryRequest)
+        #expect(result.label.source == .keywords)
+    }
+
+    @Test func defaultOnDeviceLabelerIsFoundationModels() {
+        // Only builds the labeler; no inference runs.
+        #if canImport(FoundationModels)
+            #expect(TopicLabelingService.defaultOnDeviceLabeler()?.source == .foundationModels)
+        #else
+            #expect(TopicLabelingService.defaultOnDeviceLabeler() == nil)
+        #endif
     }
 }
 
