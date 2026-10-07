@@ -1,6 +1,6 @@
 # iCloud sync
 
-Blau keeps all text (conversations, topics, utterances) and the voiceprint in
+Blau keeps all text (conversations, topics, utterances, memory) and the voiceprint in
 SwiftData and mirrors it to the **private database** of the CloudKit container
 `iCloud.com.joeblau.blau` (issue #20). There is no Blau server: the data
 lives on the user's devices and in their own iCloud account. The model and
@@ -161,7 +161,7 @@ Development environment; never mix a Debug device with a TestFlight device.
 | # | Step | Expected | Result |
 | - | ---- | -------- | ------ |
 | 1 | Fresh install on A and B. Open Settings → iCloud on both. | "iCloud Sync: On", "iCloud Account: Signed in". | pending |
-| 2 | In the CloudKit Console (Development), check `iCloud.com.joeblau.blau` → Schema. | Record types `CD_Conversation`, `CD_Topic`, `CD_Utterance`, `CD_VoiceProfile`, `CD_VoiceEnrollmentSet` exist (DEBUG schema initialization). | pending |
+| 2 | In the CloudKit Console (Development), check `iCloud.com.joeblau.blau` → Schema. | Record types `CD_Conversation`, `CD_Topic`, `CD_Utterance`, `CD_VoiceProfile`, `CD_VoiceEnrollmentSet`, `CD_Document`, `CD_CollectionItem`, `CD_MemoryEntity`, `CD_Fact`, `CD_ProfileBlock` exist (DEBUG schema initialization). | pending |
 | 3 | On A, record a short conversation (until the conversation UI exists, use a DEBUG build that inserts a `Conversation` with a topic and two utterances). | A's Settings shows "Syncing…", then "On" with "Last Synced: now". | pending |
 | 4 | Keep B in the foreground and wait up to 1 minute. | The conversation, its topic and utterances appear on B with the same text, order and topic title. | pending |
 | 5 | Background B, edit the topic title on A, then bring B to the foreground. | B shows the new title (silent push or the foreground refresh). | pending |

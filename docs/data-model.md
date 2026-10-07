@@ -1,18 +1,24 @@
 # Data model
 
-Blau keeps all text (conversations, topics, utterances) and the user's
-voiceprint in SwiftData. The store is mirrored to the user's private CloudKit
+Blau keeps all text (conversations, topics, utterances, and the long-term
+memory: knowledge-base documents, entities, facts and the profile block) and
+the user's voiceprint in SwiftData. The store is mirrored to the user's private CloudKit
 database in `iCloud.com.joeblau.blau`, so it follows CloudKit's schema rules.
 Derived data such as embeddings and search indexes stays local and is
 rebuilt from these models (issue #7).
 
 The models live in `Packages/BlauKit/Sources/BlauPersistence/Schema`.
 
+The current schema is **v2** (`SchemaV2`, version `2.0.0`): the five v1
+models below, unchanged, plus five memory models ([Schema v2](#schema-v2-memory)).
+Code outside BlauPersistence uses the aliases in `CurrentSchema.swift`, which
+always point at the newest version.
+
 ## Schema v1
 
-`SchemaV1` (version `1.0.0`) defines five flat models. Code outside
-BlauPersistence uses the aliases in `CurrentSchema.swift`, which always point
-at the newest version:
+`SchemaV1` (version `1.0.0`) defines five flat models. `SchemaV2` carries them
+over unchanged (`SchemaV2.Conversation` and so on), and the aliases point
+there:
 
 | Model (CloudKit record type)  | Swift alias          |
 | ----------------------------- | -------------------- |
@@ -120,6 +126,131 @@ optional and uses `.nullify`.
   from `BlauClock` (see docs/architecture.md, rule 5). The `Date.distantPast`
   declaration defaults exist only to satisfy CloudKit.
 
+## Schema v2: memory
+
+`SchemaV2` (version `2.0.0`, issue #61) adds the synced, text-only models for
+long-term memory (epic #9). Embeddings and the FTS index built from them are
+local and rebuildable (#62), never synced.
+
+| Model (CloudKit record type) | Swift alias      | Holds                                                                 |
+| ---------------------------- | ---------------- | --------------------------------------------------------------------- |
+| `Document`                   | `MemoryDocument` | A knowledge-base page: note, company, profile or collection (#65)     |
+| `CollectionItem`             | `CollectionItem` | One prompt of a collection (e.g. a YC question) and its practice record (#69) |
+| `MemoryEntity`               | `MemoryEntity`   | A person, organization, place, product, project... the user talks about |
+| `Fact`                       | `Fact`           | An add-only, validity-dated statement about the user or an entity (#66) |
+| `ProfileBlock`               | `ProfileBlock`   | The pinned summary of the user sent with every session (#67)          |
+
+The Swift alias for `Document` is `MemoryDocument` (the entity and record type
+are still `Document`) so an unqualified `Document` never competes with a
+framework type of that name, the same reason `Utterance` is `StoredUtterance`.
+The issue's `Entity` is named `MemoryEntity` everywhere, so it never reads as
+a Core Data or SwiftData entity description.
+
+```mermaid
+erDiagram
+    Document ||--o{ CollectionItem : "collectionItems (cascade)"
+    MemoryEntity |o--o{ Fact : "facts (cascade)"
+
+    Document {
+        UUID id
+        String kindRaw "note, company, profile, collection"
+        String title
+        String body
+        Date createdAt
+        Date updatedAt
+        String contentHash "SHA-256 hex of title and body"
+    }
+    CollectionItem {
+        UUID id
+        Int ordinal
+        String prompt
+        String referenceAnswer "optional"
+        Date createdAt
+        Date lastPracticedAt "optional"
+        Int practiceCount "default 0"
+        Double score "optional, 0...1"
+    }
+    MemoryEntity {
+        UUID id
+        String name
+        String typeRaw "person, organization, place, product, project, event, concept, other"
+        String aliases "JSON array of strings"
+        String summary "optional"
+        Date createdAt
+        Date updatedAt
+    }
+    Fact {
+        UUID id
+        String predicate
+        String objectText
+        UUID sourceUtteranceID "optional"
+        Date validFrom
+        Date invalidatedAt "optional"
+        Double confidence "default 1, 0...1"
+        String originRaw "extracted, user"
+        Date createdAt
+    }
+    ProfileBlock {
+        UUID id
+        String key "default user"
+        String text "about 1,500 tokens"
+        Date updatedAt
+    }
+```
+
+| Deleting            | Does                                                                   |
+| ------------------- | ---------------------------------------------------------------------- |
+| a `Document`        | deletes its collection items                                           |
+| a `CollectionItem`  | removes it from its document                                           |
+| a `MemoryEntity`    | deletes its facts (statements about it mean nothing without it); facts about the user (no subject) stay |
+| a `Fact`            | removes it from its entity                                             |
+
+`CollectionItem.document` and `Fact.subject` are optional and use `.nullify`,
+like every to-one side in v1.
+
+### Memory field notes
+
+- **Content hash.** `Document.title`, `body`, `updatedAt` and `contentHash`
+  are `private(set)`: change the text with `update(title:body:at:)`, which
+  refreshes the hash and stamps `updatedAt` only when the text actually
+  changed. The hash is SHA-256 over the title's UTF-8 length, the title and
+  the body, as 64 lowercase hex digits; the indexer (#63) compares it with the
+  hash it last indexed, so a document synced from another device is
+  re-embedded only if its text changed. The hash format is pinned by a test:
+  changing it re-indexes every document.
+- **Facts are add-only and validity-dated** (Zep / Graphiti, issue #1). A fact
+  is true over `[validFrom, invalidatedAt)`. When something stops being true,
+  `invalidate(at:)` closes the old fact and the extractor adds a new one, so
+  "where did I work in March" still has an answer. Invalidating twice keeps
+  the earlier date, so the same correction replayed on two devices converges.
+  `createdAt` is when the fact was recorded, which can be later than
+  `validFrom`. Current facts are `invalidatedAt == nil`, which works in a
+  `#Predicate`.
+- **A fact with no subject is about the user.** `sourceUtteranceID` is a
+  plain id rather than a relationship, so deleting a conversation keeps what
+  was learned from it.
+- **Origin.** `originRaw` is `extracted` (inferred by a model, #66) or `user`
+  (entered, confirmed or explicitly asked to be remembered by the user, which
+  outranks a contradicting extracted fact). `confidence` is clamped to `0...1`.
+- **Aliases** are a JSON array in a string (`aliases`), because CloudKit has
+  no list type for SwiftData to map `[String]` to. Use `aliasNames`, which
+  trims, drops blanks, the entity's own name and case- or diacritic-insensitive
+  repeats. `matches(_:)` compares a name with the entity's name and aliases the
+  same way.
+- **No uniqueness, so de-duplicate on read.** Two devices can each create the
+  `Acme` entity or the `user` profile block while offline. `ProfileBlock.latest(key:)`
+  fetches the most recently updated block for a key (ties broken by `id`, so
+  every device picks the same one); consolidation (#67) and extraction (#66)
+  merge the extras.
+- **Profile budget.** `ProfileBlock.tokenBudget` is 1,500 tokens;
+  `approximateTokenCount` (UTF-8 bytes / 4) is a cheap check against it.
+- **Not encrypted.** The memory fields are not `.allowsCloudEncryption`. They
+  hold text derived from the utterances, which are not encrypted either, and
+  the choice can't change once deployed. Users with Advanced Data Protection
+  get end-to-end encryption for all of it.
+- **Unknown raw values** (`kindRaw`, `typeRaw`, `originRaw`) read as `nil`
+  through `kind`, `type` and `origin`, like the v1 enums.
+
 ## CloudKit rules
 
 CloudKit mirroring rejects a schema that breaks any of these rules, but
@@ -142,6 +273,21 @@ one:
 Each inverse is declared once, on the to-many side, with
 `@Relationship(inverse:)`. SwiftData links the other side, and the Core Data
 check confirms both ends have an inverse.
+
+Production is also **additive only** across versions.
+`CloudKitCompatibility.breakingChanges(in: BlauMigrationPlan.self)` compares
+each version with the next on the generated Core Data models, and the tests
+fail on any of these:
+
+| Change from one version to the next                                  | Violation kind      |
+| -------------------------------------------------------------------- | ------------------- |
+| An entity disappears                                                 | `removedEntity`     |
+| A property disappears (including a rename)                           | `removedProperty`   |
+| A property's type, optionality, destination, inverse, cardinality or ordering changes (its Core Data version hash) | `changedProperty` |
+| An attribute's `.allowsCloudEncryption` changes                      | `changedEncryption` |
+
+A delete rule may change: it is local behavior, not part of the CloudKit
+schema.
 
 ## Writing from the pipeline: `ConversationStore`
 
@@ -212,17 +358,46 @@ Once a schema version is deployed to the CloudKit production environment, the
 CloudKit schema is **additive only**: you can add record types and fields, but
 never rename, retype or delete them. To change the model:
 
-1. Copy the models into a new `SchemaV2` with `versionIdentifier` `2.0.0`.
-   Never edit a version that has shipped.
+1. Copy the models into a new `SchemaV3` with `versionIdentifier` `3.0.0`
+   (replace `SchemaV2` with `SchemaV3` in copies of the `SchemaV2+*.swift`
+   files). Never edit a version that has shipped.
 2. Make only additive changes (new models, new optional or defaulted
    properties, new optional relationships with inverses).
-3. Append `SchemaV2.self` to `BlauMigrationPlan.schemas` and add a
-   `.lightweight(fromVersion: SchemaV1.self, toVersion: SchemaV2.self)` stage.
-4. Point `CurrentSchema` at `SchemaV2`.
-5. Run `swift test` in `Packages/BlauKit`: the CloudKit compatibility tests
-   check every version in the plan.
-6. Deploy the new schema to production in the CloudKit console before
+3. Append `SchemaV3.self` to `BlauMigrationPlan.schemas` and add a
+   `.lightweight(fromVersion: SchemaV2.self, toVersion: SchemaV3.self)` stage.
+4. Point `CurrentSchema` at `SchemaV3`.
+5. Check in a store written by the previous version (see
+   `Tests/BlauPersistenceTests/Fixtures/README.md`) and add a migration test
+   like `MigrationV1toV2Tests`.
+6. Run `swift test` in `Packages/BlauKit`: the CloudKit compatibility tests
+   check every version in the plan and that each step is additive.
+7. Deploy the new schema to production in the CloudKit console before
    shipping the build (checklist in [release.md](release.md)).
 
-The memory models (Document, CollectionItem, Entity, Fact, ProfileBlock) arrive
-in v2 (#61).
+### History
+
+| Version | Issue | Change | Stage from the previous version |
+| ------- | ----- | ------ | ------------------------------- |
+| 1.0.0 | #19 | `Conversation`, `Topic`, `Utterance`, `VoiceProfile`, `VoiceEnrollmentSet` | (first version) |
+| 2.0.0 | #61 | Adds `Document`, `CollectionItem`, `MemoryEntity`, `Fact`, `ProfileBlock`; v1 models unchanged | `BlauMigrationPlan.migrateV1toV2`, lightweight |
+
+### Migration tests
+
+`MigrationV1toV2Tests` start from `Fixtures/SchemaV1/Blau.store`, a store
+written by `SchemaV1` through SwiftData exactly as a v1 build writes it
+(configuration `Blau`, persistent history on), and checked in. They copy it to
+a temporary directory and open it with the current schema and plan, through
+`BlauModelContainer` and through `PersistenceBootstrap` (the app's launch
+path), then check:
+
+- every conversation, topic, utterance, voiceprint and enrollment set, every
+  field and every relationship survived;
+- the store's recorded entity hashes moved from v1's to v2's, and the memory
+  tables start empty;
+- memory models can be written to the migrated store, and it reopens without
+  migrating again;
+- the bootstrap stays on disk (no fallback to an in-memory store).
+
+The same checks run on a v1 store written during the test.
+`SchemaV1FixtureTests` fails if the checked-in store's hashes no longer match
+`SchemaV1`, which means `SchemaV1` was edited in place.
