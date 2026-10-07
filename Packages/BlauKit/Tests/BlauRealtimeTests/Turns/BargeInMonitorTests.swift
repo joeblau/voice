@@ -139,6 +139,84 @@ struct BargeInMonitorTests {
         }
     }
 
+    /// Regression (PR #123 review round 2): the agent's leak holds a VAD
+    /// segment open through a long reply, and VAD splits it every 8 s. The
+    /// split's continuation onset sat 100 samples before `detectedAt`, under
+    /// the 160 the level checks measure, so the guard let it through and the
+    /// agent interrupted itself with nobody talking.
+    @Test func continuationOnsetOfALeakDoesNotBargeIn() async throws {
+        let mic = MicSignal.leak(syllable: -34, pause: -40, seconds: 10)
+        let setup = Setup(audible: .seconds(5), microphone: mic)
+        let detected = MicSignal.offset(9.0)
+        let onset = SpeechOnset(
+            segmentID: 4, startOffset: detected - 100, sampleRate: MicSignal.rate, isContinuation: true,
+            detectedAt: detected)
+
+        let outcome = await setup.monitor.handle(.speechStarted(onset))
+
+        #expect(outcome == .continuation)
+        #expect(setup.target.triggers.isEmpty)
+        // A bookkeeping split, not an onset: nothing is counted or logged.
+        let statistics = await setup.monitor.statistics
+        #expect(statistics.onsetsWhileSpeaking == 0)
+        #expect(statistics.suppressedTotal == 0)
+        #expect(setup.signposts.events.isEmpty)
+    }
+
+    /// Even the user's own speech: a continuation carries on a segment
+    /// whose real onset was already judged, so it is never judged again.
+    @Test(arguments: [-100, 0, 4000])
+    func continuationOnsetsAreNeverJudged(samplesBeforeDetection: Int64) async throws {
+        let setup = Setup(microphone: MicSignal.tone(-70, seconds: 1.5) + MicSignal.tone(-20, seconds: 8.5))
+        let detected = MicSignal.offset(9.0)
+        let onset = SpeechOnset(
+            segmentID: 7, startOffset: detected - samplesBeforeDetection, sampleRate: MicSignal.rate,
+            isContinuation: true, detectedAt: detected)
+        #expect(await setup.monitor.handle(.speechStarted(onset)) == .continuation)
+        #expect(setup.target.triggers.isEmpty)
+    }
+
+    /// A continuation doesn't drop the open segment: its end is still
+    /// handled, and the next real onset is judged as usual.
+    @Test func aRealOnsetAfterAContinuationIsJudged() async throws {
+        let setup = Setup(microphone: Self.userOverQuietEcho)
+        let continuation = SpeechOnset(
+            segmentID: 1, startOffset: MicSignal.offset(1.0), sampleRate: MicSignal.rate, isContinuation: true,
+            detectedAt: MicSignal.offset(1.0))
+        #expect(await setup.monitor.handle(.speechStarted(continuation)) == .continuation)
+        await setup.monitor.handle(
+            .speechEnded(
+                SpeechSegment(
+                    id: 1, sampleRange: MicSignal.offset(1.0)..<MicSignal.offset(1.2), sampleRate: MicSignal.rate,
+                    isContinuation: true, endReason: .silence, detectedAt: MicSignal.offset(1.4),
+                    peakProbability: 0.9, meanProbability: 0.8)))
+        let outcome = await setup.monitor.handle(.speechStarted(.at(1.5, detected: 1.8, segment: 2)))
+        guard case .bargedIn = outcome else {
+            Issue.record("Expected a barge-in, got \(String(describing: outcome))")
+            return
+        }
+    }
+
+    /// Defence in depth: speech the history holds but that is too short to
+    /// measure is suppressed rather than let through (fail closed).
+    @Test func speechTooShortToMeasureDoesNotBargeIn() async throws {
+        let setup = Setup(microphone: MicSignal.leak(syllable: -34, pause: -40, seconds: 3))
+        let detected = MicSignal.offset(2.0)
+        let onset = SpeechOnset(
+            segmentID: 2, startOffset: detected - 100, sampleRate: MicSignal.rate, isContinuation: false,
+            detectedAt: detected)
+        #expect(await setup.monitor.handle(.speechStarted(onset)) == .suppressed(.echo))
+        #expect(setup.target.triggers.isEmpty)
+    }
+
+    /// The same with an empty span (VAD reporting the onset at the moment
+    /// it began).
+    @Test func anEmptySpanTheHistoryHoldsDoesNotBargeIn() async throws {
+        let setup = Setup(microphone: MicSignal.leak(syllable: -34, pause: -40, seconds: 3))
+        #expect(await setup.monitor.handle(.speechStarted(.at(2.0, detected: 2.0))) == .suppressed(.echo))
+        #expect(setup.target.triggers.isEmpty)
+    }
+
     @Test func speechBelowTheMinimumLevelDoesNotBargeIn() async throws {
         let mic = MicSignal.tone(-80, seconds: 1.5) + MicSignal.tone(-52, seconds: 1.5)
         let setup = Setup(microphone: mic)

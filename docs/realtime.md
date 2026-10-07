@@ -698,6 +698,23 @@ how long the item now playing has been audible) and placed on the capture
 timeline at the onset's `detectedAt`. Without a player there is no grace
 period; without the capture history the level checks are skipped.
 
+Two more rules close gaps where the guard would otherwise fail open:
+
+- *Continuation onsets never barge in.* When a segment reaches VAD's
+  `maximumSegmentDuration` (8 s), VAD ends it and starts a continuation
+  (`SpeechOnset.isContinuation`) at the quietest point of its last second,
+  which can sit right on `detectedAt`. That is the same speech carrying on,
+  whose real onset was already judged (or came before Grok spoke), so the
+  monitor returns `BargeInOutcome.continuation` without judging or counting
+  it. Otherwise the agent's own leak, holding a segment open through a long
+  reply, would get a fresh chance to interrupt it every 8 s, with almost
+  nothing to measure.
+- *Too short to measure is suppressed.* Speech the capture history still
+  holds but that is shorter than 10 ms (`minimumMeasuredSamples`, including
+  an empty span) can't be told from the leak, so it is suppressed as
+  `echo`. Only speech the history no longer holds at all is let through
+  unjudged.
+
 The level defaults are starting points chosen from the signal levels, not
 measured on a phone yet: calibrate them with the manual checks below and
 change `BargeInConfiguration.standard`.

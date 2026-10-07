@@ -142,6 +142,10 @@ public enum BargeInOutcome: Sendable, Hashable {
     /// Started in the grace period; decided once enough speech after it
     /// has been heard (or the segment ends).
     case deferred
+    /// VAD's forced split of an over-long segment
+    /// (`SpeechOnset.isContinuation`): the same speech carrying on, not new
+    /// speech, so it is neither judged nor counted.
+    case continuation
 }
 
 /// Counts for the HUD and the logs.

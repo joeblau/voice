@@ -19,7 +19,9 @@ import Foundation
 /// **Trigger.** A confirmed VAD onset (`VoiceActivityEvent.speechStarted`,
 /// #28) on the echo-cancelled microphone while the orchestrator is
 /// `agentSpeaking`. Speech while Grok is still thinking is left to the
-/// final utterance, which interrupts the same way (#36).
+/// final utterance, which interrupts the same way (#36). A continuation
+/// onset (VAD splitting a segment over its maximum duration) is the same
+/// speech carrying on, not a new onset, and never barges in.
 ///
 /// **Echo guard.** Voice processing removes most of the agent's voice from
 /// the microphone, but not all of it, and least while its echo canceller
@@ -144,6 +146,13 @@ public actor BargeInMonitor {
     // MARK: Deciding
 
     private func speechStarted(_ onset: SpeechOnset) async -> BargeInOutcome {
+        // VAD's forced split of a segment over its maximum duration: the
+        // same speech carrying on, whose real onset was already judged (or
+        // came before Grok spoke). Judging it again would give the agent's
+        // own leak, holding a segment open through a long reply, a fresh
+        // chance to barge in at every split, with a measured span that can
+        // be empty. Its ID is still tracked as open (`handle`).
+        if onset.isContinuation { return .continuation }
         let receivedAt = clock.uptime
         pending?.task.cancel()
         pending = nil
@@ -243,17 +252,24 @@ public actor BargeInMonitor {
 
     // MARK: Level checks
 
-    /// The shortest speech the level checks judge; less (out of the
-    /// history, say) is let through.
+    /// The shortest speech the level checks judge. Speech the history no
+    /// longer holds is let through; a shorter span the history does hold is
+    /// suppressed, since it can't be told from the leak (fail closed).
     static let minimumMeasuredSamples = 160
 
     private func echoCheck(
         _ candidate: Candidate, through end: Int64, microphone: any CaptureFrameSource
     ) -> BargeInOutcome? {
         let onset = candidate.onset
-        guard end > candidate.countsFrom, let speech = microphone.history(in: candidate.countsFrom..<end),
-            speech.sampleCount >= Self.minimumMeasuredSamples
-        else { return nil }
+        // An empty span is probed one sample long, so the history still says
+        // whether it holds this stretch of audio at all.
+        let span = candidate.countsFrom..<max(end, candidate.countsFrom + 1)
+        guard let speech = microphone.history(in: span) else { return nil }
+        guard end > candidate.countsFrom, speech.sampleCount >= Self.minimumMeasuredSamples else {
+            return suppress(
+                .echo, segment: onset.segmentID,
+                detail: "only \(max(0, end - candidate.countsFrom)) samples of speech to judge")
+        }
         let level = Self.decibels(speech.rms)
         if let minimum = configuration.minimumSpeechLevel, level < minimum {
             return suppress(
