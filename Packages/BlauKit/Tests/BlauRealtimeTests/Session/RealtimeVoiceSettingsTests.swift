@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 
 @testable import BlauRealtime
@@ -123,6 +124,52 @@ struct RealtimeVoiceSettingsStoreTests {
         #expect(second.values == first.values)
     }
 
+    @Test func revisionCountsChangesOnly() {
+        let store = RealtimeVoiceSettingsStore()
+        #expect(store.revision == 0)
+        store.update { $0.voice = .ara }
+        #expect(store.revision == 1)
+        store.update { $0.voice = .ara }  // no change
+        store.set(store.settings)
+        #expect(store.revision == 1)
+        store.set(RealtimeVoiceSettings(voice: .sal, speed: 0.8))
+        #expect(store.revision == 2)
+    }
+
+    /// `update` is one atomic read-modify-write: concurrent steps all land.
+    @Test func concurrentUpdatesLoseNothing() {
+        let store = RealtimeVoiceSettingsStore(
+            persistence: InMemoryVoiceSettingsPersistence(RealtimeVoiceSettings(speed: 0.7)))
+        DispatchQueue.concurrentPerform(iterations: 15) { _ in
+            store.update { $0.speed += RealtimeVoiceSettings.speedStep }
+        }
+        #expect(store.settings.speed == 1.45)
+        #expect(store.revision == 15)
+    }
+
+    /// The save runs outside the store's lock, so an observer of the save
+    /// (as `UserDefaults` change notifications would be) can read the store.
+    @Test func aSaveObserverCanReadTheStore() {
+        let persistence = ObservedPersistence()
+        let store = RealtimeVoiceSettingsStore(persistence: persistence)
+        persistence.onSave { _ = store.settings }
+        store.update { $0.voice = .leo }
+        #expect(persistence.saves == [RealtimeVoiceSettings(voice: .leo)])
+    }
+
+    /// Racing writers save outside the lock, yet the last save is always the
+    /// store's final settings.
+    @Test func concurrentWritersLeaveTheLatestSettingsSaved() {
+        let persistence = InMemoryVoiceSettingsPersistence()
+        let store = RealtimeVoiceSettingsStore(persistence: persistence)
+        let voices = RealtimeVoice.builtIn
+        DispatchQueue.concurrentPerform(iterations: 200) { index in
+            let speed = 0.7 + Double(index % 17) * 0.05
+            store.set(RealtimeVoiceSettings(voice: voices[index % voices.count], speed: speed))
+        }
+        #expect(persistence.loadVoiceSettings() == store.settings)
+    }
+
     @Test func endingAStreamUnsubscribes() async throws {
         let store = RealtimeVoiceSettingsStore()
         let collector = StreamCollector(store.changes())
@@ -168,5 +215,31 @@ struct RealtimeVoiceSettingsModelTests {
         #expect(model.voice == .eve)
         model.reload()
         #expect(model.voice == .sal)
+    }
+}
+
+/// Records saves and calls a hook from inside each one.
+private final class ObservedPersistence: RealtimeVoiceSettingsPersisting {
+    private struct State {
+        var saves: [RealtimeVoiceSettings] = []
+        var hook: (@Sendable () -> Void)?
+    }
+
+    private let state = Mutex(State())
+
+    var saves: [RealtimeVoiceSettings] { state.withLock { $0.saves } }
+
+    func onSave(_ hook: @escaping @Sendable () -> Void) {
+        state.withLock { $0.hook = hook }
+    }
+
+    func loadVoiceSettings() -> RealtimeVoiceSettings? { nil }
+
+    func saveVoiceSettings(_ settings: RealtimeVoiceSettings) {
+        let hook = state.withLock { state in
+            state.saves.append(settings)
+            return state.hook
+        }
+        hook?()
     }
 }

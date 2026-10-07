@@ -149,6 +149,10 @@ struct RealtimeSessionConfiguratorTests {
         #expect(sender.sessions.last?.voice == "ara")
     }
 
+    /// A slider dragged for 1.6 s, moving every 100 ms of clock time (a
+    /// quarter of the debounce), sends nothing while it moves and exactly
+    /// one update, with the final value, after it is let go. A throttle
+    /// (one update per 400 ms window) would send mid-drag values here.
     @Test func aDraggedSliderSendsOneUpdateWithTheFinalValue() async throws {
         let configurator = makeConfigurator()
         let sender = RecordingSender()
@@ -158,20 +162,66 @@ struct RealtimeSessionConfiguratorTests {
         defer { follower.cancel() }
         try await waitUntil("subscribed") { store.subscriberCount == 1 }
 
-        store.update { $0.speed = 1.05 }
-        await clock.waitForSleepers()
-        for speed in [1.1, 1.15, 1.2, 1.25, 1.3, 1.35, 1.4] {
+        // 0.75, 0.80, ... 1.50: one value per 100 ms, from t = 0 to 1500 ms.
+        let drag = (0..<16).map { Double(75 + 5 * $0) / 100 }
+        for (step, speed) in drag.enumerated() {
+            if step > 0 {
+                clock.advance(by: .milliseconds(100))
+                try await settle()
+                #expect(sender.sessions.count == 1, "sent mid-drag at \(step * 100) ms")
+            }
             store.update { $0.speed = speed }
+            await clock.waitForSleepers()
         }
-        clock.advance(by: .milliseconds(400))
-        try await waitUntil("update sent") { sender.sessions.count == 2 }
+
+        // Let go at 1500 ms. Nothing goes out before 400 ms of quiet.
+        for _ in 0..<3 {
+            clock.advance(by: .milliseconds(100))
+            try await settle()
+        }
+        #expect(sender.sessions.count == 1, "sent before 400 ms of quiet")
+
+        // One update within two debounce periods of the last change.
+        var waited = 300
+        while sender.sessions.count == 1 && waited < 800 {
+            clock.advance(by: .milliseconds(100))
+            waited += 100
+            try await settle()
+        }
+        #expect(sender.sessions.count == 2)
+        #expect(sender.sessions.last?.speed == 1.5)
 
         // The buffered change wakes the loop once more; nothing new is sent.
+        for _ in 0..<8 {
+            clock.advance(by: .milliseconds(100))
+            try await settle()
+        }
+        #expect(sender.sessions.count == 2)
+    }
+
+    /// A change made after the quiet period has started still restarts it:
+    /// the first change alone is never sent.
+    @Test func aChangeDuringTheQuietPeriodRestartsIt() async throws {
+        let configurator = makeConfigurator()
+        let sender = RecordingSender()
+        try await configurator.configure(sender)
+
+        let follower = Task { await configurator.followSettingsChanges(sending: sender) }
+        defer { follower.cancel() }
+        try await waitUntil("subscribed") { store.subscriberCount == 1 }
+
+        store.update { $0.voice = .ara }
+        await clock.waitForSleepers()
+        clock.advance(by: .milliseconds(350))
+        store.update { $0.voice = .rex }
+        clock.advance(by: .milliseconds(50))
+        try await settle()
+        #expect(sender.sessions.count == 1, "sent while Settings were still changing")
+
         await clock.waitForSleepers()
         clock.advance(by: .milliseconds(400))
-        try await settle()
-        #expect(sender.sessions.count == 2)
-        #expect(sender.sessions.last?.speed == 1.4)
+        try await waitUntil("update sent") { sender.sessions.count == 2 }
+        #expect(sender.sessions.map(\.voice) == ["eve", "rex"])
     }
 
     @Test func changesWhileDisconnectedWaitForTheNextConnection() async throws {

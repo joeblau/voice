@@ -149,8 +149,11 @@ await configurator.followSettingsChanges(sending: client)
   is the single source of truth: Settings → Voice writes it (through
   `RealtimeVoiceSettingsModel`), it is saved in `UserDefaults`, and
   `configure(_:)` reads it each time. `followSettingsChanges(sending:)`
-  sends a new update once Settings has been still for 400 ms, so dragging the
-  speed slider sends one update with the final value. While disconnected
+  debounces: every change restarts a 400 ms quiet period, and an update is
+  sent only once the settings have gone a full 400 ms without changing
+  (tracked by the store's `revision` counter). Dragging the speed slider
+  therefore sends one update, with the final value, 400 to 800 ms after it
+  is let go (the quiet period is checked once per 400 ms). While disconnected
   nothing is sent; the next `configure(_:)` carries the change.
 - **Always complete.** Each update carries every field above, built from the
   settings and memory at that moment, so it never depends on an earlier

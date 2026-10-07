@@ -20,8 +20,10 @@ extension RealtimeClient: RealtimeEventSending {}
 /// - **When Settings change.** ``followSettingsChanges(sending:)`` watches
 ///   the ``RealtimeVoiceSettingsStore`` and sends a new `session.update` as
 ///   soon as the voice, speed or reasoning effort changes, so the change
-///   applies from the next response. Changes are debounced (a speed slider
-///   being dragged sends one update, not dozens). While disconnected
+///   applies from the next response. Changes are debounced: nothing is sent
+///   until the settings have gone ``settingsDebounce`` without changing, so
+///   a speed slider being dragged sends one update, with the value it was
+///   let go at, not dozens. While disconnected
 ///   nothing is sent; the next ``configure(_:)`` carries the new settings.
 ///
 /// Every `session.update` is complete (instructions, voice, audio, turn
@@ -39,7 +41,7 @@ extension RealtimeClient: RealtimeEventSending {}
 public actor RealtimeSessionConfigurator {
     public nonisolated let settings: RealtimeVoiceSettingsStore
     public nonisolated let configuration: RealtimeSessionConfiguration
-    /// How long Settings must be still before a change is sent.
+    /// How long Settings must go without changing before a change is sent.
     public nonisolated let settingsDebounce: Duration
 
     private let memory: any RealtimeMemoryContextProviding
@@ -122,21 +124,23 @@ public actor RealtimeSessionConfigurator {
     /// Sends a `session.update` whenever the settings change, until the
     /// task is cancelled. Run it alongside the session.
     ///
-    /// A change is sent once the settings have been still for
-    /// ``settingsDebounce``. Changes made while disconnected are not sent
+    /// This is a debounce, not a throttle: every change restarts the quiet
+    /// period, and a change is sent only once the settings have gone a full
+    /// ``settingsDebounce`` without changing. While they keep changing (a
+    /// slider being dragged) nothing is sent; when they stop, one update
+    /// goes out with the final settings. The quiet period is checked once
+    /// per ``settingsDebounce``, so that update leaves between one and two
+    /// ``settingsDebounce``s after the last change.
+    ///
+    /// Changes made while disconnected are not sent
     /// (``RealtimeClientError/notConnected`` is expected then); the next
     /// ``configure(_:)`` picks them up.
     public func followSettingsChanges(sending sender: some RealtimeEventSending) async {
         let changes = settings.changes()
         for await _ in changes {
-            do {
-                try await clock.sleep(for: settingsDebounce)
-            } catch {
-                return
-            }
+            guard await waitUntilSettingsAreStill() else { return }
             // Whatever arrived during the wait is in `settings` now; the
             // buffered change wakes the loop once more and is skipped below.
-            guard !Task.isCancelled else { return }
             guard settings.settings != appliedSettings else { continue }
             do {
                 try await configure(sender)
@@ -146,6 +150,26 @@ public actor RealtimeSessionConfigurator {
                 Log.realtime.error(
                     "Couldn't send updated voice settings: \(error.description, privacy: .public)")
             }
+        }
+    }
+
+    /// Sleeps until the settings have gone a full ``settingsDebounce``
+    /// without changing (``RealtimeVoiceSettingsStore/revision`` unchanged
+    /// across a whole sleep), restarting the wait whenever they changed.
+    ///
+    /// - Returns: `false` if the task was cancelled.
+    private func waitUntilSettingsAreStill() async -> Bool {
+        var seen = settings.revision
+        while true {
+            do {
+                try await clock.sleep(for: settingsDebounce)
+            } catch {
+                return false
+            }
+            guard !Task.isCancelled else { return false }
+            let current = settings.revision
+            if current == seen { return true }
+            seen = current
         }
     }
 
