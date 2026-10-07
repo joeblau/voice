@@ -31,7 +31,7 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `flags` | `FeatureFlags` | `UserDefaults`, overrides in DEBUG | in memory |
 | `clock` | `any BlauClock` | `SystemClock` | `SystemClock`, or a `ManualClock` from the test |
 | `audio` | `any AudioService` | unavailable until #23 / #24 | `FakeAudioService` |
-| `transcriber` | `any Transcriber` | unavailable until #29 | `FakeTranscriber` |
+| `transcriber` | `any Transcriber` | unavailable until the live audio pipeline (capture hub and VAD) is composed; then `ParakeetStreamingTranscriber` (#29, [asr.md](asr.md)) | `FakeTranscriber` |
 | `voiceGate` | `any VoiceGate` | unavailable until #47 | `FakeVoiceGate` |
 | `realtime` | `any RealtimeService` | unavailable until #34 - #36 | `FakeRealtimeService` |
 | `persistence` | `PersistenceController` | `PersistenceController.live(isDebugBuild:)`: `Application Support/Blau/Blau.store`, mirrored to iCloud when the account allows | `PersistenceController.inMemory()` |
