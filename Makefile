@@ -48,6 +48,10 @@ test-unit: generate ## Run only the unit tests
 test-ui: generate ## Run only the UI tests
 	$(XCODEBUILD) test -scheme Blau -testPlan Blau -only-testing:BlauUITests -destination '$(DESTINATION)' $(SIM_FLAGS)
 
+.PHONY: test-kit
+test-kit: ## Run the BlauKit package tests on the macOS host
+	cd Packages/BlauKit && swift test
+
 .PHONY: perf
 perf: generate ## Run performance tests (Blau-Perf scheme, Release)
 	$(XCODEBUILD) test -scheme Blau-Perf -testPlan BlauPerf -destination '$(DESTINATION)' $(SIM_FLAGS)

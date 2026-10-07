@@ -2,7 +2,8 @@
 
 Blau is a native iOS app for long-form voice conversation with Grok. It is
 built with Swift 6, SwiftUI and SwiftData, and targets iOS 26.0 and later.
-See issue #1 for the architecture overview.
+See issue #1 for the architecture overview and
+[`docs/architecture.md`](docs/architecture.md) for the module layout.
 
 ## Getting started
 
@@ -27,6 +28,7 @@ Run `make generate` again after every pull or after editing `project.yml`.
 | `make test`      | Run unit and UI tests (`Blau` scheme, `Blau` test plan, coverage) |
 | `make test-unit` | Run only `BlauTests`                                             |
 | `make test-ui`   | Run only `BlauUITests`                                           |
+| `make test-kit`  | Run the `BlauKit` package tests on the macOS host (`swift test`) |
 | `make perf`      | Run `BlauPerfTests` (`Blau-Perf` scheme, Release build)          |
 | `make clean`     | Delete the generated project, plists and DerivedData             |
 | `make format`    | Format all Swift sources in place with swift-format              |
@@ -47,6 +49,8 @@ Formatting, branch naming, commit and pull request conventions are in
 | ---------------- | --------------------------------------------------------------- |
 | `project.yml`    | XcodeGen spec: targets, settings, Info.plist keys, entitlements, schemes |
 | `Blau/`          | App target sources and resources                                |
+| `Packages/BlauKit` | Local Swift package with the business logic, one module per subsystem (see [`docs/architecture.md`](docs/architecture.md)) |
+| `docs/`          | Architecture and engineering docs                               |
 | `BlauTests/`     | Unit tests (Swift Testing), hosted in the app                   |
 | `BlauUITests/`   | UI tests (XCTest)                                               |
 | `BlauPerfTests/` | Performance tests (XCTest UI-testing bundle, launch metrics)    |
