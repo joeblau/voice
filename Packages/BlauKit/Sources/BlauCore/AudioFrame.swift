@@ -22,13 +22,28 @@ public struct AudioFrame: Hashable, Sendable {
     /// start of capture.
     public let sampleOffset: Int64
 
+    /// When `samples[0]` was captured, in host time (`mach_absolute_time`
+    /// ticks, the clock of `AVAudioTime.hostTime`), or `nil` when unknown,
+    /// for example for audio read back from history or a file.
+    ///
+    /// Use it to line audio up with other host-time events (playback,
+    /// network). Use `sampleOffset` for positions within the stream: it is
+    /// exact, while host time carries the hardware clock's jitter.
+    public let hostTime: UInt64?
+
     /// - Precondition: `sampleRate > 0` and `sampleOffset >= 0`.
-    public init(samples: [Float], sampleRate: Int = AudioFrame.captureSampleRate, sampleOffset: Int64) {
+    public init(
+        samples: [Float],
+        sampleRate: Int = AudioFrame.captureSampleRate,
+        sampleOffset: Int64,
+        hostTime: UInt64? = nil
+    ) {
         precondition(sampleRate > 0, "Sample rate must be positive")
         precondition(sampleOffset >= 0, "Sample offset must not be negative")
         self.samples = samples
         self.sampleRate = sampleRate
         self.sampleOffset = sampleOffset
+        self.hostTime = hostTime
     }
 
     public var sampleCount: Int { samples.count }

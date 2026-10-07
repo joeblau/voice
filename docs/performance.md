@@ -122,7 +122,7 @@ case step.
 
 | Interval              | Category   | Case                  | Begins                                              | Ends                                            |
 | --------------------- | ---------- | --------------------- | --------------------------------------------------- | ----------------------------------------------- |
-| `capture.frame`       | `audio`    | `.captureFrame`       | A capture tap callback receives a hardware buffer   | The 16 kHz mono frame is in the ring buffer and fanned out |
+| `capture.frame`       | `audio`    | `.captureFrame`       | The capture thread takes a hardware buffer off the real-time ring | Its 16 kHz audio is in the hub and fanned out to subscribers |
 | `vad.chunk`           | `asr`      | `.vadChunk`           | A chunk is handed to Silero VAD                     | Speech probability and start/end events are out |
 | `asr.chunk`           | `asr`      | `.asrChunk`           | A 320 ms chunk is handed to streaming Parakeet      | The partial transcript for that chunk is out    |
 | `asr.eou`             | `asr`      | `.asrEndOfUtterance`  | VAD reports end of speech                           | The end-of-utterance decision fires (or speech resumes) |

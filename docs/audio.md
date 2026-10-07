@@ -11,7 +11,7 @@ components; backgrounding and screen lock are #26.
 import BlauAudio
 
 let audio = AudioSessionController.live()   // iOS only
-await audio.register(captureTap)            // AudioGraphComponent, #24
+await audio.register(capture)               // MicrophoneCapture, #24 (see "Capture" below)
 await audio.register(playbackNode)          // AudioGraphComponent, #25
 await audio.start()
 
@@ -130,6 +130,111 @@ public protocol AudioGraphComponent: AnyObject, Sendable {
 - Register components before `start()`. Registering or unregistering while
   running rebuilds the graph, which drops a few milliseconds of audio.
 
+## Capture (#24)
+
+`MicrophoneCapture` is the mic capture engine. It is an
+`AudioGraphComponent`: register it with the controller and subscribe to its
+`hub`. VAD, voice ID and ASR take a `CaptureFrameSource` (the protocol the
+hub implements) so their tests can feed fixtures.
+
+```swift
+let capture = MicrophoneCapture()
+await audio.register(capture)
+await audio.start()
+
+let hub = capture.hub                          // CaptureHub: CaptureFrameSource
+for await frame in hub.frames() { ... }        // AudioFrame: 16 kHz mono, 20 ms
+for await level in hub.levels() { ... }        // AudioLevel for the record button meter
+let lookBack = hub.frames(replaying: .seconds(2))   // history first, then live
+let clip = hub.history(in: start..<end)        // absolute sample offsets, last 30 s
+let stats = hub.statistics                     // CaptureStatistics, see Telemetry
+```
+
+### Pipeline
+
+```mermaid
+flowchart LR
+    VPIO[VPIO input node] -->|"~20 ms buffers, hardware rate"| Sink[AVAudioSinkNode]
+    Sink -->|"audio I/O thread: downmix + copy, no allocation"| Ring[(SPSC ring<br/>2 s, preallocated)]
+    Ring -->|semaphore| Thread[capture thread]
+    Thread -->|"AVAudioConverter → 16 kHz, capture.frame"| Hub[CaptureHub]
+    Hub --> VAD
+    Hub --> ASR
+    Hub --> VoiceID[Voice ID]
+    Hub --> Meter[levels]
+    Hub --> History[(30 s history)]
+```
+
+1. **Audio I/O thread.** An `AVAudioSinkNode` connected to the input node
+   receives each hardware buffer on the real-time thread, at the session's
+   I/O buffer size (20 ms). `CaptureProducer` downmixes it to mono (the
+   first channel when voice processing is on, the channel average
+   otherwise) straight into a preallocated lock-free single-producer,
+   single-consumer ring, writes a small header (frame count, host time,
+   drops before it) into a second ring, and signals a semaphore. If either
+   ring is full the buffer is dropped and counted; the next buffer that fits
+   carries the size of the gap.
+2. **Capture thread.** A dedicated thread (`com.joeblau.blau.capture`,
+   QoS user-interactive) wakes on the semaphore, reads each buffer,
+   resamples it to 16 kHz with `AVAudioConverter` (a pass-through when the
+   route already runs at 16 kHz, as Bluetooth HFP can), stamps host time and
+   sample offset, and appends to the hub inside a `capture.frame` interval.
+3. **Hub.** Re-chunks into 20 ms `AudioFrame`s whatever the hardware buffer
+   size, keeps 30 s of history and yields the same frame values to every
+   subscriber (the sample arrays are shared, not copied).
+
+**Why a sink node rather than a tap.** The issue sketched a tap on the
+input node. `installTap` buffers are 100 to 400 ms (the SDK documents that
+range), delivered on an internal thread: too coarse for barge-in, and the
+real-time question doesn't arise because the tap isn't on the I/O thread.
+The sink node gets the real I/O buffers, and its header documents that the
+voice-processing input supports it. The tap is still available as
+`MicrophoneCapture.Configuration(inputMode: .tap)`, a fallback if a route
+misbehaves with the sink node; both feed the same producer. The SDK 27
+error-returning tap API is `NS_REFINED_FOR_SWIFT` with no public Swift
+spelling, so `.tap` uses `installTap(onBus:bufferSize:format:block:)`.
+
+### Frames, offsets and time
+
+- `sampleOffset` counts 16 kHz samples from the start of capture. Frames
+  are contiguous (`next.sampleOffset == previous.nextSampleOffset`)
+  except after lost audio.
+- **Drops leave gaps aligned with real time.** When the ring overflowed,
+  offsets jump by the lost duration so later audio stays where it belongs;
+  history reads the gap back as silence. A subscriber spots a gap by
+  comparing offsets.
+- **Rebuilds are contiguous.** Every graph build (start, resume, route
+  change, media-services reset) starts a new capture segment that reads the
+  current hardware format, so 48 kHz speaker → 16 kHz HFP just works.
+  Segments run in order on the hub; the stream continues without a gap in
+  offsets, and `hostTime` shows the real-time jump.
+- `hostTime` is the `mach_absolute_time` of the frame's first sample. Each
+  hardware buffer's own timestamp anchors the audio that follows it, so it
+  doesn't drift over an hour. Frames replayed from history have none.
+- A frame is shorter than 20 ms only right before a gap and at the end of a
+  segment.
+
+### Backpressure
+
+Each subscriber buffers up to 10 s (`CaptureHub.Configuration.subscriberBuffer`).
+One that falls further behind loses its oldest frames, counted in
+`subscriberDroppedFrames`; the capture thread and the other subscribers
+never wait for it. Levels keep only the newest value.
+
+### Real-time safety
+
+The audio-thread path (`CaptureProducer.write` and everything it calls) is
+annotated `@_noLocks`: the compiler rejects any allocation, lock,
+retain/release, generic metadata access or call into code it can't see,
+in Debug and Release. The one call outside it is
+`DispatchSemaphore.signal()`, an atomic increment plus a Mach trap when
+the capture thread is waiting; it doesn't allocate or block.
+`CaptureAllocationTests` checks the same at run time: it counts every heap
+allocation the calling thread makes (through libmalloc's `malloc_logger`
+hook) while it drives the sink node's receiver block thousands of times,
+with the real capture thread draining concurrently and the ring
+overflowing now and then, and expects zero.
+
 ## Playback (#25)
 
 `StreamingAudioPlayer` (in `BlauAudio/Playback`) plays Grok's streamed
@@ -216,6 +321,33 @@ pipeline stages, so they are not in the canonical interval table in
 | `audio.routeChange` | event | Route change notifications |
 | `audio.engineConfigurationChange` | event | `AVAudioEngineConfigurationChange` for the current engine |
 | `audio.mediaServicesLost`, `audio.mediaServicesReset` | event | Media-server notifications |
+| `capture.drop` | event | The capture ring overflowed and audio was lost (emitted from the capture thread when the gap is accounted for) |
+
+Capture also uses the canonical `capture.frame` interval (see
+[performance.md](performance.md)): one per hardware buffer, on the capture
+thread, from taking it off the ring to its 16 kHz audio reaching every
+subscriber. Nothing is signposted or logged on the audio I/O thread.
+
+### Capture counters
+
+`CaptureHub.statistics` is a `CaptureStatistics` snapshot for the debug HUD
+(#71), MetricKit diagnostics (#72) and tests:
+
+| Counter | Counts |
+| ------- | ------ |
+| `droppedBuffers` | Hardware buffers the audio thread dropped because the ring was full: **the dropped-frame counter** |
+| `droppedSamples`, `gaps` | 16 kHz samples lost to those drops, and how many gaps they made |
+| `subscriberDroppedFrames` | Frames a subscriber lost because it fell more than 10 s behind |
+| `framesPublished`, `samplesPublished` | Frames and samples fanned out |
+| `conversionFailures` | Buffers `AVAudioConverter` rejected |
+| `segments` | Capture segments, one per graph build |
+
+`droppedFrames(frameLength:)` folds the capture and subscriber losses into
+one number of 20 ms frames. Every drop is also logged on `Log.audio` as an
+error with the totals (`Capture dropped 2 buffer(s), 640 samples at 16 kHz
+(2 buffers in total); resuming at sample 1280`), a subscriber that starts
+or stops dropping logs once each way, and each segment logs its totals when
+it ends.
 
 Playback adds the canonical interval `playback.firstBuffer` (in
 [performance.md](performance.md)): from the first delta of a response
@@ -236,6 +368,12 @@ played milliseconds and how much was dropped.
 | `Packages/BlauKit/Tests/BlauAudioTests/Playback/PlaybackEngineTests.swift` | The node in a real `AVAudioEngine` in offline manual rendering mode at 48 kHz: no gap over two minutes, flush silence and played-ms measured at the engine's output, reinstall after a rebuild | `swift test` on the Mac |
 | `Packages/BlauKit/Tests/BlauAudioTests/Playback/RecordedDeltaStreamTests.swift` | Replays a real capture of Grok's deltas (JSON Lines, see the file) | Only with `BLAU_PLAYBACK_RECORDING=/path/to/capture.jsonl` |
 | `BlauTests/StreamingPlaybackLiveTests.swift` | The node on the live voice-processing engine: real-time pacing and flush | Only with `BLAU_DEVICE_TESTS=1` and microphone permission |
+| `Packages/BlauKit/Tests/BlauAudioTests/Capture/RingBufferTests.swift` | The SPSC rings: all-or-nothing writes, wrap-around, a two-thread stress test of 2 M samples | `swift test` on the Mac |
+| `Packages/BlauKit/Tests/BlauAudioTests/Capture/CaptureProducerTests.swift` | Downmixing (planar, interleaved, VPIO first channel), drops and gap reporting, host times; **zero heap allocations** on the audio-thread path (`CaptureAllocationTests`, with a positive control proving the counter works) | `swift test` on the Mac |
+| `Packages/BlauKit/Tests/BlauAudioTests/Capture/CaptureResamplerTests.swift` | 48 / 44.1 / 24 kHz → 16 kHz keeps every sample, the tone and the level; chunking doesn't change the output; 16 kHz passes through | `swift test` on the Mac |
+| `Packages/BlauKit/Tests/BlauAudioTests/Capture/CaptureHubTests.swift` | 20 ms re-chunking, host times, **three consumers get identical streams**, history and replay, gaps, slow subscribers, levels | `swift test` on the Mac |
+| `Packages/BlauKit/Tests/BlauAudioTests/Capture/CapturePipelineTests.swift` | Producer → capture thread → hub with real threads: **three concurrent consumers get identical, sample-accurate streams** (equal to converting the whole signal at once), drops aligned with real time, segments across a 48 → 16 kHz route change | `swift test` on the Mac |
+| `BlauTests/MicrophoneCaptureLiveTests.swift` | The real VPIO engine with the sink node and with the tap: three consumers get the same 16 kHz audio, contiguous offsets, host times, levels, no drops | Only with `BLAU_DEVICE_TESTS=1` and microphone permission |
 
 The two-minute fixture is synthetic: seeded speech-like audio cut into
 20–100 ms deltas that arrive 1.1–2× faster than real time with 20–60 ms of
@@ -280,3 +418,17 @@ log stream --level debug --predicate 'subsystem == "com.joeblau.blau" && categor
 | 10 | Barge-in | Talk over the agent mid-sentence | Agent audio stops within ~50 ms with no click; a `Flushed playback` log with the played ms | Pending |
 | 11 | Played ms | Barge in, then compare `audio_end_ms` in the truncate event with a screen recording's audio | Within ±20 ms | Pending |
 | 12 | Route change mid-reply | Connect AirPods while the agent speaks | Playback continues after the rebuild at the same loudness | Pending |
+
+### Capture on a device (#24)
+
+Run the same debug build with a `MicrophoneCapture` registered and three
+subscribers (or the live suite above on the device), and watch
+`log stream ... category == "audio"` for `Capture dropped` lines.
+
+| # | Scenario | Steps | Expected | Result |
+| - | -------- | -------- | -------- | ------ |
+| C1 | No allocations on the audio thread | Profile a Release build with Instruments' **Allocations** template (or **System Trace** plus Allocations). Record 60 s of speech, then filter the allocation list by thread to the audio I/O thread (`AURemoteIO::IOThread` or similar; the one running `MicrophoneCapture.sinkReceiver`) | No allocation whose stack contains `CaptureProducer` or `sinkReceiver`. Allocations by Apple's own I/O code on that thread, if any, are outside Blau's control; note them | Pending |
+| C2 | Steady state | Speak for 10 minutes on the speaker route | `hub.statistics.droppedBuffers == 0`; no `Capture dropped` log | Pending |
+| C3 | Route change | AirPods in and out mid-sentence | A new segment per rebuild (`Capture installed ... 16000 Hz` for HFP); offsets keep counting; frames keep arriving within ~1 s | Pending |
+| C4 | Load | Run the ASR and voice ID models while capturing for 30 minutes | No capture drops; if any, `droppedBuffers` and the log lines show how many | Pending |
+| C5 | Sink node vs tap | Repeat C2 with `inputMode: .tap` | Same audio, ~100 ms frame bursts instead of 20 ms | Pending |
