@@ -25,6 +25,7 @@ them by filling in the tables.
 | `memory.embeddinggemma` | EmbeddingGemma-300M as Core ML, truncated to 256-d and quantized to int8 | `load`, `embed.64tok`, `embed.128tok`, `embed.256tok`, memory | Memory index (#59, #60) |
 | `memory.embed.batch32` | The shared text embedding service (#60) on an installed hosting folder: prompt, Swift tokenizer, token table, Core ML, 256-d int8 | `load`, `embed.batch32` and `embed.batch32.chunk` latency, `tokens.mean`, `budget.batch32`, a within/over-budget note, memory | #60's acceptance criterion: a batch of 32 chunks within #59's budget |
 | `memory.index.search50k` | The memory index (#62): 50k exchange-like chunks with 256-d int8 vectors in an on-disk SQLite/FTS5 index (no model needed) | `build`, `load` (every vector into the matrix, the launch cost), `search.vector`, `search.keyword` and `search.hybrid` latency, `budget.search`, `index.fileSize`, a within/over-budget note, memory | #62's acceptance criterion: a search over 50k chunks within 20 ms p95 on an A17 |
+| `memory.search50k` | Hybrid retrieval (#64): the whole `MemorySearch` pipeline (BM25 + vector, weighted RRF, time boost, entity expansion over 2,000 entities, dedupe, snippets) on the same synthetic 50k-chunk index, query vector precomputed | `build`, `load`, `search` latency, `budget.search`, `search.expandedFacts`, `search.timeQueries`, `search.results`, `index.fileSize`, a within/over-budget note, memory | #64's acceptance criterion: p95 search latency under 50 ms |
 | `topics.label.foundationModels` | On-device Foundation Models through Blau's production `FoundationModelsTopicLabeler` (#53) | `label.cold`, `label`, `label.prewarmed`, `titles.withinWordLimit` | Topic confirmation and titles (#53) |
 | Background probe | Parakeet EOU 320 ms on the Neural Engine, with a CPU-only baseline | Per-window latency by app phase, errors, Neural Engine availability, verdict, mitigation | iOS 27 background Neural Engine restrictions (#26) |
 
@@ -920,6 +921,31 @@ simulator runs on the Mac's CPU, which was under a load average of 550 to
 `MemoryIndexBenchmarks.testSearch50k`, or run "Memory index search, 50k
 chunks" on the debug benchmark screen, and fill the `Memory index` rows of
 the results table.
+
+## Memory search (#64)
+
+#64's acceptance criterion is **p95 search latency under 50 ms**.
+`memory.search50k` runs the whole `MemorySearch` pipeline (BM25 and vector
+candidates, weighted RRF, the "last week" time boost on a third of the
+queries, entity expansion over 2,000 entities and 5,000 facts, dedupe,
+snippets) on the same kind of synthetic 50k-chunk index, with a
+precomputed query vector (query embedding is `memory.embed`). See
+[memory-search.md](memory-search.md#performance).
+
+**Mac reference** (M3 Max, macOS 27.2, optimized build, heavily shared
+machine; `BLAU_INDEX_BENCHMARK=1 swift test -Xswiftc -O --scratch-path
+.build/optimized --filter MemorySearchBenchmarkTests`, 2026-10-08):
+
+| Metric | M3 Max (loaded) |
+| --- | --- |
+| `search` p50 / p95 | 7.6 / 24.2 ms |
+| `search.expandedFacts` (mean per search) | 15.8 |
+| `load` (50k vectors into the matrix) | 195 ms |
+
+**iPhone: pending.** `make bench` runs
+`MemoryIndexBenchmarks.testHybridSearch50k`, or run "Memory search
+(hybrid), 50k chunks" on the debug benchmark screen, and fill the table in
+[memory-search.md](memory-search.md#performance).
 
 ## After the numbers land
 

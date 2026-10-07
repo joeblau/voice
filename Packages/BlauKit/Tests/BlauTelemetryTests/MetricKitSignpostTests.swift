@@ -157,7 +157,7 @@ struct MetricKitSignpostTests {
     @Test func defaultBackendsAddMetricKitWhereNeeded() {
         #if canImport(MetricKit)
             #expect(Signposts.defaultBackend(for: .realtime) is MetricKitSignpostBackend)
-            let realtime = Signposts.realtime.backend as? MetricKitSignpostBackend
+            let realtime = (Signposts.realtime.backend as? TappedSignpostBackend)?.base as? MetricKitSignpostBackend
             #expect(realtime?.reportedIntervals.map(\.description) == ["realtime.turn", "realtime.firstAudio"])
         #endif
         #expect(Signposts.defaultBackend(for: .audio) is OSSignpostBackend)

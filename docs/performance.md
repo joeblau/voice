@@ -145,6 +145,7 @@ case step.
 | `topics.label`        | `topics`   | `.topicsLabel`        | A candidate boundary goes to Foundation Models      | The boundary is confirmed or rejected and titled |
 | `memory.embed`        | `memory`   | `.memoryEmbed`        | A batch of up to 32 texts is handed to the shared embedding service (#60) | Every text's 256-d int8 vector is out; the end message is the text and token count |
 | `memory.search`       | `memory`   | `.memorySearch`       | A memory search starts (BM25 + vector)              | Fused, ranked results are out                   |
+| `memory.extract`      | `memory`   | `.memoryExtract`      | Fact extraction starts on a closed topic (#66)      | Its facts and entities are written (or it failed); the end message is the outcome |
 | `db.save`             | `data`     | `.dbSave`             | `ModelContext.save()` is called                     | It returns                                      |
 
 ### Adding an interval
@@ -723,6 +724,8 @@ runs once per session, before any turn, and stays Instruments-only for now.
 `asr.secondPass` runs once per utterance off the turn's critical path (it
 never delays a turn), so it stays Instruments-only too; compare
 `realtime.firstAudio` with the second pass on and off instead (docs/asr.md).
+`memory.extract` runs once per closed topic in the background and is
+dominated by the xAI request, so it stays Instruments-only as well.
 End messages (`realtime.event`'s event type) only reach Instruments:
 `mxSignpost` intervals carry none. Use the shared
 `Signposts` statics (or `Signposts.defaultBackend(for:)`) to get both;
@@ -852,8 +855,9 @@ let gate = IndexingGate(performance: environment.performance)   // await gate.wa
 ```
 
 The indicator sits in a top safe-area inset of the main screen
-(`MainScreenScaffold`), so the DEBUG voice loop HUD lays out below it and
-the conversation scrolls under it.
+(`MainScreenScaffold`), so the conversation scrolls under it. The
+performance HUD's Device section shows the same level and its strictest
+reason ("Perf level").
 
 The debug menu's **Thermal and power** section shows the readings, the
 level and why, and overrides the level (Automatic, Normal, Reduced,
@@ -928,19 +932,188 @@ real-time factor and memory, and probes background Neural Engine behaviour.
 It emits the canonical intervals above around every measured step. Running
 it and the results are in [docs/benchmarks.md](benchmarks.md).
 
-## Turn latency in the HUD
+## Performance HUD
 
-The turn orchestrator (#36) measures each turn as it happens: end of
-utterance → first audio (`realtime.firstAudio`'s span) and end of utterance
-→ `response.done` (`realtime.turn`'s), kept as last / p50 / p95 over the last
-200 turns. With the **Performance HUD** flag on, the main screen shows them
-with the turn state, the connection and token usage
-([realtime.md](realtime.md#latency-and-the-hud)). Device numbers go in the
-pending table there.
+The debug performance HUD (#71) is a small translucent panel over the app
+that shows pipeline health during a real conversation. It is in every build,
+TestFlight included.
+
+| Turn it on                          | How                                                          |
+| ----------------------------------- | ------------------------------------------------------------ |
+| Settings → Developer → Performance HUD | The switch; remembered across launches                    |
+| Triple-tap the main screen          | DEBUG builds; shows or hides it                              |
+| The `perfHUD` feature flag          | Debug menu, or `-blau.featureFlag.perfHUD YES` for one launch |
+
+Tap the panel to switch between the compact rows and every section; drag it
+anywhere. It remembers both. Turning it off from Settings or the triple-tap
+also clears a `perfHUD` flag override. Values that deserve attention turn
+orange (warning) or red (critical), and so does the panel's border.
+
+### What it shows
+
+| Row              | Source                                                                 | Compact |
+| ---------------- | ---------------------------------------------------------------------- | ------- |
+| FPS              | `CADisplayLink` callbacks per second on the main thread, the link's target rate and refreshes missed, over one second in every three (see Overhead) | yes |
+| CPU              | Process CPU time over wall time since the previous sample (`CLOCK_PROCESS_CPUTIME_ID`); 100% is one core | yes |
+| Memory           | Physical footprint (`task_vm_info.phys_footprint`, what jetsam and Instruments use) and `os_proc_available_memory()` | yes |
+| Thermal          | `ProcessInfo.thermalState`                                             | yes |
+| Perf level       | The thermal and power policy's level, its strictest reason and whether it is recovering (`PerformancePolicy.snapshot`, #75) | |
+| HUD cost         | The HUD's own CPU time (sampling, display-link callbacks) as a share of one core over the last 10 s | |
+| Capture          | `CaptureHub.statistics`: hardware buffers dropped, subscriber drops, conversion failures | |
+| VAD              | Speech or silence, Silero's model time per second of audio, chunks skipped as quiet | |
+| ASR chunk        | `asr.chunk` last / p50 / p95 (or the transcriber's mean and slowest chunk before any is timed) | |
+| EOU decision     | `asr.eou` last / p50 / p95                                             | |
+| Voice score      | The gate's latest score and threshold (`PerformanceGauges`, reported by the verification gate, #47) | |
+| Turn, Realtime   | The turn orchestrator's state and the WebSocket connection             | |
+| Session          | The realtime session's continuity: phase, age, renewals, resumptions and reseeds (#39) | |
+| EOU → audio      | End of utterance → first audio, last / p50 / p95 over the last 200 turns (the `realtime.firstAudio` span) | p50 / p95 |
+| Turn time        | End of utterance → `response.done` (the `realtime.turn` span)           | |
+| Tokens, Cost     | `response.done` usage; the cost estimate is reply audio minutes × $0.08 plus text inputs × $0.004 (`RealtimePricing.grokVoice`) | |
+| Barge-in         | Barge-ins this conversation, and the last one's onset → playback flushed and VAD delay (#37) | |
+| Topic depth      | The segmenter's depth score at the newest gap and its threshold (`PerformanceGauges`) | |
+| Signposts        | Every canonical interval timed while the HUD shows: last / p50 / p95 and count | |
+
+Rows whose stage isn't running, or isn't built yet, show "–". The voice
+score row fills in once the verification gate (#47) reports to
+`PerformanceGauges.shared`; the gate should call
+`report(.voiceScore, score)` and `report(.voiceThreshold, threshold)` for
+every decision.
+
+### How it measures
+
+- **Signposts.** The shared `Signposts` statics go through a
+  `TappedSignpostBackend`, which, while `SignpostLatencyTap.shared` is
+  active, times every canonical interval next to its `os_signpost` begin
+  and end and adds it to a 200-sample window. The HUD therefore reports the
+  very spans Instruments shows; no stage has to know about the HUD.
+- **Gauges.** Values the HUD can't reach through the composition root (the
+  voice ID score, the topic depth score) are published to
+  `PerformanceGauges.shared`: one short lock per report, no allocation.
+- **Pipeline.** `VoiceLoop.hudReadings()` reads the capture hub's, VAD's
+  and transcriber's lock-protected counters and the orchestrator's latest
+  `TurnSnapshot`.
+- **Sampling.** `PerformanceHUDSampler` reads everything once a second
+  (`defaultInterval`), on the main actor, and builds the
+  `PerformanceHUDReadout` the panel renders. All of it lives in
+  `BlauTelemetry` and `BlauRealtime`, tested on the Mac; the app adds the
+  display link, the panel and the controller (`Blau/PerformanceHUD`).
+
+### Overhead
+
+The budget is **under 1% of one core**. Nothing runs while the HUD is hidden:
+the tap is off (one relaxed atomic load per interval), there is no display
+link and no sampling timer, and the overlay's task only runs while the app is
+active. While it shows:
+
+| Piece                            | Cost                                  | Checked by |
+| -------------------------------- | ------------------------------------- | ---------- |
+| Sampling and building the readout, 1 Hz | ~500 µs per sample in a debug build with all 19 intervals full (~0.05% of a core) | `PerformanceHUDSamplerTests.realSamplingCostsWellUnderOnePercentOfACore` (fails above 0.5%) |
+| Signpost tap                     | ~0.6 µs per interval in a debug build; 0.015% of a core at 250 intervals/s | `tappingIntervalsCostsWellUnderOnePercentOfACore` (fails above 0.1%) |
+| Display link (60 Hz, one second in three) and SwiftUI updates of the panel | measured with the rest, end to end | `PerformanceHUDOverheadTests` (BlauPerfTests) |
+
+Every display-link callback wakes the main run loop, and that wake-up, not
+the callback's own arithmetic, is most of the HUD's cost: about 0.1 ms per
+frame in the Simulator, so a link running all the time costs about 0.8% of
+a core on its own. The HUD therefore measures the frame rate for one second
+in every three (`frameRateDutyCycle`) and keeps the last reading on screen
+in between; a hitch while the link sleeps doesn't show in the FPS row (it
+does show in Instruments' Hangs and in MetricKit).
+
+The "HUD cost" row shows the sampler's and the display link's CPU time live.
+`PerformanceHUDOverheadTests` (`make perf`) measures the whole app's CPU time
+over 10 s idle spans with the HUD hidden and shown (`XCTCPUMetric`, three
+iterations each). The difference between the two "CPU Time" averages over
+10 s is the HUD's share of a core. It includes the SwiftUI updates of the
+panel, which the "HUD cost" row doesn't; the render server's compositing is
+outside the app either way. XCTest reports metric values only to the log and
+the result bundle, so read them there:
+
+```sh
+make perf DESTINATION='id=<udid>' 2>&1 | grep "IdleCPUWithTheHUD.*measured \[CPU Time"
+```
+
+Read the per-iteration `values`, not only the average: the first one or two
+iterations after a launch can still carry launch work (fixture model checks,
+store setup) in either phase. Recorded 2026-10-08 in the iOS 26.5 Simulator
+(iPhone 17, Release build) on an Apple M3 Max shared with other builds:
+
+| Phase      | CPU time per 10 s idle span, five iterations     | Steady state |
+| ---------- | ------------------------------------------------ | ------------ |
+| HUD hidden | 0.240, 0.137, 0.000, 0.000, 0.000 s              | 0.000 s      |
+| HUD shown  | 0.389, 0.032, 0.040, 0.035, 0.039 s              | 0.032–0.040 s |
+
+So the HUD costs **0.3–0.4% of one core** in the Simulator, everything in
+the app process included. Before the display link was duty-cycled it cost
+0.9% (0.089–0.095 s per 10 s, with 2 Hz sampling), almost all of it
+main-thread wake-ups.
+
+### Checking it against Instruments
+
+`scripts/verify-hud.sh` (`make verify-hud`) starts the opt-in
+`PerformanceHUDInstrumentsComparison` suite (`BLAU_HUD_COMPARE=1`), attaches
+the os_signpost and Activity Monitor instruments to its process, and lets it
+run a known workload with the HUD's sampler and tap active: 450 intervals of
+nine canonical names with lengths from 0.2 to 60 ms (on the calling thread,
+across suspensions, ended on another task, and overlapping), then 20 s of
+steady CPU load with 96 MB of extra memory. `scripts/lib/hud_compare.py`
+then checks:
+
+- **Signposts.** Per interval, the HUD's count equals Instruments', at least
+  85% of the instances (paired in the order they ended) have the same
+  duration within 0.05 ms or 1%. The HUD reads its
+  clock right before each `os_signpost` begin and end, so an instance only
+  disagrees when its thread was preempted between the two clock reads.
+- **CPU.** The HUD's clock is read inside `hud.compare.sample` intervals, so
+  its CPU time sits on the trace's timeline next to Activity Monitor's "CPU
+  Time" for the same process. Over the load the two CPU percentages must be
+  within 2 points or 15%. Activity Monitor's samples land up to about a
+  second after the CPU time they report, so shorter windows are printed for
+  information only.
+- **Memory.** The HUD's footprint is within 3% (or 4 MB) of Activity
+  Monitor's "Memory".
+
+Pass `--keep` to keep the trace. Recorded 2026-10-08 on an Apple M3 Max,
+macOS 27.2, Xcode 27.2:
+
+| Interval               | Count HUD / Instruments | p50 ms HUD / Instruments | p95 ms HUD / Instruments | Same duration (±0.05 ms or 1%) | Worst pair |
+| ---------------------- | ----------------------- | ------------------------ | ------------------------ | ------------------------------ | ---------- |
+| `asr.chunk`            | 50 / 50                 | 13.561 / 13.561          | 24.590 / 24.591          | 50 of 50                       | 0.02 ms    |
+| `capture.frame`        | 50 / 50                 | 1.033 / 1.033            | 2.199 / 2.202            | 50 of 50                       | 0.04 ms    |
+| `db.save`              | 50 / 50                 | 5.641 / 5.645            | 9.780 / 9.786            | 50 of 50                       | 0.01 ms    |
+| `playback.firstBuffer` | 50 / 50                 | 5.594 / 5.596            | 10.543 / 10.549          | 50 of 50                       | 0.01 ms    |
+| `realtime.firstAudio`  | 50 / 50                 | 23.956 / 23.959          | 40.384 / 40.390          | 50 of 50                       | 0.03 ms    |
+| `realtime.turn`        | 50 / 50                 | 42.051 / 42.061          | 59.284 / 59.289          | 50 of 50                       | 0.01 ms    |
+| `topics.segment`       | 50 / 50                 | 2.260 / 2.259            | 4.417 / 4.418            | 50 of 50                       | 0.02 ms    |
+| `vad.chunk`            | 50 / 50                 | 1.958 / 1.957            | 3.411 / 3.416            | 50 of 50                       | 0.01 ms    |
+| `voiceid.verify`       | 50 / 50                 | 8.256 / 8.259            | 14.065 / 14.070          | 50 of 50                       | 0.01 ms    |
+
+| Value                     | HUD      | Instruments (Activity Monitor) |
+| ------------------------- | -------- | ------------------------------ |
+| CPU over the 20 s load    | 50.3%    | 50.3% (17 samples)             |
+| Memory footprint          | 104.4 MB | 104.4 MB                       |
+
+Earlier runs on the same Mac while dozens of other builds and test runs
+saturated it (the workload thread got 9–15% of a core) matched every
+count and the footprint, but the CPU over an 8 s load differed by up to 2.3
+points (Activity Monitor had only three samples in it), and 4–12% of the
+instances per interval differed by up to 47 ms: the time their
+thread waited between the HUD's clock read and the `os_signpost` record. The
+others agreed to within 0.05 ms.
+
+**On device: pending.** The same comparison on an iPhone needs the app
+running there:
+
+| Check | How | Result |
+| ----- | --- | ------ |
+| HUD overhead < 1% CPU | `make perf DESTINATION='id=<udid>'` (`PerformanceHUDOverheadTests`), plus the "HUD cost" row during a 10-minute conversation | pending (needs a device) |
+| FPS matches Instruments | Record **Core Animation FPS** (or the Blau template plus Hangs) while scrolling the transcript; compare with the FPS row | pending (needs a device) |
+| CPU and memory match | Record the Blau template with **Activity Monitor** added; compare its "% CPU" and "Memory" for Blau with the CPU and Memory rows | pending (needs a device) |
+| Latencies match | Record the Blau template during 20 turns; compare the os_signpost summary's average for `asr.chunk`, `realtime.firstAudio` and `realtime.turn` with the HUD's Signposts section | pending (needs a device and xAI credentials) |
+| Thermal state | Run a long session until **Thermal State** reports *fair* or *serious*; the Thermal row should change at the same moment | pending (needs a device) |
 
 ## What comes next
 
 The rest of the performance epic (#11) builds on these names: the end-to-end
-latency budget (#74), the soak test (#76) and the debug HUD (#71). The XCTest
-performance suite and its CI baselines (#73) and thermal and power
-adaptation (#75) are described above.
+latency budget (#74) and the soak test (#76). The XCTest performance suite
+and its CI baselines (#73) and thermal and power adaptation (#75) are
+described above, and the performance HUD above shows the same intervals live.

@@ -1,3 +1,4 @@
+import BlauMemory
 import BlauPersistence
 import BlauRealtime
 import BlauTranscription
@@ -110,16 +111,24 @@ struct SettingsView: View {
                 XAIAccountSettingsSection()
                 VoiceSettingsSection()
                 SearchToolsSettingsSection()
+                MemorySettingsSection()
                 ICloudSettingsSection()
+                MemoryIndexSettingsSection()
+                MarkdownExportSettingsSection()
                 SpeechModelsSettingsSection()
                 SpeechRecognitionSettingsSection()
-                Section("Developer") {
+                Section {
+                    PerformanceHUDToggle()
                     NavigationLink {
                         DiagnosticsView()
                     } label: {
                         Label("Diagnostics", systemImage: "waveform.path.ecg")
                     }
                     .accessibilityIdentifier(DiagnosticsView.Identifier.open)
+                } header: {
+                    Text("Developer")
+                } footer: {
+                    PerformanceHUDToggle.footer
                 }
             }
             .navigationTitle("Settings")
@@ -136,11 +145,15 @@ struct SettingsView: View {
 #if DEBUG
     #Preview("No key") {
         SettingsView()
+            .environment(AppEnvironment.preview())
             .environment(XAIAccount.preview())
             .environment(PersistenceController.preview())
             .environment(AppDiagnostics(store: nil))
             .environment(SpeechModels.fixtureManager())
             .environment(RealtimeVoiceSettingsModel.preview())
             .environment(TranscriptionSettings.preview())
+            .environment(MemoryIndexingController(persistence: .preview(), embedder: nil, performance: nil))
+            .environment(MarkdownExportController.local(persistence: .preview()))
+            .environment(MemoryLearningSettings(store: InMemoryMemoryLearningPreferenceStore()))
     }
 #endif

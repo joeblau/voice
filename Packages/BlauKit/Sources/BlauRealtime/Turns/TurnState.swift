@@ -1,3 +1,4 @@
+import BlauAudio
 import BlauCore
 import Foundation
 
@@ -67,11 +68,20 @@ public struct TurnFailure: Error, Sendable, Hashable, CustomStringConvertible {
     /// Whether the user has to do something (add or fix their xAI key)
     /// before trying again.
     public var requiresUserAction: Bool
+    /// What to tell the user and what they can do (the error catalog, #80).
+    public var issue: UserFacingIssue
 
-    public init(kind: Kind, message: String, requiresUserAction: Bool = false) {
+    /// - Parameter issue: The catalog entry. By default the one for `kind`
+    ///   (a failed connection, a failed reply, a failed transcript write).
+    ///   A failed reply's entry is worded for that one reply
+    ///   (``UserFacingIssue/asReplyFailure``): the connection still works,
+    ///   so the way to retry is to say it again.
+    public init(kind: Kind, message: String, requiresUserAction: Bool = false, issue: UserFacingIssue? = nil) {
         self.kind = kind
         self.message = message
         self.requiresUserAction = requiresUserAction
+        let issue = issue ?? kind.defaultIssue
+        self.issue = kind == .response ? issue.asReplyFailure : issue
     }
 
     public var description: String { "\(kind.rawValue): \(message)" }
@@ -85,6 +95,12 @@ public struct RealtimeUsageTotals: Sendable, Hashable {
     public var inputTokens = 0
     public var outputTokens = 0
     public var totalTokens = 0
+    /// User text items sent to Grok (`conversation.item.create` with
+    /// `input_text`). xAI bills each one as a text input.
+    public var textInputs = 0
+    /// Reply audio received (`response.output_audio.delta`), at the
+    /// session's output rate. xAI bills speech-to-speech per minute of audio.
+    public var outputAudio: Duration = .zero
 
     public init() {}
 
@@ -114,6 +130,15 @@ public struct TurnSnapshot: Sendable, Equatable {
     public var agentText: String
     /// Committed utterances waiting for the connection to come back.
     public var queuedUtterances: Int
+    /// The stored user utterances (`Utterance.id`) waiting to be sent, in
+    /// order, so the transcript can mark them "waiting to send" (#80).
+    public var queuedUtteranceIDs: [UUID]
+    /// The user utterances discarded while waiting (``TurnOrchestrator/discardQueued()``)
+    /// this conversation: stored, but never sent to Grok.
+    public var discardedUtteranceIDs: Set<UUID>
+    /// Whether the device has an internet connection, as last reported
+    /// (``TurnOrchestrator/networkReachabilityChanged(_:)``).
+    public var network: NetworkReachability
     /// Turns that got a complete reply.
     public var completedTurns: Int
     /// End of utterance → first audio, and whole-turn durations.
@@ -132,6 +157,14 @@ public struct TurnSnapshot: Sendable, Equatable {
     /// transcript can mark them as interrupted. Their stored text is what
     /// was heard.
     public var interruptedAgentUtterances: Set<UUID>
+    /// Grok's reply so far, one entry per message item, in order: the
+    /// transcript next to the stored utterance and the audio it belongs to.
+    /// The chat transcript (#42) reveals each one as its audio plays.
+    /// Empty between replies, like ``agentText``.
+    public var agentSpeech: [AgentSpeech]
+    /// The function calls Grok made this conversation (newest 64), for the
+    /// chat's tool chips (#68). Those of the turn in progress are `isLive`.
+    public var toolCalls: [ToolCall]
 
     public init(
         state: TurnState = .paused,
@@ -140,13 +173,18 @@ public struct TurnSnapshot: Sendable, Equatable {
         userPartial: String? = nil,
         agentText: String = "",
         queuedUtterances: Int = 0,
+        queuedUtteranceIDs: [UUID] = [],
+        discardedUtteranceIDs: Set<UUID> = [],
+        network: NetworkReachability = .unknown,
         completedTurns: Int = 0,
         latency: TurnLatencyStatistics = TurnLatencyStatistics(),
         usage: RealtimeUsageTotals = RealtimeUsageTotals(),
         session: RealtimeSessionContinuity = RealtimeSessionContinuity(),
         bargeIns: Int = 0,
         lastBargeIn: BargeInRecord? = nil,
-        interruptedAgentUtterances: Set<UUID> = []
+        interruptedAgentUtterances: Set<UUID> = [],
+        agentSpeech: [AgentSpeech] = [],
+        toolCalls: [ToolCall] = []
     ) {
         self.state = state
         self.connection = connection
@@ -154,6 +192,9 @@ public struct TurnSnapshot: Sendable, Equatable {
         self.userPartial = userPartial
         self.agentText = agentText
         self.queuedUtterances = queuedUtterances
+        self.queuedUtteranceIDs = queuedUtteranceIDs
+        self.discardedUtteranceIDs = discardedUtteranceIDs
+        self.network = network
         self.completedTurns = completedTurns
         self.latency = latency
         self.usage = usage
@@ -161,5 +202,28 @@ public struct TurnSnapshot: Sendable, Equatable {
         self.bargeIns = bargeIns
         self.lastBargeIn = lastBargeIn
         self.interruptedAgentUtterances = interruptedAgentUtterances
+        self.agentSpeech = agentSpeech
+        self.toolCalls = toolCalls
+    }
+}
+
+extension TurnSnapshot {
+    /// One message item of Grok's reply in progress.
+    public struct AgentSpeech: Sendable, Hashable {
+        /// The id the agent utterance is (or will be) stored under.
+        public var utteranceID: UUID
+        /// Where its audio plays: ask the player how much was heard.
+        public var playbackID: PlaybackItemID
+        /// The transcript received so far.
+        public var transcript: String
+        /// Wall-clock time the item started (its first audio or text).
+        public var startedAt: Date?
+
+        public init(utteranceID: UUID, playbackID: PlaybackItemID, transcript: String, startedAt: Date? = nil) {
+            self.utteranceID = utteranceID
+            self.playbackID = playbackID
+            self.transcript = transcript
+            self.startedAt = startedAt
+        }
     }
 }

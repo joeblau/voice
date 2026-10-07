@@ -90,5 +90,40 @@
             print("NLContextual mean Pk \(meanPk)")
             #expect(meanPk <= 0.25)
         }
+
+        /// Offline re-segmentation (#55) on the real model's vectors: the
+        /// streaming topics, then `TopicResegmenter` over every exchange.
+        /// Reports both; asserts re-segmentation makes no transcript worse.
+        @Test func resegmentsTheScriptedTranscripts() async throws {
+            guard let embedder = await makeEmbedder() else { return }
+            var streamingTotal = 0.0
+            var resegmentedTotal = 0.0
+            for transcript in ScriptedTranscript.all {
+                let config = TopicConfig.contextualEmbedding
+                let segmenter = StreamingTopicSegmenter(
+                    embedder: embedder, config: config, signposter: .disabled(.topics))
+                let units = transcript.units()
+                for unit in units {
+                    _ = try await segmenter.append(unit)
+                }
+                let streaming = await segmenter.boundaries.map(\.unitIndex)
+                let result = TopicResegmenter(configuration: TopicResegmenter.Configuration.standard.matching(config))
+                    .resegment(
+                        embeddings: await segmenter.embeddings, timeRanges: units.map(\.timeRange),
+                        boundaries: streaming)
+                let before = SegmentationMetrics.pk(
+                    reference: transcript.boundaries, hypothesis: streaming, count: transcript.count)
+                let after = SegmentationMetrics.pk(
+                    reference: transcript.boundaries, hypothesis: result.boundaries, count: transcript.count)
+                streamingTotal += before
+                resegmentedTotal += after
+                print(
+                    "NLContextual re-segmentation \(transcript.name): reference \(transcript.boundaries) streaming \(streaming) (Pk \(before)) re-segmented \(result.boundaries) (Pk \(after))"
+                )
+                #expect(after <= before + 1e-12, "\(transcript.name) got worse: \(result.changes)")
+            }
+            let count = Double(ScriptedTranscript.all.count)
+            print("NLContextual re-segmentation mean Pk \(streamingTotal / count) → \(resegmentedTotal / count)")
+        }
     }
 #endif

@@ -14,10 +14,12 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `Blau/Composition/DeviceLockObserver.swift` | Device lock and unlock (protected data) for the conversation keeper and the background inference monitor ([background.md](background.md)) |
 | `Blau/LiveActivity/` | The recording Live Activity: its attributes and Stop intent (shared with the `BlauWidgets` extension) and the `RecordingIndicator` that starts, updates and ends it ([background.md](background.md)) |
 | `Blau/RootView.swift` | The main screen ([below](#main-screen)): navigation stack, bottom bar, content area, the Settings and xAI onboarding sheets, and the DEBUG menu button |
+| `Blau/Branding/` | The brand's color tokens (`BrandColor`, `TopicDotColor`), type scale (`BrandTextStyle`) and the `BrandLockup` the empty main screen shows ([branding.md](branding.md)) |
 | `Blau/MainScreen/` | The bottom bar's `SettingsButton` and `RecordButton`, their accessibility identifiers, and the `RecordingController` behind Record |
 | `Blau/XAI/XAIServices.swift` | The xAI services (#33): `make(config:)` for the app, `hermetic(config:)` for previews and tests |
 | `Blau/VoiceLoop/` | `VoiceLoop` (the spoken conversation: the live audio pipeline feeding the `TurnOrchestrator`, #36), the SwiftData transcript recorder, the HUD rows and the DEBUG Voice Loop screen |
 | `Blau/Debug/` | The DEBUG menu and the reusable feature flag toggles |
+| `Blau/Issues/` | `IssueCenter` (the current issue of the conversation, the audio and iCloud, fed to the banner; the network path fed to the orchestrator) and `IssueBanner`, the banner above the conversation with the recovery actions ([errors.md](errors.md), #80) |
 | `BlauCore/Services/` | The service protocols and `UnavailableService` |
 | `BlauCore/Fakes/` | Fakes for previews and tests, `TranscriptScript` |
 | `BlauCore/FeatureFlags/` | `FeatureFlag`, `FeatureFlags` and their storage |
@@ -42,17 +44,21 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `realtime` | `any RealtimeService` | `TurnOrchestrator` (#36, [realtime.md](realtime.md#turn-orchestration)): the xAI client, session configuration, a `StreamingAudioPlayer` and the SwiftData transcript | `FakeRealtimeService` |
 | `voiceLoop` | `VoiceLoop` | Starts the conversation audio (through its keeper), builds the VAD and Parakeet on `start()` and feeds the orchestrator; Debug menu → Voice Loop, and the Live Activity Stop button stops it | unavailable (no orchestrator) |
 | `persistence` | `PersistenceController` | `PersistenceController.live(isDebugBuild:)`: `Application Support/Blau/Blau.store`, mirrored to iCloud when the account allows | `PersistenceController.inMemory()` |
-| `topics` | `any TopicService` | unavailable until #52 - #54 | `FakeTopicService` |
-| `memory` | `any MemoryService` | unavailable until #62 - #68 | `FakeMemoryService` |
+| `topics` | `any TopicService` | `TopicLifecycle` (#54, [topics.md](topics.md#topic-lifecycle)): fed by the orchestrator's transcript (`TopicTrackingTranscript`), writing topics through the transcript's store | `FakeTopicService` |
+| `topicLifecycle` | `TopicLifecycle` | the same lifecycle as `topics`; the timeline's rename, merge and split go through it | keyword titles over the in-memory store (`TopicLifecycle.offline`) |
+| `memory` | `any MemoryService` | `MemoryToolService` (#68, [memory-tools.md](memory-tools.md)): search over the store and index `memoryIndexing` has open; the same service backs Grok's memory tools, which `realtimeSession` declares and the orchestrator runs behind the `memoryTools` flag | `FakeMemoryService` |
 | `transcriptionSettings` | `TranscriptionSettings` | `UserDefaults` (`blau.transcription.engine`); the `blau.uitests` suite in DEBUG UI tests | in memory, Apple's engine reported installed |
+| `markdownExport` | `MarkdownExportController` | Markdown files in iCloud Drive → Blau (#78, [export.md](export.md)); settings in `UserDefaults`, the `blau.uitests` suite in DEBUG UI tests; `start()` runs its automatic export, leaving the foreground flushes it | a temporary folder and in-memory settings (`MarkdownExportController.local`) |
 | `xai` | `XAIServices` | Keychain + network (`XAIServices.make`); the `BLAU_UI_TEST_XAI` stub in DEBUG UI tests | in-memory key store + stub transport (`XAIServices.hermetic`) |
+| `issues` | `IssueCenter` | follows the orchestrator, the conversation audio's keeper and the store's sync state; feeds `NWPathMonitor` (`SystemNetworkMonitor`) to the orchestrator for offline mode | the store's sync state only; `-BlauIssueFixture <code>` shows one catalog entry in UI tests |
 | `lifecycle` | `AppLifecycleCoordinator` | | |
 
 Views read it with `@Environment(AppEnvironment.self)`. The
 `.appEnvironment(_:)` modifier also injects `FeatureFlags`, the
 `AppLifecycleCoordinator`, the `XAIAccount` (`xai.account`), the
-`PersistenceController` (Settings reads its iCloud status) and the
-`TranscriptionSettings` (Settings → Speech Recognition), so a view can read
+`PersistenceController` (Settings reads its iCloud status), the
+`TranscriptionSettings` (Settings → Speech Recognition) and the
+`MarkdownExportController` (Settings → Markdown Export), so a view can read
 just the part it needs.
 
 The modifier does not set the SwiftData container: the controller opens the
@@ -229,7 +235,8 @@ NavigationStack {
   least as tall as the area between the bars (a `GeometryReader` around the
   scroll view, which respects the safe area while the scroll view inside
   still runs under the bars), so it stays centered and scrolls rather than
-  clips at large Dynamic Type sizes.
+  clips at large Dynamic Type sizes. Once there is a conversation it shows
+  the chat transcript instead ([chat.md](chat.md)).
 - Until onboarding (#44) exists, the speech-model setup card
   (`SpeechModelSetupView`, `blau.models.setup`) shows while the required
   models aren't ready. It is a `.safeAreaInset(edge: .bottom)` on

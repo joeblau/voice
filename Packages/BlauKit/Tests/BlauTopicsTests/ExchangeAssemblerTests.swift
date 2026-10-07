@@ -64,6 +64,22 @@ struct ExchangeAssemblerTests {
         #expect(greeting?.text == "Hi! What's on your mind?")
     }
 
+    /// The transcript stores a merged or refined utterance again under the
+    /// same id; the exchange keeps one copy, the latest.
+    @Test func anUtteranceStoredAgainReplacesItsEarlierText() throws {
+        var assembler = ExchangeAssembler()
+        let question = utterance(.user, "how long should it rise", at: 0)
+        _ = assembler.add(question)
+        var refined = question
+        refined.text = "How long should it rise?"
+        #expect(assembler.add(refined) == nil)
+        _ = assembler.add(utterance(.agent, "Four hours.", at: 5))
+        let flushed = assembler.flush()
+        let exchange = try #require(flushed)
+        #expect(exchange.utteranceIDs.count == 2)
+        #expect(exchange.userText == "How long should it rise?")
+    }
+
     @Test func aUserOnlyExchangeEmbedsTheUsersText() throws {
         let unit = try #require(TopicUnit(utterances: [utterance(.user, "Hello?", at: 0)]))
         #expect(unit.text == "Hello?")

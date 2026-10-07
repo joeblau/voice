@@ -36,6 +36,7 @@
                 Form {
                     flagsSection
                     VoiceLoopDebugSection()
+                    topicsSection
                     environmentSection
                     lifecycleSection
                     PerformanceDebugSection(policy: environment.performance)
@@ -101,6 +102,16 @@
             Section("Lifecycle") {
                 LabeledContent("Scene phase", value: environment.lifecycle.phase?.rawValue ?? "launching")
                 LabeledContent("Phase changes", value: "\(environment.lifecycle.history.count)")
+            }
+        }
+
+        private var topicsSection: some View {
+            Section {
+                NavigationLink("Topics") {
+                    TopicsDebugView()
+                }
+            } footer: {
+                Text("Recent conversations' topics. Long-press to rename, merge or split (#54).")
             }
         }
 

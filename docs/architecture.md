@@ -29,7 +29,7 @@ complete.
 | 3     | `BlauVoiceID`       | Speaker embeddings, enrollment, accept / reject / uncertain gate, language ID                 |
 | 4     | `BlauRealtime`      | xAI realtime WebSocket client, typed events, token minting, session orchestration, tools      |
 | 4     | `BlauTopics`        | Streaming topic segmentation ([topics.md](topics.md)), boundary confirmation, labeling        |
-| 4     | `BlauMemory`        | The shared text embedding service ([embeddings.md](embeddings.md)), the FTS5 + vector search index ([memory-index.md](memory-index.md)), hybrid retrieval, fact extraction, memory tools |
+| 4     | `BlauMemory`        | The shared text embedding service ([embeddings.md](embeddings.md)), the FTS5 + vector search index ([memory-index.md](memory-index.md)), hybrid retrieval ([memory-search.md](memory-search.md)), fact extraction, memory tools |
 
 Each module exports a `<Module>Module` marker type conforming to
 `BlauCore.BlauModule`, with its name and a one-line summary.
@@ -136,7 +136,8 @@ The complete list of declared edges:
   `BLAU_DEVICE_TESTS=1`.
 - `BlauKitIntegrationTests` compose sibling modules the way the
   composition root does (today: topic segmentation on BlauMemory's shared
-  embedding service). It is a test target only, so it doesn't add an edge
+  embedding service, and BlauRealtime's memory tools over BlauMemory's
+  backend). It is a test target only, so it doesn't add an edge
   to the graph; it shares `BlauTopicsTests`' scripted transcripts through a
   symlink in its `Fixtures/`.
 - App-level unit, UI and performance tests stay in `BlauTests`,
@@ -165,6 +166,16 @@ The complete list of declared edges:
   segment rules, 16 ms boundary refinement, speech-gated audio for ASR).
 - [memory-index.md](memory-index.md): the local search index (chunking,
   FTS5 BM25, the int8 vector matrix, rebuilding from SwiftData).
+- [memory-search.md](memory-search.md): hybrid retrieval (weighted RRF of
+  BM25 and vectors tuned on the eval set, time expressions, entity
+  expansion, the reranker hook, latency).
+- [memory-extraction.md](memory-extraction.md): the post-conversation
+  fact and entity extraction pipeline (add-only, validity-dated facts,
+  entity resolution, the privacy toggle and "What Blau Learned").
+- [memory-tools.md](memory-tools.md): Grok's memory tools (`search_memory`,
+  `get_entity`, `remember`, `forget`): the BlauCore contract, the backend,
+  the token budget, the spoken confirmation, tool rounds inside a turn and
+  the chat's chips.
 - [embeddings.md](embeddings.md): the shared text embedding service
   (EmbeddingGemma 256-d int8): tokenizer, token table, batches, model
   versions, and how topics use it.
@@ -174,3 +185,10 @@ The complete list of declared edges:
 - [apple-asr.md](apple-asr.md): the `SpeechAnalyzer` / `SpeechTranscriber`
   fallback transcriber and the `TranscriberRouter` that switches engines
   at utterance boundaries (Settings toggle, background, memory pressure).
+- [export.md](export.md): the Markdown export of conversations and topics
+  to iCloud Drive → Blau (format, idempotent re-export, automatic export,
+  the iCloud Drive entitlements and the manual test plan).
+- [errors.md](errors.md): the error catalog (every user-facing problem,
+  its message, severity and recovery actions), offline mode (queued turns,
+  reconnecting when the network returns, topics segmenting without replies)
+  and the realtime decoder fuzz tests (#80).

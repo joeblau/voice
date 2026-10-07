@@ -54,6 +54,9 @@ public enum PipelineInterval: CaseIterable, Sendable {
     case memoryEmbed
     /// One hybrid memory search (BM25 + vector + fusion).
     case memorySearch
+    /// Extracting facts and entities from one closed topic (#66): the text
+    /// model call, entity resolution and the SwiftData write.
+    case memoryExtract
     /// One SwiftData save.
     case dbSave
 
@@ -78,6 +81,7 @@ public enum PipelineInterval: CaseIterable, Sendable {
         case .topicsLabel: "topics.label"
         case .memoryEmbed: "memory.embed"
         case .memorySearch: "memory.search"
+        case .memoryExtract: "memory.extract"
         case .dbSave: "db.save"
         }
     }
@@ -90,7 +94,7 @@ public enum PipelineInterval: CaseIterable, Sendable {
         case .voiceIDEmbed, .voiceIDVerify: .voiceID
         case .realtimeTurn, .realtimeFirstAudio, .realtimeConnect, .realtimeEvent: .realtime
         case .topicsSegment, .topicsLabel: .topics
-        case .memoryEmbed, .memorySearch: .memory
+        case .memoryEmbed, .memorySearch, .memoryExtract: .memory
         case .dbSave: .data
         }
     }
@@ -99,7 +103,9 @@ public enum PipelineInterval: CaseIterable, Sendable {
 /// Blau's signposters, one `OSSignposter` per `LogCategory`, all in the
 /// `com.joeblau.blau` subsystem. Intervals marked
 /// `PipelineInterval.reportsToMetricKit` are also sent to MetricKit with
-/// `mxSignpost` (see `defaultBackend(for:)`).
+/// `mxSignpost` (see `defaultBackend(for:)`), and while the debug
+/// performance HUD is showing, every canonical interval is also timed for
+/// it (`SignpostLatencyTap`).
 ///
 /// ```swift
 /// try Signposts.withInterval(.dbSave) { try context.save() }
@@ -108,15 +114,22 @@ public enum PipelineInterval: CaseIterable, Sendable {
 /// interval.end()
 /// ```
 public enum Signposts {
-    public static let audio = Signposter(category: .audio, backend: defaultBackend(for: .audio))
-    public static let asr = Signposter(category: .asr, backend: defaultBackend(for: .asr))
-    public static let voiceID = Signposter(category: .voiceID, backend: defaultBackend(for: .voiceID))
-    public static let realtime = Signposter(category: .realtime, backend: defaultBackend(for: .realtime))
-    public static let topics = Signposter(category: .topics, backend: defaultBackend(for: .topics))
-    public static let memory = Signposter(category: .memory, backend: defaultBackend(for: .memory))
-    public static let data = Signposter(category: .data, backend: defaultBackend(for: .data))
-    public static let ui = Signposter(category: .ui, backend: defaultBackend(for: .ui))
-    public static let performance = Signposter(category: .performance, backend: defaultBackend(for: .performance))
+    public static let audio = Signposter(category: .audio, backend: sharedBackend(for: .audio))
+    public static let asr = Signposter(category: .asr, backend: sharedBackend(for: .asr))
+    public static let voiceID = Signposter(category: .voiceID, backend: sharedBackend(for: .voiceID))
+    public static let realtime = Signposter(category: .realtime, backend: sharedBackend(for: .realtime))
+    public static let topics = Signposter(category: .topics, backend: sharedBackend(for: .topics))
+    public static let memory = Signposter(category: .memory, backend: sharedBackend(for: .memory))
+    public static let data = Signposter(category: .data, backend: sharedBackend(for: .data))
+    public static let ui = Signposter(category: .ui, backend: sharedBackend(for: .ui))
+    public static let performance = Signposter(category: .performance, backend: sharedBackend(for: .performance))
+
+    /// The backend behind the shared signposter for `category`: the
+    /// `defaultBackend(for:)`, timed for the HUD by `SignpostLatencyTap.shared`
+    /// while that is active.
+    public static func sharedBackend(for category: LogCategory) -> any SignpostBackend {
+        TappedSignpostBackend(base: defaultBackend(for: category), tap: .shared)
+    }
 
     /// The shared signposter for `category`.
     public static func signposter(for category: LogCategory) -> Signposter {

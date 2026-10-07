@@ -4,6 +4,7 @@ import BlauMemory
 import BlauPersistence
 import BlauRealtime
 import BlauTelemetry
+import BlauTopics
 import BlauTranscription
 import Foundation
 import Observation
@@ -55,6 +56,18 @@ final class AppEnvironment {
     let topics: any TopicService
     let memory: any MemoryService
 
+    /// Opens, titles and refines topics, and applies the user's rename,
+    /// merge and split (#54). In the live app it is also `topics`, fed by
+    /// the orchestrator's transcript; elsewhere it runs on keyword titles
+    /// over the in-memory store, so topic edits work in previews.
+    let topicLifecycle: TopicLifecycle
+
+    /// Learning from conversations (#66): each topic the lifecycle closes is
+    /// sent for fact and entity extraction, and Settings → Memory binds to
+    /// its toggle and "What Blau Learned". Only the live app calls xAI;
+    /// every other kind runs on a text model that is never available.
+    let memoryLearning: MemoryLearning
+
     /// xAI access (#33): the key store, the REST client, on-device realtime
     /// token minting and the `XAIAccount` the key entry views bind to. The
     /// live app uses the Keychain and the network; every other kind runs on
@@ -86,6 +99,13 @@ final class AppEnvironment {
     /// in memory.
     let transcriptionSettings: TranscriptionSettings
 
+    /// The Markdown export to iCloud Drive → Blau (#78, docs/export.md).
+    /// Settings → Markdown Export binds to it; `start()` lets it follow the
+    /// store for automatic export, and leaving the foreground flushes it.
+    /// Live launches write to iCloud Drive; every other kind writes to a
+    /// temporary folder with in-memory settings.
+    let markdownExport: MarkdownExportController
+
     /// Delivers scene phase changes to the services (see `ScenePhaseHandling`).
     let lifecycle: AppLifecycleCoordinator
 
@@ -109,8 +129,18 @@ final class AppEnvironment {
     /// The policy's state for the views (the degraded-mode indicator).
     let performanceStatus: PerformanceStatus
 
+    /// Keeps the on-device memory search index in step with the synced
+    /// store (#63): one incremental indexer per store generation, throttled
+    /// by `performance`, with a background processing task for rebuilds
+    /// (`MemoryIndexBackgroundTask`). Only an on-disk store is indexed, so
+    /// previews and tests (in-memory stores) never build one.
+    let memoryIndexing: MemoryIndexingController
+
     /// Applies the performance level to the inference backends.
     @ObservationIgnored private var performanceFollower: Task<Void, Never>?
+
+    /// Runs the automatic Markdown export (`MarkdownExportController.run()`).
+    @ObservationIgnored private var markdownExportFollower: Task<Void, Never>?
 
     /// Reports device lock and unlock to the keeper and the monitor (live
     /// app only).
@@ -120,6 +150,26 @@ final class AppEnvironment {
     /// the turn orchestrator in `realtime`. Only the live environment can
     /// start it.
     let voiceLoop: VoiceLoop
+
+    /// Every transcript write the turn orchestrator makes, as it happens
+    /// (the live app wraps its SwiftData transcript in it).
+    let transcriptFeed: TranscriptFeed
+
+    /// What the chat transcript (#42) shows on top of the store: the
+    /// speech in progress, Grok's reply as it plays, and the utterances
+    /// just written. Lives as long as the app, so a rebuilt main screen
+    /// keeps the running conversation's rows.
+    let chat: ChatTranscriptModel
+
+    /// The debug performance HUD (#71): shown from Settings → Developer, a
+    /// DEBUG triple-tap or the `perfHUD` flag; reads the voice loop.
+    let performanceHUD: PerformanceHUDController
+
+    /// What the main screen's issue banner shows (#80, docs/errors.md): the
+    /// conversation's, the audio's and iCloud's current problems, with
+    /// their recovery actions. In the live app it also feeds the network
+    /// path to the turn orchestrator (offline mode).
+    let issues: IssueCenter
 
     /// The xAI key refresh started by the latest return to `active`, so tests
     /// can wait for it.
@@ -148,7 +198,13 @@ final class AppEnvironment {
         conversationAudio: ConversationAudio? = nil,
         backgroundInference: BackgroundInferenceMonitor = BackgroundInferenceMonitor(),
         textEmbeddings: TextEmbeddingService = TextEmbeddings.unavailable(),
-        performance: PerformancePolicy = PerformancePolicy(source: ManualDeviceConditionsSource())
+        performance: PerformancePolicy = PerformancePolicy(source: ManualDeviceConditionsSource()),
+        topicLifecycle: TopicLifecycle? = nil,
+        transcriptFeed: TranscriptFeed = TranscriptFeed(),
+        markdownExport: MarkdownExportController? = nil,
+        networkMonitor: (any NetworkMonitor)? = nil,
+        memoryLearning: MemoryLearning? = nil,
+        memoryIndexing: MemoryIndexingController? = nil
     ) {
         self.kind = kind
         self.config = config
@@ -161,6 +217,12 @@ final class AppEnvironment {
         self.persistence = persistence
         self.topics = topics
         self.memory = memory
+        let offlineTranscript = PersistenceTranscriptRecorder(persistence: persistence)
+        self.topicLifecycle =
+            topicLifecycle ?? (topics as? TopicLifecycle)
+            ?? .offline(transcript: offlineTranscript)
+        self.memoryLearning =
+            memoryLearning ?? .offline(persistence: persistence, transcript: offlineTranscript)
         self.xai = xai
         self.speechModels = speechModels
         self.textEmbeddings = textEmbeddings
@@ -170,9 +232,26 @@ final class AppEnvironment {
         self.backgroundInference = backgroundInference
         self.performance = performance
         self.performanceStatus = PerformanceStatus(policy: performance)
-        self.voiceLoop = VoiceLoop(
+        self.markdownExport = markdownExport ?? .local(persistence: persistence)
+        self.memoryIndexing =
+            memoryIndexing
+            ?? MemoryIndexingController(persistence: persistence, embedder: textEmbeddings, performance: performance)
+        let voiceLoop = VoiceLoop(
             realtime: realtime, speechModels: speechModels, audio: conversationAudio,
             backgroundInference: backgroundInference, performance: performance)
+        self.voiceLoop = voiceLoop
+        self.transcriptFeed = transcriptFeed
+        self.chat = ChatTranscriptModel(
+            realtime: realtime, feed: transcriptFeed, player: conversationAudio?.player)
+        self.performanceHUD = PerformanceHUDController(
+            flags: flags, preferences: kind == .live ? .userDefaults() : .inMemory(),
+            pipeline: {
+                var readings = voiceLoop.hudReadings()
+                readings.performance = performance.snapshot
+                return readings
+            })
+        self.issues = IssueCenter(
+            realtime: realtime, keeper: conversationAudio?.keeper, persistence: persistence, network: networkMonitor)
         self.lifecycle = AppLifecycleCoordinator(
             participants: Self.lifecycleOrder(
                 persistence: persistence, audio: audio, transcriber: transcriber,
@@ -193,9 +272,18 @@ final class AppEnvironment {
     func start() async {
         startBackgroundServices()
         startPerformancePolicy()
+        // #80: the issue banner's sources; UI tests can show a catalog entry.
+        issues.start(fixture: kind == .live ? nil : IssueCenter.fixtureCode())
+        // #63: indexes the store once `PersistenceGate` has opened it.
+        memoryIndexing.start()
+        memoryLearning.start(following: topicLifecycle)
+        // Previews and UI tests only: a canned conversation (#42).
+        async let fixture: Void = ChatTranscriptFixture.seedIfRequested(in: self)
+        startMarkdownExport()
         async let models: Void = speechModels.start()
         await xai.start()
         await models
+        await fixture
     }
 
     /// Wires what keeps a conversation going off screen (#26): the Live
@@ -226,6 +314,14 @@ final class AppEnvironment {
         let inference = backgroundInference
         let levels = performance.performanceLevels()
         performanceFollower = Task { await inference.follow(levels) }
+    }
+
+    /// Starts following the store for the automatic Markdown export (#78).
+    /// It only exports while Settings → Export Automatically is on.
+    private func startMarkdownExport() {
+        guard markdownExportFollower == nil else { return }
+        let export = markdownExport
+        markdownExportFollower = Task { await export.run() }
     }
 
     /// Ends the conversation: what the Live Activity's Stop button does.
@@ -298,14 +394,34 @@ extension AppEnvironment {
         let models = speechModels ?? SpeechModels.makeManager()
         let persistence = persistence ?? .live(isDebugBuild: AppConfig.isDebugBuild)
         let xai = xai ?? XAIServices.make(config: config)
-        let realtimeSession = RealtimeSessionServices.make()
+        let flags = FeatureFlags(
+            storage: UserDefaultsFeatureFlagStorage(defaults: defaults),
+            allowsOverrides: AppConfig.isDebugBuild
+        )
+        let textEmbeddings = TextEmbeddings.make(models: models)
+        // The device's thermal state, Low Power Mode and battery (#75).
+        // One policy, shared by the indexer (#63) and fact extraction (#66).
+        let performance = PerformancePolicy()
+        // #63: the incremental memory indexer; #68: the memory tools Grok
+        // calls search its index and write facts to the store.
+        let memoryIndexing = MemoryIndexingController(
+            persistence: persistence, embedder: textEmbeddings, performance: performance)
+        let memory = MemoryTools.service(indexing: memoryIndexing, textEmbeddings: textEmbeddings)
+        let realtimeSession = RealtimeSessionServices.make(
+            tools: MemoryTools.registry(backend: memory, enabled: flags.isEnabled(.memoryTools)))
+        // #54: the topic lifecycle writes through the transcript's store.
+        let transcript = PersistenceTranscriptRecorder(persistence: persistence)
+        let topics = TopicLifecycle.app(
+            transcript: transcript, labeling: .app(xai: xai), textEmbeddings: textEmbeddings)
+        let transcriptFeed = TranscriptFeed()
+        // #66: facts and entities extracted from every closed topic.
+        let memoryLearning = MemoryLearning.live(
+            xai: xai, transcript: transcript, persistence: persistence, textEmbeddings: textEmbeddings,
+            performance: performance)
         return AppEnvironment(
             kind: .live,
             config: config,
-            flags: FeatureFlags(
-                storage: UserDefaultsFeatureFlagStorage(defaults: defaults),
-                allowsOverrides: AppConfig.isDebugBuild
-            ),
+            flags: flags,
             clock: SystemClock(),
             audio: conversationAudio.keeper,
             // ParakeetStreamingTranscriber (#29) reads the capture hub and
@@ -316,23 +432,35 @@ extension AppEnvironment {
             voiceGate: UnavailableService(subsystem: "voice ID"),
             // The Grok realtime session and the turn orchestrator (#34 - #36).
             realtime: VoiceLoop.makeOrchestrator(
-                config: config, xai: xai, realtimeSession: realtimeSession, persistence: persistence,
-                player: conversationAudio.player),
+                config: config, xai: xai, realtimeSession: realtimeSession,
+                transcript: TopicTrackingTranscript(base: transcript, topics: topics),
+                // The transcript also supplies the current topic when a new
+                // realtime session has to be given the conversation again (#39).
+                reseedContext: transcript,
+                player: conversationAudio.player, feed: transcriptFeed),
             // The SwiftData stores with CloudKit sync (#20).
             persistence: persistence,
-            // #52 - #54: the topic segmenter.
-            topics: UnavailableService(subsystem: "topics"),
+            // #52 - #54: topic segmentation, labels and the topic lifecycle.
+            topics: topics,
             // #62 - #68: memory and its tools.
-            memory: UnavailableService(subsystem: "memory"),
+            memory: memory,
             xai: xai,
             speechModels: models,
             realtimeSession: realtimeSession,
             // #31: the Settings toggle that forces Apple's speech engine.
             transcriptionSettings: TranscriptionSettings.make(),
             conversationAudio: conversationAudio,
-            textEmbeddings: TextEmbeddings.make(models: models),
-            // The device's thermal state, Low Power Mode and battery (#75).
-            performance: PerformancePolicy()
+            textEmbeddings: textEmbeddings,
+            // Also drives `memoryIndexing` and `memoryLearning`.
+            performance: performance,
+            topicLifecycle: topics,
+            transcriptFeed: transcriptFeed,
+            // #78: Markdown files in iCloud Drive → Blau.
+            markdownExport: .live(persistence: persistence),
+            // #80: offline mode follows the network path.
+            networkMonitor: SystemNetworkMonitor(),
+            memoryLearning: memoryLearning,
+            memoryIndexing: memoryIndexing
         )
     }
 

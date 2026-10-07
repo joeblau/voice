@@ -105,6 +105,21 @@ public actor TurnOrchestrator: RealtimeService {
         public var responseCreateHoldLimit: Duration
         /// Session renewal, resumption and reseeding (#39).
         public var continuity: SessionContinuityConfiguration
+        /// After the client gives up reconnecting (its retries ran out on a
+        /// failure that may pass, such as an xAI outage), the orchestrator
+        /// tries again this often while the network is reachable (#80).
+        /// `nil` waits for ``TurnOrchestrator/connect()`` or for the network
+        /// to come back.
+        public var retryAfterGivingUp: Duration?
+        /// How long a turn whose response called tools waits for the tool
+        /// runner to ask for the follow-up before the turn is given up. Every
+        /// call is answered within its tool's timeout (a few seconds), so
+        /// this only fires when the runner dropped the round.
+        public var toolFollowUpTimeout: Duration
+        /// Keep each tool call's arguments and output in
+        /// ``TurnSnapshot/toolCalls`` (DEBUG builds show them under the chat's
+        /// tool chips, #68). They are user content, so it is off by default.
+        public var keepsToolPayloads: Bool
 
         public init(
             mergeWindow: Duration = .milliseconds(400),
@@ -113,7 +128,10 @@ public actor TurnOrchestrator: RealtimeService {
             outputSampleRate: Int = 24_000,
             playbackDrainSlack: Duration = .seconds(2),
             responseCreateHoldLimit: Duration = .seconds(2),
-            continuity: SessionContinuityConfiguration = .standard
+            continuity: SessionContinuityConfiguration = .standard,
+            retryAfterGivingUp: Duration? = .seconds(30),
+            toolFollowUpTimeout: Duration = .seconds(20),
+            keepsToolPayloads: Bool = false
         ) {
             self.mergeWindow = mergeWindow
             self.responseTimeout = responseTimeout
@@ -122,6 +140,9 @@ public actor TurnOrchestrator: RealtimeService {
             self.playbackDrainSlack = playbackDrainSlack
             self.responseCreateHoldLimit = responseCreateHoldLimit
             self.continuity = continuity
+            self.retryAfterGivingUp = retryAfterGivingUp
+            self.toolFollowUpTimeout = toolFollowUpTimeout
+            self.keepsToolPayloads = keepsToolPayloads
         }
 
         public static let standard = Configuration()
@@ -153,6 +174,13 @@ public actor TurnOrchestrator: RealtimeService {
     public nonisolated let configurator: RealtimeSessionConfigurator
     public nonisolated let audio: any AgentAudioOutput
     public nonisolated let configuration: Configuration
+    /// Answers Grok's function calls (#38), when the session declares
+    /// client-side tools (the memory tools, #68). The orchestrator feeds it
+    /// and is the single consumer of its `activity`.
+    public nonisolated let toolRunner: RealtimeToolRunner?
+    private let toolRouter: ToolEventRouter?
+    private let toolFeed: AsyncStream<ToolFeedItem>.Continuation
+    private let toolFeedStream: AsyncStream<ToolFeedItem>
 
     private let transcript: any TurnTranscriptRecording
     let reseedContext: any RealtimeReseedContextProviding
@@ -211,8 +239,20 @@ public actor TurnOrchestrator: RealtimeService {
     private var truncatedItems: [String: AgentItem] = [:]
     /// Stored agent utterances cut short by the user, this conversation.
     private var interruptedAgentUtterances: Set<UUID> = []
+    /// User utterances discarded while waiting for the connection.
+    var discardedUtterances: Set<UUID> = []
     private var bargeIns = 0
     private var lastBargeIn: BargeInRecord?
+    /// This conversation's tool calls, newest ``maximumToolCallRecords``.
+    private var toolCalls: [ToolCallEntry] = []
+
+    // Offline (#80)
+    /// The network as last reported by ``networkReachabilityChanged(_:)``.
+    private var network: NetworkReachability = .unknown
+    /// Whether the transcript was last told that replies are deferred.
+    private var repliesDeferred = false
+    /// Tries the connection again after the client gave up.
+    private var retryTask: Task<Void, Never>?
 
     // Continuity (#39): see TurnOrchestrator+Continuity.swift
     /// The conversation as stored, for reseeding a new server session.
@@ -241,6 +281,10 @@ public actor TurnOrchestrator: RealtimeService {
     /// Connections in a row that dropped before their resumption was
     /// confirmed.
     var unconfirmedResumes = 0
+    /// The user texts of discarded turns whose items had already reached
+    /// the server conversation (#80): a connection still resuming that
+    /// conversation deletes them from the replayed history.
+    var discardedSentTexts: [String] = []
     /// The session is old enough to renew at the next quiet moment.
     var rolloverDue = false
     /// A renewal is under way.
@@ -261,6 +305,9 @@ public actor TurnOrchestrator: RealtimeService {
     var connectTask: Task<Void, Never>?
     private var responseTimeoutTask: Task<Void, Never>?
     private var holdTask: Task<Void, Never>?
+    private var toolWaitTask: Task<Void, Never>?
+    private var toolFeedTask: Task<Void, Never>?
+    private var toolActivityTask: Task<Void, Never>?
 
     /// - Parameters:
     ///   - client: The realtime connection. The orchestrator is the single
@@ -271,9 +318,13 @@ public actor TurnOrchestrator: RealtimeService {
     ///   - transcript: Stores both roles' utterances.
     ///   - reseedContext: The current topic, for reseeding a new server
     ///     session (#39).
+    ///   - tools: The client-side tools the session declares (the same
+    ///     registry the configurator's `session.tools` came from). Empty:
+    ///     no tool runner.
     ///   - clock: Measures latency, dates agent utterances, times the drain
     ///     and response timeouts and the session's age.
-    ///   - signposter: Where `realtime.turn` and `realtime.firstAudio` go.
+    ///   - signposter: Where `realtime.turn`, `realtime.firstAudio` and
+    ///     `realtime.toolCall` go.
     ///   - configuration: Merge window, timeouts and session continuity.
     public init(
         client: RealtimeClient,
@@ -281,6 +332,7 @@ public actor TurnOrchestrator: RealtimeService {
         audio: any AgentAudioOutput,
         transcript: any TurnTranscriptRecording,
         reseedContext: any RealtimeReseedContextProviding = NoRealtimeReseedContext(),
+        tools: RealtimeToolRegistry = RealtimeToolRegistry(),
         clock: any BlauClock = SystemClock(),
         signposter: Signposter = Signposts.realtime,
         configuration: Configuration = .standard
@@ -296,6 +348,18 @@ public actor TurnOrchestrator: RealtimeService {
         let latency = TurnLatencyStatistics(capacity: configuration.latencyWindow)
         self.latency = latency
         broadcaster = SnapshotBroadcaster(initial: TurnSnapshot(latency: latency))
+        (toolFeedStream, toolFeed) = AsyncStream.makeStream(of: ToolFeedItem.self, bufferingPolicy: .unbounded)
+        if tools.isEmpty {
+            toolRouter = nil
+            toolRunner = nil
+        } else {
+            let router = ToolEventRouter(client: client)
+            toolRouter = router
+            toolRunner = RealtimeToolRunner(
+                registry: tools, sender: router, clock: clock,
+                configuration: .init(reportsCallDetails: configuration.keepsToolPayloads), signposter: signposter)
+        }
+        toolRouter?.attach(self)
     }
 
     deinit {
@@ -306,10 +370,15 @@ public actor TurnOrchestrator: RealtimeService {
         drainTask?.cancel()
         responseTimeoutTask?.cancel()
         holdTask?.cancel()
+        retryTask?.cancel()
         rolloverTask?.cancel()
         rolloverDeadlineTask?.cancel()
         tokenRefreshTask?.cancel()
         resumeTimeoutTask?.cancel()
+        toolWaitTask?.cancel()
+        toolFeedTask?.cancel()
+        toolActivityTask?.cancel()
+        toolFeed.finish()
         broadcaster.finish()
     }
 
@@ -431,7 +500,10 @@ public actor TurnOrchestrator: RealtimeService {
         queued.removeAll()
         conversationID = nil
         userPartial = nil
+        repliesDeferred = false
+        cancelRetry()
         cancelTimers()
+        cancelTools()
         cancelContinuityTasks()
         settingsTask?.cancel()
         settingsTask = nil
@@ -469,6 +541,9 @@ public actor TurnOrchestrator: RealtimeService {
         stateTask?.cancel()
         eventTask = nil
         stateTask = nil
+        toolFeed.finish()
+        toolActivityTask?.cancel()
+        toolActivityTask = nil
         await client.shutdown()
         broadcaster.finish()
     }
@@ -541,6 +616,7 @@ public actor TurnOrchestrator: RealtimeService {
         if conversationID == nil {
             try await start()
         } else {
+            cancelRetry()
             await forgetStaleServerConversation()
             do {
                 try await client.connect()
@@ -567,6 +643,133 @@ public actor TurnOrchestrator: RealtimeService {
             } catch {
                 Log.realtime.error("Couldn't flush the transcript: \(String(describing: error), privacy: .public)")
             }
+        }
+    }
+
+    // MARK: Offline (#80)
+
+    /// Tells the orchestrator whether the device has an internet connection
+    /// (the app's `NWPathMonitor`).
+    ///
+    /// While unreachable, the snapshot reports ``ConversationConnectivity/offline``
+    /// and what the user says is stored and queued as usual. When the
+    /// network comes back and the client had given up reconnecting, the
+    /// orchestrator reconnects at once, so the queued utterances go out
+    /// (one turn, after the session is resumed or reseeded) without waiting
+    /// for a retry timer or a tap.
+    public func networkReachabilityChanged(_ reachable: Bool) {
+        let previous = network
+        network = reachable ? .reachable : .unreachable
+        guard network != previous else { return }
+        Log.realtime.notice("Network \(reachable ? "reachable" : "unreachable", privacy: .public)")
+        if reachable {
+            if case .disconnected(let error?) = connection, conversationID != nil, error != .cancelled,
+                !error.requiresUserAction
+            {
+                Log.realtime.notice("Network is back; reconnecting")
+                reconnectNow()
+            }
+        } else {
+            // Nothing to retry until the network is back.
+            cancelRetry()
+        }
+        publish()
+    }
+
+    /// Follows a stream of reachability reports (``networkReachabilityChanged(_:)``)
+    /// until it finishes or the task is cancelled.
+    public func follow(network reachability: AsyncStream<Bool>) async {
+        for await reachable in reachability {
+            networkReachabilityChanged(reachable)
+        }
+    }
+
+    /// Drops the utterances waiting for the connection: the user chose not
+    /// to wait for Grok's answer. They stay in the transcript (they were
+    /// said) and are marked in ``TurnSnapshot/discardedUtteranceIDs``; Grok
+    /// doesn't get them, so a reconnect doesn't answer them, and a later
+    /// reseed (which only sends stored exchanges) leaves them out too.
+    ///
+    /// A turn whose items reached xAI before the connection dropped is
+    /// already in the server conversation. Resuming that conversation would
+    /// leave the question there for the next reply to answer, so the next
+    /// connection starts a new server conversation instead (reseeded
+    /// without the discarded utterances). A connection already reopening
+    /// the old conversation deletes those items once it has resumed.
+    ///
+    /// - Returns: How many utterances were discarded.
+    @discardableResult
+    public func discardQueued() -> Int {
+        guard conversationID != nil, !queued.isEmpty else { return 0 }
+        let discarded = queued
+        queued.removeAll()
+        discardedUtterances.formUnion(discarded.map(\.user.id))
+        Log.realtime.notice("Discarded \(discarded.count, privacy: .public) queued utterance(s)")
+        let sent = discarded.filter(\.wasSent)
+        if !sent.isEmpty {
+            discardedSent(sent.flatMap(\.texts))
+        }
+        publish()
+        return discarded.count
+    }
+
+    /// Reconnects in the background (``connect()``), unless a connection is
+    /// already being opened.
+    private func reconnectNow() {
+        cancelRetry()
+        guard conversationID != nil else { return }
+        connectTask?.cancel()
+        connectTask = Task { [weak self] in
+            try? await self?.connect()
+        }
+    }
+
+    /// The client gave up: try again later if the failure may pass by
+    /// itself and the network is there.
+    private func scheduleRetry(after error: RealtimeClientError) {
+        cancelRetry()
+        guard let interval = configuration.retryAfterGivingUp, conversationID != nil, error.isRetryable,
+            network != .unreachable
+        else { return }
+        Log.realtime.notice(
+            "Trying the connection again in \(interval.timeInterval, format: .fixed(precision: 0), privacy: .public) s"
+        )
+        let clock = clock
+        retryTask = Task { [weak self] in
+            do {
+                try await clock.sleep(for: interval)
+            } catch {
+                return
+            }
+            await self?.retryFired()
+        }
+    }
+
+    private func retryFired() {
+        retryTask = nil
+        guard conversationID != nil, case .disconnected(_?) = connection, network != .unreachable else { return }
+        Log.realtime.notice("Retrying the realtime connection")
+        reconnectNow()
+    }
+
+    private func cancelRetry() {
+        retryTask?.cancel()
+        retryTask = nil
+    }
+
+    /// Tells the transcript when replies start or stop waiting for the
+    /// connection, in order with the utterances it records, so the topic
+    /// lifecycle can keep segmenting what the user says while no replies
+    /// come (#80).
+    private func updateReplyDeferral(_ snapshot: TurnSnapshot) {
+        guard let id = conversationID else { return }
+        let deferred = snapshot.connectivity.defersReplies
+        guard deferred != repliesDeferred else { return }
+        repliesDeferred = deferred
+        Log.realtime.notice("Replies \(deferred ? "deferred" : "resumed", privacy: .public)")
+        let transcript = transcript
+        recorder.enqueue {
+            await transcript.repliesDeferredChanged(deferred, in: id)
         }
     }
 
@@ -793,12 +996,22 @@ public actor TurnOrchestrator: RealtimeService {
     }
 
     private func sent(_ events: [RealtimeClientEvent], turn number: Int?) {
+        countTextInputs(in: events)
         guard let number, let turn = current, turn.number == number else { return }
         guard events.contains(where: { $0.type == "response.create" }) else { return }
         if state == .committing {
             setState(.agentThinking)
         }
         scheduleResponseTimeout(for: number)
+    }
+
+    /// Adds the user text items among `events`, sent to Grok, to the usage
+    /// totals: xAI bills each one as a text input (`RealtimePricing`).
+    func countTextInputs(in events: [RealtimeClientEvent]) {
+        usage.textInputs += events.count { event in
+            guard case .conversationItemCreate(.message(let message), _) = event else { return false }
+            return message.role == .user && message.content.contains { $0.type == .inputText }
+        }
     }
 
     private func sendFailed(turn number: Int?, error: RealtimeClientError) {
@@ -841,6 +1054,7 @@ public actor TurnOrchestrator: RealtimeService {
                 await self?.connectionChanged(state, url: url)
             }
         }
+        startToolRunner()
     }
 
     private func connectionChanged(_ newState: RealtimeClient.ConnectionState, url: URL?) {
@@ -851,12 +1065,15 @@ public actor TurnOrchestrator: RealtimeService {
         }
         switch newState {
         case .connected:
+            cancelRetry()
             let session = epoch.advance()
             isSessionReady = false
             // A new connection: nothing sent on the old one will answer.
             awaitingResponse.removeAll()
             activeResponseID = nil
             unknownResponseIsActive = false
+            // Nor will its tool calls: the new server session doesn't know them.
+            cancelTools()
             let configurator = configurator
             let client = client
             let epoch = epoch
@@ -883,9 +1100,11 @@ public actor TurnOrchestrator: RealtimeService {
             if let turn = current, !turn.isResponseDone {
                 connectionLost(during: turn)
             }
+            cancelTools()
             sessionLost(newState)
             if case .disconnected(let error?) = newState, !retryFreshAfterRefusedResume(error) {
                 fail(TurnFailure(connectionError: error))
+                scheduleRetry(after: error)
             }
         }
         publish()
@@ -912,6 +1131,16 @@ public actor TurnOrchestrator: RealtimeService {
 
     private func handle(_ event: RealtimeServerEvent) {
         guard conversationID != nil else { return }
+        process(event)
+        // The runner sees each event after the orchestrator has handled
+        // it, so when it asks for a follow-up the response that made the
+        // calls is already done here.
+        if toolRunner != nil, Self.concernsTools(event) {
+            toolFeed.yield(.event(event))
+        }
+    }
+
+    private func process(_ event: RealtimeServerEvent) {
         lastServerActivity = clock.uptime
         switch event {
         case .conversationCreated(let created):
@@ -922,8 +1151,18 @@ public actor TurnOrchestrator: RealtimeService {
             sessionUpdated()
         case .responseCreated(let created):
             responseCreated(created.response)
+        case .responseFunctionCallArgumentsDone(let done):
+            noteToolCall(done.callID, responseID: done.responseID)
+        case .responseOutputItemDone(let done):
+            if case .functionCall(let call) = done.item, let callID = call.callID {
+                noteToolCall(callID, responseID: done.responseID)
+            }
         case .responseOutputItemAdded(let added):
-            if case .message(let message) = added.item, message.role == .assistant, let itemID = message.id {
+            if case .functionCall(let call) = added.item, let callID = call.callID {
+                noteToolCall(callID, responseID: added.responseID)
+            } else if case .message(let message) = added.item, message.role == .assistant,
+                let itemID = message.id
+            {
                 if let responseID = added.responseID, ignoredResponses.contains(responseID) {
                     // An item of a response given up: none of it is played,
                     // so Grok shouldn't think it said it.
@@ -1061,7 +1300,7 @@ public actor TurnOrchestrator: RealtimeService {
         endIntervals(of: turn, message: "rejected")
         current = nil
         cancelTimers()
-        fail(TurnFailure(kind: .response, message: error.message ?? "Grok couldn't answer"))
+        fail(TurnFailure(kind: .response, message: error.message ?? "Grok couldn't answer", issue: error.issue))
     }
 
     private func audioDelta(_ delta: RealtimeServerEvent.AudioDelta) {
@@ -1070,7 +1309,12 @@ public actor TurnOrchestrator: RealtimeService {
             let index = self.agentItemIndex(itemID, contentIndex: delta.contentIndex ?? 0, in: &turn)
             let item = turn.agentItems[index]
             self.audio.enqueue(pcm16: delta.audio, item: item.playbackID)
-            turn.agentItems[index].receivedFrames += Int64(delta.audio.count / 2)
+            let frames = Int64(delta.audio.count / 2)
+            turn.agentItems[index].receivedFrames += frames
+            self.usage.outputAudio += .samples(frames, sampleRate: self.sampleRate)
+            if turn.responseFirstAudioAt == nil {
+                turn.responseFirstAudioAt = self.clock.uptime
+            }
             guard turn.firstAudioAt == nil else { return }
             let now = self.clock.uptime
             turn.firstAudioAt = now
@@ -1136,12 +1380,225 @@ public actor TurnOrchestrator: RealtimeService {
             // Its `response.created` never came: the turn's slot is answered.
             awaitingResponse.removeAll { $0.turn == turn.number }
         }
-        finishResponse(of: turn, status: response.status?.rawValue ?? "completed", output: response.output ?? [])
+        let calls = turn.toolCallIDs.union(Self.functionCallIDs(in: response.output ?? []))
+        if toolRunner != nil, !calls.isEmpty, Self.continuesWithTools(response.status) {
+            awaitToolResults(of: turn, responseID: response.id, output: response.output ?? [])
+            return
+        }
+        finishResponse(
+            of: turn, status: response.status?.rawValue ?? "completed", output: response.output ?? [],
+            failure: RealtimeErrorDetail(statusDetails: response.statusDetails))
+    }
+
+    // MARK: Tool rounds
+
+    /// Starts feeding the tool runner and following its activity (once).
+    private func startToolRunner() {
+        guard let runner = toolRunner, toolFeedTask == nil else { return }
+        let feed = toolFeedStream
+        toolFeedTask = Task {
+            for await item in feed {
+                switch item {
+                case .event(let event): await runner.handle(event)
+                case .cancelAll: await runner.cancelAll()
+                }
+            }
+        }
+        toolActivityTask = Task { [weak self] in
+            for await activity in runner.activity {
+                await self?.toolActivity(activity)
+            }
+        }
+    }
+
+    /// Drops every tool call in flight (barge-in, a new or lost connection,
+    /// stop): nothing more is sent for them.
+    private func cancelTools() {
+        guard toolRunner != nil else { return }
+        toolFeed.yield(.cancelAll)
+        toolWaitTask?.cancel()
+        toolWaitTask = nil
+    }
+
+    /// A function call of the current turn's response.
+    private func noteToolCall(_ callID: String, responseID: String?) {
+        guard toolRunner != nil else { return }
+        updateTurn(responseID: responseID) { turn in
+            turn.toolCallIDs.insert(callID)
+        }
+    }
+
+    /// The turn's response is done and called tools: the turn goes on.
+    /// What Grok said before the calls (usually "let me check") is stored,
+    /// the signposts keep running, and the turn waits for the runner to ask
+    /// for the follow-up (``requestToolFollowUp()``), whose reply continues
+    /// the same turn.
+    private func awaitToolResults(of turn: Turn, responseID: String?, output: [RealtimeItem]) {
+        var turn = turn
+        for case .message(let message) in output where message.role == .assistant {
+            guard let itemID = message.id else { continue }
+            let index = agentItemIndex(itemID, contentIndex: 0, in: &turn)
+            if turn.agentItems[index].transcript.isEmpty {
+                turn.agentItems[index].transcript = message.text
+            }
+        }
+        for index in turn.agentItems.indices where !turn.agentItems[index].isPersisted {
+            audio.finish(turn.agentItems[index].playbackID)
+            let item = turn.agentItems[index]
+            persistAgent(item, text: item.transcript, duration: .samples(item.receivedFrames, sampleRate: sampleRate))
+            turn.agentItems[index].isPersisted = true
+            turn.agentItems[index].isSettled = true
+        }
+        if let responseID {
+            turn.toolResponseIDs.insert(responseID)
+        }
+        turn.awaitsToolResults = true
+        turn.responseID = nil
+        turn.toolCallIDs = []
+        // Nothing is outstanding until the follow-up is requested, so there
+        // is no response to cancel if the user cuts in meanwhile.
+        turn.responseCreateAttempts = 0
+        turn.needsResponseCreate = false
+        turn.responseFirstAudioAt = nil
+        turn.toolRounds += 1
+        current = turn
+        responseTimeoutTask?.cancel()
+        responseTimeoutTask = nil
+        Log.realtime.notice(
+            "Turn \(turn.number, privacy: .public): waiting for tool results (round \(turn.toolRounds, privacy: .public))"
+        )
+        scheduleToolWait(for: turn.number)
+        if state == .agentSpeaking {
+            // The filler is still playing; thinking once it has.
+            waitForFiller(of: turn.number)
+        } else {
+            setState(.agentThinking)
+        }
+        publish()
+    }
+
+    private func waitForFiller(of number: Int) {
+        drainTask?.cancel()
+        let audio = audio
+        drainTask = Task { [weak self] in
+            await audio.waitUntilIdle()
+            guard !Task.isCancelled else { return }
+            await self?.fillerPlayed(turn: number)
+        }
+    }
+
+    private func fillerPlayed(turn number: Int) {
+        guard let turn = current, turn.number == number, turn.awaitsToolResults, state == .agentSpeaking else {
+            return
+        }
+        drainTask = nil
+        setState(.agentThinking)
+    }
+
+    private func scheduleToolWait(for number: Int) {
+        toolWaitTask?.cancel()
+        let clock = clock
+        let timeout = configuration.toolFollowUpTimeout
+        toolWaitTask = Task { [weak self] in
+            do {
+                try await clock.sleep(for: timeout)
+            } catch {
+                return
+            }
+            await self?.toolWaitExpired(turn: number)
+        }
+    }
+
+    private func toolWaitExpired(turn number: Int) {
+        guard let turn = current, turn.number == number, turn.awaitsToolResults else { return }
+        Log.realtime.error("Turn \(number, privacy: .public): no follow-up after its tool calls; giving up")
+        endToolTurn(turn, message: "toolsTimedOut")
+    }
+
+    /// Ends a turn whose tool round won't be followed up: what was said is
+    /// stored already; the conversation goes back to listening.
+    private func endToolTurn(_ turn: Turn, message: String) {
+        endIntervals(of: turn, message: message)
+        current = nil
+        cancelTimers()
+        cancelTools()
+        setState(userPartial == nil ? .listening : .userSpeaking)
+    }
+
+    /// The tool runner has sent every output of the current turn's tool
+    /// round and asks for the follow-up response: sent like the turn's own
+    /// `response.create` (tagged, and held while another response is
+    /// active).
+    ///
+    /// - Throws: `RealtimeClientError.cancelled` when no turn is waiting for
+    ///   tool results any more (the user cut in, or the round was given up);
+    ///   the runner then drops the round.
+    func requestToolFollowUp() throws(RealtimeClientError) {
+        guard conversationID != nil, var turn = current, turn.awaitsToolResults else {
+            Log.realtime.notice("Not requesting a tool follow-up: its turn has ended")
+            throw .cancelled
+        }
+        toolWaitTask?.cancel()
+        toolWaitTask = nil
+        turn.awaitsToolResults = false
+        turn.needsResponseCreate = true
+        current = turn
+        Log.realtime.notice("Turn \(turn.number, privacy: .public): tool results sent; requesting the follow-up")
+        requestResponseIfReady()
+    }
+
+    /// Follows the runner: records each call for ``TurnSnapshot/toolCalls``,
+    /// and ends a turn whose tool round the runner dropped.
+    private func toolActivity(_ activity: RealtimeToolRunner.Activity) {
+        guard conversationID != nil else { return }
+        switch activity {
+        case .started(let callID, let name):
+            guard !toolCalls.contains(where: { $0.call.id == callID }) else { return }
+            toolCalls.append(
+                ToolCallEntry(
+                    call: TurnSnapshot.ToolCall(id: callID, name: name, startedAt: clock.now), turn: current?.number))
+            if toolCalls.count > Self.maximumToolCallRecords {
+                toolCalls.removeFirst(toolCalls.count - Self.maximumToolCallRecords)
+            }
+        case .details(let callID, _, let arguments, let output):
+            guard configuration.keepsToolPayloads,
+                let index = toolCalls.lastIndex(where: { $0.call.id == callID })
+            else { return }
+            toolCalls[index].call.arguments = arguments
+            toolCalls[index].call.output = output
+        case .finished(let callID, _, let outcome):
+            guard let index = toolCalls.lastIndex(where: { $0.call.id == callID }) else { return }
+            toolCalls[index].call.outcome = outcome
+        case .abandoned(let responseID):
+            // The current turn's round was dropped: no follow-up will come.
+            let endsTurn =
+                responseID.map { id in
+                    current?.awaitsToolResults == true && current?.toolResponseIDs.contains(id) == true
+                }
+                ?? false
+            // Calls still running for an ended turn (or this one) never
+            // answer now.
+            for index in toolCalls.indices where toolCalls[index].call.outcome == nil {
+                if endsTurn || toolCalls[index].turn != current?.number {
+                    toolCalls[index].call.outcome = .cancelled
+                }
+            }
+            if endsTurn, let turn = current {
+                Log.realtime.notice("Turn \(turn.number, privacy: .public): its tool round was dropped")
+                endToolTurn(turn, message: "toolsAbandoned")
+                return
+            }
+        case .followUpRequested:
+            return
+        }
+        publish()
     }
 
     /// Ends `turn`'s response: finishes its audio, writes the agent
     /// utterances, ends the signposts and waits for playback to drain.
-    private func finishResponse(of turn: Turn, status: String, output: [RealtimeItem]) {
+    private func finishResponse(
+        of turn: Turn, status: String, output: [RealtimeItem], failure: RealtimeErrorDetail? = nil
+    ) {
         var turn = turn
         // Fill in transcripts the deltas didn't deliver.
         for case .message(let message) in output where message.role == .assistant {
@@ -1152,7 +1609,9 @@ public actor TurnOrchestrator: RealtimeService {
             }
         }
         turn.isResponseDone = true
-        for index in turn.agentItems.indices {
+        // Items spoken before a tool round were finished and stored then.
+        let earlier = Set(turn.agentItems.indices.filter { turn.agentItems[$0].isPersisted })
+        for index in turn.agentItems.indices where !earlier.contains(index) {
             audio.finish(turn.agentItems[index].playbackID)
             let item = turn.agentItems[index]
             persistAgent(item, text: item.transcript, duration: .samples(item.receivedFrames, sampleRate: sampleRate))
@@ -1175,7 +1634,7 @@ public actor TurnOrchestrator: RealtimeService {
 
         if status == RealtimeResponseStatus.failed.rawValue {
             current = nil
-            fail(TurnFailure(kind: .response, message: "Grok couldn't answer"))
+            fail(TurnFailure(kind: .response, message: "Grok couldn't answer", issue: failure?.issue))
             return
         }
         guard let firstAudioAt = turn.firstAudioAt else {
@@ -1184,10 +1643,12 @@ public actor TurnOrchestrator: RealtimeService {
             return
         }
         current = turn
-        let received = turn.agentItems.reduce(Duration.zero) {
-            $0 + .samples($1.receivedFrames, sampleRate: sampleRate)
+        // This response's audio, played from its own first audio (the
+        // silence while tools ran doesn't count).
+        let received = turn.agentItems.indices.filter { !earlier.contains($0) }.reduce(Duration.zero) {
+            $0 + .samples(turn.agentItems[$1].receivedFrames, sampleRate: sampleRate)
         }
-        let remaining = max(.zero, received - (now - firstAudioAt))
+        let remaining = max(.zero, received - (now - (turn.responseFirstAudioAt ?? firstAudioAt)))
         waitForPlayback(of: turn.number, atMost: remaining + configuration.playbackDrainSlack)
         publish()
     }
@@ -1301,8 +1762,9 @@ public actor TurnOrchestrator: RealtimeService {
             } else if !item.isPersisted {
                 persistAgent(item, text: item.transcript, duration: .milliseconds(played))
             }
-            // Cut short: less was heard than arrived, or more was coming.
-            if played < received || cancelsResponse {
+            // Cut short: less was heard than arrived, or more was coming
+            // (not for what was said before a tool round: it was complete).
+            if played < received || (cancelsResponse && !item.isSettled) {
                 interruptedAgentUtterances.insert(item.utteranceID)
                 cut.append(
                     .init(
@@ -1313,6 +1775,9 @@ public actor TurnOrchestrator: RealtimeService {
         if !events.isEmpty, isSessionReady {
             send(events, turn: nil)
         }
+        // Its tool calls (running, or waiting for their follow-up) are
+        // dropped with it.
+        cancelTools()
         endIntervals(of: turn, message: reason.rawValue)
         Log.realtime.notice("Turn \(turn.number, privacy: .public) \(reason.rawValue, privacy: .public)")
         current = nil
@@ -1393,7 +1858,7 @@ public actor TurnOrchestrator: RealtimeService {
         // slot (marked abandoned): the next turn's `response.create` waits
         // for it, up to ``Configuration/responseCreateHoldLimit``.
         abandon(turn, reason: .timedOut)
-        fail(TurnFailure(kind: .response, message: "Grok didn't respond"))
+        fail(TurnFailure(kind: .response, message: "Grok didn't respond", issue: UserFacingIssue(.replyTimedOut)))
     }
 
     func cancelTimers() {
@@ -1403,6 +1868,8 @@ public actor TurnOrchestrator: RealtimeService {
         holdTask = nil
         drainTask?.cancel()
         drainTask = nil
+        toolWaitTask?.cancel()
+        toolWaitTask = nil
     }
 
     // MARK: Transcript
@@ -1482,7 +1949,9 @@ public actor TurnOrchestrator: RealtimeService {
     }
 
     func publish() {
-        broadcaster.publish(makeSnapshot())
+        let snapshot = makeSnapshot()
+        updateReplyDeferral(snapshot)
+        broadcaster.publish(snapshot)
     }
 
     private func makeSnapshot() -> TurnSnapshot {
@@ -1493,13 +1962,26 @@ public actor TurnOrchestrator: RealtimeService {
             userPartial: userPartial,
             agentText: current?.agentItems.map(\.transcript).joined(separator: " ") ?? "",
             queuedUtterances: queued.count,
+            queuedUtteranceIDs: queued.map(\.user.id),
+            discardedUtteranceIDs: discardedUtterances,
+            network: network,
             completedTurns: completedTurns,
             latency: latency,
             usage: usage,
             session: continuitySnapshot(),
             bargeIns: bargeIns,
             lastBargeIn: lastBargeIn,
-            interruptedAgentUtterances: interruptedAgentUtterances
+            interruptedAgentUtterances: interruptedAgentUtterances,
+            agentSpeech: current?.agentItems.map {
+                TurnSnapshot.AgentSpeech(
+                    utteranceID: $0.utteranceID, playbackID: $0.playbackID, transcript: $0.transcript,
+                    startedAt: $0.startedAt)
+            } ?? [],
+            toolCalls: toolCalls.map { entry in
+                var call = entry.call
+                call.isLive = entry.turn != nil && entry.turn == current?.number
+                return call
+            }
         )
     }
 
@@ -1515,8 +1997,11 @@ public actor TurnOrchestrator: RealtimeService {
         rowOfFinal.removeAll()
         truncatedItems.removeAll()
         interruptedAgentUtterances.removeAll()
+        discardedUtterances.removeAll()
+        repliesDeferred = false
         bargeIns = 0
         lastBargeIn = nil
+        toolCalls.removeAll()
         usage = RealtimeUsageTotals()
         completedTurns = 0
         latency = TurnLatencyStatistics(capacity: configuration.latencyWindow)
@@ -1597,6 +2082,18 @@ extension TurnOrchestrator {
         var needsResponseCreate = true
         /// How many times its `response.create` has been sent.
         var responseCreateAttempts = 0
+        /// When the current response's first audio arrived (uptime): the
+        /// first response's, or a tool follow-up's.
+        var responseFirstAudioAt: Duration?
+        /// Function calls the current response made (#38).
+        var toolCallIDs: Set<String> = []
+        /// The response ended with function calls; the turn waits for the
+        /// tool runner to ask for the follow-up.
+        var awaitsToolResults = false
+        /// Responses of this turn that called tools.
+        var toolResponseIDs: Set<String> = []
+        /// Tool rounds so far.
+        var toolRounds = 0
 
         /// Whether any of the reply reached the user: audio, or text.
         var hasReplyContent: Bool {
@@ -1631,6 +2128,9 @@ extension TurnOrchestrator {
         var startOffset: Duration?
         var receivedFrames: Int64 = 0
         var isPersisted = false
+        /// Said in full before a tool round (#68): its response is done, so
+        /// cancelling the follow-up doesn't cut it.
+        var isSettled = false
 
         init(itemID: String, contentIndex: Int, startedAt: Date?, startOffset: Duration?) {
             self.itemID = itemID
@@ -1680,7 +2180,9 @@ extension TurnOrchestrator {
 
 extension TurnFailure {
     init(connectionError error: RealtimeClientError) {
-        self.init(kind: .connection, message: error.description, requiresUserAction: error.requiresUserAction)
+        self.init(
+            kind: .connection, message: error.description, requiresUserAction: error.requiresUserAction,
+            issue: error.issue)
     }
 }
 

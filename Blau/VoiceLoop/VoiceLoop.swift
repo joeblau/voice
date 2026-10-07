@@ -101,6 +101,32 @@ final class VoiceLoop {
     /// The HUD rows for the current snapshot.
     var hudReadout: TurnHUDReadout { TurnHUDReadout(snapshot) }
 
+    /// The voice pipeline's part of the performance HUD (#71): capture
+    /// drops, the VAD's state and load, the ASR chunk counters, and the
+    /// orchestrator's turn state, latencies, tokens and cost. Every read is a
+    /// lock-protected snapshot, cheap enough for the HUD's 1 Hz refresh.
+    func hudReadings() -> PipelineReadings {
+        var readings = PipelineReadings()
+        snapshot.fill(&readings)
+        if let audio {
+            let capture = audio.capture.hub.statistics
+            readings.capture = .init(
+                droppedBuffers: capture.droppedBuffers, subscriberDroppedFrames: capture.subscriberDroppedFrames,
+                conversionFailures: capture.conversionFailures)
+        }
+        if let pipeline {
+            let vad = pipeline.voiceActivity.statistics
+            readings.voiceActivity = .init(
+                isSpeech: pipeline.voiceActivity.isSpeechActive, modelLoad: vad.modelLoad,
+                skippedFraction: vad.skippedFraction)
+            let asr = pipeline.transcriber.statistics
+            readings.transcriber = .init(
+                chunks: asr.chunksProcessed, meanChunkMilliseconds: asr.meanChunkTime.milliseconds,
+                slowestChunkMilliseconds: asr.slowestChunk.milliseconds)
+        }
+        return readings
+    }
+
     /// Builds the audio pipeline and starts a conversation. The realtime
     /// session connects in the background; what the user says meanwhile is
     /// queued.
@@ -146,24 +172,30 @@ final class VoiceLoop {
 
     /// The live orchestrator: a realtime client minting its secrets on
     /// device, Blau's session configuration, the conversation's 24 kHz
-    /// `player` and the SwiftData transcript. Sessions are resumed after a
-    /// drop and renewed before xAI's 120-minute limit (#39).
+    /// `player` and the SwiftData transcript (with the topic lifecycle
+    /// listening, #54), whose writes `feed` reports to the chat transcript
+    /// (#42) as they happen. Sessions are resumed after a drop and renewed
+    /// before xAI's 120-minute limit (#39), reseeded with the current topic
+    /// from `reseedContext`.
     static func makeOrchestrator(
         config: AppConfig,
         xai: XAIServices,
         realtimeSession: RealtimeSessionServices,
-        persistence: PersistenceController,
-        player: StreamingAudioPlayer
+        transcript: any TurnTranscriptRecording,
+        reseedContext: any RealtimeReseedContextProviding,
+        player: StreamingAudioPlayer,
+        feed: TranscriptFeed = TranscriptFeed()
     ) -> TurnOrchestrator {
-        // The transcript also supplies the current topic when a new realtime
-        // session has to be given the conversation again (#39).
-        let transcript = PersistenceTranscriptRecorder(persistence: persistence)
-        return TurnOrchestrator(
+        TurnOrchestrator(
             client: RealtimeClient(endpoint: config.xaiRealtimeURL, tokenProvider: xai.tokenProvider),
             configurator: realtimeSession.configurator,
             audio: player,
-            transcript: transcript,
-            reseedContext: transcript
+            transcript: FeedingTranscriptRecorder(transcript, feed: feed),
+            reseedContext: reseedContext,
+            // #68: the memory tools Grok calls; DEBUG keeps their payloads
+            // for the chat's tool chips.
+            tools: realtimeSession.toolRegistry,
+            configuration: TurnOrchestrator.Configuration(keepsToolPayloads: AppConfig.isDebugBuild)
         )
     }
 }
@@ -176,15 +208,19 @@ final class VoiceLoop {
 @MainActor
 final class LiveVoicePipeline {
     let transcriber: ParakeetStreamingTranscriber
+    /// The VAD, for the performance HUD.
+    let voiceActivity: VoiceActivitySegmenter
     private let stopAudio: @Sendable () async -> Void
     private var vadTask: Task<Void, Never>?
     private var bargeInTask: Task<Void, Never>?
 
     private init(
-        transcriber: ParakeetStreamingTranscriber, vadTask: Task<Void, Never>?, bargeInTask: Task<Void, Never>?,
+        transcriber: ParakeetStreamingTranscriber, voiceActivity: VoiceActivitySegmenter,
+        vadTask: Task<Void, Never>?, bargeInTask: Task<Void, Never>?,
         stopAudio: @escaping @Sendable () async -> Void
     ) {
         self.transcriber = transcriber
+        self.voiceActivity = voiceActivity
         self.vadTask = vadTask
         self.bargeInTask = bargeInTask
         self.stopAudio = stopAudio
@@ -248,7 +284,8 @@ final class LiveVoicePipeline {
             }
             let vadTask = Task { await vad.run(on: hub) }
             return LiveVoicePipeline(
-                transcriber: transcriber, vadTask: vadTask, bargeInTask: bargeInTask, stopAudio: stopAudio)
+                transcriber: transcriber, voiceActivity: vad, vadTask: vadTask, bargeInTask: bargeInTask,
+                stopAudio: stopAudio)
         #else
             throw VoiceLoop.StartError.unavailable
         #endif

@@ -1,6 +1,8 @@
 import BlauCore
+import BlauPersistence
 import BlauRealtime
 import BlauTranscription
+import SwiftData
 import SwiftUI
 
 /// Top-level view hosted by the app's window: the main screen (#40).
@@ -11,7 +13,8 @@ import SwiftUI
 /// between them, so the system lays them out, gives them Liquid Glass, keeps
 /// them clear of the home indicator on every iPhone size and in landscape, and
 /// lets the conversation scroll under the bar. DEBUG builds add the debug menu
-/// button to the top bar.
+/// button to the top bar, and a triple-tap on the main screen that shows or
+/// hides the performance HUD (#71).
 ///
 /// It also hosts the xAI key entry points (#33): Settings and, while no usable
 /// key is stored (none, or an unreadable one), the onboarding step. UI and
@@ -31,6 +34,7 @@ struct RootView: View {
 /// environment's audio service.
 struct MainScreenScaffold: View {
     @Environment(ModelManager.self) private var models
+    @Environment(AppEnvironment.self) private var environment
     @Environment(\.scenePhase) private var scenePhase
     @State private var recording: RecordingController
     @State private var isShowingSettings = false
@@ -45,13 +49,24 @@ struct MainScreenScaffold: View {
     var body: some View {
         NavigationStack {
             MainScreen(onConnectAccount: { isShowingKeyOnboarding = true })
-                .voiceLoopHUD()
+                #if DEBUG
+                    // Triple-tap anywhere on the main screen to show or hide the
+                    // performance HUD (#71).
+                    .simultaneousGesture(
+                        TapGesture(count: 3).onEnded { environment.performanceHUD.toggleVisible() })
+                #endif
                 // Shown only while the device is hot or short on power (#75).
-                // An inset, not an overlay: the DEBUG voice loop HUD (applied
-                // just before, top-leading on the content) then sits below the
-                // indicator instead of under it, and the conversation scrolls
+                // An inset, not an overlay, so the conversation scrolls
                 // beneath it like it does beneath the bars.
-                .safeAreaInset(edge: .top, spacing: 0) { PerformanceIndicator() }
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    VStack(spacing: 0) {
+                        PerformanceIndicator()
+                        // #80: offline, reconnecting, key, audio and iCloud
+                        // problems with their recovery actions.
+                        IssueBannerSlot { isShowingKeyOnboarding = true }
+                    }
+                    .animation(.default, value: environment.issues.primary)
+                }
                 .toolbar {
                     #if DEBUG
                         ToolbarItem(placement: .topBarTrailing) {
@@ -82,6 +97,8 @@ struct MainScreenScaffold: View {
                 }
                 .animation(.default, value: models.isReady)
         }
+        // Over the whole stack, bars included, so it can be dragged anywhere.
+        .performanceHUD()
         .task {
             await recording.synchronize()
         }
@@ -118,33 +135,43 @@ struct MainScreenScaffold: View {
     }
 }
 
-/// The main screen's content: the area the conversation (#42) and topic
-/// timeline (#56) fill. Until they land it shows the app name and, while no
-/// usable xAI key is stored, the onboarding button.
+/// The main screen's content: the conversation (#42), and later the topic
+/// timeline (#56). It shows the running conversation, or else the most
+/// recent one; before there is any, the brand lockup and, while no usable xAI
+/// key is stored, the onboarding button.
 ///
-/// It is a scroll view that runs under the bottom bar's glass, anchored to the
-/// bottom like a conversation. The empty state is at least as tall as the
-/// area between the bars so it stays centered, and scrolls instead of clipping
-/// when Dynamic Type makes it taller than the screen.
+/// Either way it is a scroll view that runs under the bottom bar's glass,
+/// anchored to the bottom like a conversation. The empty state is at least as
+/// tall as the area between the bars so it stays centered, and scrolls instead
+/// of clipping when Dynamic Type makes it taller than the screen.
 struct MainScreen: View {
     /// Opens the xAI key onboarding step.
     var onConnectAccount: () -> Void = {}
 
     @Environment(XAIAccount.self) private var account
+    @Environment(AppEnvironment.self) private var environment
+    @Query(ChatTranscript.latestConversation) private var latestConversation: [Conversation]
 
     var body: some View {
+        if let conversationID = environment.chat.conversationID?.rawValue ?? latestConversation.first?.id {
+            ChatTranscriptView(conversationID: conversationID, onConnectAccount: onConnectAccount)
+                .accessibilityIdentifier(MainScreenAccessibility.content)
+        } else {
+            emptyState
+        }
+    }
+
+    private var emptyState: some View {
         // The reader's size is the area between the bars (it respects the
         // safe area); the scroll view inside still runs under them.
         GeometryReader { visible in
             ScrollView {
                 VStack(spacing: 24) {
-                    Text("Blau")
-                        .font(.largeTitle)
-                        .foregroundStyle(.secondary)
+                    BrandLockup()
 
                     if account.needsKeyEntry {
                         Button("Connect Your xAI Account", action: onConnectAccount)
-                            .buttonStyle(.borderedProminent)
+                            .brandProminentButtonStyle()
                             .accessibilityIdentifier(XAIKeyIdentifiers.openOnboarding)
                     }
                 }
@@ -158,22 +185,38 @@ struct MainScreen: View {
             .scrollBounceBehavior(.basedOnSize)
             .accessibilityIdentifier(MainScreenAccessibility.content)
         }
+        // The whole screen takes taps (the DEBUG triple-tap for the HUD).
+        .contentShape(Rectangle())
     }
 }
 
 #Preview("Main screen") {
     let environment = AppEnvironment.preview()
-    RootView()
-        .appEnvironment(environment)
-        .environment(AppDiagnostics(store: nil))
-        .task { await environment.speechModels.start() }
+    PersistenceGate(persistence: environment.persistence) {
+        RootView()
+    }
+    .appEnvironment(environment)
+    .environment(AppDiagnostics(store: nil))
+    .task { await environment.speechModels.start() }
+}
+
+#Preview("Main screen, conversation") {
+    let environment = AppEnvironment.preview()
+    PersistenceGate(persistence: environment.persistence) {
+        RootView()
+    }
+    .appEnvironment(environment)
+    .environment(AppDiagnostics(store: nil))
+    .task { await ChatTranscriptFixture.seed(count: 60, into: environment.persistence) }
 }
 
 #Preview("Main screen, largest text") {
     let environment = AppEnvironment.preview()
-    RootView()
-        .appEnvironment(environment)
-        .environment(AppDiagnostics(store: nil))
-        .task { await environment.speechModels.start() }
-        .dynamicTypeSize(.accessibility5)
+    PersistenceGate(persistence: environment.persistence) {
+        RootView()
+    }
+    .appEnvironment(environment)
+    .environment(AppDiagnostics(store: nil))
+    .task { await environment.speechModels.start() }
+    .dynamicTypeSize(.accessibility5)
 }

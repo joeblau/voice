@@ -2,10 +2,12 @@
 
 `BlauTopics` watches the conversation as it streams and decides when it has
 moved to a new topic. This document describes the streaming segmentation
-engine (#52) and how its candidate boundaries are confirmed and titled by a
-language model ([Confirmation and labels](#confirmation-and-labels), #53).
-The topic lifecycle (#54) and offline re-segmentation (#55) build on their
-events.
+engine (#52), how its candidate boundaries are confirmed and titled by a
+language model ([Confirmation and labels](#confirmation-and-labels), #53),
+and the [topic lifecycle](#topic-lifecycle) that turns those decisions into
+stored topics and applies the user's edits (#54), and the
+[offline re-segmentation](#offline-re-segmentation) that checks every
+boundary again when the conversation ends (#55).
 
 The engine is a streaming variant of TextTiling (Hearst, 1997) over exchange
 embeddings, with hysteresis so a brief digression doesn't split a topic.
@@ -26,6 +28,7 @@ is unit-tested on the Mac.
 | `StreamingTopicSegmenter` | Actor that embeds each unit, runs the engine inside the `topics.segment` signpost interval and logs decisions under `Log.topics` |
 | `TopicConfig` | Every parameter |
 | `SegmentationMetrics` | Pk and WindowDiff, for evaluating against labelled transcripts |
+| `TopicResegmenter` | Offline re-segmentation at the end of a conversation: TreeSeg-style divisive clustering over every exchange embedding, starting from the streaming topics ([below](#offline-re-segmentation)) |
 
 ```swift
 // The shared embedding service (#60) when installed, else a fallback:
@@ -359,3 +362,270 @@ To measure on a device, run the same suite on the package scheme with the
 environment variable set in the scheme's test action, or read the
 `topics.label` intervals from an Instruments recording of a real
 conversation (see [performance.md](performance.md)).
+
+## Topic lifecycle
+
+`TopicLifecycle` (BlauTopics, #54) runs the topics of the live conversation:
+it opens them, titles them, refines each one when it closes, and applies the
+user's rename, merge and split. It writes through `ConversationStore`
+(BlauPersistence), the same store that records the transcript, so the
+store's current topic follows every boundary and new utterances join the
+right topic. The code is in `Packages/BlauKit/Sources/BlauTopics/Lifecycle/`
+and `Packages/BlauKit/Sources/BlauPersistence/ConversationStore+Topics.swift`.
+
+```swift
+// Blau/Topics/TopicLifecycle+App.swift and AppEnvironment.live():
+let transcript = PersistenceTranscriptRecorder(persistence: persistence)
+let topics = TopicLifecycle.app(transcript: transcript, labeling: .app(xai: xai), textEmbeddings: textEmbeddings)
+let orchestrator = VoiceLoop.makeOrchestrator(
+    ..., transcript: TopicTrackingTranscript(base: transcript, topics: topics), reseedContext: transcript, ...)
+// The timeline's context menu (Blau/Topics/TopicEditMenu.swift):
+try await topics.rename(topicID, to: "Seed round")
+try await topics.mergeWithPrevious(topicID)
+try await topics.split(topicID, atUtterance: utteranceID)
+```
+
+`TopicTrackingTranscript` stores each utterance, then hands it to the
+lifecycle (`ingest`), which queues the work and returns at once: labeling
+takes seconds and must never hold up the transcript or the audio. The queue
+runs in order, and every store call names its topic, so a decision that
+lands after the conversation ended still changes the right topic.
+
+### What happens when
+
+| Moment | What the lifecycle does |
+| ------ | ----------------------- |
+| Conversation starts | Opens the first topic at the conversation's start, titled "New topic" (`Topic.placeholderTitle`). A resumed conversation with an open topic continues it |
+| Each exchange | `ExchangeAssembler` groups the committed utterances; an exchange is scored when the user speaks again or 1 s after the agent's reply was stored (`exchangeSettleDelay`). Its time range is re-based on the wall clock, so user (ASR timeline) and agent (orchestrator clock) speech always arrive in order |
+| 3rd exchange of a topic without a model title | Labels the topic so far: provisional title and summary (`firstTitleAfterExchanges`) |
+| Candidate the model agreed with | Splits the current topic at the boundary: the new topic appears with the model's provisional title, shown in italics (`titleIsProvisional`) |
+| Candidate vetoed in the same step | Nothing is opened |
+| Boundary confirmed | Moves the new topic's start to the confirmed gap if it moved, keeps the topic, and **refines the closed topic**: labels all of its exchanges and makes that title final, with a summary |
+| Candidate taken back (digression, end of stream) | Merges the provisional topic back into the one before it. If the user renamed the provisional topic, the break is theirs: the topic stays and the one before it is closed and refined instead |
+| Conversation ends | Scores the last exchange, takes back an unconfirmed break, [re-segments](#offline-re-segmentation) the conversation, refines the last topic; a topic with no utterances is removed. Utterances that arrive afterwards (late transcripts) never reopen topics |
+
+The new topic appears about two exchanges after a real switch: the
+segmenter raises a candidate once two exchanges after the gap exist
+(`rightWindow`), and the lifecycle shows it then instead of waiting for the
+confirmation, which needs `sustainUnits` more. On the scripted transcripts
+the switch's first exchange is in a new topic one or two exchanges after it
+(`TopicLifecycleTests.aNewTopicAppearsWithinTwoExchangesOfASwitch`), and
+after confirmation every topic starts exactly at the labelled boundary.
+`Configuration.opensTopicsAtCandidates = false` waits for the confirmation
+instead (three to five exchanges).
+
+| Transcript | Switch at exchange | New topic shown after exchange |
+| ---------- | ------------------ | ------------------------------ |
+| `threeTopics` | 6, 12 | 7 (provisional at 4, moved to 6 on confirmation), 13 |
+| `briefDigression` | 12 | 13 (the digression at 6 was shown after 7 and taken back after 9) |
+| `explicitCues` | 5, 10 | 7, 11 |
+| `fourTopics` | 7, 12, 18 | 7 (provisional at 4, moved to 7), 13, 19 |
+| `singleTopic` | none | none kept (two candidates shown and taken back) |
+
+### Titles and manual edits
+
+`Topic.titleIsProvisional` decides who may write a title:
+
+- The lifecycle only ever writes a title through
+  `ConversationStore.applyTopicLabel`, which writes it **only while the title
+  is provisional**. A refinement on close makes it final.
+- A manual rename (`renameTopic`) makes the title final and saves at once,
+  so it is on disk (and queued for CloudKit) before the call returns. A
+  manual title is therefore never overwritten, whatever label lands later.
+  The summary is still refreshed.
+- **Merge with previous** gives the earlier topic the later one's utterances
+  and end, deletes the later topic, and refreshes the summary. The earlier
+  topic keeps its title unless that title is provisional and the later
+  one's is final (refined and manual titles are both final, so a refined
+  earlier title wins over a manual later one). Merging away a provisional
+  topic also ignores the segmenter's later confirmation of that boundary.
+- **Renaming a provisional topic** accepts its break: if the segmenter
+  later takes the candidate back, the named topic is kept rather than
+  merged away, and the topic before it is closed and refined.
+- **Split here** starts a new topic at an utterance (not the first). Both
+  parts are labeled again; a manual title on the first part stays.
+
+Topic order is `ordinal` (renumbered 0, 1, 2... on every split and merge).
+Each closed topic's final title and summary are stored on the `Topic`, and
+`TopicLifecycle.events()` reports them for session continuity (#39) and
+memory (M3):
+
+| Event | When |
+| ----- | ---- |
+| `.opened` | A topic opened: the first topic, a provisional break, or the second part of a split |
+| `.updated` | A title, summary or span changed. A merge or split that revises a topic which had already closed reports its new final label here |
+| `.closed` | A topic closed and was refined. Sent once per topic, when it closes (a confirmed boundary, the end of the conversation, or splitting the open topic) |
+| `.removed` | A provisional break taken back, a topic merged into the one before it, or an empty last topic |
+
+Session continuity reads the current topic straight from the store: the
+realtime reseed (#39) gets `reseedContext: transcript`, the same
+`PersistenceTranscriptRecorder` (and so the same `ConversationStore`) the
+lifecycle writes titles and summaries to. The recorder opens one store per
+container and makes every caller wait for it, so the transcript and the
+lifecycle never write through two stores after an iCloud account change.
+
+Until the timeline (#56) exists, DEBUG builds show recent conversations'
+topics with the edit menu in **Debug → Topics** (`TopicsDebugView`).
+
+### Not covered yet
+
+- A title refined on close and a manual title are both "final"
+  (`titleIsProvisional == false`); the schema can't tell them apart. Offline
+  re-segmentation tells them apart in memory during the session (see
+  [What the user owns](#what-the-user-owns)); a `titleSource` field in a
+  schema v3 would let a later pass (for example a `BGProcessingTask`) do the
+  same.
+- Two devices editing the same conversation at once resolve through
+  CloudKit's last-writer-wins per field.
+
+## Offline re-segmentation
+
+The streaming segmenter decides with two exchanges of look-ahead. When the
+conversation ends, every exchange embedding is available at once, so
+`TopicLifecycle` checks the boundaries again (#55). The engine is
+`TopicResegmenter` (`Packages/BlauKit/Sources/BlauTopics/Offline/`), pure
+and deterministic like `TopicSegmenter`; the lifecycle applies what it
+proposes (`TopicLifecycle+Resegmentation.swift`).
+
+### How it decides
+
+TreeSeg (Gklezakos et al., 2024) segments a transcript top-down: a
+stretch's incoherence is the sum of squared distances of its embeddings to
+their mean (`SSE`), and it is cut where that drops the most. A cut's
+**score** is that drop divided by `σ²`, the mean within-topic spread per
+exchange, so a cut through a single topic scores about 1 whatever the
+embedder (an F-statistic) and the thresholds carry over from the lexical
+embedder to dense ones.
+
+Rather than replace the streaming topics, the engine starts from them and
+only proposes changes that clearly improve coherence:
+
+1. **Merge.** A boundary scoring under `mergeThreshold` (1.5) separates two
+   parts of one topic and is removed, weakest first. This folds back a
+   digression the hysteresis didn't catch.
+2. **Move.** A boundary moves up to `moveRadius` (2) exchanges if the cut
+   there scores at least `moveMargin` (0.25) more.
+3. **Split.** TreeSeg's divisive step: each topic is cut at its best place
+   if that scores at least `splitThreshold` (2.5) and both parts are full
+   topics (the segmenter's `minimumTopicUnits` and `minimumTopicDuration`),
+   then each half is tried the same way. `σ²` is measured on the starting
+   topics, so a missed change inflates it; after a round that added
+   boundaries it is measured again and the step repeats.
+4. **Merge again**, against the refreshed `σ²`, sparing the new boundaries.
+
+No boundary is added at a `forbidden` position (one the labeling model
+vetoed). The passes depend on each other: the second merge pass is scored
+against the boundaries the split added, so a removal can rely on an
+addition (a break at 8 moves to 10, then goes once 16 is added). A rejected
+addition therefore can't just be dropped from `changes`; the engine runs
+again with that position forbidden.
+
+Between 1.5 and 2.5 the streaming decision stands: a hysteresis, like the
+segmenter's. The thresholds come from the score distributions on the 60
+synthetic conversations: a cut inside a reference topic scored at most 1.93
+(95th percentile 1.56), a reference boundary at least 1.58 (5th percentile
+2.95).
+
+### In the lifecycle
+
+A conversation in which replies were deferred (offline, #80) isn't
+re-segmented: its user-only exchanges are short questions whose spread
+doesn't match the whole exchanges the thresholds were tuned on, and the
+streaming topics stand.
+
+When the conversation finishes, after the last exchange is scored and an
+unconfirmed break is taken back, the lifecycle lays the stored topics over
+the session's exchanges (an exchange belongs to the topic its first
+utterance is in) and works in two phases, so the slow model calls never sit
+between a check and the write it guards:
+
+1. **Plan.** It runs the engine and sends every boundary the engine adds to
+   the labeling service as a `.boundary` request, like a streaming
+   candidate, before changing anything. If the model vetoes one (and the
+   user didn't announce the change), that position is forbidden and the
+   engine runs again, until the model accepts every addition. Each question
+   is asked once, and at most eight per conversation
+   (`TopicLifecycle.resegmentationQuestionLimit`): after a veto the engine
+   proposes the next best cut, so a model that keeps saying no would
+   otherwise be asked about one exchange after another. Past the limit only
+   boundaries the model already accepted can be added. Then it reads the
+   stored topics again: if one changed
+   while the model was being asked (the user renamed it), it plans again
+   with that topic locked, up to three times.
+2. **Apply.** It applies the changes through the store in order:
+
+| Change | Store | Labels |
+| ------ | ----- | ------ |
+| Boundary removed | `mergeTopicWithPrevious(_:ifUnchanged:)`; `.removed` for the merged topic | The remaining topic is titled again over all its exchanges |
+| Boundary moved | `moveTopicStart(_:to:ifUnchanged:)` | Both topics' summaries are refreshed; titles stay |
+| Boundary added | `splitTopic(_:at:title:ifUnchanged:)` with the title the model gave when it accepted the boundary; `.opened` for the new topic | Both parts are titled |
+
+Each write is a compare-and-swap: the lifecycle reads the topics it is
+about to change, checks that the user doesn't own them, and passes those
+snapshots; the store refuses the edit (`ConversationStoreError.topicChanged`)
+if a topic's title or span changed in between.
+
+A topic that closed during the conversation and changes here is reported as
+`.updated` with its new final label; a topic closing now (the last one, or
+one re-segmentation opened) as `.closed`, once. Re-titling uses
+`ConversationStore.replaceTopicLabel(_:expectedTitle:title:summary:)`, a
+compare-and-swap on the title the lifecycle wrote, so a rename that lands
+while the labeler runs wins. `Configuration.resegmentation = nil` turns the
+pass off.
+
+#### What the user owns
+
+Re-segmentation never touches a topic the user owns: no boundary is added
+inside it, its edges don't move, and its title isn't written. That is a
+topic the user renamed, merged or split in this session, a topic carried
+over from an earlier session (its exchanges aren't in this session's
+segmenter), or a topic whose final title isn't the one a labeler wrote here
+(renamed some other way, such as on another device). A boundary the user
+announced ("let's switch gears") is pinned.
+
+A rename isn't queued behind the lifecycle (it is written at once), so it
+can land while re-segmentation runs. One that lands while the model is
+being asked makes the lifecycle plan again with the topic locked. One that
+lands between a change's check and its write makes the store refuse the
+write, and the remaining changes are dropped. Either way the renamed topic
+is neither split, moved nor merged. A merge or split by the user is queued
+behind the whole pass.
+
+Why at the end of the conversation and not in a `BGProcessingTask`: the
+lifecycle already holds every exchange's embedding and knows which titles it
+wrote, so the pass costs milliseconds and needs no schema change. A later
+background pass would have to embed every exchange again and could not tell
+a refined title from a manual one (above).
+
+### Evaluation
+
+`ResegmentationEvaluationTests` runs the streaming segmenter, then the
+engine, through `LexicalTextEmbedder`;
+`TopicResegmentationLifecycleTests.pkOfTheStoredTopicsImprovesOnTheFixtureSet`
+does the same through the whole lifecycle and store and measures the stored
+topics. `BLAU_PRINT_RESEGMENTATION=1` prints the numbers;
+`BLAU_FULL_RESEGMENTATION_EVAL=1` runs the lifecycle test on all 65
+conversations (by default the scripted ones and synthetic 41–60).
+
+| Set | Conversations | Pk, streaming → re-segmented | WindowDiff | Better / worse | Digressions split |
+| --- | ------------- | ---------------------------- | ---------- | -------------- | ----------------- |
+| Fixture set: scripted + synthetic 1–60 | 65 | **0.0279 → 0.0095** | 0.0283 → 0.0099 | 10 / 0 | 6 → 3 |
+| Same, through the lifecycle and store | 65 | **0.0279 → 0.0095** | | 10 / 0 | |
+| Held out: synthetic 61–300 (not tuned on) | 240 | 0.0422 → 0.0145 | 0.0426 → 0.0146 | 57 / 0 | 40 → 17 |
+| Scripted, Apple contextual embedding (macOS 27.2, opt-in) | 5 | 0.096 → **0.019** | | 1 / 0 | |
+| Scripted, shared embedding service | 5 | **pending** (needs the model bundle) | | | |
+
+The scripted transcripts already segment exactly with the lexical embedder
+and are left unchanged. With Apple's contextual embedding the streaming
+segmenter missed the Japan boundary after the digression in
+`briefDigression`; re-segmentation found it and split nothing else
+(`BLAU_DEVICE_TESTS=1 swift test --filter NLContextualTextEmbedderTests`).
+The opt-in `RealModelTopicSegmentationTests` (above) also re-segments and
+prints a "Re-segmented" column; run it on the model bundle to fill in the
+shared-service row.
+
+A 400-exchange conversation with every other boundary missed and a false
+one in every remaining topic is re-segmented exactly in 0.5 s in a debug
+build on the Mac (`TopicResegmenterTests.aLongConversationIsQuick`); it runs
+once per conversation, off the audio path. The lifecycle logs each pass's
+duration and changes under `Log.topics`.

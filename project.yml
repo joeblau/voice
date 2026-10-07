@@ -86,12 +86,21 @@ targets:
           and hold a spoken conversation with you.
         # audio: an active .playAndRecord session keeps a conversation
         # running with the screen locked (#26, docs/background.md).
+        # processing: the memory index rebuild's BGProcessingTask (#63,
+        # docs/memory-indexer.md).
         UIBackgroundModes:
           - audio
           - remote-notification
+          - processing
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.joeblau.blau.memory-index
         # The lock-screen recording indicator (#26).
         NSSupportsLiveActivities: true
-        UILaunchScreen: {}
+        # Branding (#82, docs/branding.md): the brand mark centered on the
+        # system background, both from Assets.xcassets/Brand.
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+          UIImageName: BrandMark
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         # Landscape too: the main screen's bottom bar keeps Settings left
@@ -110,6 +119,14 @@ targets:
         # entitlement. Unsigned simulator / CI builds (CODE_SIGNING_ALLOWED=NO)
         # stay local-only instead of crashing in CKContainer. See docs/sync.md.
         BlauCloudKitEnabled: $(CODE_SIGNING_ALLOWED)
+        # The Markdown export (#78, docs/export.md): the container's
+        # Documents folder shows in Files as iCloud Drive → Blau. iOS only
+        # rereads this key when CFBundleVersion changes.
+        NSUbiquitousContainers:
+          iCloud.com.joeblau.blau:
+            NSUbiquitousContainerIsDocumentScopePublic: true
+            NSUbiquitousContainerName: Blau
+            NSUbiquitousContainerSupportedFolderLevels: Any
     postBuildScripts:
       # Release only (BLAU_FORBID_EMBEDDED_SECRETS): fail if XAI_DEV_API_KEY
       # is set or an xAI key is found in the built executable or Info.plist.
@@ -130,6 +147,10 @@ targets:
           - iCloud.com.joeblau.blau
         com.apple.developer.icloud-services:
           - CloudKit
+          # iCloud Drive, for the Markdown export (#78).
+          - CloudDocuments
+        com.apple.developer.ubiquity-container-identifiers:
+          - iCloud.com.joeblau.blau
         aps-environment: development
 
   # The recording Live Activity on the lock screen and in the Dynamic

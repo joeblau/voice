@@ -5,7 +5,9 @@ built with Swift 6, SwiftUI and SwiftData, and targets iOS 26.0 and later.
 See issue #1 for the architecture overview and
 [`docs/architecture.md`](docs/architecture.md) for the module layout. Data is
 stored with SwiftData and synced through the user's private iCloud container
-([`docs/sync.md`](docs/sync.md)); [`docs/release.md`](docs/release.md) has the
+([`docs/sync.md`](docs/sync.md)), with an optional Markdown copy of every
+conversation in iCloud Drive → Blau ([`docs/export.md`](docs/export.md));
+[`docs/release.md`](docs/release.md) has the
 checklist to run before every TestFlight build.
 
 ## Getting started
@@ -47,12 +49,15 @@ configured. See [docs/configuration.md](docs/configuration.md).
 | `make bench-kit` | Run the model benchmarks on this Mac (reference numbers, downloads models) |
 | `make eval-noise` | Compare noise suppressors (DeepFilterNet3, Apple voice isolation) on the ASR fixtures: WER and cost (downloads models, [docs](docs/noise-suppression.md)) |
 | `make eval-asr`  | Evaluate the ASR engines on the fixtures: a WER, latency and RTF table per engine (downloads models, [docs](docs/asr-eval.md)) |
+| `make eval-memory` | Evaluate memory retrieval (Recall@k, MRR) and LLM-judged answers on the memory eval set, with the regression gate ([docs](docs/memory-eval.md)) |
+| `make icon-previews` | Render the app icon in every appearance into `.build/AppIcon` ([docs](docs/branding.md)) |
 | `make secrets`   | Create `Config/Secrets.xcconfig` from the example                |
 | `make test-scripts` | Test the secrets, CI and Instruments template scripts         |
 | `make install-instruments-template` | Add the Blau template to Instruments' chooser ([docs](docs/performance.md#instruments-template)) |
 | `make trace`     | Record Blau on `TRACE_DEVICE` with the Blau Instruments template |
 | `make instruments-template` | Regenerate `Tools/Instruments/Blau.tracetemplate`     |
 | `make verify-instruments` | Record with the template on the Mac and check every interval is captured |
+| `make verify-hud` | Record a workload on the Mac and check the performance HUD's numbers match Instruments |
 | `make clean`     | Delete the generated project, plists and DerivedData             |
 | `make format`    | Format all Swift sources in place with swift-format              |
 | `make lint`      | Lint all Swift sources with swift-format (fails on any finding)  |
@@ -70,7 +75,8 @@ Formatting, branch naming, commit and pull request conventions are in
 
 GitHub Actions runs `lint`, `package-tests`, `app-tests` and the
 micro-benchmark gate (`perf-kit`) on every pull request and push to `main`,
-and the performance suite and the ASR evaluation nightly. Each job calls
+and the performance suite, the ASR evaluation and the memory evaluation
+nightly. Each job calls
 the same `make` targets as above. See [docs/ci.md](docs/ci.md).
 
 ## Project layout
@@ -81,7 +87,7 @@ the same `make` targets as above. See [docs/ci.md](docs/ci.md).
 | `Blau/`          | App target sources and resources                                |
 | `BlauWidgets/`   | App extension rendering the recording Live Activity ([docs](docs/background.md)) |
 | `Packages/BlauKit` | Local Swift package with the business logic, one module per subsystem (see [`docs/architecture.md`](docs/architecture.md)) |
-| `docs/`          | Architecture and engineering docs ([app shell, environment and feature flags](docs/app-shell.md)) |
+| `docs/`          | Architecture and engineering docs ([app shell, environment and feature flags](docs/app-shell.md), [branding](docs/branding.md)) |
 | `BlauTests/`     | Unit tests (Swift Testing), hosted in the app                   |
 | `BlauUITests/`   | UI tests (XCTest)                                               |
 | `BlauPerfTests/` | Performance tests (XCTest UI-testing bundle): launch metrics and the scripted five-minute session, with the CI baselines in `Baselines/` ([docs](docs/performance.md#performance-suite)) |
@@ -89,11 +95,11 @@ the same `make` targets as above. See [docs/ci.md](docs/ci.md).
 | `BlauBenchmarks/` | On-device model benchmarks (XCTest, not hosted in the app; [docs](docs/benchmarks.md)) |
 | `TestPlans/`     | `Blau.xctestplan` (unit + UI, coverage), `BlauPerf.xctestplan` and `BlauBenchmarks.xctestplan` |
 | `Config/`        | xcconfig files; `Secrets.xcconfig` is gitignored ([docs](docs/configuration.md)) |
-| `scripts/`       | `swift-format.sh` (behind `make format` and `make lint`), git hooks, embedded-secrets check, `Secrets.xcconfig` writer, `verify-signposts.sh` and the Instruments template scripts (see [`docs/performance.md`](docs/performance.md)), `update-model-manifest.py` (see [`docs/models.md`](docs/models.md)), `make-vad-fixtures.py` (see [`docs/vad.md`](docs/vad.md)), `make-asr-fixtures.py` and `eval-asr.sh` (the ASR evaluation, see [`docs/asr-eval.md`](docs/asr-eval.md)), `fetch-deepfilternet3.sh` and `eval-noise-suppression.sh` (the noise suppression spike, see [`docs/noise-suppression.md`](docs/noise-suppression.md)), `voice-id-eval-librispeech.py` (the voice ID calibration set, see [`docs/voice-id-eval.md`](docs/voice-id-eval.md)), `embeddings/` (the text-embedding retrieval eval and Core ML conversion, see [`docs/benchmarks.md`](docs/benchmarks.md#text-embedding-model-59); the int8 token table, tokenizer parity and tokenizer fixtures, see [`docs/embeddings.md`](docs/embeddings.md)), the CI helpers in `scripts/ci/` ([`docs/ci.md`](docs/ci.md)), and the performance gates in `scripts/perf/` (`perf-gate.py` for the XCTest suite, `microbench.sh` for the micro-benchmarks; see [`docs/performance.md`](docs/performance.md#performance-suite)) |
+| `scripts/`       | `swift-format.sh` (behind `make format` and `make lint`), git hooks, embedded-secrets check, `Secrets.xcconfig` writer, `verify-signposts.sh`, `verify-hud.sh` and the Instruments template scripts (see [`docs/performance.md`](docs/performance.md)), `update-model-manifest.py` (see [`docs/models.md`](docs/models.md)), `make-vad-fixtures.py` (see [`docs/vad.md`](docs/vad.md)), `make-asr-fixtures.py` and `eval-asr.sh` (the ASR evaluation, see [`docs/asr-eval.md`](docs/asr-eval.md)), `eval-memory.sh` (the memory evaluation, see [`docs/memory-eval.md`](docs/memory-eval.md)), `fetch-deepfilternet3.sh` and `eval-noise-suppression.sh` (the noise suppression spike, see [`docs/noise-suppression.md`](docs/noise-suppression.md)), `voice-id-eval-librispeech.py` (the voice ID calibration set, see [`docs/voice-id-eval.md`](docs/voice-id-eval.md)), `embeddings/` (the text-embedding retrieval eval and Core ML conversion, see [`docs/benchmarks.md`](docs/benchmarks.md#text-embedding-model-59); the int8 token table, tokenizer parity and tokenizer fixtures, see [`docs/embeddings.md`](docs/embeddings.md); the memory eval vectors, see [`docs/memory-eval.md`](docs/memory-eval.md#recording-vectors)), the CI helpers in `scripts/ci/` ([`docs/ci.md`](docs/ci.md)), and the performance gates in `scripts/perf/` (`perf-gate.py` for the XCTest suite, `microbench.sh` for the micro-benchmarks; see [`docs/performance.md`](docs/performance.md#performance-suite)) |
 | `Datasets/voice-id/` | The owner's voice ID evaluation recordings, stored with consent in LFS (see its README and [`docs/voice-id-eval.md`](docs/voice-id-eval.md)) |
 | `Datasets/asr/` | The owner's ASR evaluation recordings, stored with consent in LFS (see its README and [`docs/asr-eval.md`](docs/asr-eval.md)) |
 | `Tools/Instruments/` | `Blau.tracetemplate`, the Instruments template for profiling Blau, and the instrument list and options it is generated from |
-| `docs/`          | Developer documentation, including [on-device models](docs/models.md), [text embeddings](docs/embeddings.md) and the [memory search index](docs/memory-index.md) |
+| `docs/`          | Developer documentation, including [on-device models](docs/models.md), [text embeddings](docs/embeddings.md), the [memory search index](docs/memory-index.md), its [incremental indexer](docs/memory-indexer.md), [hybrid memory search](docs/memory-search.md) and the [memory evaluation](docs/memory-eval.md) |
 | `.github/`       | CI workflow ([docs](docs/ci.md)), pull request and issue templates |
 
 ### Targets and schemes

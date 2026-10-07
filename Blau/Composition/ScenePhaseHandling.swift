@@ -1,4 +1,5 @@
 import BlauCore
+import BlauMemory
 import BlauRealtime
 import BlauTelemetry
 import BlauTranscription
@@ -51,14 +52,30 @@ extension AppEnvironment {
             // background don't always post CKAccountChanged.
             let persistence = persistence
             persistenceRefresh = Task { await persistence.refresh() }
+            // The embedding model may have been installed meanwhile (#63).
+            memoryIndexing.refresh()
+            // Topics waiting for fact extraction (#66): the key or the
+            // network may be back.
+            memoryLearning.resume()
         }
 
         #if canImport(UIKit)
             if transition.isEnteringBackground {
+                // A rebuild or embedding backlog left: finish it in a
+                // background processing task (#63).
+                if kind == .live { MemoryIndexBackgroundTask.scheduleIfNeeded(memoryIndexing) }
                 let assertion = BackgroundTaskAssertion(name: "blau.lifecycle.background")
                 Task {
                     await lifecycle.waitUntilDelivered()
                     assertion.end()
+                }
+                // Write a pending automatic Markdown export (#78) now rather
+                // than after its delay, which a suspended app may not get.
+                let export = markdownExport
+                let exportAssertion = BackgroundTaskAssertion(name: "blau.export.markdown")
+                Task {
+                    await export.flushAutoExport()
+                    exportAssertion.end()
                 }
             }
         #endif
@@ -91,8 +108,9 @@ extension AppEnvironment {
 /// Puts `environment` and the objects views read most into the SwiftUI
 /// environment: the `AppEnvironment` itself, its `FeatureFlags`, its
 /// `AppLifecycleCoordinator`, its `XAIAccount`, its `PersistenceController`,
-/// its speech `ModelManager`, its `TranscriptionSettings` and its
-/// `PerformanceStatus`.
+/// its speech `ModelManager`, its `TranscriptionSettings`, its
+/// `MemoryLearningSettings`, its `PerformanceStatus` and its
+/// `MarkdownExportController`.
 ///
 /// The SwiftData container is not set here: it is replaced when the iCloud
 /// account changes, so `PersistenceGate` (inside this modifier in the app)
@@ -110,7 +128,10 @@ struct AppEnvironmentModifier: ViewModifier {
             .environment(environment.persistence)
             .environment(environment.speechModels)
             .environment(environment.transcriptionSettings)
+            .environment(environment.memoryLearning.settings)
             .environment(environment.performanceStatus)
+            .environment(environment.memoryIndexing)
+            .environment(environment.markdownExport)
     }
 }
 

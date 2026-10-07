@@ -229,11 +229,23 @@ issue sketched, because `RealtimeTool` is already the wire type of a
 ```swift
 // Composition root: one registry for both halves.
 var registry = RealtimeToolRegistry()
-try registry.register(SearchMemoryTool(index: index))       // #68, behind the memoryTools flag
+try registry.register(contentsOf: MemoryTools.all(backend: memoryToolService))   // #68, behind the memoryTools flag
 let configurator = RealtimeSessionConfigurator(settings: store, memory: memory, tools: registry.definitions)
-let runner = RealtimeToolRunner(registry: registry, sender: client)
+let orchestrator = TurnOrchestrator(
+    client: client, configurator: configurator, audio: player, transcript: store, tools: registry)
+```
 
-// The turn orchestrator (#36), which reads client.events:
+The turn orchestrator owns the runner (`orchestrator.toolRunner`): it
+passes it the response, function-call and error events after handling
+each one itself, cancels everything on barge-in, interruptions and every
+new or lost connection, and carries a turn whose response called tools
+over to the follow-up, which the runner requests through the orchestrator
+so it goes out tagged with the turn (see
+[memory-tools.md](memory-tools.md#inside-a-turn)). Used on its own, the
+runner is fed the same way:
+
+```swift
+let runner = RealtimeToolRunner(registry: registry, sender: client)
 for await event in client.events {
     await runner.handle(event)         // every event, in order; returns at once
     ...
@@ -296,7 +308,13 @@ response.done (completed)                                     │
   is dropped. A new connection is a new server session without those calls.
 
 `runner.activity` reports `started`, `finished(outcome:)`,
-`followUpRequested` and `abandoned`, for a "Searching…" hint in the UI.
+`followUpRequested` and `abandoned` (and, with
+`Configuration.reportsCallDetails`, each call's arguments and output in
+`details`), for the chat's tool chips (#68). A tool can read
+`RealtimeToolCallContext.current` while it runs: the call id, the response
+and the **tool chain**, a number that grows with each response the runner
+didn't request (the user's turns); `forget` uses it to require that the
+user spoke between asking and confirming.
 
 ### Built-in search tools and spoken filler
 
@@ -512,6 +530,15 @@ the same cut on *speech start* (VAD), with the echo guard, is
   background (the voice loop uses it so the user can start talking while the
   secret is minted). A connection that gives up moves the state to
   `error(.connection)`; `connect()` tries again.
+- **Offline (#80).** `networkReachabilityChanged(_:)` (the app feeds it
+  `NWPathMonitor` through `follow(network:)`) makes the snapshot's
+  `connectivity` `.offline`; when the path comes back and the client had
+  given up, the orchestrator reconnects at once. After a give-up on a
+  failure that may pass (an outage, timeouts) it also tries again every
+  `retryAfterGivingUp` (30 s) while the path is up; key problems wait for
+  the user. `discardQueued()` drops what waits (stored, never sent, left
+  out of reseeds). `TurnSnapshot.issue` is the catalog entry the banner
+  shows, with the number of messages waiting. See [errors.md](errors.md).
 
 ### Latency and the HUD
 
@@ -523,8 +550,10 @@ merged, interrupted or timed out (they never ended) are not sampled. "End of utt
 is when the final reaches the orchestrator; ASR's own end-of-speech delay
 is `asr.eou`.
 
-With the **Performance HUD** flag on, `VoiceLoopHUD` shows
-`TurnHUDReadout`'s rows over the main screen:
+The debug performance HUD (#71, see
+[performance.md](performance.md#performance-hud)) shows them in its Grok
+section, filled by `TurnSnapshot.fill(_:)`; the voice loop's debug screen
+shows `TurnHUDReadout`'s rows:
 
 ```
 Turn         agentSpeaking
@@ -534,7 +563,11 @@ Turn time    last 3120 · p50 2890 · p95 4410 ms (n=12)
 Tokens       4120 in · 960 out · 12 resp
 ```
 
-The full HUD (#71) adds the other subsystems.
+The HUD adds a cost estimate: reply audio minutes × $0.08 plus text inputs ×
+$0.004 (`RealtimePricing.grokVoice`, xAI's published speech-to-speech rates).
+`TurnSnapshot.usage` counts both: `outputAudio` sums every audio delta
+received (replies cut short by barge-in included, since they were
+generated) and `textInputs` every user text item sent.
 
 ### Usage
 
@@ -792,12 +825,13 @@ path from a VAD onset through the real `StreamingAudioPlayer`).
 | Voice change mid-session | Change the voice and speed in Settings during a conversation; the next reply uses them | pending (needs a device and xAI credentials) |
 | Echo tool, live | Register `EchoTool`, ask Grok to "test the echo tool with the words blue harbor" with a real key, record it with `RealtimeTranscriptRecorder`; the session should match `echo-tool.jsonl` in shape (filler, `function_call`, one output, one `response.create`, an answer using the result) | pending (needs xAI credentials) |
 | Parallel calls, live | Ask a question that needs two lookups at once; Console (`category:realtime`) shows two `Running tool` lines and one `requested the follow-up`; no `conversation_already_has_active_response` error | pending (needs xAI credentials and #68 tools) |
+| Memory tools, live | With a company document in the knowledge base and a real key, ask "What does my company do?"; Grok says a filler, calls `search_memory` (Console `category:realtime`: `Running tool search_memory`, then `requested the follow-up`), the chat shows "Searched memory" and the answer uses the document. Then "remember that my sister Maya lives in Lisbon", "where does Maya live?", "forget that" (Grok asks first) | pending (needs a device and xAI credentials; see [memory-tools.md](memory-tools.md)) |
 | Web and X search | Turn on Settings → Search → Web Search, ask about today's news; `session.updated` echoes `{"type": "web_search"}` and the answer is current | pending (needs xAI credentials) |
 | Spoken filler | With a slow tool, Grok says something like "let me check" before the pause | pending (needs xAI credentials and a device) |
 | Spoken conversation end to end | Install the speech models, add an xAI key, open **Debug menu → Voice Loop**, Start, and hold a ten-turn conversation on the speaker and on AirPods; every reply plays and the Voice Loop screen shows both sides | pending (needs a device and xAI credentials) |
 | Transcript stored for both roles | After the conversation above, the store holds one user and one agent utterance per turn, in order | pending (needs a device and xAI credentials) |
 | Response matching echoes | Record the conversation above with `RealtimeTranscriptRecorder`, interrupting Grok mid-reply a few times. Note whether `response.created` echoes `metadata.blau_turn`, and whether an `error` names the `response.create`'s `event_id` in `error.event_id`. Without either, matching runs on the order fallback | pending (needs xAI credentials) |
-| EOU → first audio p50 | Turn on **Performance HUD** in the debug menu; after 20 turns, record the HUD's p50 / p95 here and compare them with Instruments' `realtime.firstAudio` | pending (needs a device and xAI credentials) |
+| EOU → first audio p50 | Turn on **Settings → Developer → Performance HUD**; after 20 turns, record the HUD's p50 / p95 here and compare them with Instruments' `realtime.firstAudio` | pending (needs a device and xAI credentials) |
 | Echo | On the loudspeaker, Grok's own voice never produces a user utterance (VPIO echo cancellation; voice ID is #47) | pending (needs a device) |
 | Barge-in → silence | Debug menu → Voice Loop on the loudspeaker; ask for a long answer and say "wait" mid-sentence. The audio stops at once; Console (`category:realtime`) shows `Barge-in on segment …: playback flushed … ms after the onset` and `Flushed playback` (`category:audio`). Record the HUD's **Barge-in** row over 10 barge-ins, and a screen recording's onset → silence | pending (needs a device and xAI credentials) |
 | Next reply heard-only | Ask for a numbered list of five items, barge in during item two and ask "what was the last item you said?". Grok names item one or two, never a later one; the truncate's `audio_end_ms` matches what was heard (audio.md check 11) | pending (needs a device and xAI credentials) |

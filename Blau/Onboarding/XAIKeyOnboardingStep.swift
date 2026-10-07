@@ -41,7 +41,7 @@ struct XAIKeyOnboardingStep: View {
                         .foregroundStyle(.green)
                         .accessibilityIdentifier(XAIKeyIdentifiers.status)
                     Button("Continue", action: onFinish)
-                        .buttonStyle(.borderedProminent)
+                        .brandProminentButtonStyle()
                         .frame(maxWidth: .infinity)
                 } else {
                     if case .unavailable(let error) = account.status, account.problem == nil {

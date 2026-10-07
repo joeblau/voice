@@ -5,8 +5,10 @@ conversation exchange, knowledge-base document, collection item and fact
 cut into chunks, full-text indexed with **SQLite FTS5 (BM25)** and, once
 embedded by the shared text embedding service ([embeddings.md](embeddings.md)),
 carrying a **256-d int8 vector** that is searched by brute force with
-Accelerate. Hybrid retrieval (#64) fuses the two rankings; the incremental
-indexer (#63) keeps the index current. The code is in
+Accelerate. Hybrid retrieval (#64, [memory-search.md](memory-search.md))
+fuses the two rankings; the incremental indexer (#63,
+[memory-indexer.md](memory-indexer.md)) keeps the index current and is
+what builds it in the app. The code is in
 `Packages/BlauKit/Sources/BlauMemory/Index/`.
 
 The index is **derived data**: local only, never synced, excluded from
@@ -23,11 +25,14 @@ if try await index.needsRebuild { try await rebuilder.rebuild() }
 // At launch, load every vector of the installed model into the matrix.
 try await index.loadVectors(modelVersion: try await textEmbeddings.currentModelVersion())
 
-// Search (what #64 fuses with RRF).
+// The raw rankings; MemorySearch (#64, memory-search.md) fuses them.
 let query = try await textEmbeddings.embed(["ramen place in Osaka"], as: .query)[0]
 async let vector = index.vectorSearch(query, limit: 50)
 async let keyword = index.keywordSearch("ramen place in Osaka", limit: 50)
 let chunks = try await index.chunks(withIDs: (try await keyword).map(\.chunkID))
+
+// Hybrid search: fusion, time, entity expansion, snippets.
+let results = try await MemorySearch(index: index, embedder: textEmbeddings).search("ramen place in Osaka")
 ```
 
 ## Pieces
@@ -40,8 +45,8 @@ let chunks = try await index.chunks(withIDs: (try await keyword).map(\.chunkID))
 | `MemoryChunker` | Cuts snapshots into chunks, deterministically (below) |
 | `ChunkingPolicy` | Chunk size (from the model's sequence length), overlap, facts per exchange, time zone of the dates in keys |
 | `KeywordQuery` | Turns a plain-text query into a safe FTS5 pattern |
-| `MemoryIndexRebuilder` | Rebuilds the index from a `MemorySourceProvider`, reusing every vector whose key text didn't change; fills in missing vectors |
-| `SwiftDataMemorySources` | Reads conversations, documents, collection items and facts from the synced store as Sendable snapshots, merging CloudKit duplicates |
+| `MemoryIndexRebuilder` | Rebuilds the index from a `MemorySourceProvider`, reusing every vector whose key text didn't change; fills in missing vectors. The app uses the incremental indexer's resumable pass instead ([memory-indexer.md](memory-indexer.md)); this one-shot rebuild is the reference the indexer's tests compare with |
+| `SwiftDataMemorySources` | Reads conversations, documents, collection items and facts from the synced store as Sendable snapshots, merging CloudKit duplicates; also the indexer's `MemorySourceReader` (sources by id) |
 | `MemoryChunkEmbedding` | What the rebuilder embeds with; `TextEmbeddingService` and `TextEmbeddingModel` conform |
 | `MemoryIndexSearchBenchmark` | The 50k-chunk search benchmark (`memory.index.search50k`) |
 
@@ -55,12 +60,14 @@ One SQLite file, `Application Support/Blau/Derived/MemoryIndex.sqlite`
 | `chunk` | `rowid`, `id` (UUID, unique), `sourceID`, `sourceKind`, `ordinal`, `text`, `keyText`, `contentHash`, `modelVersion`, `vector` (int8 × 256 blob), `vectorScale`, `createdAt`, `topicID`, `conversationID` |
 | `chunk_fts` | FTS5 over `keyText`, external content (`content='chunk'`), tokenizer `porter unicode61 remove_diacritics 2`; kept in sync by triggers that fire only when the key text actually changes, so attaching a vector never rewrites the full-text index |
 | `chunk_vocab` | `fts5vocab` over `chunk_fts`: how many chunks hold each stem (the common-word cutoff below) |
-| `index_state` | When the last full rebuild finished |
+| `index_state` | When the last full rebuild finished (`rebuiltAt`), and the indexer's bookkeeping (`stateValue(forKey:)`): its rebuild checkpoint and the chunking the index was built with ([memory-indexer.md](memory-indexer.md)) |
+| `fact_link` | `(conversationID, factID)`: the facts each conversation's exchange keys list (`SourceChunks.linkedFactIDs`), so editing or deleting a fact re-chunks its exchange |
 
-`PRAGMA user_version` holds `MemoryIndex.schemaVersion`. A file that isn't a
-database, can't be opened, or has another schema version is deleted and
-recreated empty, and `needsRebuild` turns `true`: nothing in it is
-irreplaceable. Bump the version when the schema changes.
+`PRAGMA user_version` holds `MemoryIndex.schemaVersion` (2 since #63 added
+`fact_link`). A file that isn't a database, can't be opened, or has another
+schema version is deleted and recreated empty, and `needsRebuild` turns
+`true`: nothing in it is irreplaceable. Bump the version when the schema
+changes.
 
 A vector is stored with the `modelVersion` of the model that made it
 ([embeddings.md](embeddings.md#model-version)). Vectors of different models
@@ -193,7 +200,8 @@ only filtered searches that came up short pay for it. Unfiltered searches
 keep the cutoff, since a rare word in the index always matches something.
 
 Scores: BM25 (negated `bm25()`, higher is better) and cosine. They are only
-comparable within one search; #64 fuses ranks, not scores.
+comparable within one search; `MemorySearch` (#64) fuses ranks, not scores
+([memory-search.md](memory-search.md)).
 
 ## Rebuilding
 
@@ -234,8 +242,8 @@ an A17**. `memory.index.search50k` measures it ([benchmarks.md](benchmarks.md#me
 
 `Log.memory`: opening failures and recreation at `error`, matrix loads and
 rebuild start and end (counts, duration) at `notice`. Text and queries are
-never logged. The fused search will be one `memory.search` interval (#64,
-[performance.md](performance.md)).
+never logged. The fused search (`MemorySearch`, #64) is one
+`memory.search` interval ([performance.md](performance.md)).
 
 ## Testing
 
