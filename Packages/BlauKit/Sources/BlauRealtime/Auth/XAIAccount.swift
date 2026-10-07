@@ -173,6 +173,18 @@ public final class XAIAccount {
         if case .connected = status { true } else { false }
     }
 
+    /// Whether the UI should offer key entry (onboarding's connect button,
+    /// the key field in Settings): no key is stored, or the stored one is
+    /// unreadable (``APIKeyStoreError/corruptItem``). Reloading can't fix a
+    /// corrupt item, but saving a new key overwrites it in place and
+    /// removing the key deletes it.
+    public var needsKeyEntry: Bool {
+        switch status {
+        case .noKey, .unavailable(.corruptItem): true
+        case .unknown, .connected, .unavailable: false
+        }
+    }
+
     public var isBusy: Bool { activity != .idle }
 
     private static let logger = Logger(subsystem: "com.joeblau.blau", category: "xai")

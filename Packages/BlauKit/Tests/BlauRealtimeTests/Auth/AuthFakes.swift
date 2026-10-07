@@ -191,6 +191,33 @@ struct FailingAPIKeyStore: APIKeyStore {
     func delete() async throws(APIKeyStoreError) { throw error }
 }
 
+/// A store holding an unreadable item: `load` throws `.corruptItem` until a
+/// key is saved over it (as `SecItemUpdate` does) or it is deleted.
+final class CorruptItemAPIKeyStore: APIKeyStore {
+    private enum Item {
+        case corrupt
+        case key(XAIAPIKey)
+    }
+
+    private let item = Mutex<Item?>(.corrupt)
+
+    func load() async throws(APIKeyStoreError) -> XAIAPIKey? {
+        switch item.withLock({ $0 }) {
+        case .corrupt: throw .corruptItem
+        case .key(let key): return key
+        case nil: return nil
+        }
+    }
+
+    func save(_ key: XAIAPIKey) async throws(APIKeyStoreError) {
+        item.withLock { $0 = .key(key) }
+    }
+
+    func delete() async throws(APIKeyStoreError) {
+        item.withLock { $0 = nil }
+    }
+}
+
 // MARK: - HTTP
 
 /// Answers requests from a handler and records them. No network.

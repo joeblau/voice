@@ -4,7 +4,8 @@ import SwiftUI
 /// Top-level view hosted by the app's window. Placeholder until the main
 /// screen scaffold lands (#40); UI and launch tests anchor on its
 /// accessibility identifier. It already offers the two xAI key entry points:
-/// Settings (bottom-left) and, while no key is stored, the onboarding step.
+/// Settings (bottom-left) and, while no usable key is stored (none, or an
+/// unreadable one), the onboarding step.
 struct RootView: View {
     nonisolated static let accessibilityIdentifier = "blau.root"
 
@@ -18,7 +19,7 @@ struct RootView: View {
                 .font(.largeTitle)
                 .accessibilityIdentifier(Self.accessibilityIdentifier)
 
-            if account.status == .noKey {
+            if account.needsKeyEntry {
                 Button("Connect Your xAI Account") {
                     isShowingKeyOnboarding = true
                 }

@@ -61,6 +61,85 @@ struct XAIAccountTests {
         let account = makeAccount(store: FailingAPIKeyStore(error: .locked))
         await account.load()
         #expect(account.status == .unavailable(.locked))
+        // Unlocking fixes this, so the UI offers Try Again, not key entry.
+        #expect(!account.needsKeyEntry)
+    }
+
+    @Test func keyEntryIsOfferedOnlyWithoutAUsableKey() async throws {
+        let account = makeAccount()
+        #expect(!account.needsKeyEntry)  // .unknown: still loading.
+        await account.load()
+        #expect(account.needsKeyEntry)  // .noKey
+        await account.connect(apiKey: TestKeys.primaryRaw)
+        #expect(!account.needsKeyEntry)  // .connected
+
+        for error: APIKeyStoreError in [.locked, .keychain(status: -25300)] {
+            let failing = makeAccount(store: FailingAPIKeyStore(error: error))
+            await failing.load()
+            #expect(!failing.needsKeyEntry, "\(error)")
+        }
+    }
+
+    // MARK: Corrupt item
+
+    @Test func aCorruptItemCanBeReplacedByEnteringTheKeyAgain() async throws {
+        let store = CorruptItemAPIKeyStore()
+        let account = makeAccount(store: store)
+
+        await account.load()
+        #expect(account.status == .unavailable(.corruptItem))
+        #expect(account.needsKeyEntry)
+        #expect(XAIAccountProblem(.corruptItem).message.contains("Enter your key again"))
+
+        // Reloading ("Try Again") can't fix it...
+        await account.load()
+        #expect(account.status == .unavailable(.corruptItem))
+
+        // ...but connecting a key overwrites the unreadable item.
+        #expect(await account.connect(apiKey: TestKeys.primaryRaw))
+        #expect(account.status == .connected(.init(redacted: "•••• a1b2", name: "blau-dev", verified: true)))
+        #expect(!account.needsKeyEntry)
+        #expect(account.problem == nil)
+        #expect(try await store.load() == TestKeys.primary)
+        #expect(keyChanges.value == 1)
+
+        // And it stays fixed across reloads.
+        await account.load()
+        #expect(account.status == .connected(.init(redacted: "•••• a1b2", name: "blau-dev", verified: true)))
+    }
+
+    @Test func aCorruptItemCanBeRemoved() async throws {
+        let store = CorruptItemAPIKeyStore()
+        let account = makeAccount(store: store)
+        await account.load()
+
+        await account.removeKey()
+
+        #expect(account.status == .noKey)
+        #expect(account.needsKeyEntry)
+        #expect(account.problem == nil)
+        #expect(try await store.load() == nil)
+        #expect(keyChanges.value == 1)
+    }
+
+    @Test func aCorruptKeychainItemIsOverwrittenInPlace() async throws {
+        // End to end through the real Keychain store and its update-first save.
+        let keychain = FakeKeychain()
+        keychain.insert(
+            service: "test.service", account: "test.account", synchronizable: true, data: Data([0xFF, 0xFE, 0x00]))
+        let store = KeychainAPIKeyStore(service: "test.service", account: "test.account", keychain: keychain)
+        let account = makeAccount(store: store)
+
+        await account.load()
+        #expect(account.status == .unavailable(.corruptItem))
+
+        #expect(await account.connect(apiKey: TestKeys.primaryRaw))
+        #expect(keychain.itemCount == 1)
+        #expect(
+            keychain.data(service: "test.service", account: "test.account", synchronizable: true)
+                == Data(TestKeys.primaryRaw.utf8))
+        await account.load()
+        #expect(account.status == .connected(.init(redacted: "•••• a1b2", name: "blau-dev", verified: true)))
     }
 
     // MARK: Connecting

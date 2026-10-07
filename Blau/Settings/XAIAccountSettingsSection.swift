@@ -20,6 +20,19 @@ struct XAIAccountSettingsSection: View {
                 XAIKeyEntryView()
             case .connected(let key):
                 connectedRows(key)
+            case .unavailable(let error) where account.needsKeyEntry:
+                // The stored item is unreadable (e.g. damaged, or written in a
+                // format this build doesn't accept). Reloading would fail the
+                // same way, so offer to overwrite it with a new key or remove it.
+                if account.problem == nil {
+                    XAIProblemView(problem: XAIAccountProblem(error))
+                }
+                XAIKeyEntryView(connectTitle: "Replace Key")
+                Button("Remove Key…", role: .destructive) {
+                    isConfirmingRemoval = true
+                }
+                .disabled(account.isBusy)
+                .accessibilityIdentifier(XAIKeyIdentifiers.remove)
             case .unavailable(let error):
                 XAIProblemView(problem: XAIAccountProblem(error))
                 Button("Try Again") {

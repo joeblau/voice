@@ -44,6 +44,10 @@ struct XAIKeyOnboardingStep: View {
                         .buttonStyle(.borderedProminent)
                         .frame(maxWidth: .infinity)
                 } else {
+                    if case .unavailable(let error) = account.status, account.problem == nil {
+                        // E.g. an unreadable stored key: entering one replaces it.
+                        XAIProblemView(problem: XAIAccountProblem(error))
+                    }
                     XAIKeyEntryView(onConnected: onFinish)
                     Button("Skip for Now", action: onFinish)
                         .frame(maxWidth: .infinity)
