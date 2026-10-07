@@ -316,6 +316,13 @@ Examples from the end-to-end run:
 | should we move the haik to sunday den | Should we move the high to Sunday then? |
 | let me think about the for a moment | Let me think about that for a moment. |
 
+## Evaluation
+
+Word error rate, first-partial and end-of-utterance latency and RTF on a
+fixed set of clean, cafe, TV and accented fixtures, for this transcriber and
+the second pass, are tracked by the ASR evaluation harness:
+[asr-eval.md](asr-eval.md) (`make eval-asr`, nightly in CI).
+
 ## Tests
 
 | Where | What | Runs |

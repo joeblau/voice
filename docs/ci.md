@@ -3,7 +3,7 @@
 Every pull request and every push to `main` runs
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) on GitHub Actions.
 A nightly run on `main` repeats the suite against the current runner image and
-adds the performance tests.
+adds the performance tests and the ASR evaluation.
 
 ## Jobs
 
@@ -13,6 +13,7 @@ adds the performance tests.
 | `package-tests` | `swift build --build-tests` and `swift test` in `Packages/BlauKit` on the macOS host | `make test-kit` | Swift Testing xUnit report |
 | `app-tests`     | XcodeGen, then the `Blau` scheme's `Blau` test plan (`BlauTests` + `BlauUITests`) on an iOS Simulator | `make test` | `app-tests.xcresult` |
 | `perf`          | Nightly (and on demand) only: `Blau-Perf` scheme, `BlauPerf` test plan, Release | `make perf` | `perf.xcresult` |
+| `asr-eval`      | Nightly (and on demand) only: every ASR engine on the LFS fixtures with the real models; fails on the regression gate ([asr-eval.md](asr-eval.md#nightly-ci)) | `make eval-asr` | `asr-eval-report` (`report.json`, `report.md`, `summary.txt`), 90 days; `report.md` on the summary page |
 
 The three PR checks run in parallel, each on its own runner, so a lint failure
 does not hide a test failure. Artifacts are on the run's summary page for 14
@@ -29,7 +30,8 @@ a smoke check only; real baselines come from a device.
 
 - `pull_request`, `push` to `main`, `merge_group` (GitHub merge queue) and
   `workflow_dispatch` run `lint`, `package-tests` and `app-tests`.
-- `schedule` (08:23 UTC daily, `main`) runs those plus `perf`.
+- `schedule` (08:23 UTC daily, `main`) runs those plus `perf` and `asr-eval`.
+  **Run workflow** has a checkbox for each of the two.
 - A new push to a pull request cancels that PR's in-flight run. Runs on `main`
   are never cancelled mid-flight, so every merged commit gets a result; GitHub
   still drops a *queued* `main` run once a newer one is waiting.
@@ -83,6 +85,7 @@ When GitHub promotes Xcode 27 to a general-availability `macos-27` image, set
 | --------------- | ------------------------------------- | ----------------------------------------- |
 | `package-tests` | `Packages/BlauKit/.build`: clones, FluidAudio's binary artifacts and build products | Xcode build + `Package.swift` + `Package.resolved` |
 | `app-tests`, `perf` | `.build/DerivedData/SourcePackages`: package clones and binary artifacts | Xcode build + `Package.swift` + `Package.resolved` |
+| `asr-eval`      | `Packages/BlauKit/.build` (shared with `package-tests`) and `.build/models`: the pinned Core ML models, about 700 MB | The same as `package-tests`; the models by `PinnedModelManifest.swift` |
 
 Each key changes only with the toolchain or the dependency graph, so a cache
 is saved once per change (on `main`, where pull requests can read it) and

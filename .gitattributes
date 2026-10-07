@@ -5,3 +5,13 @@ Datasets/voice-id/**/*.m4a filter=lfs diff=lfs merge=lfs -text
 Datasets/voice-id/**/*.caf filter=lfs diff=lfs merge=lfs -text
 Datasets/voice-id/**/*.flac filter=lfs diff=lfs merge=lfs -text
 Datasets/voice-id/**/*.aiff filter=lfs diff=lfs merge=lfs -text
+# ASR evaluation fixtures (#32): synthesised speech, see
+# scripts/make-asr-fixtures.py and docs/asr-eval.md. Run `git lfs pull` to get
+# the audio; without it the evaluation and the fixture tests that need audio
+# are skipped.
+Packages/BlauKit/Tests/BlauTranscriptionTests/Fixtures/ASR/*.wav filter=lfs diff=lfs merge=lfs -text
+# The owner's ASR recordings, stored with consent (Datasets/asr/README.md).
+Datasets/asr/**/*.wav filter=lfs diff=lfs merge=lfs -text
+Datasets/asr/**/*.m4a filter=lfs diff=lfs merge=lfs -text
+Datasets/asr/**/*.caf filter=lfs diff=lfs merge=lfs -text
+Datasets/asr/**/*.flac filter=lfs diff=lfs merge=lfs -text

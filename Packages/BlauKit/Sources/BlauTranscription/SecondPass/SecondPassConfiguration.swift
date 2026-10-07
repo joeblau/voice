@@ -78,6 +78,18 @@ public struct SecondPassConfiguration: Hashable, Sendable {
 
     var leadingPaddingSamples: Int64 { leadingPadding.sampleCount(sampleRate: 16_000) }
     var trailingPaddingSamples: Int64 { trailingPadding.sampleCount(sampleRate: 16_000) }
+
+    /// The audio the second pass reads for an utterance spanning `start..<end`
+    /// (16 kHz samples): `leadingPadding` before it, never reaching back past
+    /// `previousEnd` (the previous utterance's end) or 0, and
+    /// `trailingPadding` after it. Never empty. The caller clamps the upper
+    /// bound to the audio it has. Shared by `SecondPassTranscriber` and the
+    /// ASR evaluation harness, so both cut the same audio.
+    func audioRange(start: Int64, end: Int64, previousEnd: Int64) -> Range<Int64> {
+        let lower = max(start - leadingPaddingSamples, min(previousEnd, start), 0)
+        let upper = max(end + trailingPaddingSamples, lower + 1)
+        return lower..<upper
+    }
 }
 
 /// Why an utterance kept its streaming text.

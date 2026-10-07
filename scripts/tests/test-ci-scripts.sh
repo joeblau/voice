@@ -243,13 +243,20 @@ else
     echo "$unpinned" | sed 's/^/       /'
 fi
 
-for job in lint package-tests app-tests perf; do
+for job in lint package-tests app-tests perf asr-eval; do
     if grep -Eq "^  $job:" "$workflow"; then
         pass "ci.yml defines the $job job"
     else
         fail "ci.yml defines the $job job"
     fi
 done
+
+# The ASR evaluation needs the fixture audio, which is in Git LFS.
+if awk '/^  asr-eval:/{job=1} job && /lfs: true/{found=1} END{exit !found}' "$workflow"; then
+    pass "ci.yml checks out Git LFS files for asr-eval"
+else
+    fail "ci.yml checks out Git LFS files for asr-eval"
+fi
 
 echo
 echo "$passed passed, $failed failed"
