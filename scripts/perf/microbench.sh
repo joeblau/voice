@@ -17,7 +17,8 @@
 #           result; see docs/performance.md for when to)
 #
 # Environment:
-#   MICROBENCH_FILTER   regular expression: only the matching benchmarks
+#   MICROBENCH_FILTER   regular expression matching whole benchmark names,
+#                       e.g. "memory\..+": only those benchmarks
 #   MICROBENCH_OUTPUT   file the check's report is also written to (CI puts
 #                       it on the job summary)
 
@@ -52,25 +53,37 @@ case $command in
             mkdir -p "$(dirname -- "$output")"
             cp "$report" "$output"
         fi
-        # package-benchmark's exit codes (BenchmarkShared.ExitCode).
-        case $status in
-            0)
+        # The tool exits 2 on a regression and 4 on an improvement
+        # (BenchmarkShared.ExitCode), but `swift package` turns any plugin
+        # error into exit 1 and prints the plugin's error name, so classify
+        # by that name.
+        if [ "$status" -eq 0 ]; then
+            outcome=equal
+        elif grep -q 'benchmarkThresholdRegression' "$report" || [ "$status" -eq 2 ]; then
+            outcome=regression
+        elif grep -q 'benchmarkThresholdImprovement' "$report" || [ "$status" -eq 4 ]; then
+            outcome=improvement
+        else
+            outcome=failed
+        fi
+        case $outcome in
+            equal)
                 echo "microbench: every gated metric is within its threshold."
+                exit 0
                 ;;
-            4)
+            improvement)
                 echo "microbench: faster than the thresholds; run 'make microbench-baseline' to tighten them."
-                status=0
+                exit 0
                 ;;
-            2)
+            regression)
                 echo "microbench: REGRESSION: a gated metric is more than its tolerance worse than Thresholds/." >&2
-                status=1
+                exit 1
                 ;;
             *)
                 echo "microbench: the benchmark run failed (exit $status)." >&2
-                status=1
+                exit 1
                 ;;
         esac
-        exit "$status"
         ;;
     *)
         echo "usage: $0 run|check|update [package-benchmark options]" >&2

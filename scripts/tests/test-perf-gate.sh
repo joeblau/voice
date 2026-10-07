@@ -200,25 +200,34 @@ expect "a change above the minimum delta still fails" 1 \
 
 # --- microbench.sh exit codes -----------------------------------------------------
 
-# A stand-in `swift` that exits with $FAKE_SWIFT_STATUS, as package-benchmark
-# does: 0 equal, 2 regression, 4 improvement.
+# A stand-in `swift` that behaves like `swift package benchmark thresholds
+# check`: the plugin's error name on stderr and exit 1 (what `swift package`
+# does with any plugin error), or exit 0.
 mkdir -p "$work/bin"
 cat >"$work/bin/swift" <<'EOF'
 #!/bin/sh
 echo "fake swift $*"
+if [ -n "${FAKE_SWIFT_ERROR:-}" ]; then
+    echo "error: $FAKE_SWIFT_ERROR" >&2
+    exit 1
+fi
 exit "${FAKE_SWIFT_STATUS:-0}"
 EOF
 chmod +x "$work/bin/swift"
 
+# microbench_check <plugin error name or "">
 microbench_check() {
-    PATH="$work/bin:$PATH" FAKE_SWIFT_STATUS=$1 MICROBENCH_OUTPUT="$work/microbench.txt" "$microbench" check
+    PATH="$work/bin:$PATH" FAKE_SWIFT_ERROR=$1 MICROBENCH_OUTPUT="$work/microbench.txt" "$microbench" check
 }
-expect "microbench check passes when equal to the thresholds" 0 microbench_check 0
+expect "microbench check passes when equal to the thresholds" 0 microbench_check ""
 expect_output "microbench check runs package-benchmark's thresholds check" "benchmark thresholds check --path Thresholds"
-expect "microbench check fails on a regression" 1 microbench_check 2
-expect "microbench check passes on an improvement" 0 microbench_check 4
+expect "microbench check fails on a regression" 1 microbench_check benchmarkThresholdRegression
+expect_output "the regression is reported" "fake swift"
+expect "microbench check passes on an improvement" 0 microbench_check benchmarkThresholdImprovement
 expect_output "an improvement suggests tightening the thresholds" "make microbench-baseline"
-expect "microbench check fails when the run fails" 1 microbench_check 3
+expect "microbench check fails when a benchmark crashes" 1 microbench_check benchmarkCrashed
+expect "microbench check fails on the tool's own regression status" 1 \
+    env PATH="$work/bin:$PATH" FAKE_SWIFT_STATUS=2 "$microbench" check
 if [ -s "$work/microbench.txt" ]; then pass "microbench check saves its report"; else fail "microbench check saves its report"; fi
 expect "microbench rejects an unknown command" 64 "$microbench" frobnicate
 
