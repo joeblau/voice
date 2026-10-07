@@ -130,6 +130,7 @@ case step.
 | `voiceid.verify`      | `voiceid`  | `.voiceIDVerify`      | Scoring of a segment against the voiceprint starts  | Accept / reject / uncertain is decided          |
 | `realtime.turn`       | `realtime` | `.realtimeTurn`       | A verified utterance's text is committed to Grok    | `response.done`, or the response is cancelled by barge-in |
 | `realtime.firstAudio` | `realtime` | `.realtimeFirstAudio` | Same commit as `realtime.turn`                      | The first `response.output_audio.delta` arrives |
+| `playback.firstBuffer` | `audio`   | `.playbackFirstBuffer` | The first audio delta of a response item is enqueued in the player | The item's first frame is rendered (the jitter buffer is primed) |
 | `topics.segment`      | `topics`   | `.topicsSegment`      | A new exchange is scored for a topic boundary       | The depth score and hysteresis decision are out |
 | `topics.label`        | `topics`   | `.topicsLabel`        | A candidate boundary goes to Foundation Models      | The boundary is confirmed or rejected and titled |
 | `memory.embed`        | `memory`   | `.memoryEmbed`        | Text is handed to the embedding model               | The int8 vector is out                          |

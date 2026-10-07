@@ -4,8 +4,8 @@
 voice-processing `AVAudioEngine` for the whole conversation. It brings them
 up, publishes their state and route for the UI, and keeps them running
 through phone calls, route changes and media-server resets. Capture (#24)
-and playback (#25) plug into its engine as graph components; backgrounding
-and screen lock are #26.
+and playback (#25, [below](#playback-25)) plug into its engine as graph
+components; backgrounding and screen lock are #26.
 
 ```swift
 import BlauAudio
@@ -130,6 +130,73 @@ public protocol AudioGraphComponent: AnyObject, Sendable {
 - Register components before `start()`. Registering or unregistering while
   running rebuilds the graph, which drops a few milliseconds of audio.
 
+## Playback (#25)
+
+`StreamingAudioPlayer` (in `BlauAudio/Playback`) plays Grok's streamed
+reply audio, 24 kHz mono PCM16 `response.output_audio.delta` events, and
+stops it at once on barge-in. It is an `AudioGraphComponent`, so it lives
+on the same voice-processing engine as capture and the echo canceller
+hears it as the reference signal.
+
+```swift
+let player = StreamingAudioPlayer()
+await audio.register(player)
+await audio.start()
+
+let item = PlaybackItemID(itemID: event.itemID, contentIndex: event.contentIndex)
+try player.enqueue(base64: event.delta, item: item)   // response.output_audio.delta
+player.finish(item)                                   // response.output_audio.done
+
+// Barge-in (#37): silence first, then tell the server what was heard.
+let cut = player.flush()
+if let heard = cut.current {
+    // conversation.item.truncate(item_id: heard.id.itemID,
+    //   content_index: heard.id.contentIndex, audio_end_ms: heard.playedMilliseconds)
+}
+
+for await snapshot in player.updates() {   // "agent speaking" indicator
+    snapshot.isSpeaking; snapshot.level.rms
+}
+```
+
+### Design
+
+| Concern | How |
+| ------- | --- |
+| Node | An `AVAudioSourceNode` rendering 24 kHz float into the main mixer, which converts to the hardware rate (48 kHz speaker, 16/24 kHz HFP). The stream is mono but the node's format has two identical channels: a mono mixer input plays at unity gain only the first time it is connected and comes back 3 dB quieter after every graph rebuild (route change); a stereo input stays at unity on mono and stereo outputs (`uninstallDetachesTheNodeAndReinstallResumesTheQueue` pins this) |
+| Decoding | `PCM16Decoder`: base64 or binary little-endian PCM16 → `Float` / 32 768 with Accelerate. A delta that ends mid-sample keeps its odd byte for the next delta of the same item |
+| Jitter buffer | A response starts once 120 ms is queued (`prerollDuration`), or at once when `finish` says nothing more is coming, or after `maximumPrerollWait` (300 ms) of a trickle |
+| Underrun | The queue ran dry while the item is still streaming: render silence, count it, wait for `rebufferDuration` (120 ms) and resume. Nothing is dropped or reordered. Running dry after `finish` is the end of speech, not an underrun |
+| Played time | Frames are credited to their item as the node renders them, so `playedItem(for:)` and `flush()` report exactly what reached the output: preroll and underrun silence are not counted. `playedMilliseconds` rounds down, for `audio_end_ms` |
+| Flush | `flush()` empties the queue under the lock and returns what was played. The next render cycle plays a 5 ms linear fade of what was playing (credited as played; no click) and then silence. Items it cut are marked finished, so deltas still in flight before `response.cancel` lands are dropped |
+| Level | RMS and peak of each render cycle. The render thread can't post to an `AsyncStream` without risking a glitch, so `updates(every:)` samples the player on the `BlauClock` (50 ms by default) |
+| Rebuilds | The queue lives outside the node. A route change or media-services reset reinstalls the node and playback carries on where it was |
+
+The issue suggested an `AVAudioPlayerNode` fed with scheduled
+`AVAudioPCMBuffer`s. A source node pulling from our own queue fits the
+requirements better: a player node's sample time keeps running through
+underruns, so played time would have to be reconstructed from completion
+callbacks; jitter-buffer and underrun policy would sit outside the node;
+and the mixer converts the 24 kHz source just the same. Both are ordinary
+nodes on the same engine, so echo cancellation is unaffected.
+
+### Real-time safety
+
+The render callback and the producers share one `Mutex` (`os_unfair_lock`,
+which donates priority to the render thread). Every critical section is
+short: producers append whole chunks; the render thread copies at most one
+cycle. The render path never allocates or frees: chunks are allocated by
+`enqueue`, consumed chunks are released by the next producer call outside
+the lock, and per-item counters sit in a fixed ring created in `init`
+(`itemHistoryCapacity`, 64 items).
+
+### Latency budget
+
+| Step | Time |
+| ---- | ---- |
+| First delta → first frame rendered (`playback.firstBuffer`) | 120 ms preroll plus up to one I/O cycle |
+| `flush()` → silence | At most one I/O cycle (20 ms) until the next render, plus the 5 ms fade, plus the hardware output latency. Measured offline through the mixer: 5.7 ms after a flush between cycles |
+
 ## Telemetry
 
 Logs go to `Log.audio` (category `audio`): every state transition, every
@@ -150,6 +217,13 @@ pipeline stages, so they are not in the canonical interval table in
 | `audio.engineConfigurationChange` | event | `AVAudioEngineConfigurationChange` for the current engine |
 | `audio.mediaServicesLost`, `audio.mediaServicesReset` | event | Media-server notifications |
 
+Playback adds the canonical interval `playback.firstBuffer` (in
+[performance.md](performance.md)): from the first delta of a response
+item reaching the player to its first rendered frame, which is the jitter
+buffer's delay. Underruns are logged (`Playback underrun`) when the late
+audio arrives, since the render thread can't log; flushes log the item, its
+played milliseconds and how much was dropped.
+
 ## Tests
 
 | Where | What | Runs |
@@ -157,6 +231,17 @@ pipeline stages, so they are not in the canonical interval table in
 | `Packages/BlauKit/Tests/BlauAudioTests/AudioSessionControllerTests.swift` | The state machine against a fake session, engine and permission: start/stop, permission, failures, phone-call interruption and resume, AirPods ↔ speaker, configuration changes with retries, media-services reset, published updates | `swift test` on the Mac |
 | `BlauTests/SystemAudioSessionTests.swift` | The real `AVAudioSession` adapter: the category, mode and options it sets, and how it translates interruption, route-change and media-services notifications (simulated on a private notification center) | `make test-unit`, simulator |
 | `BlauTests/SystemAudioSessionTests.swift`, `AudioSessionControllerLiveTests` | The live controller and voice-processing engine coming up and down | Only with `BLAU_DEVICE_TESTS=1` and microphone permission |
+| `Packages/BlauKit/Tests/BlauAudioTests/Playback/StreamingAudioPlayerTests.swift` | Jitter buffer, underruns, items, flush and fade, stale deltas, levels, `updates`, the `playback.firstBuffer` signpost, cycle by cycle | `swift test` on the Mac |
+| `Packages/BlauKit/Tests/BlauAudioTests/Playback/DeltaStreamPlaybackTests.swift` | The acceptance criteria against a two-minute delta stream fixture with jittered arrivals: bit-exact gapless output, played-ms vs the fixture, flush silence, recovery from a server stall | `swift test` on the Mac |
+| `Packages/BlauKit/Tests/BlauAudioTests/Playback/PlaybackEngineTests.swift` | The node in a real `AVAudioEngine` in offline manual rendering mode at 48 kHz: no gap over two minutes, flush silence and played-ms measured at the engine's output, reinstall after a rebuild | `swift test` on the Mac |
+| `Packages/BlauKit/Tests/BlauAudioTests/Playback/RecordedDeltaStreamTests.swift` | Replays a real capture of Grok's deltas (JSON Lines, see the file) | Only with `BLAU_PLAYBACK_RECORDING=/path/to/capture.jsonl` |
+| `BlauTests/StreamingPlaybackLiveTests.swift` | The node on the live voice-processing engine: real-time pacing and flush | Only with `BLAU_DEVICE_TESTS=1` and microphone permission |
+
+The two-minute fixture is synthetic: seeded speech-like audio cut into
+20–100 ms deltas that arrive 1.1–2× faster than real time with 20–60 ms of
+network jitter and occasional 60 ms spikes. A real recording needs xAI
+credentials; capture one by logging each server event with its receive
+time as `t_ms` and replay it with `BLAU_PLAYBACK_RECORDING`.
 
 Run the live suite on a simulator (parallel testing off, so the test runs on
 the simulator that has the permission rather than a clone):
@@ -191,3 +276,7 @@ log stream --level debug --predicate 'subsystem == "com.joeblau.blau" && categor
 | 6 | Siri | Start, invoke Siri, dismiss | `interrupted`, then `running` | Pending |
 | 7 | Media services reset | Settings → Developer → Reset Media Services mid-session | `Media services were reset` log; `running` again with a new engine | Pending |
 | 8 | Echo | Speaker route, play agent audio while silent | Captured level stays near the noise floor (voice processing removes the playback) | Pending |
+| 9 | Gapless reply | Ask Grok for a two-minute answer on the speaker and on AirPods | No clicks, gaps or stutter; no `Playback underrun` logs on a good network | Pending |
+| 10 | Barge-in | Talk over the agent mid-sentence | Agent audio stops within ~50 ms with no click; a `Flushed playback` log with the played ms | Pending |
+| 11 | Played ms | Barge in, then compare `audio_end_ms` in the truncate event with a screen recording's audio | Within ±20 ms | Pending |
+| 12 | Route change mid-reply | Connect AirPods while the agent speaks | Playback continues after the rebuild at the same loudness | Pending |

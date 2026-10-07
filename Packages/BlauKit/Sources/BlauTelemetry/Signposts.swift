@@ -28,6 +28,9 @@ public enum PipelineInterval: CaseIterable, Sendable {
     /// Committing the user's text until the first audio delta arrives:
     /// the latency the user hears.
     case realtimeFirstAudio
+    /// From the first audio delta of a response item reaching the player
+    /// to its first frame being rendered: the jitter buffer's delay.
+    case playbackFirstBuffer
     /// Scoring one candidate topic boundary.
     case topicsSegment
     /// Confirming a boundary and generating a topic title on device.
@@ -50,6 +53,7 @@ public enum PipelineInterval: CaseIterable, Sendable {
         case .voiceIDVerify: "voiceid.verify"
         case .realtimeTurn: "realtime.turn"
         case .realtimeFirstAudio: "realtime.firstAudio"
+        case .playbackFirstBuffer: "playback.firstBuffer"
         case .topicsSegment: "topics.segment"
         case .topicsLabel: "topics.label"
         case .memoryEmbed: "memory.embed"
@@ -61,7 +65,7 @@ public enum PipelineInterval: CaseIterable, Sendable {
     /// The category the interval is emitted under.
     public var category: LogCategory {
         switch self {
-        case .captureFrame: .audio
+        case .captureFrame, .playbackFirstBuffer: .audio
         case .vadChunk, .asrChunk, .asrEndOfUtterance: .asr
         case .voiceIDEmbed, .voiceIDVerify: .voiceID
         case .realtimeTurn, .realtimeFirstAudio: .realtime
