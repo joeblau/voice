@@ -105,6 +105,10 @@ enum KitModule: String, CaseIterable {
         case .transcription:
             // Labelled speech WAVs and recorded Silero probabilities (VAD tests).
             [.copy("Fixtures")]
+        case .memory:
+            // The personal retrieval eval set (#59): company facts, YC
+            // answers, past conversations and profile facts.
+            [.copy("Fixtures")]
         default:
             []
         }
