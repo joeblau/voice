@@ -368,6 +368,9 @@ public actor TopicLifecycle: TopicService {
         // segmenter needs.
         guard conversation.unitOfUtterance[utterance.id] == nil else { return }
         let repliesDeferred = deferredConversation == conversation.id
+        if repliesDeferred, utterance.speaker == .user, !utterance.isBlank {
+            conversation.hasUserOnlyExchanges = true
+        }
         if repliesDeferred, utterance.speaker == .user, !utterance.isBlank,
             conversation.exchanges.isAwaitingReply, !conversation.exchanges.contains(utterance.id)
         {
@@ -876,6 +879,9 @@ final class LiveConversation {
     var lockedTopics: Set<UUID> = []
     /// The last title a labeler wrote to each topic.
     var labelTitles: [UUID: String] = [:]
+    /// Some exchanges were scored while replies were deferred (#80): only
+    /// the user's side, which re-segmentation's thresholds weren't tuned on.
+    var hasUserOnlyExchanges = false
 
     init(id: ConversationID, startedAt: Date, pipeline: TopicPipeline) {
         self.id = id

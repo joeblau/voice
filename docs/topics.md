@@ -528,6 +528,11 @@ synthetic conversations: a cut inside a reference topic scored at most 1.93
 
 ### In the lifecycle
 
+A conversation in which replies were deferred (offline, #80) isn't
+re-segmented: its user-only exchanges are short questions whose spread
+doesn't match the whole exchanges the thresholds were tuned on, and the
+streaming topics stand.
+
 When the conversation finishes, after the last exchange is scored and an
 unconfirmed break is taken back, the lifecycle lays the stored topics over
 the session's exchanges (an exchange belongs to the topic its first

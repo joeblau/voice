@@ -57,6 +57,13 @@ extension TopicLifecycle {
     ///    topic. On any failure the remaining changes are dropped.
     func resegment(_ conversation: LiveConversation) async -> ResegmentationOutcome {
         guard let settings = configuration.resegmentation else { return ResegmentationOutcome() }
+        // Exchanges with no reply (#80) are short questions on their own:
+        // their spread doesn't match the whole exchanges the thresholds were
+        // tuned on, so the streaming topics stand.
+        guard !conversation.hasUserOnlyExchanges else {
+            Log.topics.notice("Replies were deferred; re-segmentation left the streaming topics as they are")
+            return ResegmentationOutcome()
+        }
         let segmenter = conversation.pipeline.segmenter
         let units = await segmenter.units
         let embeddings = await segmenter.embeddings
