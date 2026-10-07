@@ -108,7 +108,10 @@ The complete list of declared edges:
    FluidAudio is pinned `from: "0.17.5"` with its default
    `NemoTextProcessing` trait turned off (that trait links a prebuilt text
    normalizer used only by its TTS frontends). `Package.resolved` is
-   committed.
+   committed. A module's test target links the same third-party products,
+   so tests can check the module's assumptions against them. The model
+   files FluidAudio runs are pinned separately, by commit and SHA-256, in
+   `BlauTranscription`'s model manifest (see [models.md](models.md)).
 
 ## Adding to the graph
 

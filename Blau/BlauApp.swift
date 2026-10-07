@@ -28,7 +28,7 @@ struct BlauApp: App {
             }
             // Outside the gate, so a sync-mode switch (which rebuilds the
             // gate's content) neither drops the environment nor reloads the
-            // xAI key.
+            // xAI key, and doesn't touch the speech models.
             .appEnvironment(environment)
             .environment(diagnostics)
             .task { await environment.start() }

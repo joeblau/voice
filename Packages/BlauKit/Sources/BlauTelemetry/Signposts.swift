@@ -19,6 +19,11 @@ public enum PipelineInterval: CaseIterable, Sendable {
     case asrChunk
     /// From the end of speech to the end-of-utterance decision.
     case asrEndOfUtterance
+    /// Downloading and verifying one on-device model.
+    case modelDownload
+    /// Loading one on-device model for the first time on this OS version
+    /// (the Neural Engine compile).
+    case modelWarmUp
     /// Computing one speaker embedding.
     case voiceIDEmbed
     /// Scoring one speech segment against the enrolled voiceprint.
@@ -56,6 +61,8 @@ public enum PipelineInterval: CaseIterable, Sendable {
         case .vadChunk: "vad.chunk"
         case .asrChunk: "asr.chunk"
         case .asrEndOfUtterance: "asr.eou"
+        case .modelDownload: "model.download"
+        case .modelWarmUp: "model.warmUp"
         case .voiceIDEmbed: "voiceid.embed"
         case .voiceIDVerify: "voiceid.verify"
         case .realtimeTurn: "realtime.turn"
@@ -75,7 +82,7 @@ public enum PipelineInterval: CaseIterable, Sendable {
     public var category: LogCategory {
         switch self {
         case .captureFrame, .playbackFirstBuffer: .audio
-        case .vadChunk, .asrChunk, .asrEndOfUtterance: .asr
+        case .vadChunk, .asrChunk, .asrEndOfUtterance, .modelDownload, .modelWarmUp: .asr
         case .voiceIDEmbed, .voiceIDVerify: .voiceID
         case .realtimeTurn, .realtimeFirstAudio, .realtimeConnect, .realtimeEvent: .realtime
         case .topicsSegment, .topicsLabel: .topics

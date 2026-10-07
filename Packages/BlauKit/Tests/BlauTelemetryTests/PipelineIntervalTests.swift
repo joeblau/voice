@@ -9,9 +9,10 @@ struct PipelineIntervalTests {
     @Test func coversTheDocumentedStages() {
         #expect(
             Self.names == [
-                "capture.frame", "vad.chunk", "asr.chunk", "asr.eou", "voiceid.embed", "voiceid.verify",
-                "realtime.turn", "realtime.firstAudio", "realtime.connect", "realtime.event", "playback.firstBuffer",
-                "topics.segment", "topics.label", "memory.embed", "memory.search", "db.save",
+                "capture.frame", "vad.chunk", "asr.chunk", "asr.eou", "model.download", "model.warmUp",
+                "voiceid.embed", "voiceid.verify", "realtime.turn", "realtime.firstAudio", "realtime.connect",
+                "realtime.event", "playback.firstBuffer", "topics.segment", "topics.label", "memory.embed",
+                "memory.search", "db.save",
             ]
         )
     }
@@ -39,6 +40,8 @@ struct PipelineIntervalTests {
         #expect(categories["vad.chunk"] == .asr)
         #expect(categories["asr.chunk"] == .asr)
         #expect(categories["asr.eou"] == .asr)
+        #expect(categories["model.download"] == .asr)
+        #expect(categories["model.warmUp"] == .asr)
         #expect(categories["voiceid.embed"] == .voiceID)
         #expect(categories["voiceid.verify"] == .voiceID)
         #expect(categories["realtime.turn"] == .realtime)

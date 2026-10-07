@@ -2,6 +2,7 @@ import BlauCore
 import BlauPersistence
 import BlauRealtime
 import BlauTelemetry
+import BlauTranscription
 import Foundation
 import Observation
 import SwiftData
@@ -58,6 +59,13 @@ final class AppEnvironment {
     /// an in-memory key store and a stub transport.
     let xai: XAIServices
 
+    /// The on-device speech models (#27): downloads, verifies and warms up
+    /// the FluidAudio models. The live app uses the pinned manifest (or
+    /// fixture models when a test runner asks for them, see
+    /// `SpeechModels.makeManager`); every other kind runs on fixture models,
+    /// so no preview or test ever starts a real download.
+    let speechModels: ModelManager
+
     /// Delivers scene phase changes to the services (see `ScenePhaseHandling`).
     let lifecycle: AppLifecycleCoordinator
 
@@ -81,7 +89,8 @@ final class AppEnvironment {
         persistence: PersistenceController,
         topics: any TopicService,
         memory: any MemoryService,
-        xai: XAIServices
+        xai: XAIServices,
+        speechModels: ModelManager
     ) {
         self.kind = kind
         self.config = config
@@ -95,6 +104,7 @@ final class AppEnvironment {
         self.topics = topics
         self.memory = memory
         self.xai = xai
+        self.speechModels = speechModels
         self.lifecycle = AppLifecycleCoordinator(
             participants: Self.lifecycleOrder(
                 persistence: persistence, audio: audio, transcriber: transcriber, voiceGate: voiceGate,
@@ -109,9 +119,12 @@ final class AppEnvironment {
     var modelContainer: ModelContainer? { persistence.stack?.container }
 
     /// Launch-time work, run once from the app's root `.task`: seeds the
-    /// DEBUG developer xAI key, then loads the stored key.
+    /// DEBUG developer xAI key, then loads the stored key; alongside, checks
+    /// the installed speech models and starts any downloads they need.
     func start() async {
+        async let models: Void = speechModels.start()
         await xai.start()
+        await models
     }
 
     /// The services in the order they are told the app became active, lowest
@@ -161,7 +174,8 @@ extension AppEnvironment {
         config: AppConfig = .current,
         defaults: UserDefaults = .standard,
         persistence: PersistenceController? = nil,
-        xai: XAIServices? = nil
+        xai: XAIServices? = nil,
+        speechModels: ModelManager? = nil
     ) -> AppEnvironment {
         AppEnvironment(
             kind: .live,
@@ -186,7 +200,9 @@ extension AppEnvironment {
             topics: UnavailableService(subsystem: "topics"),
             // #62 - #68: memory and its tools.
             memory: UnavailableService(subsystem: "memory"),
-            xai: xai ?? XAIServices.make(config: config)
+            xai: xai ?? XAIServices.make(config: config),
+            // #27: the on-device speech model download manager.
+            speechModels: speechModels ?? SpeechModels.makeManager()
         )
     }
 
@@ -223,7 +239,8 @@ extension AppEnvironment {
         memories: [String] = sampleMemories,
         isEnrolled: Bool = true,
         clock: any BlauClock = SystemClock(),
-        xai: XAIServices? = nil
+        xai: XAIServices? = nil,
+        speechModels: ModelManager? = nil
     ) -> AppEnvironment {
         let flags = flags ?? .inMemory(kind == .uiTest ? launchArgumentFlagOverrides() : [:])
         return AppEnvironment(
@@ -238,7 +255,8 @@ extension AppEnvironment {
             persistence: .inMemory(),
             topics: FakeTopicService(),
             memory: FakeMemoryService(memories: memories),
-            xai: xai ?? XAIServices.hermetic(config: config)
+            xai: xai ?? XAIServices.hermetic(config: config),
+            speechModels: speechModels ?? fakeSpeechModels(kind: kind)
         )
     }
 
@@ -248,6 +266,16 @@ extension AppEnvironment {
         "The YC interview practice set has 20 questions",
         "Joe prefers short answers when practicing interview questions",
     ]
+
+    /// Fixture speech models for a non-live environment. Unit tests build
+    /// many environments while the test host app runs its own, so each gets
+    /// a store of its own instead of resetting the shared fixture store.
+    private static func fakeSpeechModels(kind: Kind) -> ModelManager {
+        guard kind == .unitTest else { return SpeechModels.fixtureManager() }
+        let root = SpeechModels.defaultFixtureRoot.appending(
+            path: UUID().uuidString, directoryHint: .isDirectory)
+        return SpeechModels.fixtureManager(root: root)
+    }
 
     private static func launchArgumentFlagOverrides() -> [FeatureFlag: Bool] {
         let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)

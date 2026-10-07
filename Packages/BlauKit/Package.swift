@@ -106,7 +106,9 @@ enum KitModule: String, CaseIterable {
     var testTarget: Target {
         .testTarget(
             name: "\(rawValue)Tests",
-            dependencies: [.target(name: rawValue)],
+            // Third-party products too, so tests can check the module's
+            // assumptions against them (e.g. FluidAudio's model file names).
+            dependencies: [.target(name: rawValue)] + externalDependencies,
             resources: testResources,
             swiftSettings: swiftSettings
         )

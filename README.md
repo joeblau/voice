@@ -76,9 +76,9 @@ the same `make` targets as above. See [docs/ci.md](docs/ci.md).
 | `BlauPerfTests/` | Performance tests (XCTest UI-testing bundle, launch metrics)    |
 | `TestPlans/`     | `Blau.xctestplan` (unit + UI, coverage) and `BlauPerf.xctestplan` |
 | `Config/`        | xcconfig files; `Secrets.xcconfig` is gitignored ([docs](docs/configuration.md)) |
-| `scripts/`       | `swift-format.sh` (behind `make format` and `make lint`), git hooks, embedded-secrets check, `Secrets.xcconfig` writer, `verify-signposts.sh` and the Instruments template scripts (see [`docs/performance.md`](docs/performance.md)), and the CI helpers in `scripts/ci/` ([`docs/ci.md`](docs/ci.md)) |
+| `scripts/`       | `swift-format.sh` (behind `make format` and `make lint`), git hooks, embedded-secrets check, `Secrets.xcconfig` writer, `verify-signposts.sh` and the Instruments template scripts (see [`docs/performance.md`](docs/performance.md)), `update-model-manifest.py` (see [`docs/models.md`](docs/models.md)), and the CI helpers in `scripts/ci/` ([`docs/ci.md`](docs/ci.md)) |
 | `Tools/Instruments/` | `Blau.tracetemplate`, the Instruments template for profiling Blau, and the instrument list and options it is generated from |
-| `docs/`          | Developer documentation                                         |
+| `docs/`          | Developer documentation, including [on-device models](docs/models.md) |
 | `.github/`       | CI workflow ([docs](docs/ci.md)), pull request and issue templates |
 
 ### Targets and schemes

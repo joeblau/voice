@@ -108,6 +108,7 @@ struct SettingsView: View {
             Form {
                 XAIAccountSettingsSection()
                 ICloudSettingsSection()
+                SpeechModelsSettingsSection()
                 Section("Developer") {
                     NavigationLink {
                         DiagnosticsView()
@@ -134,5 +135,6 @@ struct SettingsView: View {
             .environment(XAIAccount.preview())
             .environment(PersistenceController.preview())
             .environment(AppDiagnostics(store: nil))
+            .environment(SpeechModels.fixtureManager())
     }
 #endif
