@@ -153,16 +153,6 @@ jobs:
           restore-keys: |
             spm-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.build }}-
 
-      - name: Resolve packages
-        run: |
-          for attempt in 1 2 3; do
-            xcodebuild -resolvePackageDependencies -project Blau.xcodeproj -scheme Blau \
-              -derivedDataPath .build/DerivedData && exit 0
-            echo "::warning::Package resolution failed (attempt $attempt); retrying"
-            sleep $((attempt * 10))
-          done
-          exit 1
-
       - name: Boot simulator
         id: simulator
         run: scripts/ci/simulator-destination.sh --boot
