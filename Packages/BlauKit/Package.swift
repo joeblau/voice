@@ -89,10 +89,22 @@ enum KitModule: String, CaseIterable {
         )
     }
 
+    /// Resources bundled with the module's test target.
+    var testResources: [Resource] {
+        switch self {
+        case .realtime:
+            // Recorded and hand-written realtime sessions (JSON Lines).
+            [.copy("Fixtures")]
+        default:
+            []
+        }
+    }
+
     var testTarget: Target {
         .testTarget(
             name: "\(rawValue)Tests",
             dependencies: [.target(name: rawValue)],
+            resources: testResources,
             swiftSettings: swiftSettings
         )
     }
