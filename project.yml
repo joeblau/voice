@@ -91,7 +91,11 @@ targets:
           - remote-notification
         # The lock-screen recording indicator (#26).
         NSSupportsLiveActivities: true
-        UILaunchScreen: {}
+        # Branding (#82, docs/branding.md): the brand mark centered on the
+        # system background, both from Assets.xcassets/Brand.
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+          UIImageName: BrandMark
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         # Landscape too: the main screen's bottom bar keeps Settings left

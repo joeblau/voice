@@ -41,8 +41,7 @@ struct RecordButton: View {
         Button(action: action) {
             label
         }
-        .buttonStyle(.borderedProminent)
-        .tint(phase == .recording || phase == .stopping ? .red : .accentColor)
+        .brandProminentButtonStyle(phase == .recording || phase == .stopping ? .recordingFill : .accentFill)
         .disabled(phase.isBusy)
         .accessibilityIdentifier(MainScreenAccessibility.recordButton)
         .accessibilityValue(accessibilityValue)

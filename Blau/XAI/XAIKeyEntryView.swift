@@ -74,7 +74,7 @@ struct XAIKeyEntryView: View {
                 }
                 .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .brandProminentButtonStyle()
             .disabled(!canSubmit)
             .accessibilityIdentifier(XAIKeyIdentifiers.connect)
         }
