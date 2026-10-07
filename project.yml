@@ -162,6 +162,35 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         TEST_TARGET_NAME: Blau
 
+  # On-device model benchmarks (#22, docs/benchmarks.md). Not hosted in the
+  # app: it links BlauKit itself, so the app's dead-code stripping can't drop
+  # the benchmark cases. Every test skips unless BLAU_DEVICE_TESTS=1.
+  BlauBenchmarks:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: BlauBenchmarks
+        excludes:
+          - Assets
+      # Optional, gitignored model and recording (see Assets/README.md).
+      - path: BlauBenchmarks/Assets
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: BlauKit
+        products:
+          - BlauCore
+          - BlauTelemetry
+          - BlauAudio
+          - BlauTranscription
+          - BlauVoiceID
+          - BlauTopics
+          - BlauMemory
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.blau.benchmarks
+        GENERATE_INFOPLIST_FILE: YES
+
 schemes:
   Blau:
     build:
@@ -205,3 +234,15 @@ schemes:
       config: Release
     archive:
       config: Release
+
+  # Model benchmarks on a physical iPhone: `make bench DEVICE=<udid>`.
+  Blau-Benchmarks:
+    build:
+      targets:
+        BlauBenchmarks: [test]
+    test:
+      # Optimized Swift (FluidAudio's decoders, BlauKit) like the shipping app.
+      config: Release
+      testPlans:
+        - path: TestPlans/BlauBenchmarks.xctestplan
+          defaultPlan: true

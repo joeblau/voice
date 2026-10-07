@@ -38,6 +38,8 @@ configured. See [docs/configuration.md](docs/configuration.md).
 | `make test-ui`   | Run only `BlauUITests`                                           |
 | `make test-kit`  | Run the `BlauKit` package tests on the macOS host (`swift test`) |
 | `make perf`      | Run `BlauPerfTests` (`Blau-Perf` scheme, Release build)          |
+| `make bench`     | Run the model benchmarks on an iPhone (`DEVICE=<udid>`, [docs](docs/benchmarks.md)) |
+| `make bench-kit` | Run the model benchmarks on this Mac (reference numbers, downloads models) |
 | `make secrets`   | Create `Config/Secrets.xcconfig` from the example                |
 | `make test-scripts` | Test the secrets, CI and Instruments template scripts         |
 | `make install-instruments-template` | Add the Blau template to Instruments' chooser ([docs](docs/performance.md#instruments-template)) |
@@ -74,7 +76,8 @@ the same `make` targets as above. See [docs/ci.md](docs/ci.md).
 | `BlauTests/`     | Unit tests (Swift Testing), hosted in the app                   |
 | `BlauUITests/`   | UI tests (XCTest)                                               |
 | `BlauPerfTests/` | Performance tests (XCTest UI-testing bundle, launch metrics)    |
-| `TestPlans/`     | `Blau.xctestplan` (unit + UI, coverage) and `BlauPerf.xctestplan` |
+| `BlauBenchmarks/` | On-device model benchmarks (XCTest, not hosted in the app; [docs](docs/benchmarks.md)) |
+| `TestPlans/`     | `Blau.xctestplan` (unit + UI, coverage), `BlauPerf.xctestplan` and `BlauBenchmarks.xctestplan` |
 | `Config/`        | xcconfig files; `Secrets.xcconfig` is gitignored ([docs](docs/configuration.md)) |
 | `scripts/`       | `swift-format.sh` (behind `make format` and `make lint`), git hooks, embedded-secrets check, `Secrets.xcconfig` writer, `verify-signposts.sh` and the Instruments template scripts (see [`docs/performance.md`](docs/performance.md)), `update-model-manifest.py` (see [`docs/models.md`](docs/models.md)), `make-vad-fixtures.py` (see [`docs/vad.md`](docs/vad.md)), and the CI helpers in `scripts/ci/` ([`docs/ci.md`](docs/ci.md)) |
 | `Tools/Instruments/` | `Blau.tracetemplate`, the Instruments template for profiling Blau, and the instrument list and options it is generated from |
@@ -89,6 +92,10 @@ the same `make` targets as above. See [docs/ci.md](docs/ci.md).
 - Scheme `Blau`: runs Debug and tests with the `Blau` test plan.
 - Scheme `Blau-Perf`: runs and tests in Release with the `BlauPerf` test plan,
   so performance numbers come from an optimized build.
+- Scheme `Blau-Benchmarks`: tests `BlauBenchmarks` in Release with the
+  `BlauBenchmarks` test plan. Every test skips unless `BLAU_DEVICE_TESTS=1`
+  (`make bench` sets it). Debug builds of the app also have a benchmark
+  screen (the gauge button, or launch with `-BlauBenchmarks`).
 
 The test plans refer to targets by the identifiers XcodeGen generates. Those
 identifiers are derived from the target names, so they stay stable across

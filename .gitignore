@@ -20,3 +20,7 @@ DerivedData/
 
 # Secrets (see Secrets.xcconfig handling)
 Secrets.xcconfig
+
+# Optional benchmark model and recording (see BlauBenchmarks/Assets/README.md)
+BlauBenchmarks/Assets/*
+!BlauBenchmarks/Assets/README.md

@@ -131,6 +131,10 @@ The complete list of declared edges:
   `BLAU_DEVICE_TESTS=1`.
 - App-level unit, UI and performance tests stay in `BlauTests`,
   `BlauUITests` and `BlauPerfTests` (see the README).
+- Model benchmarks: each module defines `BenchmarkCase`s for its models
+  (protocols from `BlauTelemetry`), the debug benchmark screen and the
+  `BlauBenchmarks` XCTest target compose them, and the real-model runs are
+  gated behind `BLAU_DEVICE_TESTS=1`. See [benchmarks.md](benchmarks.md).
 
 ## Subsystem docs
 
