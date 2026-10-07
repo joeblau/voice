@@ -32,6 +32,7 @@ struct BlauApp: App {
             .appEnvironment(environment)
             .environment(diagnostics)
             .task { await environment.start() }
+            .debugBenchmarksEntry()
         }
         .onChange(of: scenePhase, initial: true) { _, phase in
             environment.handleScenePhase(phase)

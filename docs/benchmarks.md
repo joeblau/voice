@@ -1,8 +1,424 @@
-# Benchmarks
+# On-device model benchmarks
 
-Measured results for Blau's on-device models. Each section says how the
-numbers were produced so they can be re-run and compared. Device rows stay
-**Pending** until someone runs the harness on a physical iPhone.
+Research spike #22 (epic #11). Several numbers the architecture in issue #1
+depends on are not published for iPhone: streaming ASR latency per chunk
+size, second-pass load and speed, speaker-embedding latency, text-embedding
+latency, Foundation Models label latency, and what iOS 27 does to Neural
+Engine work when the screen is locked. This document describes the harness
+that measures them, the results so far, and the decisions that hang on them.
+
+**Status (2026-10-07):** the harness is complete and validated end to end
+against the real FluidAudio models on a Mac. **The iPhone results are still
+pending**: they need physical A17 Pro / A18 / A19 iPhones, which the
+harness's author did not have. The two decisions below are written as
+rules with a provisional outcome, so whoever runs the benchmarks can settle
+them by filling in the tables.
+
+## What is measured
+
+| Case id | Model | Numbers | Why |
+| --- | --- | --- | --- |
+| `asr.eou.160ms`, `asr.eou.320ms`, `asr.eou.1280ms` | Parakeet realtime EOU 120M (FluidAudio `StreamingEouAsrManager`) | `load`, `rtfx`, `window` and `window.burst` latency, `window.p95OfHop`, `finish` latency, memory | Pick the default chunk size (#29) |
+| `asr.tdt.v3` | Parakeet TDT 0.6B v3 (FluidAudio `AsrManager`) | `load.cold`, `load.warm`, `rtfx` on 60 s, `utterance.5s` latency, memory | Second pass (#30): first-launch cost and per-utterance latency |
+| `voiceid.wespeaker` | WeSpeaker ResNet34-LM (FluidAudio `wespeaker_v2`, 256-d) | `load`, `embed.1.5s`, `embed.3s`, `cosine.sameSpeaker`, memory | Voice ID gate (#45, #47) |
+| `voiceid.campplus` | CAM++ (FluidAudio, beta, 192-d) | same as above | The challenger named in #1 |
+| `memory.embeddinggemma` | EmbeddingGemma-300M as Core ML, truncated to 256-d and quantized to int8 | `load`, `embed.64tok`, `embed.128tok`, `embed.256tok`, memory | Memory index (#59, #60) |
+| `topics.label.foundationModels` | On-device Foundation Models through Blau's production `FoundationModelsTopicLabeler` (#53) | `label.cold`, `label`, `label.prewarmed`, `titles.withinWordLimit` | Topic confirmation and titles (#53) |
+| Background probe | Parakeet EOU 320 ms on the Neural Engine, with a CPU-only baseline | Per-window latency by app phase, errors, Neural Engine availability, verdict, mitigation | iOS 27 background Neural Engine restrictions (#26) |
+
+Every latency is reported as a distribution (p50, p95, p99, min, max, mean,
+standard deviation, count); the tables show p50 and p95.
+
+## Running the benchmarks
+
+### On an iPhone: the results table
+
+```sh
+xcrun devicectl list devices          # find the iPhone's identifier
+make bench DEVICE=<identifier>        # Release build, about 20 minutes
+```
+
+`make bench` runs the `BlauBenchmarks` XCTest target through the
+`Blau-Benchmarks` scheme in the **Release** configuration (the shipping
+optimization level; FluidAudio's decoders are Swift code and are several
+times slower unoptimized). It sets `TEST_RUNNER_BLAU_DEVICE_TESTS=1`;
+without it every benchmark skips, so `make test` and CI never run them.
+Signing must be set up for a device build (Xcode > Settings > Accounts, and
+a development team on the `BlauBenchmarks` target), and the device needs
+network access the first time: models download from Hugging Face
+(about 1 GB in total) into the test runner's container.
+
+Each test attaches its result, the cumulative report for the device
+(`<date>-<model id>.json`) and a Markdown summary to the result bundle in
+`.build/Benchmarks/`. Extract them with:
+
+```sh
+xcrun xcresulttool export attachments --path .build/Benchmarks/<run>.xcresult --output-path /tmp/bench
+```
+
+Before a run: charge above 50%, unplugged or plugged in consistently (note
+which), Low Power Mode off, the device at room temperature and idle for a
+few minutes. Every result records the thermal state at start and end; runs
+that reach `serious` are marked `ok (throttled)` and don't count toward the
+go/no-go.
+
+### The debug benchmark screen
+
+Debug builds of the app have a gauge button in the top-right corner (or
+launch with `-BlauBenchmarks`) that opens **Benchmarks**: the same cases with
+progress, results, and JSON/Markdown reports you can share, saved under
+`Documents/Benchmarks/Reports/`. A Debug build runs Swift code unoptimized,
+so its ASR numbers are pessimistic and stay out of the table; the screen
+says so. Build the app in Release with the `BLAU_BENCHMARKS` compilation
+condition to get the screen with optimized code:
+
+```sh
+xcodebuild build -scheme Blau -configuration Release -destination 'id=<identifier>' \
+  -derivedDataPath .build/DerivedData -allowProvisioningUpdates \
+  SWIFT_ACTIVE_COMPILATION_CONDITIONS=BLAU_BENCHMARKS XAI_DEV_API_KEY=
+```
+
+The screen exists mainly for the background probe, which needs a person to
+lock the device.
+
+### The background Neural Engine probe
+
+On the benchmark screen, under **Background Neural Engine probe**:
+
+1. Set a duration (10 minutes is a good default) and tap **Start probe**.
+   Blau asks for the microphone: the probe keeps an audio session recording,
+   exactly like a conversation, which is what keeps the app running off
+   screen (the `audio` background mode).
+2. The probe first times 40 windows of the same model on the CPU only (the
+   baseline), then loads the Neural Engine model and starts the live run.
+3. When the status says *Running*, stay in Blau for about a minute (the
+   foreground sample), then press the side button to lock the device. The
+   device must have a passcode: "locked" is detected as protected data
+   becoming unavailable, about 10 seconds after locking.
+4. Leave it locked for most of the run, then unlock and return to Blau. The
+   verdict, the recommended mitigation and a JSON report with every sample
+   appear when the run ends (or tap **Stop and analyse**).
+
+Run it on iOS 27 (the restriction is new there) and, for comparison, on
+iOS 26.
+
+### On this Mac: reference numbers
+
+```sh
+make bench-kit       # BLAU_DEVICE_TESTS=1 swift test -c release --filter RealModel
+```
+
+Runs the same cases (except EmbeddingGemma) against the real models on the
+Mac. Set `BLAU_BENCH_OUTPUT=<dir>` to keep the JSON reports and
+`BLAU_BENCH_AUDIO=<file>` to use a recording. Mac numbers say nothing about
+an iPhone; they validate the harness and catch gross regressions.
+
+### Optional inputs
+
+- **Speech.** By default the benchmarks synthesize about 70 seconds of
+  conversational English on the device with `AVSpeechSynthesizer`
+  (`AudioFixture.benchmarkPassage`), so nothing is downloaded or committed.
+  To use a recording instead, put `benchmark-speech.wav` in
+  `BlauBenchmarks/Assets/` (XCTest) or `Documents/Benchmarks/` (app). If
+  synthesis fails, a deterministic speech-shaped signal is used and the
+  report says so; it underestimates the ASR decoder's cost because it
+  decodes few tokens.
+- **EmbeddingGemma.** No Swift package ships EmbeddingGemma-300M for Core ML,
+  so the case is skipped until a model is supplied. Convert
+  `google/embeddinggemma-300m` with coremltools (inputs `input_ids` and
+  `attention_mask`, int32, shape `[1, 256]` or a range; output the pooled
+  `[1, 768]` embedding), name it `EmbeddingGemma*.mlpackage` or
+  `.mlmodelc`, and put it in `BlauBenchmarks/Assets/` (XCTest; gitignored)
+  or copy it to the app's `Documents/Benchmarks/Models/` with
+  `xcrun devicectl device copy to`. A `.mlpackage` is compiled on the device
+  and the compile counts toward `load`. #59 owns the model choice and the
+  conversion.
+
+## Methodology
+
+- **Timing** uses a monotonic clock (`BlauClock.uptime`, `ContinuousClock`
+  in production) around each call. Each measured step is wrapped in its
+  canonical signpost (`asr.chunk`, `voiceid.embed`, `memory.embed`,
+  `topics.label`), so an Instruments trace of a run lines up with
+  [docs/performance.md](performance.md).
+- **Warm-up.** The first windows or iterations of every pass are excluded
+  (4 ASR windows, 3 embeddings, 1 transcription).
+- **Streaming ASR** is fed one hop at a time with 16 kHz mono float buffers
+  (FluidAudio's no-resampling fast path). The harness mirrors FluidAudio's
+  windowing to know how many encoder windows each call ran, and divides the
+  call's time by them. Two passes: *burst* (back to back, 60 s of audio)
+  gives `rtfx` (audio seconds per compute second, including utterance
+  finishes) and `window.burst`; *paced* (one hop per hop duration, 30 s of
+  audio, like live capture) gives `window`, the latency the user feels.
+  Paced latency can be worse than burst latency because the Neural Engine
+  clocks down between bursts. Every 10 s of audio the utterance is finished
+  (`finish`), as the pipeline does at each end of utterance. Note the
+  window is not the hop: at 320 ms, FluidAudio's encoder sees 630 ms of
+  audio (64 mel frames) and advances 320 ms.
+- **Load** is the time to load compiled models from disk. On a device the
+  first load after install also specializes the model for the Neural
+  Engine; the OS caches that per model location. For TDT v3, `load.cold`
+  copies the model folder to a fresh path first (a cache miss, like a fresh
+  install) and `load.warm` loads the same copy again (median of three).
+  Downloads are never timed.
+- **Memory** is the process's physical footprint (`task_vm_info
+  .phys_footprint`, what jetsam and Xcode's gauge use): `memory.footprint`
+  at the end, `memory.footprintGrowth` the highest sampled value above the
+  baseline taken before loading. `memory.neuralGrowth` is the kernel's
+  neural (Neural Engine) ledger for the process. Compiled Neural Engine
+  programs live partly in the ANE daemon, so the footprint undercounts
+  Neural Engine models; the neural ledger covers what the kernel attributes
+  to Blau.
+- **Speaker embeddings** are timed on windows taken from different places in
+  the speech. `cosine.sameSpeaker` compares two windows of the same speaker,
+  a sanity check, not a calibration (#48).
+- **Text embeddings** use synthetic token IDs (latency depends on sequence
+  length, not content) and include Matryoshka truncation to 256-d,
+  L2 normalization and int8 quantization (`MatryoshkaEmbedding`).
+- **Topic labels** time the labeler Blau ships, `FoundationModelsTopicLabeler`
+  (#53), through `FoundationModelsLabelBenchmarkGenerator`: the same
+  instructions and prompt (`TopicLabelPrompt`), token budget and
+  `TopicLabelPrompt.fit`, greedy sampling, and retries (a smaller prompt, or
+  plain text after a refusal). The fixtures (`TopicLabelRequest.benchmarkRequests`)
+  are boundary requests shaped like the segmenter's: three exchanges, user
+  turn and assistant reply, either side of the boundary, plus the previous
+  title. `label.cold` is the first request in the process, session creation
+  included. For `label` and `label.prewarmed` the labeler's first guided
+  session is made outside the timed region through its prewarming seam
+  (`prepareSession(for:prewarm:)`; for `label.prewarmed`, `prewarm()` is
+  called on it), then both wait the same lead (`prewarmLead`, 1.5 s by
+  default, about how early the segmenter knows a boundary is coming) and
+  only the labeler's `label` is timed: token counting, fitting, generation
+  and any retry. `prewarm()` returns at once and loads in the background, so
+  it needs that lead to have any effect. `titles.withinWordLimit` counts
+  the model's raw titles, before `TopicTitleFormatter` enforces the limit.
+  Titles are never logged.
+- **Device and conditions.** Every report records the model identifier,
+  chip, OS build, memory, build configuration, and thermal state at the
+  start and end of each case.
+
+The measuring logic lives in BlauKit next to each model (`BlauTelemetry`
+for the runner, statistics, reports and the background analysis;
+`BlauTranscription`, `BlauVoiceID`, `BlauMemory`, `BlauTopics` for the cases)
+behind protocols, and is unit tested on the Mac with fakes on a virtual
+clock. The app and the XCTest target only compose the cases.
+
+## Results
+
+### iPhones (pending)
+
+Fill this table from the reports (`BenchmarkReport.comparisonTable` renders
+it from the JSON). Release builds only. Rows marked *budget* feed the
+go/no-go below.
+
+| Case | Metric | iPhone 15 Pro (A17 Pro) | iPhone 16 / 16 Pro (A18 / A18 Pro) | iPhone 17 / 17 Pro (A19 / A19 Pro) |
+| --- | --- | --- | --- | --- |
+| EOU 160 ms | `window` p50 / p95 | pending | pending | pending |
+| | `rtfx` | pending | pending | pending |
+| | `memory.footprintGrowth` | pending | pending | pending |
+| EOU 320 ms | `window` p50 / p95 | pending | pending | pending |
+| | `window.p95OfHop` (budget ≤ 50%) | pending | pending | pending |
+| | `rtfx` (budget ≥ 4×) | pending | pending | pending |
+| | `finish` p95 | pending | pending | pending |
+| | `memory.footprintGrowth` (budget ≤ 300 MB) | pending | pending | pending |
+| EOU 1280 ms | `window` p50 / p95 | pending | pending | pending |
+| | `rtfx` | pending | pending | pending |
+| TDT v3 | `load.cold` / `load.warm` | pending | pending | pending |
+| | `rtfx` (60 s) | pending | pending | pending |
+| | `utterance.5s` p50 / p95 | pending | pending | pending |
+| | `memory.footprintGrowth` | pending | pending | pending |
+| WeSpeaker ResNet34-LM | `embed.1.5s` p50 / p95 | pending | pending | pending |
+| | `embed.3s` p50 / p95 | pending | pending | pending |
+| CAM++ | `embed.1.5s` / `embed.3s` p50 | pending | pending | pending |
+| EmbeddingGemma 256-d int8 | `embed.128tok` p50 / p95 | pending (needs model) | pending (needs model) | pending (needs model) |
+| | `memory.footprintGrowth` | pending | pending | pending |
+| Foundation Models | `label.cold` | pending | pending | pending |
+| | `label` / `label.prewarmed` p50 | pending | pending | pending |
+| Background probe (iOS 27) | verdict / mitigation | pending | pending | pending |
+
+### Mac reference (harness validation)
+
+Measured with `make bench-kit` (Release) on an Apple M3 Max (Mac15,8,
+128 GB), macOS 27.2, on 2026-10-07, with synthesized speech. **The machine
+was heavily loaded by other builds during the run (load average around
+600)**, so these numbers are noisy upper bounds. They show that every case
+runs end to end against the real models, and the relative costs.
+
+| Case | Metric | M3 Max (loaded) |
+| --- | --- | --- |
+| EOU 160 ms | `load` (first load, includes compile) | 67.0 s |
+| | `window.burst` p50 / p95 | 37.7 / 313.5 ms |
+| | `window` (paced) p50 / p95 | 35.6 / 146.9 ms |
+| | `rtfx` | 1.03× |
+| EOU 320 ms | `load` (first load, includes compile) | 96.2 s |
+| | `window.burst` p50 / p95 | 38.5 / 49.1 ms |
+| | `window` (paced) p50 / p95 | 69.5 / 173.9 ms |
+| | `window.p95OfHop` | 54% |
+| | `finish` p50 / p95 | 37.4 / 44.1 ms |
+| | `rtfx` | 8.08× |
+| | `memory.footprintGrowth` | 70 MB |
+| EOU 1280 ms | `load` (first load, includes compile) | 168.5 s |
+| | `window.burst` p50 / p95 | 49.4 / 60.8 ms |
+| | `rtfx` | 25.9× |
+| TDT v3 | `load.cold` / `load.warm` | 126.7 s / 1.16 s |
+| | `rtfx` (60 s) | 22.0× |
+| | `utterance.5s` p50 / p95 | 294.5 / 666.8 ms |
+| | `memory.footprintGrowth` / `memory.neuralGrowth` | 34 MB / 468 MB |
+| WeSpeaker ResNet34-LM | `load` | 687 ms |
+| | `embed.1.5s` p50 / p95 | 135.8 / 305.3 ms |
+| | `embed.3s` p50 / p95 | 125.5 / 220.3 ms |
+| | `cosine.sameSpeaker` | 0.83 |
+| CAM++ | `embed.1.5s` p50 / p95 | 1,632 / 3,317 ms |
+| | `embed.3s` p50 / p95 | 916 / 1,322 ms |
+| | `cosine.sameSpeaker` | 0.91 |
+| Foundation Models | `label.cold` | 3,136 ms |
+| | `label` p50 / p95 | 2,107 / 2,456 ms |
+| | `label.prewarmed` p50 / p95 | 2,063 / 2,394 ms |
+| | `titles.withinWordLimit` | 100% |
+
+The Foundation Models rows time the production labeler (#53) and were
+measured on 2026-10-07 (`BLAU_DEVICE_TESTS=1 swift test -c release --filter
+RealModelTopicLabelBenchmarkTests`, same Mac, load average 260 to 450). A
+second run gave `label` p50 2,649 ms and `label.prewarmed` p50 2,816 ms
+(cold 3,213 ms), but a device test shared the model for its first 5 s.
+These agree with the 2.26 to 2.70 s p50 that docs/topics.md reports for the
+labeler. Earlier rows in this PR (`label` p50 783 to 865 ms) timed a
+benchmark-only copy of the labeler with a shorter prompt and no token
+counting, and are superseded.
+
+What the Mac run already shows, independent of the device:
+
+- **EOU 160 ms costs about the same per window as 320 ms** (≈ 38 ms burst
+  p50 each), but FluidAudio's 160 ms variant advances by 80 ms (50%
+  overlap), so it runs four windows for every one at 320 ms. On the loaded
+  M3 Max it barely kept up (1.03×). Unless an iPhone shows otherwise, 160 ms
+  is too expensive to be the default on a phone that also runs VAD, voice
+  ID and playback.
+- **Paced latency is worse than burst latency** (EOU 320: p50 69.5 ms paced
+  against 38.5 ms burst). Budgets must be judged on the paced `window`
+  numbers, which is what the go/no-go uses.
+- **First loads are long.** Each EOU variant took one to three minutes to
+  load the first time (Neural Engine compilation, inflated by the load on
+  the machine). The model manager (#27) must load models ahead of the
+  first conversation, behind onboarding's download step (#44), and never on
+  the record button's critical path.
+- **Cold load is a first-launch problem, warm load is not.** TDT v3 took
+  127 s to load from a fresh location (the on-device compile) and 1.2 s
+  once the OS had cached it: the copy-to-a-new-path method does force the
+  compile. The footprint barely moved (34 MB) while the kernel's neural
+  ledger grew 468 MB, which is why both are recorded.
+- **Foundation Models labels take about two seconds** with the production
+  labeler (p50 2.1 to 2.6 s, cold 3.1 s on the loaded Mac). That is fine off
+  the critical path (#53 labels after a boundary is detected), but too slow
+  to run per exchange. With a 1.5 s lead outside the timed region,
+  prewarming made no consistent difference (±170 ms either way across the
+  two runs). The method can only show this for a model that is already
+  resident: each plain request follows the previous prewarmed one by about
+  1.5 s, so the plain row is warm too. So the Mac shows no benefit when the
+  model is already loaded, and says nothing about a prewarm after the model
+  was evicted; the iPhone runs decide whether #52/#53 should prewarm.
+- **WeSpeaker costs the same for 1.5 s and 3 s windows.** FluidAudio's
+  export takes a fixed 10 s input and repeat-pads shorter audio (verified
+  in `EmbeddingExtractor.fillWaveformBuffer`), so the "score at 1.5 s,
+  re-score at 3 s" plan in #1 costs two full inferences. #45 should either
+  accept that or export a variable-length (or 3 s) model.
+- **CAM++ is not a drop-in challenger on iOS.** FluidAudio loads it with
+  `.cpuAndGPU` because its dynamic time axis is rejected by the Neural
+  Engine compiler, and iOS doesn't allow GPU work in the background; it was
+  also an order of magnitude slower here.
+
+## EOU-320 go/no-go
+
+**Rule.** Parakeet EOU at 320 ms is the default chunk size (#1, #29) if, on
+**at least two physical iPhones**, in Release runs that stayed below the
+`serious` thermal state:
+
+| Criterion | Budget | Why |
+| --- | --- | --- |
+| Paced `window` p95 | ≤ 50% of the 320 ms hop (≤ 160 ms) | VAD, voice ID and playback share the hop |
+| Burst `rtfx` | ≥ 4× | The model is busy at most a quarter of the time, so a one-hour session stays cool |
+| `memory.footprintGrowth` | ≤ 300 MB | Leaves room for TDT, WeSpeaker and the embedding model |
+
+A miss on any device is a **no-go** for that device class. The rule is
+code: `EouChunkSizeDecision.evaluate(reports:)` in BlauTranscription
+returns `.go`, `.noGo(reasons:)` or `.pending`, and
+`AsrBenchmarks.testParakeetEou320ms` fails on a device that misses the
+latency budget.
+
+**If no-go:** use 1280 ms on the failing device class (one window per
+1.28 s; the Mac run shows a 26× real-time factor) and accept the slower
+partials, since end of utterance, not partial text, gates the turn. 160 ms
+is not a fallback (see above).
+
+**Verdict: pending.** No iPhone has reported yet (`.pending("0 of 2 iPhones
+reported qualifying results")`). Provisionally EOU-320 stays the default:
+FluidAudio documents 14× RTFx for it on LibriSpeech (source comment on
+`StreamingChunkSize.ms320`), and on the loaded Mac its burst p95 used 15% of
+the hop and its paced p95 54%, a load-induced miss that has to be checked
+on an idle iPhone.
+
+## Background Neural Engine behaviour
+
+### What the SDK says (verified against the iOS 27.2 SDK in Xcode 27.2)
+
+- **There is no `continued-processing.inference` entitlement.**
+  `BGContinuedProcessingTaskRequest.Resources` has exactly one resource
+  besides the default: `.gpu`, which needs
+  `com.apple.developer.background-tasks.continued-processing.gpu`
+  (`BackgroundTasks/BGTaskRequest.h`). Nothing in BackgroundTasks or Core ML
+  mentions the Neural Engine or background inference. The entitlement named
+  in #1 does not exist in this SDK.
+- `BGContinuedProcessingTask` is the wrong tool anyway: it is a
+  user-initiated job with system progress UI that the system may queue or
+  refuse, not a way to keep a conversation running.
+- Core ML has no background-specific API or error code. The only runtime
+  signal is `MLModel.availableComputeDevices`, which the probe records each
+  window.
+- FluidAudio pins Parakeet to `.cpuAndNeuralEngine` and never uses the GPU
+  "which keeps background execution permitted on iOS" (`AsrModels.load`);
+  its diarizer (WeSpeaker) defaults to `.all`, which may use the GPU, so
+  `WeSpeakerExtractor` passes `.cpuAndNeuralEngine` explicitly.
+
+### Decision
+
+Before the probe has run on a device:
+
+1. **No entitlement is requested.** The inference entitlement doesn't exist
+   and Blau doesn't need the GPU.
+2. **Every model loads with `.cpuAndNeuralEngine` or `.cpuOnly`, never
+   `.all` or `.cpuAndGPU`** (GPU work is refused in the background). This
+   rules out CAM++ as FluidAudio ships it.
+3. **The audio session stays active and recording for the whole
+   conversation** (`audio` background mode), which keeps the process
+   running when the screen locks (#23, #26).
+4. **#26 adds a runtime monitor** that watches per-window latency and Core
+   ML errors while off screen and applies the mitigation the probe
+   recommends. `BackgroundInferenceMitigation.recommended(for:hop:)`
+   encodes the table:
+
+| Probe verdict | Meaning | Mitigation |
+| --- | --- | --- |
+| `works` (off-screen p50 ≤ 1.5× foreground) | The Neural Engine keeps working | `keepNeuralEngine`: nothing to do |
+| `degraded` or `cpuFallback`, off-screen p95 ≤ 80% of the hop | Slower (or silently on the CPU) but keeps up | `acceptCPUFallback`: keep going, monitor latency |
+| `degraded` or `cpuFallback`, off-screen p95 > 80% of the hop | Can't keep up | `switchToSystemTranscriber`: hand ASR to `SpeechTranscriber` (#31) while backgrounded |
+| `errors`, CPU-only p95 ≤ 80% of the hop | Core ML throws off screen | `reloadOnCPUWhenBackgrounded`: reload ASR with `.cpuOnly` on `didEnterBackground`, back to the Neural Engine on return |
+| `errors`, CPU too slow | | `switchToSystemTranscriber` |
+| `suspended` (< 50% of expected windows ran) | The app stopped getting time | `fixBackgroundExecution`: the audio session isn't keeping the app alive; fix that first |
+
+A silent CPU fallback is told apart from ordinary slowdown by comparing
+off-screen latency with the CPU-only baseline of the same model: if it is
+closer (on a log scale) to the CPU baseline than to the foreground latency,
+the work moved to the CPU.
+
+Coverage counts each off-screen window as owning the time until the next
+window, and the last one as owning the time until the run ended. A
+suspension that lasts past the end of the run (the tester unlocks late)
+therefore still reads as `suspended`, even though the window after resuming
+is a warm-up and records no sample.
+
+**Empirical result: pending** (needs an iPhone on iOS 27; see the probe
+procedure above). The probe's JSON report goes next to the device's
+benchmark report.
 
 ## Voice ID: speaker embeddings (#45)
 
@@ -112,3 +528,12 @@ on the Mac (`cpuAndNeuralEngine`), 2026-10-07:
 Every same-speaker pair scores above every different-speaker pair at all
 three windows. The hardest different-speaker pairs are the two female
 speakers (`clb`/`slt`). Thresholds are calibrated on real recordings in #48.
+
+## After the numbers land
+
+1. Paste the comparison table (`BenchmarkReport.comparisonTable`) and the
+   probe verdicts into the tables above.
+2. Run `EouChunkSizeDecision.evaluate` over the reports and record the
+   verdict.
+3. Update the ASR, Voice ID and Perf rows of "Key decisions" in #1, and the
+   Parakeet research brief's background note, with the verdicts.

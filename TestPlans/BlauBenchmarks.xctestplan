@@ -1,0 +1,25 @@
+{
+  "configurations" : [
+    {
+      "id" : "5D1A7C2E-3B4F-4E8A-9C6D-22B0E1F4A7C3",
+      "name" : "Release",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "codeCoverage" : false,
+    "testTimeoutsEnabled" : false
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:Blau.xcodeproj",
+        "identifier" : "074250CC1D2A34C569EC586D",
+        "name" : "BlauBenchmarks"
+      }
+    }
+  ],
+  "version" : 1
+}

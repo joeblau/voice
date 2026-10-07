@@ -59,6 +59,21 @@ test-kit: ## Run the BlauKit package tests on the macOS host
 perf: generate ## Run performance tests (Blau-Perf scheme, Release)
 	$(XCODEBUILD) test -scheme Blau-Perf -testPlan BlauPerf -destination '$(DESTINATION)' $(SIM_FLAGS) XAI_DEV_API_KEY=
 
+# On-device model benchmarks (#22): a physical iPhone (DEVICE=<udid> from
+# `xcrun devicectl list devices`) with signing set up. Results land in the
+# .xcresult as attachments; see docs/benchmarks.md.
+BENCH_RESULT ?= .build/Benchmarks/$(shell date +%Y%m%d-%H%M%S).xcresult
+
+.PHONY: bench
+bench: generate ## Run the model benchmarks on DEVICE=<udid> (Release, docs/benchmarks.md)
+	@test -n "$(DEVICE)" || { echo "Set DEVICE=<udid>; list devices with: xcrun devicectl list devices"; exit 1; }
+	TEST_RUNNER_BLAU_DEVICE_TESTS=1 $(XCODEBUILD) test -scheme Blau-Benchmarks -testPlan BlauBenchmarks \
+		-destination 'id=$(DEVICE)' -resultBundlePath '$(BENCH_RESULT)' -allowProvisioningUpdates
+
+.PHONY: bench-kit
+bench-kit: ## Run the model benchmarks on this Mac (reference numbers only, downloads models)
+	cd Packages/BlauKit && BLAU_DEVICE_TESTS=1 swift test -c release --filter RealModel
+
 .PHONY: secrets
 secrets: ## Create Config/Secrets.xcconfig from the example (kept if it exists)
 	env -u XAI_DEV_API_KEY scripts/write-secrets-xcconfig.sh

@@ -491,6 +491,13 @@ which intervals reach MetricKit. Delivery itself needs a device:
 | `realtime.firstAudio` in `signpostMetrics`         | Pending (needs #36) |
 | Export opens in Files / AirDrop on device          | Pending |
 
+## Model benchmarks
+
+The on-device model benchmark harness (#22) measures each model's latency,
+real-time factor and memory, and probes background Neural Engine behaviour.
+It emits the canonical intervals above around every measured step. Running
+it and the results are in [docs/benchmarks.md](benchmarks.md).
+
 ## What comes next
 
 The rest of the performance epic (#11) builds on these names: the XCTest
