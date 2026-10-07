@@ -248,10 +248,23 @@ response.done (completed)                                     │
 ```
 
 - **Exactly one `response.create`** per response that made calls, sent only
-  when that response is done *and* every output has been written. xAI's
-  guide: "Do not send `response.create` until all function call outputs
-  have been submitted"; and a `response.create` while the response is still
-  active is rejected, so the runner waits for `response.done` too.
+  when that response is done, every output has been written, *and* no other
+  response is in progress. xAI's guide: "Do not send `response.create` until
+  all function call outputs have been submitted"; and a `response.create`
+  while any response is active is rejected
+  (`conversation_already_has_active_response`), so the runner waits for
+  `response.done` too.
+- **Someone else's response.** If the user speaks while a tool runs, the
+  orchestrator starts their response (barge-in only fires while Grok is
+  speaking, so nothing is cancelled). The tool's output still goes out at
+  once, but the follow-up waits for that response's `response.done`; rounds
+  that become ready together share one `response.create`. While the runner's
+  own `response.create` hasn't started yet, no second one is sent. If the
+  server rejects the follow-up anyway (an `error` with code
+  `conversation_already_has_active_response`), the runner forgets it, so the
+  next response isn't counted as its follow-up. This relies on the
+  orchestrator passing `response.created` and `response.done`; without
+  `response.created` the runner can't see other responses.
 - **Every call gets an output**, so the model can always say something:
   the tool's result, or `{"error": "<code>", "message": "…"}` with code
   `timeout` (past the tool's `timeout`; the tool's task is cancelled and a

@@ -21,12 +21,17 @@ import os
 ///    when the tool took longer than its ``RealtimeFunctionTool/timeout``
 ///    (3 s by default), threw, got unusable arguments, or doesn't exist. The
 ///    model always gets an answer it can talk about.
-/// 3. Once the response that made the calls is done (`response.done`) and
-///    every one of its outputs has been sent, **one** `response.create`
-///    asks Grok to answer with the results. xAI's guide: "Do not send
-///    `response.create` until all function call outputs have been
-///    submitted", and a `response.create` while the response is still
-///    active is rejected, so both conditions are needed.
+/// 3. Once the response that made the calls is done (`response.done`),
+///    every one of its outputs has been sent, **and no other response is in
+///    progress**, **one** `response.create` asks Grok to answer with the
+///    results. xAI's guide: "Do not send `response.create` until all
+///    function call outputs have been submitted", and a `response.create`
+///    while *any* response is active is rejected
+///    (`conversation_already_has_active_response`), so all three conditions
+///    are needed. A round that is ready while someone else's response runs
+///    (the user spoke while a tool was working) waits for that response's
+///    `response.done`; rounds that become ready together share one
+///    `response.create`.
 ///
 /// A follow-up response may call tools again; each round works the same
 /// way. After ``Configuration/maximumConsecutiveRounds`` rounds without an
@@ -151,13 +156,18 @@ public actor RealtimeToolRunner {
     /// (after a barge-in, say) are ignored. Bounded.
     private var abandonedResponseIDs: Set<String> = []
     private var abandonedOrder: [String] = []
+    /// The response in progress (from `response.created` until its
+    /// `response.done`). No follow-up is requested while it's set.
     private var currentResponseID: String?
     /// Follow-ups requested in a row by the current tool chain.
     private var consecutiveRounds = 0
     /// Whether the runner sent a `response.create` whose
     /// `response.created` hasn't arrived yet. The next response is then
     /// the runner's follow-up and continues the chain; any other response
-    /// was started by someone else and begins a new one.
+    /// was started by someone else and begins a new one. While it's set, no
+    /// other `response.create` is sent (the server would reject it). Cleared
+    /// by `response.created`, any `response.done`, a rejection `error`, a
+    /// failed send and ``cancelAll()``.
     private var followUpPending = false
     private var nextToken: UInt64 = 0
 
@@ -235,6 +245,8 @@ public actor RealtimeToolRunner {
             await startIfComplete(done.item, responseID: done.responseID)
         case .responseDone(let done):
             await responseFinished(done.response)
+        case .error(let error):
+            followUpRejectedIfNeeded(error.error)
         default:
             break
         }
@@ -388,7 +400,7 @@ public actor RealtimeToolRunner {
         // `cancelAll()` may have run while the output was being sent.
         guard calls[callID]?.token == token else { return }
         calls[callID]?.isSent = true
-        await followUpIfReady(call.round)
+        await requestFollowUpIfReady()
     }
 
     private func responseFinished(_ response: RealtimeResponse) async {
@@ -396,66 +408,109 @@ public actor RealtimeToolRunner {
         if currentResponseID == key.responseID {
             currentResponseID = nil
         }
+        // A response finished, so a follow-up the runner requested has
+        // started (and maybe finished) or was lost. Either way it's no longer
+        // pending; this also clears it when the orchestrator doesn't pass
+        // `response.created`.
+        followUpPending = false
         // Calls the server only reported in the final output.
         if response.status == nil || response.status == .completed || response.status == .incomplete {
             for item in response.output ?? [] {
                 await startIfComplete(item, responseID: key.responseID)
             }
         }
-        guard rounds[key] != nil else {
+        if rounds[key] == nil {
             // An ordinary reply (or one cut short): the tool chain is over.
             consecutiveRounds = 0
-            return
-        }
-        if response.status == .cancelled || response.status == .failed {
+        } else if response.status == .cancelled || response.status == .failed {
             Log.realtime.notice(
                 "Response \(key.responseID ?? "?", privacy: .public) ended \(response.status?.rawValue ?? "?", privacy: .public); dropping its tool calls"
             )
             abandon(key)
             consecutiveRounds = 0
-            return
+        } else {
+            rounds[key]?.responseDone = true
         }
-        rounds[key]?.responseDone = true
-        await followUpIfReady(key)
+        // The conversation may be idle now, so a round that was waiting for
+        // this response to end (not only its own) can get its follow-up.
+        await requestFollowUpIfReady()
     }
 
-    /// Sends the one `response.create` for round `key` once its response is
-    /// done and every output has been sent.
-    private func followUpIfReady(_ key: RoundKey) async {
-        guard let round = rounds[key], round.responseDone, !round.followUpSent,
-            round.callIDs.allSatisfy({ calls[$0]?.isSent == true })
-        else { return }
+    /// Sends one `response.create` for every round whose response is done
+    /// and whose outputs have all been sent, but only while no response is
+    /// in progress: the server rejects a `response.create` while any
+    /// response is active. Rounds that aren't sent here are retried when the
+    /// next response ends (``responseFinished(_:)``) or their last output is
+    /// sent (``complete(_:token:outcome:output:)``).
+    private func requestFollowUpIfReady() async {
+        // A response is in progress (someone else's, e.g. the user's next
+        // turn, or the runner's own follow-up that was just requested):
+        // wait for its `response.done`.
+        guard currentResponseID == nil, !followUpPending else { return }
+        let ready = rounds.filter { _, round in
+            round.responseDone && !round.followUpSent && round.callIDs.allSatisfy { calls[$0]?.isSent == true }
+        }
+        .map { key, round in (key: key, first: round.callIDs.compactMap { calls[$0]?.token }.min() ?? 0) }
+        .sorted { $0.first < $1.first }
+        .map(\.key)
+        guard !ready.isEmpty else { return }
         guard consecutiveRounds <= configuration.maximumConsecutiveRounds else {
             // The previous round was already refused with `limit_reached`
             // and the model called tools yet again: stop the loop here.
             Log.realtime.fault(
                 "Grok kept calling tools after being refused; not requesting another response")
-            abandon(key)
+            for key in ready {
+                abandon(key)
+            }
             // The chain ends here and the next response is the user's, so
             // their next question gets its tools again.
             consecutiveRounds = 0
             return
         }
-        rounds[key]?.followUpSent = true
+        let outputCount = ready.reduce(0) { $0 + (rounds[$1]?.callIDs.count ?? 0) }
+        for key in ready {
+            rounds[key]?.followUpSent = true
+        }
         consecutiveRounds += 1
         // Set before sending: the follow-up's `response.created` can be
-        // handled while this send is still suspended.
+        // handled while this send is still suspended, and no other round may
+        // send a second `response.create` in the meantime.
         followUpPending = true
         do {
             try await sender.send(.responseCreate())
+            let responseIDs = ready.map { $0.responseID ?? "?" }.joined(separator: ", ")
             Log.realtime.notice(
-                "Sent \(round.callIDs.count, privacy: .public) tool output(s) for response \(key.responseID ?? "?", privacy: .public); requested the follow-up"
+                "Sent \(outputCount, privacy: .public) tool output(s) for response \(responseIDs, privacy: .public); requested the follow-up"
             )
-            activityContinuation.yield(.followUpRequested(responseID: key.responseID))
+            for key in ready {
+                activityContinuation.yield(.followUpRequested(responseID: key.responseID))
+            }
         } catch {
             Log.realtime.error("Couldn't request the follow-up response: \(error.description, privacy: .public)")
             // No follow-up will come; the next response is the user's.
             followUpPending = false
             consecutiveRounds = 0
-            activityContinuation.yield(.abandoned(responseID: key.responseID))
+            for key in ready {
+                activityContinuation.yield(.abandoned(responseID: key.responseID))
+            }
         }
-        removeRound(key)
+        for key in ready {
+            removeRound(key)
+        }
     }
+
+    /// The server refused a `response.create` because a response was
+    /// already active. If it was the runner's follow-up, that response will
+    /// never start: forget it, so the next response someone else starts
+    /// isn't taken for it and begins a new chain.
+    private func followUpRejectedIfNeeded(_ error: RealtimeErrorDetail) {
+        guard followUpPending, error.code == Self.activeResponseErrorCode else { return }
+        Log.realtime.error("The server rejected the follow-up response: another response was active")
+        followUpPending = false
+        consecutiveRounds = 0
+    }
+
+    private static let activeResponseErrorCode = "conversation_already_has_active_response"
 
     // MARK: Bookkeeping
 
