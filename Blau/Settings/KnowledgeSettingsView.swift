@@ -1,4 +1,5 @@
 import BlauCore
+import BlauMemory
 import BlauPersistence
 import SwiftData
 import SwiftUI
@@ -11,7 +12,8 @@ enum KnowledgeSettingsIdentifiers {
 
 /// Settings → Knowledge: what Blau knows about the user (the knowledge
 /// base: profile, notes, collections, people and facts), read from the
-/// synced store, and whether Grok may search it while they talk.
+/// synced store, whether Grok may search it while they talk, and the
+/// on-device search index over it (`MemoryIndexSettingsSection`, #63).
 ///
 /// This is where the knowledge base screen opens. Viewing and editing each
 /// item is that screen's job (#65); until it ships, this page shows what is
@@ -49,6 +51,8 @@ struct KnowledgeSettingsView: View {
             } footer: {
                 Text("Grok looks things up in what Blau knows when it helps answer you.")
             }
+
+            MemoryIndexSettingsSection()
         }
         .accessibilityIdentifier(KnowledgeSettingsIdentifiers.view)
         .navigationTitle("Knowledge")
@@ -61,6 +65,7 @@ struct KnowledgeSettingsView: View {
             KnowledgeSettingsView()
         }
         .environment(FeatureFlags.inMemory())
+        .environment(MemoryIndexingController(persistence: .preview(), embedder: nil, performance: nil))
         .modelContainer(PersistenceController.previewContainer())
     }
 #endif

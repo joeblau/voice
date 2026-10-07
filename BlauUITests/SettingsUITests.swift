@@ -198,6 +198,17 @@ final class SettingsUITests: XCTestCase {
         screenshot(app, "Settings → xAI Account")
     }
 
+    // MARK: Knowledge
+
+    func testKnowledgeShowsTheMemorySearchIndex() {
+        let app = launchOnFakes()
+        openSettingsPane(SettingsPaneID.knowledge, in: app)
+        let status = app.descendants(matching: .any)["settings.memory.status"]
+        scrollTo(status, in: app.collectionViews.firstMatch)
+        XCTAssertTrue(status.waitForExistence(timeout: 10), "No search index status in Settings → Knowledge")
+        XCTAssertTrue(status.label.contains("Search Index"), status.label)
+    }
+
     // MARK: Data
 
     func testExportingConversationsOffersTheShareSheet() {
