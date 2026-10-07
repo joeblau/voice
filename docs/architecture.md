@@ -24,7 +24,7 @@ complete.
 | 0     | `BlauCore`          | Shared value types (`Utterance`, `Speaker`, `SpeakerDecision`, `AudioFrame`, `TimeRange`, `ConversationID`), protocols, the `BlauClock` abstraction |
 | 1     | `BlauTelemetry`     | Logger categories, `OSSignposter` intervals, MetricKit, the performance HUD model             |
 | 2     | `BlauAudio`         | `AVAudioSession` / `AVAudioEngine`, 16 kHz capture and fan-out, 24 kHz playback, resampling   |
-| 2     | `BlauPersistence`   | SwiftData schemas (CloudKit compatible), migrations, `ModelActor` writes                      |
+| 2     | `BlauPersistence`   | SwiftData schemas (CloudKit compatible, see [data-model.md](data-model.md)), migrations, `ModelActor` writes |
 | 3     | `BlauTranscription` | Silero VAD, streaming Parakeet ASR, second pass, `SpeechAnalyzer` fallback, model downloads   |
 | 3     | `BlauVoiceID`       | Speaker embeddings, enrollment, accept / reject / uncertain gate, language ID                 |
 | 4     | `BlauRealtime`      | xAI realtime WebSocket client, typed events, token minting, session orchestration, tools      |
