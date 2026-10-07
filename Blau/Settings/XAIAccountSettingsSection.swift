@@ -108,6 +108,7 @@ struct SettingsView: View {
             Form {
                 XAIAccountSettingsSection()
                 VoiceSettingsSection()
+                SearchToolsSettingsSection()
                 ICloudSettingsSection()
                 SpeechModelsSettingsSection()
                 Section("Developer") {

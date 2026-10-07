@@ -1,8 +1,9 @@
 import Foundation
 import Observation
 
-/// Settings → Voice binds to this. Each change is written straight to the
-/// ``RealtimeVoiceSettingsStore``, so the next `session.update` carries it.
+/// Settings → Voice and Settings → Search bind to this. Each change is
+/// written straight to the ``RealtimeVoiceSettingsStore``, so the next
+/// `session.update` carries it.
 ///
 /// ```swift
 /// @Bindable var model: RealtimeVoiceSettingsModel
@@ -42,6 +43,28 @@ public final class RealtimeVoiceSettingsModel {
     public var thinksBeforeAnswering: Bool {
         get { settings.reasoningEffort != .disabled }
         set { reasoningEffort = newValue ? .high : .disabled }
+    }
+
+    /// The built-in server tools Grok may use (Settings → Search).
+    public var builtInTools: Set<RealtimeBuiltInTool> {
+        get { settings.builtInTools }
+        set { apply { $0.builtInTools = newValue } }
+    }
+
+    /// Whether Grok may use `tool`.
+    public func isEnabled(_ tool: RealtimeBuiltInTool) -> Bool {
+        settings.builtInTools.contains(tool)
+    }
+
+    /// Lets Grok use `tool`, or stops it.
+    public func setEnabled(_ tool: RealtimeBuiltInTool, _ isEnabled: Bool) {
+        apply { settings in
+            if isEnabled {
+                settings.builtInTools.insert(tool)
+            } else {
+                settings.builtInTools.remove(tool)
+            }
+        }
     }
 
     /// The voices to offer: the built-in ones, plus the current voice if it

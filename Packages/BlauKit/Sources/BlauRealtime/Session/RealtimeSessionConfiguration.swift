@@ -12,7 +12,7 @@ import Foundation
 /// | `audio.output.speed` | Settings, 0.7–1.5, default 1.0 | |
 /// | `reasoning.effort` | Settings, `high` or `none`, default `high` | |
 /// | `instructions` | ``RealtimeInstructions`` | Persona, style, memory |
-/// | `tools` | set only when there are tools (#38) | Omitted, the server keeps what it has |
+/// | `tools` | The registry's function tools (#38), then the built-in tools on in Settings | Omitted when there are none |
 ///
 /// `audio.input` is not sent: Blau sends the *text* of each utterance, never
 /// audio. The model is chosen on the WebSocket URL (`?model=`), so
@@ -40,7 +40,10 @@ public struct RealtimeSessionConfiguration: Sendable, Hashable {
     /// - Parameters:
     ///   - settings: The user's voice settings.
     ///   - memory: What Blau remembers, for the instructions.
-    ///   - tools: The session's tools; empty sends none.
+    ///   - tools: The client-side function tools
+    ///     (``RealtimeToolRegistry/definitions``). The built-in server tools
+    ///     the user turned on (``RealtimeVoiceSettings/builtInTools``) are
+    ///     added after them. With neither, `tools` is not sent.
     ///   - now: Today's date, for the instructions.
     ///   - timeZone: The user's time zone.
     public func session(
@@ -50,7 +53,8 @@ public struct RealtimeSessionConfiguration: Sendable, Hashable {
         now: Date,
         timeZone: TimeZone
     ) -> RealtimeSession {
-        RealtimeSession(
+        let tools = tools + settings.builtInToolDefinitions
+        return RealtimeSession(
             instructions: instructions.render(memory: memory, tools: tools, now: now, timeZone: timeZone),
             reasoning: .init(effort: settings.reasoningEffort),
             voice: settings.voice.rawValue,

@@ -48,8 +48,10 @@ public actor RealtimeSessionConfigurator {
     private let clock: any BlauClock
     private let timeZone: @Sendable () -> TimeZone
 
-    /// Tools to declare in the session (#38). Empty sends none.
-    public private(set) var tools: [RealtimeTool] = []
+    /// Client-side function tools to declare in the session
+    /// (``RealtimeToolRegistry/definitions``, #38). The built-in server
+    /// tools come from the settings.
+    public private(set) var tools: [RealtimeTool]
     /// The last session sent successfully, if any.
     public private(set) var appliedSession: RealtimeSession?
     /// The settings in ``appliedSession``.
@@ -64,9 +66,12 @@ public actor RealtimeSessionConfigurator {
     ///   - clock: Dates the instructions and times the debounce.
     ///   - timeZone: The user's time zone, read at each update.
     ///   - settingsDebounce: Quiet period before a settings change is sent.
+    ///   - tools: Client-side function tools to declare
+    ///     (``RealtimeToolRegistry/definitions``).
     public init(
         settings: RealtimeVoiceSettingsStore,
         memory: any RealtimeMemoryContextProviding = NoRealtimeMemoryContext(),
+        tools: [RealtimeTool] = [],
         configuration: RealtimeSessionConfiguration = .blau,
         clock: any BlauClock = SystemClock(),
         timeZone: @escaping @Sendable () -> TimeZone = { TimeZone.current },
@@ -78,9 +83,11 @@ public actor RealtimeSessionConfigurator {
         self.clock = clock
         self.timeZone = timeZone
         self.settingsDebounce = settingsDebounce
+        self.tools = tools
     }
 
-    /// Sets the tools later updates declare. Doesn't send anything.
+    /// Sets the function tools later updates declare. Doesn't send
+    /// anything; call ``configure(_:)`` to apply them to a live session.
     public func setTools(_ tools: [RealtimeTool]) {
         self.tools = tools
     }

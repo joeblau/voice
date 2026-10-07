@@ -126,7 +126,7 @@ public final class RealtimeVoiceSettingsStore: Sendable {
         guard let (settings, subscribers) = changed else { return }
         saveLatest()
         Log.realtime.info(
-            "Voice settings changed: voice \(settings.voice.rawValue, privacy: .public), speed \(settings.speed, privacy: .public), reasoning \(settings.reasoningEffort.rawValue, privacy: .public)"
+            "Voice settings changed: voice \(settings.voice.rawValue, privacy: .public), speed \(settings.speed, privacy: .public), reasoning \(settings.reasoningEffort.rawValue, privacy: .public), built-in tools \(settings.builtInTools.sorted().map(\.rawValue).joined(separator: ","), privacy: .public)"
         )
         for subscriber in subscribers {
             subscriber.yield(settings)

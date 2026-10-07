@@ -1,11 +1,12 @@
 import Foundation
 
-/// The user's choices for how Grok sounds and thinks, from Settings → Voice.
+/// The user's choices for how Grok sounds, thinks and looks things up, from
+/// Settings → Voice and Settings → Search.
 ///
 /// They go out in every `session.update` (``RealtimeSessionConfiguration``):
-/// `voice`, `audio.output.speed` and `reasoning.effort`. Values are kept
-/// valid on the way in, so whatever is stored is something the server
-/// accepts.
+/// `voice`, `audio.output.speed`, `reasoning.effort` and the built-in
+/// server tools in `tools`. Values are kept valid on the way in, so whatever
+/// is stored is something the server accepts.
 public struct RealtimeVoiceSettings: Sendable, Hashable, Codable {
     /// `audio.output.speed`'s documented range.
     public static let speedRange: ClosedRange<Double> = 0.7...1.5
@@ -33,14 +34,32 @@ public struct RealtimeVoiceSettings: Sendable, Hashable, Codable {
     /// answering; `.disabled` (`"none"`) answers sooner.
     public var reasoningEffort: RealtimeReasoningEffort
 
+    /// xAI's server-side tools Grok may use (`web_search`, `x_search`), from
+    /// Settings → Search. Off by default. Only
+    /// ``RealtimeBuiltInTool/available`` tools are kept.
+    public var builtInTools: Set<RealtimeBuiltInTool> {
+        didSet { builtInTools = Self.supported(builtInTools) }
+    }
+
     public init(
         voice: RealtimeVoice = .eve,
         speed: Double = 1.0,
-        reasoningEffort: RealtimeReasoningEffort = .high
+        reasoningEffort: RealtimeReasoningEffort = .high,
+        builtInTools: Set<RealtimeBuiltInTool> = []
     ) {
         self.voice = voice.normalized ?? .eve
         self.speed = Self.clampedSpeed(speed)
         self.reasoningEffort = reasoningEffort
+        self.builtInTools = Self.supported(builtInTools)
+    }
+
+    /// The `session.tools` entries for ``builtInTools``, in a fixed order.
+    public var builtInToolDefinitions: [RealtimeTool] {
+        builtInTools.sorted().map(\.definition)
+    }
+
+    private static func supported(_ tools: Set<RealtimeBuiltInTool>) -> Set<RealtimeBuiltInTool> {
+        tools.filter(RealtimeBuiltInTool.available.contains)
     }
 
     /// Clamps to ``speedRange`` and rounds to ``speedStep``. A non-finite
@@ -59,6 +78,7 @@ public struct RealtimeVoiceSettings: Sendable, Hashable, Codable {
     private enum CodingKeys: String, CodingKey {
         case voice, speed
         case reasoningEffort = "reasoning_effort"
+        case builtInTools = "built_in_tools"
     }
 
     /// Lenient: a missing or unusable field falls back to its default, so
@@ -69,7 +89,9 @@ public struct RealtimeVoiceSettings: Sendable, Hashable, Codable {
             voice: (try? container.decodeIfPresent(RealtimeVoice.self, forKey: .voice)) ?? Self.default.voice,
             speed: (try? container.decodeIfPresent(Double.self, forKey: .speed)) ?? Self.default.speed,
             reasoningEffort: (try? container.decodeIfPresent(RealtimeReasoningEffort.self, forKey: .reasoningEffort))
-                ?? Self.default.reasoningEffort)
+                ?? Self.default.reasoningEffort,
+            builtInTools: (try? container.decodeIfPresent([RealtimeBuiltInTool].self, forKey: .builtInTools))
+                .map(Set.init) ?? Self.default.builtInTools)
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -77,5 +99,6 @@ public struct RealtimeVoiceSettings: Sendable, Hashable, Codable {
         try container.encode(voice, forKey: .voice)
         try container.encode(speed, forKey: .speed)
         try container.encode(reasoningEffort, forKey: .reasoningEffort)
+        try container.encode(builtInTools.sorted(), forKey: .builtInTools)
     }
 }
