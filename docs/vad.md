@@ -24,12 +24,12 @@ for await event in vad.events() {
     }
 }
 
-// ASR (#29) computes only while someone speaks:
+// A consumer that should compute only while someone speaks:
 for await item in vad.speechAudio() {
     switch item {
-    case .started(let onset): ...              // begin an utterance
+    case .started(let onset): ...              // begin
     case .audio(let frame): ...                // contiguous speech audio, from the onset on
-    case .ended(let segment): ...              // finish() the utterance
+    case .ended(let segment): ...              // end
     }
 }
 ```
@@ -128,10 +128,13 @@ and runs its own state machine.
   model state is reset before the next call. `statistics.chunksSkipped`
   counts them.
 - **Speech-gated audio.** `speechAudio()` delivers audio only between
-  `started` and `ended`, so ASR (#29) consumes and computes nothing in
-  silence. Each segment's audio starts at its onset (the backlog up to the
-  decision comes as one frame), then follows capture frame by frame; the
-  hangover is delivered before `ended`.
+  `started` and `ended`, so a consumer of it computes nothing in silence.
+  Each segment's audio starts at its onset (the backlog up to the decision
+  comes as one frame), then follows capture frame by frame; the hangover is
+  delivered before `ended`. Streaming ASR (#29) gates itself on `events()`
+  instead: its end-of-utterance detector has to hear the silence after the
+  speech, so it keeps reading the capture stream until the utterance is
+  committed, then stops ([asr.md](asr.md)).
 - **Cost when the model does run:** one call per 256 ms. On the Mac, a minute
   of room tone (model on every chunk, 235 calls) costs **0.2–0.3% of one core**
   of process CPU in total (`SileroLiveTests.silenceCostsUnderThreePercent`);

@@ -196,7 +196,9 @@ extension AppEnvironment {
             // #24 wires in the capture engine together with the
             // AudioSessionController from #23.
             audio: UnavailableService(subsystem: "audio"),
-            // #29: ParakeetStreamingTranscriber.
+            // ParakeetStreamingTranscriber (#29) reads the capture hub and
+            // the VAD segmenter, so it is wired in together with the live
+            // audio pipeline (see docs/asr.md).
             transcriber: UnavailableService(subsystem: "transcription"),
             // #47: the voice ID verification gate.
             voiceGate: UnavailableService(subsystem: "voice ID"),
