@@ -112,8 +112,9 @@ final class VoiceLoopSession: ConversationSession {
             let error = voiceLoop.startError ?? VoiceLoop.StartError.unavailable
             throw ConversationStartFailure(error, audio: audioStatus)
         case .idle, .starting:
-            // Stopped (the Live Activity's Stop) while starting.
-            throw ConversationStartFailure(CancellationError(), audio: audioStatus)
+            // Stopped (the Live Activity's Stop) while starting: not a
+            // failure, so the record button goes back to idle quietly.
+            throw CancellationError()
         }
     }
 

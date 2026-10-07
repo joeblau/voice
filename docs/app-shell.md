@@ -328,18 +328,35 @@ How it is put together:
   Parakeet while the audio session comes up, so the start costs the slower
   of the two rather than their sum. Measuring it needs an iPhone: profile
   with the Blau Instruments template and read `session.start`.
+- **Stop during a start.** Because the audio (and with it the Live
+  Activity and its Stop button) comes up while the models load, Stop can
+  arrive before the conversation is listening. `VoiceLoop.stop()` then
+  bumps a start generation and turns the microphone off; the start in
+  flight checks it after building the pipeline and after opening the
+  realtime session, releases what it built and leaves the loop idle, so
+  Grok is never left connected without a microphone. `LiveVoicePipeline`
+  also throws `CancellationError` when it finds the keeper `.inactive`
+  after the audio start. `ConversationSession.start()` reports that as
+  `CancellationError`, and `RecordButtonModel` goes back to idle quietly
+  (no error, alert or haptic; `session.start` ends as "cancelled"). A new
+  start waits for one still unwinding, so its release can't turn off the
+  new microphone.
 
 ### Tests
 
 - `RecordButtonModelTests` and `RecordButtonStateTests` (BlauKit,
   `swift test`): taps, ignored taps, ending while the audio recovers,
-  failures and retries, pause and resume,
+  failures and retries, a stop during the start, pause and resume,
   the muted hint, following the session, levels, haptics and the
   `session.start` interval.
 - `BlauTests/RecordButtonSnapshotTests.swift`: a snapshot of the button's
   face in every state, the ring at both extremes and with Reduce Motion
   (references in `BlauTests/__Snapshots__/`, per iOS major version; record
   with `TEST_RUNNER_BLAU_RECORD_SNAPSHOTS=1`, see `SnapshotAssertion`).
+- `BlauTests/VoiceLoopTests.swift`: the voice loop's start and stop over
+  fakes (`VoiceLoop.init(conversation:snapshots:startPipeline:...)`), including
+  a stop while the pipeline starts, a stop while the realtime session
+  opens, and a new start waiting for one that is unwinding.
 - `BlauTests/RecordButtonTests.swift`: VoiceOver labels, values and hints
   per state, glyphs, tints, haptics, and the live and fake wiring.
 - `BlauUITests/MainScreenUITests.swift`: finds both controls by identifier

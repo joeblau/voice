@@ -224,6 +224,43 @@ struct RecordButtonModelTests {
         #expect(model.failure == nil)
     }
 
+    /// The Live Activity's Stop while the conversation starts: the start
+    /// ends, and the button goes back to idle (not `.running` /
+    /// `reconnecting`) without an error, an alert or a haptic.
+    @Test func aStopDuringTheStartGoesQuietlyIdle() async throws {
+        let audio = FakeAudioService()
+        let session = FakeConversationSession(audio: audio, clock: clock, startDelay: .milliseconds(400))
+        let model = makeModel(session)
+
+        try await whileRunning(model) {
+            let start = Task { await model.tap() }
+            await clock.waitForSleepers()
+            #expect(model.phase == .starting)
+
+            await session.stop()  // the Live Activity's Stop
+            clock.advance(by: .milliseconds(400))
+            await start.value
+
+            #expect(model.phase == .idle)
+            #expect(model.state == .idle)
+            #expect(model.failure == nil)
+            #expect(model.startFailureMessage == nil)
+            #expect(model.feedback == nil, "no haptic for a stop the user asked for")
+            #expect(!session.status.isRunning)
+            #expect(!audio.isCapturing, "the microphone never came on")
+            #expect(signposts.endMessages(of: "session.start") == ["cancelled"])
+            #expect(!model.isTransitioning)
+
+            // The next tap starts a conversation as usual.
+            let again = Task { await model.tap() }
+            await clock.waitForSleepers()
+            clock.advance(by: .milliseconds(400))
+            await again.value
+            #expect(model.state == .listening)
+            #expect(session.calls == [.start, .stop, .start])
+        }
+    }
+
     @Test func aMissingAudioServiceIsExplained() async {
         let session = FakeConversationSession(audio: UnavailableService(subsystem: "audio"))
         let model = makeModel(session)

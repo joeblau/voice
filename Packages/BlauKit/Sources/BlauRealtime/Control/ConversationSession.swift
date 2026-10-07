@@ -74,12 +74,16 @@ public protocol ConversationSession: AnyObject {
     /// connection to Grok may still be opening (what the user says meanwhile
     /// is queued).
     ///
-    /// - Throws: Why it couldn't start, with a `localizedDescription` fit
-    ///   for the user. Nothing is left running then.
+    /// - Throws: `CancellationError` when `stop()` (the Live Activity's
+    ///   Stop) ended the conversation before it was listening. Otherwise
+    ///   why it couldn't start, with a `localizedDescription` fit for the
+    ///   user. Nothing is left running either way.
     func start() async throws
 
     /// Ends the conversation: commits what is being said, closes the
-    /// session and releases the microphone. Does nothing when stopped.
+    /// session and releases the microphone. Called while `start()` is in
+    /// flight, it ends that start too, which then throws
+    /// `CancellationError`. Does nothing when stopped.
     func stop() async
 
     /// Mutes (`true`) or unmutes the microphone without ending the

@@ -9,7 +9,9 @@ import Foundation
 /// and report a conversation that is listening on a connected session.
 /// Tests push everything else by hand: `update(_:)` for status changes,
 /// `sendInputLevel(_:)`, `sendOutputLevel(_:)` and `sendMutedSpeech(_:)`.
-/// Every call is recorded for assertions.
+/// A `stop()` while a (delayed) `start()` is in flight ends that start,
+/// which throws `CancellationError`, as the live session does. Every call
+/// is recorded for assertions.
 @MainActor
 public final class FakeConversationSession: ConversationSession {
     /// A call the session received.
@@ -39,6 +41,9 @@ public final class FakeConversationSession: ConversationSession {
     private let audio: any AudioService
     private let clock: any BlauClock
     private let startDelay: Duration
+    /// Bumped by every `start()`, and by a `stop()` that ends one in flight.
+    private var startGeneration: UInt64 = 0
+    private var isStarting = false
     private var nextID: UInt64 = 0
     private var statusSubscribers: [UInt64: AsyncStream<ConversationStatus>.Continuation] = [:]
     private var inputSubscribers: [UInt64: AsyncStream<Float>.Continuation] = [:]
@@ -142,15 +147,34 @@ public final class FakeConversationSession: ConversationSession {
             startError = nil
             throw error
         }
+        startGeneration &+= 1
+        let generation = startGeneration
+        isStarting = true
+        defer {
+            if generation == startGeneration { isStarting = false }
+        }
         if startDelay > .zero {
             try await clock.sleep(for: startDelay)
         }
+        guard generation == startGeneration else { throw CancellationError() }
         try await audio.startCapture()
+        guard generation == startGeneration else {
+            await audio.stopCapture()
+            throw CancellationError()
+        }
         status = statusAfterStart
     }
 
     public func stop() async {
         calls.append(.stop)
+        if isStarting {
+            // Stopped while starting (the Live Activity's Stop): the start
+            // in flight sees the new generation and throws
+            // `CancellationError`.
+            startGeneration &+= 1
+            isStarting = false
+            return
+        }
         guard status.isRunning else { return }
         await audio.stopCapture()
         status = .idle

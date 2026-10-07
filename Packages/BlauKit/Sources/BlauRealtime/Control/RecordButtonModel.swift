@@ -23,6 +23,10 @@ import os
 /// start two conversations. A long press offers `pauseListening()` /
 /// `resumeListening()`, which mute the microphone without ending anything.
 ///
+/// A conversation ended while it starts (the Live Activity's Stop, which
+/// makes `ConversationSession.start()` throw `CancellationError`) goes back
+/// to idle quietly: that is what the user asked for, not a failed start.
+///
 /// **Following the session.** `run()` consumes the session's status, so
 /// changes nobody asked the button for (the Live Activity's Stop, a phone
 /// call, the debug Voice Loop screen, a dropped connection) show up at once.
@@ -285,6 +289,14 @@ public final class RecordButtonModel {
             try await session.start()
             phase = .running
             apply(session.status)
+        } catch is CancellationError {
+            // Ended before it was listening (the Live Activity's Stop): what
+            // the user asked for, so no error, alert or haptic.
+            phase = .idle
+            status = session.status
+            pendingStart?.interval.end(message: "cancelled")
+            pendingStart = nil
+            logger.notice("The conversation was stopped while it started")
         } catch {
             let message = Self.message(for: error)
             phase = .idle
