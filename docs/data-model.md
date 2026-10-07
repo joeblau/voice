@@ -130,7 +130,7 @@ optional and uses `.nullify`.
 
 `SchemaV2` (version `2.0.0`, issue #61) adds the synced, text-only models for
 long-term memory (epic #9). Embeddings and the FTS index built from them are
-local and rebuildable (#62), never synced.
+local and rebuildable ([memory-index.md](memory-index.md), #62), never synced.
 
 | Model (CloudKit record type) | Swift alias      | Holds                                                                 |
 | ---------------------------- | ---------------- | --------------------------------------------------------------------- |

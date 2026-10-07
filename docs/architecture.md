@@ -29,7 +29,7 @@ complete.
 | 3     | `BlauVoiceID`       | Speaker embeddings, enrollment, accept / reject / uncertain gate, language ID                 |
 | 4     | `BlauRealtime`      | xAI realtime WebSocket client, typed events, token minting, session orchestration, tools      |
 | 4     | `BlauTopics`        | Streaming topic segmentation ([topics.md](topics.md)), boundary confirmation, labeling        |
-| 4     | `BlauMemory`        | The shared text embedding service ([embeddings.md](embeddings.md)), FTS5 + vector index, hybrid retrieval, fact extraction, memory tools |
+| 4     | `BlauMemory`        | The shared text embedding service ([embeddings.md](embeddings.md)), the FTS5 + vector search index ([memory-index.md](memory-index.md)), hybrid retrieval, fact extraction, memory tools |
 
 Each module exports a `<Module>Module` marker type conforming to
 `BlauCore.BlauModule`, with its name and a one-line summary.
@@ -53,6 +53,7 @@ flowchart BT
     Topics[BlauTopics]
     Memory[BlauMemory]
     FluidAudio[(FluidAudio)]
+    GRDB[(GRDB)]
 
     Telemetry --> Core
     Audio --> Telemetry
@@ -65,6 +66,7 @@ flowchart BT
     Memory --> Persistence
     Transcription --> FluidAudio
     VoiceID --> FluidAudio
+    Memory --> GRDB
 ```
 
 The complete list of declared edges:
@@ -79,7 +81,7 @@ The complete list of declared edges:
 | `BlauVoiceID`       | `BlauCore`, `BlauTelemetry`, `BlauAudio`    | `FluidAudio` |
 | `BlauRealtime`      | `BlauCore`, `BlauTelemetry`, `BlauAudio`, `BlauPersistence` |   |
 | `BlauTopics`        | `BlauCore`, `BlauTelemetry`, `BlauPersistence` |           |
-| `BlauMemory`        | `BlauCore`, `BlauTelemetry`, `BlauPersistence` |           |
+| `BlauMemory`        | `BlauCore`, `BlauTelemetry`, `BlauPersistence` | `GRDB`    |
 
 ## Rules
 
@@ -108,7 +110,9 @@ The complete list of declared edges:
    that first needs them and linked only by the modules that use them.
    FluidAudio is pinned `from: "0.17.5"` with its default
    `NemoTextProcessing` trait turned off (that trait links a prebuilt text
-   normalizer used only by its TTS frontends). `Package.resolved` is
+   normalizer used only by its TTS frontends). GRDB is pinned
+   `from: "7.11.1"` for BlauMemory's search index (SQLite and FTS5 from the
+   system library). `Package.resolved` is
    committed. A module's test target links the same third-party products,
    so tests can check the module's assumptions against them. The model
    files FluidAudio runs are pinned separately, by commit and SHA-256, in
@@ -155,6 +159,8 @@ The complete list of declared edges:
   ([benchmarks.md](benchmarks.md)).
 - [vad.md](vad.md): the streaming voice activity segmenter (Silero VAD,
   segment rules, 16 ms boundary refinement, speech-gated audio for ASR).
+- [memory-index.md](memory-index.md): the local search index (chunking,
+  FTS5 BM25, the int8 vector matrix, rebuilding from SwiftData).
 - [embeddings.md](embeddings.md): the shared text embedding service
   (EmbeddingGemma 256-d int8): tokenizer, token table, batches, model
   versions, and how topics use it.

@@ -57,6 +57,14 @@ final class EmbeddingBenchmarks: BenchmarkTestCase {
     }
 }
 
+/// The memory index (#62): hybrid search over 50k chunks within 20 ms p95.
+/// Needs no model: synthetic chunks and random vectors.
+final class MemoryIndexBenchmarks: BenchmarkTestCase {
+    func testSearch50k() async throws {
+        try await measure(MemoryIndexSearchBenchmark())
+    }
+}
+
 /// On-device Foundation Models for topic labels.
 final class TopicLabelBenchmarks: BenchmarkTestCase {
     func testFoundationModelsTopicLabel() async throws {

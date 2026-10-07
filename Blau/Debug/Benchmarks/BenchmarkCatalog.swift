@@ -38,6 +38,7 @@
                 SpeakerEmbeddingBenchmarkCase.camPlusPlus(audio: audio),
                 TextEmbeddingBenchmark.embeddingGemma(searching: [modelsDirectory, directory]),
                 TextEmbeddingBatchBenchmark.installed(searching: [modelsDirectory, directory]),
+                MemoryIndexSearchBenchmark(),
                 TopicLabelBenchmark(generator: FoundationModelsLabelBenchmarkGenerator()),
             ]
         }

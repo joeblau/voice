@@ -10,7 +10,7 @@ import os
 /// its additive-only schema policy. When this schema changes incompatibly,
 /// `DerivedStore` deletes the store and starts over. Search indexes and
 /// embeddings (#62) are rebuildable caches too, but live in their own SQLite
-/// files.
+/// file (BlauMemory's `MemoryIndex`, in the same derived directory).
 public enum DerivedSchemaV1: VersionedSchema {
     public static let versionIdentifier = Schema.Version(1, 0, 0)
 
