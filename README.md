@@ -18,6 +18,11 @@ open Blau.xcodeproj
 
 Run `make generate` again after every pull or after editing `project.yml`.
 
+A fresh clone builds without any secrets. To have Debug builds pre-fill your
+own xAI API key, run `make secrets` and set `XAI_DEV_API_KEY` in the
+gitignored `Config/Secrets.xcconfig`. Release builds fail if a key is
+configured. See [docs/configuration.md](docs/configuration.md).
+
 ## Make tasks
 
 | Task             | What it does                                                     |
@@ -30,6 +35,8 @@ Run `make generate` again after every pull or after editing `project.yml`.
 | `make test-ui`   | Run only `BlauUITests`                                           |
 | `make test-kit`  | Run the `BlauKit` package tests on the macOS host (`swift test`) |
 | `make perf`      | Run `BlauPerfTests` (`Blau-Perf` scheme, Release build)          |
+| `make secrets`   | Create `Config/Secrets.xcconfig` from the example                |
+| `make test-scripts` | Test the secrets build scripts                                |
 | `make clean`     | Delete the generated project, plists and DerivedData             |
 | `make format`    | Format all Swift sources in place with swift-format              |
 | `make lint`      | Lint all Swift sources with swift-format (fails on any finding)  |
@@ -55,7 +62,9 @@ Formatting, branch naming, commit and pull request conventions are in
 | `BlauUITests/`   | UI tests (XCTest)                                               |
 | `BlauPerfTests/` | Performance tests (XCTest UI-testing bundle, launch metrics)    |
 | `TestPlans/`     | `Blau.xctestplan` (unit + UI, coverage) and `BlauPerf.xctestplan` |
-| `scripts/`       | `swift-format.sh` (behind `make format` and `make lint`) and git hooks |
+| `Config/`        | xcconfig files; `Secrets.xcconfig` is gitignored ([docs](docs/configuration.md)) |
+| `scripts/`       | `swift-format.sh` (behind `make format` and `make lint`), git hooks, embedded-secrets check and `Secrets.xcconfig` writer |
+| `docs/`          | Developer documentation                                         |
 | `.github/`       | Pull request and issue templates                                |
 
 ### Targets and schemes

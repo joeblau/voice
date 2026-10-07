@@ -1,0 +1,14 @@
+// Debug.xcconfig: project-level settings for the Debug configuration.
+
+#include "Base.xcconfig"
+
+// Local, gitignored overrides (XAI_DEV_API_KEY, or another model while
+// experimenting). Optional: a fresh clone builds without it.
+// Create it with `make secrets` (copies Secrets.example.xcconfig).
+#include? "Secrets.xcconfig"
+
+// Settings below come after Secrets.xcconfig so it cannot override them.
+BLAU_ENVIRONMENT = debug
+
+// Debug builds embed the developer key so the app can seed the Keychain.
+BLAU_INFO_XAI_DEV_API_KEY = $(XAI_DEV_API_KEY)

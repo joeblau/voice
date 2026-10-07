@@ -1,0 +1,33 @@
+// Base.xcconfig
+//
+// Non-secret configuration shared by every build configuration. Debug.xcconfig
+// and Release.xcconfig include this file, then the optional, gitignored
+// Secrets.xcconfig, then their own locked settings.
+//
+// Values reach the app through Info.plist keys (see `info.properties` in
+// project.yml) and are read by the typed `AppConfig`. `//` starts a comment
+// in an xcconfig file, so store hosts here, not URLs.
+//
+// See docs/configuration.md.
+
+// Build flavour reported by AppConfig.environment ("debug" or "release").
+BLAU_ENVIRONMENT = debug
+
+// xAI API host. AppConfig derives https://<host> and wss://<host>/v1/realtime.
+XAI_API_HOST = api.x.ai
+
+// Pinned Grok realtime voice model (issue #1, "Key decisions").
+XAI_REALTIME_MODEL = grok-voice-think-fast-2.0
+
+// Developer xAI API key. Set it ONLY in Config/Secrets.xcconfig, never here.
+// DEBUG builds use it to pre-fill the Keychain on first launch (issue #33).
+// A Release build fails while it is non-empty.
+XAI_DEV_API_KEY =
+
+// What actually lands in Info.plist under BlauXAIDevAPIKey. Empty here, so the
+// key is only embedded where Debug.xcconfig opts in.
+BLAU_INFO_XAI_DEV_API_KEY =
+
+// When YES, the "Check for embedded secrets" build phase fails the build if
+// XAI_DEV_API_KEY is set or an xAI key appears in the built app.
+BLAU_FORBID_EMBEDDED_SECRETS = NO
