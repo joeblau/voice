@@ -83,7 +83,10 @@ let benchmarks: @Sendable () -> Void = {
 
     // Reciprocal rank fusion of a BM25 and a vector ranking (50 hits each,
     // half of them shared), for 1,000 queries: hybrid retrieval's (#64)
-    // fusion step.
+    // fusion step. `reciprocalRankFusion` runs `RankFusion.fuse`
+    // specialized inside BlauMemory, as `MemorySearch` does; calling the
+    // generic `fuse` from here would run it unspecialized and measure
+    // boxing that production never pays (about 100 times the allocations).
     Benchmark(
         "memory.rrf-1000-queries-2x50-hits",
         closure: { benchmark, rankings in

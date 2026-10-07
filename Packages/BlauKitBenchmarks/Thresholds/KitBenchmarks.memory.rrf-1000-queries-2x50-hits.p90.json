@@ -1,7 +1,7 @@
 {
-  "cpuTotal" : 121569279,
-  "instructions" : 829423615,
-  "mallocCountTotal" : 18000,
-  "throughput" : 7,
-  "wallClock" : 279707647
+  "cpuTotal" : 44236799,
+  "instructions" : 425983999,
+  "mallocCountTotal" : 34956,
+  "throughput" : 29,
+  "wallClock" : 82575359
 }
