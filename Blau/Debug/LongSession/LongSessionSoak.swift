@@ -85,10 +85,17 @@
             pollTask?.cancel()
             vadTask?.cancel()
             await vadTask?.value
+            // Read everything for the report while the VAD stage is still
+            // registered: unregistering drops it from the inference
+            // snapshot, and the verdict's "no model stage exhausted" rule
+            // would then check nothing. Let the monitor apply every
+            // observation the VAD recorded first.
+            await environment.backgroundInference.waitUntilIdle()
+            await refresh(environment)
+            let inference = await environment.backgroundInference.snapshot
             if let registeredStage {
                 await environment.backgroundInference.unregister(stage: registeredStage)
             }
-            await refresh(environment)
             await conversation.keeper.stopCapture()
             isRunning = false
 
@@ -101,7 +108,7 @@
                 keeper: keeperStatistics,
                 capture: LongSessionReport.Capture(capture ?? CaptureStatistics()),
                 vad: vad.map { LongSessionReport.VAD(model: vadModel, statistics: $0) },
-                inference: await environment.backgroundInference.snapshot
+                inference: inference
             )
             self.report = report
             reportURL = save(report)

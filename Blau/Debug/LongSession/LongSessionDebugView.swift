@@ -99,6 +99,8 @@
                             "p95 \(stage.recentP95Milliseconds.map { "\(Int($0.rounded())) ms" } ?? "n/a") of "
                                 + "\(Int(stage.budgetMilliseconds)) ms, \(stage.completedInferences) ok, "
                                 + "\(stage.failedInferences) failed, next off screen: \(stage.nextBackgroundBackend.rawValue)"
+                                + (stage.exhaustedOffScreen > 0
+                                    ? ", ran out off screen \(stage.exhaustedOffScreen)×" : "")
                         )
                         .font(.caption)
                         .foregroundStyle(.secondary)

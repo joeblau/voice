@@ -263,6 +263,27 @@ struct BackgroundInferencePolicyTests {
         #expect(policy.setPhase(.background).map(\.to) == [.cpu])
     }
 
+    @Test func exhaustionOffScreenIsCountedAcrossPhases() {
+        var policy = Self.policy(.reloadOnCPUWhenBackgrounded, stages: [Self.vad])
+        _ = policy.setPhase(.locked)
+        _ = policy.switchFailed(stage: "vad", backend: .cpu, error: "load failed")
+        #expect(policy.status(of: "vad")?.exhaustedOffScreen == 1)
+        // Staying exhausted (locked -> background) doesn't count again.
+        _ = policy.setPhase(.background)
+        #expect(Self.fail(&policy, "vad", count: 4).isEmpty)
+        #expect(policy.status(of: "vad")?.exhaustedOffScreen == 1)
+
+        // Unlocking clears `isExhausted` but not the count.
+        _ = policy.setPhase(.foreground)
+        #expect(policy.status(of: "vad")?.isExhausted == false)
+        #expect(policy.status(of: "vad")?.exhaustedOffScreen == 1)
+
+        // A second trip that runs out again counts again.
+        _ = policy.setPhase(.locked)
+        _ = policy.switchFailed(stage: "vad", backend: .cpu, error: "load failed")
+        #expect(policy.status(of: "vad")?.exhaustedOffScreen == 2)
+    }
+
     @Test func failingToReturnToTheNeuralEngineKeepsTheCPU() {
         var policy = Self.policy(.reloadOnCPUWhenBackgrounded, stages: [Self.vad])
         _ = policy.setPhase(.background)

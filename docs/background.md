@@ -63,9 +63,10 @@ stateDiagram-v2
     recovering --> recovering: still silent after 3 s: rebuild again (up to 3)
     recovering --> paused: still silent, off screen
     recovering --> starting: still silent, on screen: restart
-    live --> interrupted: call, Siri
+    live --> interrupted: call, Siri, another app's audio
     interrupted --> live: ended with .shouldResume
     interrupted --> paused: ended without .shouldResume
+    interrupted --> starting: startCapture() (user taps record)
     live --> paused: rebuild failed off screen
     live --> failed: rebuild failed on screen
     paused --> starting: return to the foreground, or startCapture()
@@ -73,9 +74,17 @@ stateDiagram-v2
     live --> inactive: stopCapture() / Stop on the lock screen
 ```
 
-A call still in progress when the user opens Blau is left alone: the keeper
-only restarts after an interruption has *ended* (the controller's
-`isAwaitingManualResume`), so it never fights the phone app for the mic.
+A call still in progress when the user opens Blau is left alone: on
+returning to the foreground the keeper only restarts after an interruption
+has *ended* (the controller's `isAwaitingManualResume`), so it never fights
+the phone app for the mic.
+
+iOS doesn't guarantee an interruption-ended notification, though: when
+another app's non-mixable audio takes the session, none may ever arrive. So
+an explicit `startCapture()` (the user tapping record) while `interrupted`
+restarts from scratch. If a call really still holds the mic, activation
+fails and the status becomes `failed`, which the UI shows and the user can
+retry; the conversation never sits `interrupted` with no way out.
 
 ### The silent-stall watchdog
 
@@ -123,7 +132,10 @@ runtime policy that works whatever the verdict turns out to be:
   at least 20 recent inferences (`minimumSamples`, out of a 40-inference
   window), moves the stage one step down its ladder. A backend that fails
   to load is skipped. A stage with nowhere left to go is *exhausted*: it
-  stays put and the monitor logs a fault once.
+  stays put and the monitor logs a fault once. `isExhausted` clears when
+  Blau comes back on screen, but `exhaustedOffScreen` keeps counting for the
+  life of the registration, so the soak report still sees it after the
+  user unlocks.
 - **Back on screen** every stage returns to the Neural Engine, and the
   furthest backend each one needed is remembered: the next trip off screen
   starts there instead of failing its way down again.
@@ -213,7 +225,9 @@ Watch the logs with the `log stream` command above. **Stop and report**
 writes a `LongSessionReport` (JSON, shareable) and a pass/fail verdict:
 locked at least 30 minutes, every stall recovered, live at least 99% of the
 time unless a call interrupted, the VAD analysed at least 95% of the audio,
-and no model stage exhausted.
+and no model stage exhausted at any point off screen (`exhaustedOffScreen`,
+read before the VAD stage is unregistered, so unlocking before stopping
+doesn't hide it).
 
 | # | Scenario | Steps | Expected | Result |
 | - | -------- | ----- | -------- | ------ |
@@ -223,7 +237,7 @@ and no model stage exhausted.
 | B4 | Foreground ↔ background bounces | Start, then 20 times: Home, wait 5 s, back to Blau; also lock/unlock 10 times | Status `live` the whole time; no stall faults; `Not live` ≈ 0 s; no crash | Pending |
 | B5 | Call while locked | Locked session, call the phone, answer, talk, hang up | Live Activity shows "Paused for a call", then "Blau is listening" again within ~1 s of hanging up, without unlocking | Pending |
 | B6 | Declined / missed call while locked | As B5 but decline | Either no interruption or back to listening | Pending |
-| B7 | Interruption without resume | Locked session; play music in another app from Control Center | Live Activity shows "Paused. Open Blau to resume"; opening Blau resumes | Pending |
+| B7 | Interruption without resume | Locked session; play music in another app from Control Center | While the music plays, the Live Activity shows "Paused for a call" (status `interrupted`). If the music stops with an interruption-ended without `.shouldResume`, it shows "Paused. Open Blau to resume" and opening Blau resumes. If no interruption-ended arrives, opening Blau leaves it `interrupted`, and tapping record takes the session back (`live`) | Pending |
 | B8 | Stop from the lock screen | Locked session; tap **Stop** on the Live Activity | The activity disappears; the orange microphone indicator goes away; the soak screen shows `inactive` when unlocked | Pending |
 | B9 | AirPods while locked | Locked session; take AirPods out and back in | Route follows; capture continues (no `Capture dropped` beyond the rebuild) | Pending |
 | B10 | Killed mid-session | Start, then kill Blau from the app switcher; relaunch | The stale Live Activity is gone after relaunch | Pending |

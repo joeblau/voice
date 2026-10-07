@@ -167,8 +167,14 @@ public struct BackgroundInferencePolicy: Sendable {
         public var consecutiveErrors: Int
         /// Backends that failed to load since Blau last came on screen.
         public var unusable: [InferenceBackend]
-        /// Off screen with nowhere left to go: it can't keep up.
+        /// Off screen with nowhere left to go: it can't keep up. Cleared
+        /// when Blau comes back on screen (every backend is retried).
         public var isExhausted: Bool
+        /// Times this stage ran out of backends off screen since it was
+        /// registered. Unlike `isExhausted`, a return to the foreground
+        /// doesn't clear it, so a report taken after unlocking still sees
+        /// that the stage couldn't keep up while locked.
+        public var exhaustedOffScreen: Int
         public var completedInferences: Int
         public var failedInferences: Int
     }
@@ -185,10 +191,19 @@ public struct BackgroundInferencePolicy: Sendable {
         var lastError = ""
         var unusable: Set<InferenceBackend> = []
         var isExhausted = false
+        /// Never cleared by a phase change; see `StageStatus`.
+        var exhaustedOffScreen = 0
         var completed = 0
         var failed = 0
 
         var isSwitching: Bool { desired != current }
+
+        /// Off screen with nowhere left to go. Counts each time it happens.
+        mutating func markExhausted() {
+            guard !isExhausted else { return }
+            isExhausted = true
+            exhaustedOffScreen += 1
+        }
     }
 
     public let configuration: Configuration
@@ -297,7 +312,7 @@ public struct BackgroundInferencePolicy: Sendable {
             return nil
         }
         guard let next = nextBackend(after: state.current, in: state) else {
-            state.isExhausted = true
+            state.markExhausted()
             return nil
         }
         let change = Change(stage: state.stage.name, from: state.desired, to: next, reason: reason)
@@ -340,7 +355,7 @@ public struct BackgroundInferencePolicy: Sendable {
             state.desired = next
             return change
         }
-        if phase.isBackground, backend > state.current { state.isExhausted = true }
+        if phase.isBackground, backend > state.current { state.markExhausted() }
         let change = Change(stage: name, from: backend, to: state.current, reason: reason)
         state.desired = state.current
         return change
@@ -361,6 +376,7 @@ public struct BackgroundInferencePolicy: Sendable {
             consecutiveErrors: state.consecutiveErrors,
             unusable: state.unusable.sorted(),
             isExhausted: state.isExhausted,
+            exhaustedOffScreen: state.exhaustedOffScreen,
             completedInferences: state.completed,
             failedInferences: state.failed
         )

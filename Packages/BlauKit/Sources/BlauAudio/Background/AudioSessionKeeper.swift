@@ -35,7 +35,9 @@ extension CaptureHub: CaptureProgressSource {
 /// - **resumes on return to the foreground** whatever couldn't resume off
 ///   screen: an interruption that ended without `.shouldResume`, a failed
 ///   rebuild, a stall it gave up on (iOS doesn't let a background app start
-///   recording);
+///   recording). An interruption still in progress is left alone, since it
+///   may be a call; the user takes the session back with `startCapture()`
+///   (an interruption-ended notification is not guaranteed);
 /// - **drives the recording indicator** (the Live Activity) and publishes
 ///   its `Snapshot` for the UI;
 /// - **counts** background trips, interruptions, stalls, resumes and the
@@ -77,8 +79,10 @@ public actor AudioSessionKeeper: AudioService {
         case live
         /// Audio stopped flowing; the graph is being rebuilt.
         case recovering
-        /// The system has the session (a call, Siri); the controller
-        /// resumes when the system says it should.
+        /// The system has the session (a call, Siri, another app's audio);
+        /// the controller resumes when the system says it should. Returning
+        /// to the foreground doesn't take it back (a call is never fought);
+        /// an explicit `startCapture()` does.
         case interrupted
         /// Audio stopped and won't restart until the user is in Blau: it
         /// resumes on the next return to the foreground, or on
@@ -237,18 +241,30 @@ public actor AudioSessionKeeper: AudioService {
 
     public var isCapturing: Bool { status == .live }
 
-    /// Starts the conversation's audio, or resumes it if it is paused or
-    /// failed. Does nothing if it is already on.
+    /// Starts the conversation's audio, or resumes it if it is paused,
+    /// failed or interrupted. Does nothing if it is already on.
+    ///
+    /// While `.interrupted` this is the user asking to take the session
+    /// back: iOS doesn't guarantee an interruption-ended notification (for
+    /// example when another app's non-mixable audio takes the session), so
+    /// without it the conversation could stay interrupted forever. If the
+    /// microphone really is still held (a call in progress), activation
+    /// fails and the status becomes `.failed`, which is shown. The automatic
+    /// resume on returning to the foreground stays passive and never does
+    /// this.
     ///
     /// - Throws: `AudioSessionError` if the audio can't start (microphone
-    ///   permission denied, a call holding the microphone...). The
-    ///   conversation is then off.
+    ///   permission denied, a call holding the microphone...). A first start
+    ///   that fails ends the conversation; a restart that fails leaves it
+    ///   `.failed`, to be retried.
     public func startCapture() async throws {
         if wantsSession {
             switch status {
             case .paused, .failed:
                 try await restart(reason: "startCapture()")
-            case .inactive, .starting, .live, .recovering, .interrupted:
+            case .interrupted:
+                try await restart(reason: "startCapture() while interrupted")
+            case .inactive, .starting, .live, .recovering:
                 break
             }
             return

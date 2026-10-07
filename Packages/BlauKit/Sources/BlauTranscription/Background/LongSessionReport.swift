@@ -140,8 +140,13 @@ public struct LongSessionReport: Codable, Hashable, Sendable {
                 findings.append("The VAD analysed \(Int((coverage * 100).rounded()))% of the session's audio")
             }
         }
-        for stage in inference.stages where stage.isExhausted {
-            findings.append("The \(stage.stage) stage couldn't keep up on any backend")
+        // `exhaustedOffScreen`, not `isExhausted`: the run stops after
+        // unlocking, and coming back on screen clears `isExhausted`.
+        for stage in inference.stages where stage.isExhausted || stage.exhaustedOffScreen > 0 {
+            let times = max(stage.exhaustedOffScreen, 1)
+            findings.append(
+                "The \(stage.stage) stage couldn't keep up on any backend off screen (\(times) time\(times == 1 ? "" : "s"))"
+            )
         }
         return Verdict(passed: findings.isEmpty, findings: findings)
     }

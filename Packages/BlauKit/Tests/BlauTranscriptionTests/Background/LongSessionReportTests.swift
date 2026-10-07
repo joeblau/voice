@@ -83,8 +83,35 @@ struct LongSessionReportTests {
             phase: .locked, mitigation: .reloadOnCPUWhenBackgrounded, stages: policy.statuses, switches: [])
         #expect(
             Self.verdict(Self.goodRun, inference: inference).findings == [
-                "The vad stage couldn't keep up on any backend"
+                "The vad stage couldn't keep up on any backend off screen (1 time)"
             ])
+    }
+
+    /// The real procedure: the stage runs out of backends while locked, the
+    /// user unlocks (which clears `isExhausted`) and then stops the run. The
+    /// verdict must still fail.
+    @Test func aStageExhaustedWhileLockedStillFailsAfterUnlocking() {
+        var policy = BackgroundInferencePolicy(configuration: .init(mitigation: .keepNeuralEngine))
+        _ = policy.register(.init(name: "vad", ladder: [.neuralEngine, .cpu], budget: .milliseconds(256)))
+        _ = policy.setPhase(.locked)
+        // Errors move it to the CPU, which keeps failing: nowhere left.
+        for _ in 0..<2 { _ = policy.observe(.init(stage: "vad", outcome: .failed(description: "E5RT"))) }
+        while let (stage, backend) = policy.pendingSwitch() {
+            policy.switchCompleted(stage: stage, to: backend)
+        }
+        for _ in 0..<2 { _ = policy.observe(.init(stage: "vad", outcome: .failed(description: "E5RT"))) }
+        #expect(policy.status(of: "vad")?.isExhausted == true)
+
+        _ = policy.setPhase(.foreground)
+        let status = policy.status(of: "vad")
+        #expect(status?.isExhausted == false, "unlocking retries every backend")
+        #expect(status?.exhaustedOffScreen == 1)
+
+        let inference = BackgroundInferenceMonitor.Snapshot(
+            phase: .foreground, mitigation: .keepNeuralEngine, stages: policy.statuses, switches: [])
+        let verdict = Self.verdict(Self.goodRun, inference: inference)
+        #expect(!verdict.passed)
+        #expect(verdict.findings == ["The vad stage couldn't keep up on any backend off screen (1 time)"])
     }
 
     @Test func roundTripsThroughJSON() throws {

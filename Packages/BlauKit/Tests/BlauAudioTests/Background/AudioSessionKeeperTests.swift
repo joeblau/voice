@@ -289,6 +289,55 @@ struct AudioSessionKeeperTests {
         #expect(harness.session.activations == activations, "no attempt to take the mic back from the call")
     }
 
+    /// Another app's non-mixable audio took the session and no
+    /// interruption-ended ever arrives (B7). Returning to the foreground
+    /// leaves it alone; tapping record takes the session back.
+    @Test func startCaptureWhileInterruptedRestarts() async throws {
+        let harness = KeeperHarness()
+        try await harness.start()
+        await harness.move(.inactive, .background)
+        await harness.controller.handle(.interruptionBegan(.default))
+        await harness.waitForStatus(.interrupted)
+        await harness.move(.inactive, .active)
+        #expect(await harness.keeper.status == .interrupted)
+        let activations = harness.session.activations
+
+        try await harness.keeper.startCapture()
+        #expect(await harness.keeper.status == .live)
+        #expect(await harness.controller.state == .running)
+        #expect(harness.session.activations == activations + 1)
+        #expect(await harness.indicatorState()?.status == .listening)
+        // A user restart is not an automatic foreground resume.
+        #expect(await harness.keeper.snapshot.statistics.foregroundResumes == 0)
+
+        // Audio flows again and the watchdog is still running.
+        await harness.tick(5, audioFlowing: true)
+        #expect(await harness.keeper.status == .live)
+    }
+
+    /// Tapping record while a call really still holds the microphone fails
+    /// visibly instead of silently doing nothing, and can be retried.
+    @Test func startCaptureWhileACallHoldsTheMicFails() async throws {
+        let harness = KeeperHarness()
+        try await harness.start()
+        await harness.controller.handle(.interruptionBegan(.default))
+        await harness.waitForStatus(.interrupted)
+
+        harness.session.failActivations(1)
+        await #expect(throws: AudioSessionError.self) {
+            try await harness.keeper.startCapture()
+        }
+        guard case .failed(.activationFailed) = await harness.keeper.status else {
+            Issue.record("Expected failed(activationFailed), got \(await harness.keeper.status)")
+            return
+        }
+        #expect(await harness.indicatorState()?.status == .needsAttention)
+
+        // The call ended; tapping record again works.
+        try await harness.keeper.startCapture()
+        #expect(await harness.keeper.status == .live)
+    }
+
     @Test func aFailedRebuildOffScreenWaitsForTheForeground() async throws {
         let harness = KeeperHarness()
         try await harness.start()
