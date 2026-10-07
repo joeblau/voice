@@ -52,9 +52,11 @@ public struct TemporalExpression: Hashable, Sendable {
 /// Monday), while a memory query is about the past. So relative dates go
 /// through a small English grammar here, resolved against `now` and biased
 /// to the past, and `NSDataDetector` handles what the grammar doesn't know:
-/// numeric dates ("3/14", "2026-03-14") and other absolute forms. Its
-/// result is re-anchored: only the calendar day is kept (and the year when
-/// the query wrote one), resolved against `now` like the grammar.
+/// numeric dates ("3/14", "2026-03-14") and other absolute forms. Only its
+/// matches that write out a calendar date (a month name or a numeric date)
+/// count, so clock times ("5pm") and future offsets ("in 2 weeks") don't,
+/// and its result is re-anchored: only the calendar day is kept (and the
+/// year when the query wrote one), resolved against `now` like the grammar.
 ///
 /// Grammar (case and diacritics ignored, first expression in the query
 /// wins):
@@ -539,8 +541,13 @@ public struct TemporalQueryParser: Sendable {
     /// The first date `NSDataDetector` finds, re-anchored to `now`: only its
     /// calendar day (and duration) is kept, the year too when the matched
     /// text writes one, otherwise the most recent such day on or before
-    /// today. Only matches that contain a digit are used: the grammar owns
-    /// relative words, which the detector resolves against the wall clock.
+    /// today.
+    ///
+    /// Only matches that spell out that calendar day are used (see
+    /// `spellsOutDate`). The detector also matches clock times ("5pm",
+    /// "10:30") and future offsets ("in 2 weeks"), which it resolves against
+    /// the wall clock; keeping just their month and day would name an
+    /// unrelated day, usually a year in the past.
     func detectedDate(in query: String, context: Context) -> TemporalExpression? {
         guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue) else {
             return nil
@@ -552,20 +559,36 @@ public struct TemporalQueryParser: Sendable {
         for result in detector.matches(in: query, options: [], range: whole) {
             guard let date = result.date, let range = Range(result.range, in: query) else { continue }
             let phrase = String(query[range])
-            guard phrase.contains(where: \.isNumber) else { continue }
+            let parts = detectorCalendar.dateComponents([.year, .month, .day], from: date)
+            guard let month = parts.month, let day = parts.day,
+                Self.spellsOutDate(phrase, month: month, day: day)
+            else { continue }
             let tokens = Self.tokens(in: phrase)
             let writesYear =
                 tokens.contains { Self.year(at: 0, in: [$0]) != nil }
                 || phrase.range(of: #"\b\d{1,2}[/.-]\d{1,2}[/.-]\d{2}\b"#, options: .regularExpression) != nil
-            let parts = detectorCalendar.dateComponents([.year, .month, .day], from: date)
-            guard let month = parts.month, let day = parts.day,
-                let start = context.date(month: month, day: day, year: writesYear ? parts.year : nil)
-            else { continue }
+            guard let start = context.date(month: month, day: day, year: writesYear ? parts.year : nil) else {
+                continue
+            }
             let extraDays = max(0, Int((result.duration / 86_400).rounded()))
             let end = context.day(extraDays, from: start.upperBound)
             return TemporalExpression(
                 range: start.lowerBound..<end, phrase: phrase, anchor: .calendar, source: .dataDetector)
         }
         return nil
+    }
+
+    /// Whether a phrase the detector read as `month`/`day` writes that day
+    /// out: it names the month ("Mar 3 at 5pm"), or it has a numeric date
+    /// (numbers joined by `/`, `.` or `-`: "3/14", "2026-03-14",
+    /// "14.03.2026") whose numbers include both the month and the day. Clock
+    /// times ("5pm", "10:30", "5.30pm": the detector reads today), future
+    /// offsets ("in 2 weeks") and bare ordinals ("the 3rd") don't.
+    static func spellsOutDate(_ phrase: String, month: Int, day: Int) -> Bool {
+        if tokens(in: phrase).contains(where: { Self.month($0.text, inContext: true) == month }) { return true }
+        return phrase.matches(of: /\d{1,4}(?:[\/.\-]\d{1,4}){1,2}/).contains { match in
+            let numbers = match.output.split { !$0.isNumber }.compactMap { Int($0) }
+            return numbers.contains(month) && numbers.contains(day)
+        }
     }
 }

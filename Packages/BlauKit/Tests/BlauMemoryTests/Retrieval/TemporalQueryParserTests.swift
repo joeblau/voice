@@ -129,6 +129,38 @@ struct TemporalQueryParserTests {
 
         let withYear = try #require(Self.parse("the call on 12/24/2025"))
         #expect(withYear.range == Self.days("2025-12-24", "2025-12-25"))
+
+        // A clock time next to a written date doesn't change the day.
+        let withTime = try #require(Self.parse("the call on 3/14 at 5pm"))
+        #expect(withTime.source == .dataDetector)
+        #expect(withTime.range == Self.days("2026-03-14", "2026-03-15"))
+    }
+
+    /// `NSDataDetector` also matches clock times and future offsets, which
+    /// it resolves against the wall clock. They name no calendar day, so
+    /// they aren't time expressions (they used to become a day a year ago,
+    /// which then narrowed entity expansion).
+    @Test(arguments: [
+        "the call at 5pm", "meeting at 10:30", "what do I need to do in 2 weeks", "in 2 days", "at 17:00",
+        "pick up at 5.30pm", "the dinner by 5pm tomorrow", "what is Alex planning in 2 weeks", "on the 3rd at 5pm",
+        "at 5 o'clock",
+    ])
+    func clockTimesAndFutureOffsetsAreNotDates(query: String) {
+        #expect(Self.parse(query) == nil)
+    }
+
+    /// The check on what the detector matched, without the detector (whose
+    /// results depend on the wall clock and the host's date order).
+    @Test(arguments: [
+        ("3/14", 3, 14, true), ("12/24/2025", 12, 24, true), ("2026-03-14", 3, 14, true),
+        ("14.03.2026", 3, 14, true), ("3/14 at 5pm", 3, 14, true), ("Mar 3 at 5pm", 3, 3, true),
+        ("March", 3, 1, true), ("5pm", 10, 8, false), ("10:30", 10, 8, false), ("5.30pm", 10, 8, false),
+        ("17:00", 10, 8, false), ("in 2 weeks", 10, 22, false), ("in 2 days", 10, 10, false),
+        ("the 3rd at 5pm", 10, 3, false), ("5pm tomorrow", 10, 9, false), ("3/14", 4, 14, false),
+        ("Mar 3", 4, 3, false),
+    ])
+    func detectorMatchesMustSpellOutTheDate(phrase: String, month: Int, day: Int, spellsOut: Bool) {
+        #expect(TemporalQueryParser.spellsOutDate(phrase, month: month, day: day) == spellsOut)
     }
 
     @Test func theDataDetectorCanBeTurnedOff() {

@@ -245,6 +245,21 @@ struct MemorySearchTests {
         #expect(response.results.contains { $0.id == partner.chunkID(partner.jobFact) && $0.signals.contains(.entity) })
     }
 
+    /// A clock time or a future offset in the query isn't a date, so it
+    /// doesn't narrow expansion to some other day: the current facts about
+    /// Alex are still expanded.
+    @Test(arguments: ["how is Alex doing", "what is Alex planning in 2 weeks", "Alex call at 5pm", "Alex at 10:30"])
+    func clockTimesDontNarrowExpansion(query: String) async throws {
+        let harness = try Harness()
+        let partner = Partner()
+        try await partner.populate(harness)
+        let response = try await harness.search(vectors: false, entities: partner.graph).search(query)
+        #expect(response.timeExpression == nil)
+        #expect(response.queryEntities == [partner.alex])
+        #expect(response.results.contains { $0.id == partner.chunkID(partner.jobFact) && $0.signals.contains(.entity) })
+        #expect(response.expandedFacts >= 1)
+    }
+
     /// Within explicit bounds, the facts valid then are expanded.
     @Test func expandsFactsValidDuringTheTimeFilter() async throws {
         let harness = try Harness()
