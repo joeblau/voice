@@ -1,4 +1,5 @@
 import BlauCore
+import BlauTelemetry
 import Foundation
 import Observation
 import SwiftData
@@ -196,10 +197,16 @@ public final class PersistenceController {
         // account refresh would rebuild the UI each time the app becomes
         // active. It is retried on the next launch instead.
         if case .localOnly(.cloudKitFailed) = stack.mode { return }
+        // A timed-out or failed status query (a cold `cloudd`, an XPC or
+        // network error) is not evidence that the user signed out. Leaving
+        // CloudKit on it would stop mirroring and rebuild the UI, then flip
+        // back on the next answer. Only a definite `.noAccount`, `.restricted`
+        // or `.temporarilyUnavailable` turns sync off.
+        if stack.mode.isCloudKit, status == .couldNotDetermine { return }
         let desired = options.syncMode(for: status)
         guard desired.isCloudKit != stack.mode.isCloudKit else { return }
 
-        PersistenceLog.logger.notice(
+        Log.data.notice(
             "iCloud account is now \(status.rawValue, privacy: .public); reopening the store")
         isTransitioning = true
         // Flush pending edits so nothing is lost when the container is
@@ -207,7 +214,7 @@ public final class PersistenceController {
         do {
             try stack.container.mainContext.save()
         } catch {
-            PersistenceLog.logger.error(
+            Log.data.error(
                 "Saving before the sync mode change failed: \(String(describing: error), privacy: .public)")
         }
         await install(Self.makeStack(bootstrap, mode: desired, options: options))
@@ -249,7 +256,7 @@ public final class PersistenceController {
     func record(_ event: CloudSyncEvent) async {
         activity.record(event)
         if let error = event.error {
-            PersistenceLog.logger.error(
+            Log.data.error(
                 "CloudKit \(event.kind.rawValue, privacy: .public) failed: \(error.domain, privacy: .public) \(error.code) \(error.message, privacy: .public)"
             )
         }
@@ -267,14 +274,14 @@ public final class PersistenceController {
             lastChanges = changes
             lastChangesAt = clock.now
             if changes.includesRemoteChanges {
-                PersistenceLog.logger.info(
+                Log.data.info(
                     "Imported \(changes.importedTransactionCount) transactions from iCloud")
             }
             for continuation in subscribers.values {
                 continuation.yield(changes)
             }
         } catch {
-            PersistenceLog.logger.error("Reading history failed: \(String(describing: error), privacy: .public)")
+            Log.data.error("Reading history failed: \(String(describing: error), privacy: .public)")
         }
     }
 }

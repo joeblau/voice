@@ -49,7 +49,11 @@ SwiftData's persistent history (always on) lets mirroring export it the next
 time the store opens with CloudKit. When the account changes while Blau is
 running (`CKAccountChanged`, or a different status when the app becomes
 active), the controller saves the main context and reopens the store in the
-new mode. `PersistenceGate` rebuilds the view tree for the new container
+new mode. Only a definite answer turns sync off: when the store is already
+mirroring, a status query that times out or fails (`.couldNotDetermine`, for
+example a slow `cloudd` or an XPC error) is recorded for Settings but keeps
+the CloudKit store open. At launch, "unknown" still starts local-only and
+`run()` asks again without the launch deadline. `PersistenceGate` rebuilds the view tree for the new container
 (`.id(generation)`) because models fetched from the old container are invalid
 once it is released. Services that hold the container (the `ModelActor`
 writer from #21, the indexer from #63) must also be recreated when
@@ -86,8 +90,9 @@ CloudKit when it is `YES`.
   their own tracker with their own consumer name and
   `startPosition: .beginning`.
 - History is never deleted: CloudKit mirroring needs it to export. If a
-  cursor's token has expired, the tracker returns `historyWasReset` and
-  consumers rebuild.
+  cursor's token has expired (SwiftData throws
+  `SwiftDataError.historyTokenExpired`), the tracker moves the cursor to the
+  latest transaction, returns `historyWasReset` and consumers rebuild.
 
 ## CloudKit development schema
 
@@ -110,7 +115,7 @@ opening the store. Release builds never run it.
 ## Logs
 
 Everything logs to subsystem `com.joeblau.blau`, category `data` (the
-`BlauTelemetry` `LogCategory.data` from #17):
+`BlauTelemetry` logger `Log.data`):
 
 ```sh
 log stream --predicate 'subsystem == "com.joeblau.blau" && category == "data"'

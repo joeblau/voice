@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 /// Constants for Blau's iCloud container and on-disk stores.
 public enum BlauCloud {
@@ -12,12 +11,6 @@ public enum BlauCloud {
 
     /// `ModelConfiguration` name of the local-only store for derived data.
     public static let derivedConfigurationName = "BlauDerived"
-}
-
-/// The `data` logging category (`BlauTelemetry.LogCategory.data` once #17
-/// lands) in Blau's unified-logging subsystem.
-enum PersistenceLog {
-    static let logger = Logger(subsystem: "com.joeblau.blau", category: "data")
 }
 
 /// Where the stores live on disk.

@@ -206,6 +206,49 @@ struct PersistentHistoryTrackerTests {
         #expect(try await fixture.tracker().fetchNewChanges().transactionCount == 1)
     }
 
+    @Test func anExpiredCursorResetsHistory() async throws {
+        let fixture = try HistoryFixture()
+        let tracker = fixture.tracker()
+        let context = fixture.context()
+        context.insert(Conversation(startedAt: syncT0))
+        try context.save()
+        #expect(try await tracker.fetchNewChanges().transactionCount == 1)
+
+        // Two more writes, then history up to the latest transaction is
+        // purged, taking the tracker's cursor with it.
+        context.insert(Conversation(startedAt: syncT0 + 1))
+        try context.save()
+        context.insert(Conversation(startedAt: syncT0 + 2))
+        try context.save()
+        let latest = try latestToken(in: fixture)
+        try ModelContext(fixture.container).deleteHistory(
+            HistoryDescriptor<DefaultHistoryTransaction>(predicate: #Predicate { $0.token < latest }))
+
+        let reset = try await tracker.fetchNewChanges()
+        #expect(reset.historyWasReset)
+        #expect(reset.transactionCount == 0)
+
+        // The cursor moved to the latest transaction: reading resumes normally.
+        let next = try await tracker.fetchNewChanges()
+        #expect(!next.historyWasReset)
+        #expect(next.isEmpty)
+        context.insert(Conversation(startedAt: syncT0 + 3))
+        try context.save()
+        #expect(try await tracker.fetchNewChanges().transactionCount == 1)
+
+        // The reset cursor was saved, so a relaunch doesn't reset again.
+        #expect(try await fixture.tracker().fetchNewChanges().isEmpty)
+    }
+
+    @Test func recognisesBothHistoryTokenExpiredErrors() {
+        #expect(PersistentHistoryTracker.isHistoryTokenExpired(SwiftDataError.historyTokenExpired))
+        #expect(
+            PersistentHistoryTracker.isHistoryTokenExpired(
+                NSError(domain: NSCocoaErrorDomain, code: NSPersistentHistoryTokenExpiredError)))
+        #expect(!PersistentHistoryTracker.isHistoryTokenExpired(CocoaError(.fileReadNoSuchFile)))
+        #expect(!PersistentHistoryTracker.isHistoryTokenExpired(SwiftDataError.loadIssueModelContainer))
+    }
+
     private func latestToken(in fixture: HistoryFixture) throws -> DefaultHistoryToken {
         var descriptor = HistoryDescriptor<DefaultHistoryTransaction>(
             sortBy: [SortDescriptor(\.transactionIdentifier, order: .reverse)])

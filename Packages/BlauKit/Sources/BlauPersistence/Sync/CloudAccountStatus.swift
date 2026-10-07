@@ -1,4 +1,5 @@
 import BlauCore
+import BlauTelemetry
 import CloudKit
 import Foundation
 import os
@@ -78,10 +79,10 @@ extension CloudAccountStatusProviding {
         case .status(let status):
             return status
         case .failed(let message):
-            PersistenceLog.logger.error("iCloud account status failed: \(message, privacy: .public)")
+            Log.data.error("iCloud account status failed: \(message, privacy: .public)")
             return .couldNotDetermine
         case .timedOut, nil:
-            PersistenceLog.logger.error("iCloud account status timed out")
+            Log.data.error("iCloud account status timed out")
             return .couldNotDetermine
         }
     }

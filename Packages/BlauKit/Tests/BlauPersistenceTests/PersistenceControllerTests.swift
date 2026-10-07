@@ -14,6 +14,7 @@ private func makeController(
     entitled: Bool = true,
     storeOverride: StoreOverride? = nil,
     recorder: OpenRecorder = OpenRecorder(),
+    clock: ManualClock = ManualClock(now: syncT0),
     notificationCenter: NotificationCenter = NotificationCenter()
 ) -> PersistenceController {
     PersistenceController(
@@ -21,7 +22,7 @@ private func makeController(
             location: temporary.location, cloudKitEntitled: entitled, storeOverride: storeOverride),
         accountProvider: provider,
         bootstrap: .hermetic(recorder: recorder),
-        clock: ManualClock(now: syncT0),
+        clock: clock,
         notificationCenter: notificationCenter
     )
 }
@@ -143,6 +144,66 @@ struct PersistenceControllerTests {
         #expect(controller.generation == 1)
         #expect(controller.accountStatus == .restricted)
         #expect(controller.syncState == .off(.restricted))
+    }
+
+    @Test func aFailedStatusQueryKeepsCloudKit() async throws {
+        let temporary = try TemporaryDirectory()
+        let provider = FakeAccountStatusProvider(.available)
+        let recorder = OpenRecorder()
+        let controller = makeController(temporary, provider: provider, recorder: recorder)
+        await controller.start()
+        let id = try insertConversation(controller)
+
+        // An XPC or network error is not a sign-out.
+        provider.fail()
+        await controller.refresh()
+        #expect(controller.generation == 1)
+        #expect(controller.stack?.mode == cloudKit)
+        #expect(controller.accountStatus == .couldNotDetermine)
+        #expect(controller.syncState == .upToDate(lastSync: nil))
+        #expect(recorder.containerIdentifiers == ["iCloud.com.joeblau.blau"])
+
+        // The next definite answer still decides.
+        provider.set(.available)
+        await controller.refresh()
+        #expect(controller.generation == 1)
+        #expect(controller.accountStatus == .available)
+        provider.set(.noAccount)
+        await controller.refresh()
+        #expect(controller.generation == 2)
+        #expect(controller.stack?.mode == .localOnly(.account(.noAccount)))
+        #expect(try conversationIDs(controller) == [id])
+    }
+
+    @Test(.timeLimit(.minutes(1))) func aTimedOutStatusQueryKeepsCloudKit() async throws {
+        let temporary = try TemporaryDirectory()
+        let clock = ManualClock(now: syncT0)
+        let provider = FakeAccountStatusProvider(.available)
+        let controller = makeController(temporary, provider: provider, clock: clock)
+        await controller.start()
+
+        // cloudd takes longer than the refresh deadline.
+        provider.stall()
+        async let refreshed: Void = controller.refresh()
+        await clock.waitForSleepers()
+        clock.advance(by: .seconds(10))
+        await refreshed
+        #expect(controller.generation == 1)
+        #expect(controller.stack?.mode == cloudKit)
+        #expect(controller.accountStatus == .couldNotDetermine)
+        provider.unstall()
+    }
+
+    @Test func anUndeterminedStatusStillLeavesLocalOnlyAlone() async throws {
+        let temporary = try TemporaryDirectory()
+        let provider = FakeAccountStatusProvider(.noAccount)
+        let controller = makeController(temporary, provider: provider)
+        await controller.start()
+        provider.fail()
+        await controller.refresh()
+        #expect(controller.generation == 1)
+        #expect(controller.stack?.mode == .localOnly(.account(.noAccount)))
+        #expect(controller.syncState == .off(.unknown))
     }
 
     @Test func aCloudKitFailureIsNotRetriedUntilRelaunch() async throws {

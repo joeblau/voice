@@ -26,6 +26,8 @@ final class FakeAccountStatusProvider: CloudAccountStatusProviding {
     private struct State {
         var status: Result<CloudAccountStatus, FakeError>
         var calls = 0
+        /// Queries waiting while stalled; `nil` when answering normally.
+        var stalledQueries: [CheckedContinuation<Void, Never>]?
     }
 
     struct FakeError: Error {}
@@ -49,13 +51,42 @@ final class FakeAccountStatusProvider: CloudAccountStatusProviding {
         state.withLock { $0.status = .failure(FakeError()) }
     }
 
+    /// Makes later queries hang, ignoring cancellation, like a cold `cloudd`,
+    /// until `unstall()`.
+    func stall() {
+        state.withLock { state in
+            if state.stalledQueries == nil { state.stalledQueries = [] }
+        }
+    }
+
+    /// Lets stalled and future queries answer.
+    func unstall() {
+        let waiting = state.withLock { state in
+            defer { state.stalledQueries = nil }
+            return state.stalledQueries ?? []
+        }
+        for query in waiting {
+            query.resume()
+        }
+    }
+
     /// Simulates `CKAccountChanged`.
     func postAccountChange() {
         changesContinuation.yield()
     }
 
     func accountStatus() async throws -> CloudAccountStatus {
-        try state.withLock { state in
+        if state.withLock({ $0.stalledQueries != nil }) {
+            await withCheckedContinuation { (query: CheckedContinuation<Void, Never>) in
+                let answerNow = state.withLock { state in
+                    guard state.stalledQueries != nil else { return true }
+                    state.stalledQueries?.append(query)
+                    return false
+                }
+                if answerNow { query.resume() }
+            }
+        }
+        return try state.withLock { state in
             state.calls += 1
             return try state.status.get()
         }

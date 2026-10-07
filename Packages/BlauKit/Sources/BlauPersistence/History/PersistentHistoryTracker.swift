@@ -1,4 +1,5 @@
 import BlauCore
+import BlauTelemetry
 import CoreData
 import Foundation
 import SwiftData
@@ -194,8 +195,8 @@ public actor PersistentHistoryTracker {
                 if transactions.count < batchSize { break }
             }
             changes.dropEmptyEntities()
-        } catch let error as NSError where error.code == NSPersistentHistoryTokenExpiredError {
-            PersistenceLog.logger.error(
+        } catch let error where Self.isHistoryTokenExpired(error) {
+            Log.data.error(
                 "History token for \(self.consumer, privacy: .public) expired; consumers must rebuild")
             token = try latestToken()
             changes = StoreChangeSet(historyWasReset: true)
@@ -207,13 +208,24 @@ public actor PersistentHistoryTracker {
         return changes
     }
 
+    /// Whether `error` means the cursor points at history that was deleted.
+    /// SwiftData's `fetchHistory` throws `SwiftDataError.historyTokenExpired`
+    /// (domain `SwiftData.SwiftDataError`, code 1); Core Data's
+    /// `NSPersistentHistoryTokenExpiredError` (134301) is matched too, in case
+    /// the underlying Core Data error ever surfaces unwrapped.
+    static func isHistoryTokenExpired(_ error: any Error) -> Bool {
+        if SwiftDataError.historyTokenExpired ~= error { return true }
+        let nsError = error as NSError
+        return nsError.domain == NSCocoaErrorDomain && nsError.code == NSPersistentHistoryTokenExpiredError
+    }
+
     private func loadCursor() async throws -> DefaultHistoryToken? {
         switch try await cursors.position(for: consumer) {
         case .after(let data):
             if let saved = try? JSONDecoder().decode(DefaultHistoryToken.self, from: data) {
                 return saved
             }
-            PersistenceLog.logger.error("Unreadable history cursor for \(self.consumer, privacy: .public); resetting")
+            Log.data.error("Unreadable history cursor for \(self.consumer, privacy: .public); resetting")
         case .beginning:
             // Saved while history was empty: everything since is new.
             return nil

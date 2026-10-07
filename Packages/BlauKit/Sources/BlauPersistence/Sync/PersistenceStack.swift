@@ -1,3 +1,4 @@
+import BlauTelemetry
 import Foundation
 import SwiftData
 import os
@@ -99,7 +100,7 @@ public struct PersistenceBootstrap: Sendable {
             do {
                 try location.prepare()
             } catch {
-                PersistenceLog.logger.fault(
+                Log.data.fault(
                     "Store directory unavailable: \(String(describing: error), privacy: .public)")
                 mode = .inMemory(.storeFailed(String(describing: error)))
             }
@@ -111,7 +112,7 @@ public struct PersistenceBootstrap: Sendable {
 
         let container = openSynced(mode: &mode, location: location)
         let derived = openDerived(persistent: mode.isPersistent, location: location)
-        PersistenceLog.logger.notice("Opened stores: \(String(describing: mode), privacy: .public)")
+        Log.data.notice("Opened stores: \(String(describing: mode), privacy: .public)")
         return PersistenceStack(mode: mode, container: container, derivedContainer: derived, location: location)
     }
 
@@ -123,11 +124,11 @@ public struct PersistenceBootstrap: Sendable {
             try schemaInitializer.initializeSchema(
                 schema, storeURL: options.location.syncedStoreURL, containerIdentifier: containerIdentifier)
             gate.markInitialized(schema)
-            PersistenceLog.logger.notice("Initialized the CloudKit development schema")
+            Log.data.notice("Initialized the CloudKit development schema")
         } catch {
             // Not fatal: sync still works for record types that exist. It is
             // retried next launch because the gate wasn't marked.
-            PersistenceLog.logger.error(
+            Log.data.error(
                 "initializeCloudKitSchema failed: \(String(describing: error), privacy: .public)")
         }
     }
@@ -137,7 +138,7 @@ public struct PersistenceBootstrap: Sendable {
             return try openSyncedStore(BlauModelContainer.syncedConfiguration(for: mode, location: location))
         } catch {
             let failedMode = String(describing: mode)
-            PersistenceLog.logger.error(
+            Log.data.error(
                 "Opening the synced store (\(failedMode, privacy: .public)) failed: \(String(describing: error), privacy: .public)"
             )
             if mode.isCloudKit {
@@ -159,7 +160,7 @@ public struct PersistenceBootstrap: Sendable {
             do {
                 return try openDerivedStore(location.derivedStoreURL)
             } catch {
-                PersistenceLog.logger.error(
+                Log.data.error(
                     "Derived store unavailable, using memory: \(String(describing: error), privacy: .public)")
             }
         }

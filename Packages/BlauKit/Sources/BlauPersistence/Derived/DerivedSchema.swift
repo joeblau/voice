@@ -1,3 +1,4 @@
+import BlauTelemetry
 import Foundation
 import SwiftData
 import os
@@ -71,7 +72,7 @@ public enum DerivedStore {
         do {
             return try make(url: url)
         } catch {
-            PersistenceLog.logger.error(
+            Log.data.error(
                 "Derived store failed to open, recreating it: \(String(describing: error), privacy: .public)")
             for file in StoreLocation.sqliteFiles(for: url) where fileManager.fileExists(atPath: file.path) {
                 try fileManager.removeItem(at: file)
