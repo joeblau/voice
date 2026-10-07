@@ -64,6 +64,8 @@ targets:
           - BlauRealtime
           - BlauTopics
           - BlauMemory
+      # The recording Live Activity (#26), embedded in the app.
+      - target: BlauWidgets
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.blau
@@ -82,9 +84,13 @@ targets:
         NSMicrophoneUsageDescription: >-
           Blau listens to your voice so it can transcribe what you say
           and hold a spoken conversation with you.
+        # audio: an active .playAndRecord session keeps a conversation
+        # running with the screen locked (#26, docs/background.md).
         UIBackgroundModes:
           - audio
           - remote-notification
+        # The lock-screen recording indicator (#26).
+        NSSupportsLiveActivities: true
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
@@ -121,6 +127,32 @@ targets:
         com.apple.developer.icloud-services:
           - CloudKit
         aps-environment: development
+
+  # The recording Live Activity on the lock screen and in the Dynamic
+  # Island (#26, docs/background.md). Doesn't link BlauKit: it only renders
+  # the activity; the app owns it and runs its Stop intent.
+  BlauWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: BlauWidgets
+        excludes:
+          - Supporting
+      # Shared with the app: the activity's attributes and Stop intent.
+      - path: Blau/LiveActivity/RecordingActivityAttributes.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.blau.widgets
+        PRODUCT_NAME: BlauWidgets
+        TARGETED_DEVICE_FAMILY: "1"
+    info:
+      path: BlauWidgets/Supporting/Info.plist
+      properties:
+        CFBundleDisplayName: Blau
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
 
   BlauTests:
     type: bundle.unit-test

@@ -1,3 +1,4 @@
+import BlauAudio
 import BlauCore
 import BlauPersistence
 import BlauRealtime
@@ -115,11 +116,17 @@ struct AppEnvironmentFactoryTests {
         #expect(defaults.object(forKey: FeatureFlag.memoryTools.defaultsKey) as? Bool == false)
 
         for service in [
-            environment.audio as Any, environment.transcriber, environment.voiceGate, environment.realtime,
-            environment.topics, environment.memory,
+            environment.transcriber as Any, environment.voiceGate, environment.realtime, environment.topics,
+            environment.memory,
         ] {
             #expect(service is UnavailableService)
         }
+        // The conversation audio is real (#26), and idle until a conversation
+        // starts: building it never touches the microphone.
+        let keeper = try #require(environment.audio as? AudioSessionKeeper)
+        #expect(keeper === environment.conversationAudio?.keeper)
+        #expect(await keeper.status == .inactive)
+        #expect(await environment.conversationAudio?.controller.state == .idle)
         await #expect(throws: ServiceUnavailableError.self) { try await environment.realtime.connect() }
     }
 

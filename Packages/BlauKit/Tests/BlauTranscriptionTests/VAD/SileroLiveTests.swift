@@ -91,6 +91,51 @@ struct SileroLiveTests {
         #expect(statistics.chunksAnalyzed == 235)
         #expect(cpuShare < 0.03)
     }
+
+    /// #26: the model moves to the CPU halfway through a fixture (as
+    /// `BackgroundInferenceMonitor` does when Blau leaves the screen) and
+    /// back, keeping its stream state: the probabilities match a run that
+    /// never switched, and the segments stay within tolerance.
+    @Test func switchingBackendsMidStreamKeepsTheResults() async throws {
+        let fixture = try VADFixture.load("conversation-quiet")
+        var configuration = VoiceActivityConfiguration.standard
+        configuration.modelSkipLevelDecibels = nil
+
+        let steady = RecordingSpeechProbabilityModel(try await SileroSpeechProbabilityModel(modelDirectory: directory))
+        _ = await SegmenterRun.run(fixture.frames(), model: steady, configuration: configuration)
+
+        let silero = try await SileroSpeechProbabilityModel(modelDirectory: directory)
+        #expect(silero.supportedBackends == [.neuralEngine, .cpu])
+        let switching = RecordingSpeechProbabilityModel(silero)
+        let segmenter = VoiceActivitySegmenter(
+            model: switching, configuration: configuration, signposter: .disabled(.asr))
+        let events = segmenter.events()
+        let frames = fixture.frames()
+        let thirds = [frames.count / 3, 2 * frames.count / 3]
+        for (index, frame) in frames.enumerated() {
+            if index == thirds[0] { try await silero.switchInferenceBackend(to: .cpu) }
+            if index == thirds[1] { try await silero.switchInferenceBackend(to: .neuralEngine) }
+            await segmenter.process(frame)
+        }
+        await segmenter.finish()
+        #expect(await silero.inferenceBackend == .neuralEngine)
+        await #expect(throws: InferenceBackendError.self) { try await silero.switchInferenceBackend(to: .systemSpeech) }
+
+        var segments: [SpeechSegment] = []
+        for await event in events {
+            if case .speechEnded(let segment) = event { segments.append(segment) }
+        }
+        let accuracy = BoundaryAccuracy(fixture: fixture.name, labels: fixture.labels, segments: segments)
+        print("[silero] switching backends: \(accuracy)")
+        #expect(accuracy.isWithinTolerance, "\(accuracy)")
+
+        let expected = await steady.probabilities
+        let actual = await switching.probabilities
+        #expect(actual.count == expected.count)
+        let worst = zip(expected, actual).map { abs($0 - $1) }.max() ?? 0
+        print("[silero] largest probability difference after switching: \(worst)")
+        #expect(worst < 0.05, "the CPU and the Neural Engine run the same weights and state")
+    }
 }
 
 /// User plus system CPU time of this process, in seconds.

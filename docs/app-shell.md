@@ -11,6 +11,8 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `Blau/BlauApp.swift` | `@main`: builds the environment, wraps `RootView` in `PersistenceGate`, injects the environment, runs `start()`, forwards `scenePhase` |
 | `Blau/Composition/AppEnvironment.swift` | The composition root, its factories and launch-time environment detection |
 | `Blau/Composition/ScenePhaseHandling.swift` | `ScenePhase` → `AppPhase`, background time, the `.appEnvironment(_:)` modifier |
+| `Blau/Composition/DeviceLockObserver.swift` | Device lock and unlock (protected data) for the conversation keeper and the background inference monitor ([background.md](background.md)) |
+| `Blau/LiveActivity/` | The recording Live Activity: its attributes and Stop intent (shared with the `BlauWidgets` extension) and the `RecordingIndicator` that starts, updates and ends it ([background.md](background.md)) |
 | `Blau/RootView.swift` | The (still empty) main screen, the xAI Settings and onboarding entry points, and the DEBUG menu button |
 | `Blau/XAI/XAIServices.swift` | The xAI services (#33): `make(config:)` for the app, `hermetic(config:)` for previews and tests |
 | `Blau/Debug/` | The DEBUG menu and the reusable feature flag toggles |
@@ -30,7 +32,9 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `config` | `AppConfig` | `AppConfig.current` | `AppConfig.fallback` |
 | `flags` | `FeatureFlags` | `UserDefaults`, overrides in DEBUG | in memory |
 | `clock` | `any BlauClock` | `SystemClock` | `SystemClock`, or a `ManualClock` from the test |
-| `audio` | `any AudioService` | unavailable until #23 / #24 | `FakeAudioService` |
+| `audio` | `any AudioService` | `AudioSessionKeeper` from `ConversationAudio.live` (#26): capture and playback on the voice-processing engine, kept alive off screen | `FakeAudioService` |
+| `conversationAudio` | `ConversationAudio?` | the controller, capture hub, player and keeper behind `audio` | `nil` |
+| `backgroundInference` | `BackgroundInferenceMonitor` | moves model stages off the Neural Engine off screen ([background.md](background.md)) | same, with no stages |
 | `transcriber` | `any Transcriber` | unavailable until the live audio pipeline (capture hub and VAD) is composed; then `ParakeetStreamingTranscriber` (#29, [asr.md](asr.md)) | `FakeTranscriber` |
 | `voiceGate` | `any VoiceGate` | unavailable until #47 | `FakeVoiceGate` |
 | `realtime` | `any RealtimeService` | unavailable until #34 - #36 | `FakeRealtimeService` |
@@ -154,7 +158,7 @@ and hands it to the `AppLifecycleCoordinator`. The coordinator ignores
 repeats and calls each service's `appPhaseDidChange(_:)`:
 
 - moving to `active`, lowest layer first: persistence, audio, transcriber,
-  voice gate, realtime, topics, memory;
+  the background inference monitor, voice gate, realtime, topics, memory;
 - moving to `inactive` or `background`, in reverse, so producers flush
   before the store saves.
 
@@ -169,7 +173,11 @@ mode), so a service must not stop a live session just because the app was
 backgrounded: it releases what is idle and saves what could be lost. Today
 `PersistenceController` saves pending main-context edits of the store that is
 open now whenever the app leaves the foreground (inside a `db.save`
-signpost); the subsystems add their own handling as they are built.
+signpost); the `AudioSessionKeeper` keeps the conversation running off screen
+and resumes on return what couldn't resume off screen, and the
+`BackgroundInferenceMonitor` moves model stages off the Neural Engine and back
+([background.md](background.md)). The subsystems add their own handling as
+they are built.
 
 Each move to `active` also calls `persistence.refresh()` in its own task, so
 an iCloud account change made in the Settings app while Blau was in the

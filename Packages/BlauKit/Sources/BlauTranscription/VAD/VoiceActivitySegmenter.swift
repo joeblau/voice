@@ -53,6 +53,10 @@ public actor VoiceActivitySegmenter: VoiceActivitySource {
     private let chunkLength: Int
     private let signposter: Signposter
     private let clock: any BlauClock
+    /// Told about every model call, so `BackgroundInferenceMonitor` can
+    /// move the model off the Neural Engine when it struggles off screen.
+    private let inferenceObserver: (any InferenceObserver)?
+    private let inferenceStage: String
     private let logger = Log.asr
 
     private var machine: SpeechSegmentationStateMachine
@@ -96,11 +100,15 @@ public actor VoiceActivitySegmenter: VoiceActivitySource {
     ///   - configuration: Thresholds and durations.
     ///   - signposter: Where the `vad.chunk` intervals go.
     ///   - clock: Measures the model's run time for `statistics`.
+    ///   - inferenceObserver: Receives the latency (or error) of every model
+    ///     call, under the model's `inferenceStage` (`"vad"` when the model
+    ///     isn't `InferenceBackendSwitchable`). See docs/background.md.
     public init(
         model: any SpeechProbabilityModel,
         configuration: VoiceActivityConfiguration = .standard,
         signposter: Signposter = Signposts.asr,
-        clock: any BlauClock = SystemClock()
+        clock: any BlauClock = SystemClock(),
+        inferenceObserver: (any InferenceObserver)? = nil
     ) {
         precondition(model.chunkLength > 0, "The model must take at least one sample per chunk")
         self.model = model
@@ -108,6 +116,8 @@ public actor VoiceActivitySegmenter: VoiceActivitySource {
         self.configuration = configuration
         self.signposter = signposter
         self.clock = clock
+        self.inferenceObserver = inferenceObserver
+        self.inferenceStage = (model as? any InferenceBackendSwitchable)?.inferenceStage ?? "vad"
         self.machine = SpeechSegmentationStateMachine(configuration: configuration)
         // The onset look-back, the confirmation delay and a few chunks of
         // decision latency, with room to spare.
@@ -296,7 +306,11 @@ public actor VoiceActivitySegmenter: VoiceActivitySource {
                     try await model.speechProbability(of: samples, at: offset)
                 }
                 consecutiveFailures = 0
+                inferenceObserver?.record(.completed(inferenceStage, latency: clock.uptime - started))
             } catch {
+                if !(error is CancellationError) {
+                    inferenceObserver?.record(.failed(inferenceStage, error: error))
+                }
                 consecutiveFailures += 1
                 modelNeedsReset = true
                 update { $0.modelFailures += 1 }

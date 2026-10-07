@@ -71,6 +71,7 @@ the same `make` targets as above. See [docs/ci.md](docs/ci.md).
 | ---------------- | --------------------------------------------------------------- |
 | `project.yml`    | XcodeGen spec: targets, settings, Info.plist keys, entitlements, schemes |
 | `Blau/`          | App target sources and resources                                |
+| `BlauWidgets/`   | App extension rendering the recording Live Activity ([docs](docs/background.md)) |
 | `Packages/BlauKit` | Local Swift package with the business logic, one module per subsystem (see [`docs/architecture.md`](docs/architecture.md)) |
 | `docs/`          | Architecture and engineering docs ([app shell, environment and feature flags](docs/app-shell.md)) |
 | `BlauTests/`     | Unit tests (Swift Testing), hosted in the app                   |
@@ -88,7 +89,10 @@ the same `make` targets as above. See [docs/ci.md](docs/ci.md).
 ### Targets and schemes
 
 - `Blau`: the app, bundle id `com.joeblau.blau`, iCloud container
-  `iCloud.com.joeblau.blau`.
+  `iCloud.com.joeblau.blau`. Background mode `audio` keeps a conversation
+  running with the screen locked ([docs](docs/background.md)).
+- `BlauWidgets`: the app extension (`com.joeblau.blau.widgets`) that shows
+  the recording Live Activity on the lock screen and in the Dynamic Island.
 - `BlauTests`, `BlauUITests`, `BlauPerfTests`: unit, UI and performance tests.
 - Scheme `Blau`: runs Debug and tests with the `Blau` test plan.
 - Scheme `Blau-Perf`: runs and tests in Release with the `BlauPerf` test plan,

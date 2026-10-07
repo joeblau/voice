@@ -38,6 +38,7 @@
                     environmentSection
                     lifecycleSection
                     VoiceIDThresholdsSection(config: .calibrated)
+                    longSessionSection
                     modulesSection
                 }
                 .navigationTitle("Debug")
@@ -98,6 +99,17 @@
             Section("Lifecycle") {
                 LabeledContent("Scene phase", value: environment.lifecycle.phase?.rawValue ?? "launching")
                 LabeledContent("Phase changes", value: "\(environment.lifecycle.history.count)")
+            }
+        }
+
+        private var longSessionSection: some View {
+            Section {
+                NavigationLink("Long session soak test") {
+                    LongSessionDebugView()
+                }
+                .accessibilityIdentifier(LongSessionAccessibility.openLink)
+            } footer: {
+                Text("Keeps the microphone and the VAD running with the screen locked (#26).")
             }
         }
 
