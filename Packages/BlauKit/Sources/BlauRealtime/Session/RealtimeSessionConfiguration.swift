@@ -13,6 +13,7 @@ import Foundation
 /// | `reasoning.effort` | Settings, `high` or `none`, default `high` | |
 /// | `instructions` | ``RealtimeInstructions`` | Persona, style, memory |
 /// | `tools` | The registry's function tools (#38), then the built-in tools on in Settings | Omitted when there are none |
+/// | `resumption` | `{"enabled": true}` | The server keeps the conversation so a dropped connection resumes it with `?conversation_id=` (#39). Both the first and the resuming session must opt in |
 ///
 /// `audio.input` is not sent: Blau sends the *text* of each utterance, never
 /// audio. The model is chosen on the WebSocket URL (`?model=`), so
@@ -21,15 +22,19 @@ public struct RealtimeSessionConfiguration: Sendable, Hashable {
     public var outputFormat: RealtimeSession.Audio.Format
     public var outputTransport: RealtimeAudioTransport
     public var instructions: RealtimeInstructions
+    /// Opts every session in to resumption (`resumption.enabled`).
+    public var resumption: Bool
 
     public init(
         outputFormat: RealtimeSession.Audio.Format = .pcm24kHz,
         outputTransport: RealtimeAudioTransport = .json,
-        instructions: RealtimeInstructions = .blau
+        instructions: RealtimeInstructions = .blau,
+        resumption: Bool = true
     ) {
         self.outputFormat = outputFormat
         self.outputTransport = outputTransport
         self.instructions = instructions
+        self.resumption = resumption
     }
 
     /// Blau's configuration.
@@ -59,6 +64,7 @@ public struct RealtimeSessionConfiguration: Sendable, Hashable {
             reasoning: .init(effort: settings.reasoningEffort),
             voice: settings.voice.rawValue,
             turnDetection: .manual,
+            resumption: resumption ? .init(enabled: true) : nil,
             audio: .init(output: .init(format: outputFormat, transport: outputTransport, speed: settings.speed)),
             tools: tools.isEmpty ? nil : tools
         )

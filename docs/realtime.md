@@ -55,9 +55,13 @@ Every connection is a new server session, so after each `.connected` the
 owner sends its `session.update` again (`RealtimeSessionConfigurator.configure`,
 see [Session configuration](#session-configuration)). Nothing is queued while
 disconnected: `send(_:)` throws `notConnected`, and the caller decides what
-still makes sense (a user utterance, yes; stale input audio, no). With
-resumption (#39) the owner calls `setEndpoint(_:)` with `?conversation_id=` so
-the next connection replays the conversation.
+still makes sense (a user utterance, yes; stale input audio, no). For
+[long sessions](#long-sessions) (#39) the owner calls `setEndpoint(_:)` with
+`?conversation_id=` so the next connection replays the conversation,
+`reconnect(to:)` to renew a session on purpose (`connected →
+reconnecting(attempt: 1) → connected`, the old socket closed with 1000), and
+`prepareClientSecret()` to mint the next secret before closing the old
+connection. `connectionURL` is the URL the open connection was opened with.
 
 ## Keepalive and drops
 
@@ -132,6 +136,7 @@ complete `session.update` (issue #35). The code is in
 | `reasoning.effort` | `high` (default) or `none` | Settings → Voice ("Think Before Answering") |
 | `instructions` | `RealtimeInstructions` | Persona, long-form style, short spoken answers, how to read transcribed input, tool guidance, ProfileBlock and active facts, today's date |
 | `tools` | Only when there are tools: the registry's function tools, then the built-in search tools turned on | `RealtimeToolRegistry` and Settings → Search, see [Function calling](#function-calling) |
+| `resumption` | `{"enabled": true}` | Fixed. The server keeps the conversation so a dropped connection can resume it with `?conversation_id=`; xAI requires the opt-in on the first *and* the resuming session ([Long sessions](#long-sessions)) |
 
 Not sent: `audio.input` (Blau sends the *text* of utterances, never audio)
 and `model` (it is on the WebSocket URL, see below).
@@ -317,6 +322,10 @@ response.done (completed)                                     │
 | `realtime.drop` | event | A connection was lost |
 | `realtime.reconnected` | event | A reconnect succeeded |
 | `realtime.toolCall` | interval | One function call, from its arguments being complete to its output being decided. End message: tool name and outcome (`echo succeeded`, `search_memory timed_out`, `unknown unknown_tool`) |
+| `realtime.rollover` | event | The session is being renewed (age, deadline or `max_duration`) |
+| `realtime.resumed` | event | A connection resumed the server conversation |
+| `realtime.resumeRefused` | event | A connection meant to resume started a new conversation (or the upgrade was refused) |
+| `realtime.reseed` | event | A new server conversation is being given the history again |
 
 `realtime.connect` and `realtime.event` are canonical (see
 [performance.md](performance.md)); `realtime.toolCall` is not a pipeline
@@ -492,8 +501,9 @@ the same cut on *speech start* (VAD), with the echo guard, is barge-in (#37).
   the connection dropped is queued again; a reply cut off mid-way keeps what
   arrived (played out and stored). Every send carries the session it was
   decided for, so nothing meant for a dead session reaches the next one.
-- Each connection is a new server session, so Grok doesn't remember earlier
-  turns after a reconnect; resumption and reseeding are #39.
+- A new connection resumes the server conversation or is reseeded before
+  anything queued goes out, so Grok remembers the conversation across
+  drops and renewals; see [Long sessions](#long-sessions).
 - `start(waitsForConnection: false)` returns at once and connects in the
   background (the voice loop uses it so the user can start talking while the
   secret is minted). A connection that gives up moves the state to
@@ -550,6 +560,86 @@ a late response recognized by its tag. `TurnOrchestratorIntegrationTests` adds t
 real `ConversationStore` over SwiftData (both roles stored, merges and cuts
 stored once), the `manual-text-turn` fixture replayed in lockstep, and the
 real `StreamingAudioPlayer` rendering the reply.
+
+## Long sessions
+
+Conversations can last hours, but xAI ends a session after 120 minutes
+(`error` with type `max_duration`) and connections drop. The turn
+orchestrator keeps one conversation going across both (issue #39). The code
+is in `Packages/BlauKit/Sources/BlauRealtime/Continuity/` and
+`Turns/TurnOrchestrator+Continuity.swift`; the knobs are
+`TurnOrchestrator.Configuration.continuity` (`SessionContinuityConfiguration`).
+
+| Event | What happens |
+| ----- | ------------ |
+| `conversation.created` | Its id becomes the server conversation, and the client's endpoint gets `?conversation_id=<id>`, so every automatic reconnect asks to resume it |
+| Drop | The client reconnects at once with `?conversation_id=`. The session is **not ready** until the server shows whether it resumed; utterances are transcribed, stored and queued meanwhile ("Reconnecting…") |
+| Resumed | The server replays the history (`conversation.item.created`) and then answers the `session.update` (`session.updated`); a `conversation.created` with the same id counts too. The queued utterances go out as one turn. A turn whose items already went out before the drop isn't sent twice: items the replay already holds are skipped, and a reply in the replay that never reached the user is deleted (`conversation.item.delete`) so the turn asks again |
+| Not resumed | A `conversation.created` with another id, no sign of the old conversation by `session.updated` (or within 5 s), an upgrade refused with a 4xx, or two connections in a row that drop before resuming: the connection is a **new conversation** and is reseeded (below) |
+| 110 minutes | The session is renewed at the first moment no turn is in progress and nothing is queued. A client secret is minted at 108 minutes and checked again just before closing, while the old connection still works (`prepareClientSecret()`), so the gap is one WebSocket upgrade; utterances in the gap queue. If no secret can be minted (offline), the old session is kept and the renewal tried again every minute |
+| 118 minutes | Renewed even mid-turn, before the server's own limit: what arrived of the reply is kept, as after a drop |
+| `max_duration` | Renewed at once, as a new conversation; that conversation id is never resumed again |
+| Idle 25 minutes | xAI drops resumable history after 30 idle minutes, so a conversation idle for 25 is not asked for; the next connection is new and reseeded |
+
+**Reseeding** a new server conversation: the `session.update` sent first on
+every connection already carries the system instructions and the
+ProfileBlock (and facts). Then `conversation.item.create` sends a system
+note ("this conversation continues; don't greet again"), with the current
+topic's title and summary from `RealtimeReseedContextProviding` (the app
+passes its SwiftData transcript, `ConversationStore.topicDigest(for:)`), and
+the last 8 exchanges (at most 6,000 characters, newest kept first) as user
+and assistant messages, then the queued utterances as the next turn. The
+exchanges come from what the orchestrator stored (merged, refined and cut
+replies included), so Grok sees what the user actually heard. Utterances
+still queued are left out of the reseed: they go out as the new turn.
+
+**Renewal starts a new conversation by default.** The issue sketched
+renewing with `?conversation_id=`. xAI documents 120 minutes as the maximum
+*conversation* duration and doesn't say that resuming resets it, so a
+resumed conversation might be ended at 120 minutes anyway, mid-sentence.
+Renewing as a new conversation plus a reseed never depends on that. Set
+`continuity.resumesAtRollover = true` to renew by resuming instead (the
+renewal then expects the replay, and falls back to a reseed if it doesn't
+come) once a device test shows the limit is per connection.
+
+The snapshot's `session` (`RealtimeSessionContinuity`) reports the phase
+(`connecting`, `live`, `resuming`, `rollingOver`, `reconnecting`),
+`isReconnecting` for the UI, the session's age in whole minutes and the
+renewal, resumption and reseed counts. The HUD's **Session** row shows
+them: `live · 42 min · 1 renewed · 2 resumed · 1 reseeded`. The Voice Loop
+debug screen shows "Reconnecting…" while `isReconnecting`.
+
+### Tests
+
+`swift test --filter "TurnOrchestratorContinuityTests|ConversationHistoryTests|RealtimeReseedTests|RealtimeClientRenewalTests|TopicDigestTests"`:
+
+- **A 2.5-hour session on a fake clock** (`aTwoAndAHalfHourSessionRollsOverSeamlessly`):
+  30 turns, one every five minutes. The secret is minted at 108 minutes,
+  the session renewed at 110 between turns (old socket closed with 1000,
+  new conversation), reseeded with the note and the last 8 exchanges, and
+  the conversation goes on: every question answered, all 60 utterances
+  stored, never an error state. A variant renews by resuming, twice.
+- **A drop mid-response** (`aDropMidResponseResumesAndDeliversTheQueuedTurns`):
+  the reply is cut and kept, the state shows reconnecting, two utterances
+  are queued, the reconnect resumes `?conversation_id=`, nothing goes out
+  until the replay and `session.updated`, then both queued utterances go
+  out with one `response.create` and are answered.
+- Renewal waiting for the turn in progress, the deadline cutting it, no
+  secret postponing it, `max_duration`; a requeued turn not sent twice to a
+  resumed conversation; a refused resumption reseeding (with the topic)
+  before the queued turn; an unconfirmed resumption timing out; an upgrade
+  refused with 404; an idle conversation; a new conversation never resuming
+  the last one; the reseed through the real `ConversationStore`.
+
+### Manual verification
+
+| Check | How | Result |
+| ----- | --- | ------ |
+| Resumption shape | With a real key, record a session (`RealtimeTranscriptRecorder`), toggle Airplane Mode for 5 s. Note whether `conversation.created` arrives before or after the `session.update`, whether the resumed connection sends `conversation.created` with the same id, the replay (`conversation.item.created`) and `session.updated` after it. Console (`category:realtime`) shows `Resumed conversation … (n item(s) replayed)` | pending (needs a device and xAI credentials) |
+| Expired conversation | Resume a `conversation_id` idle for over 30 minutes (or a made-up one): note whether the upgrade is refused (HTTP status) or a new `conversation.created` arrives; either way Console shows a reseed | pending (needs xAI credentials) |
+| 120-minute limit | Run a session past 120 minutes with `continuity.rolloverAfter = nil`: note the `max_duration` error and whether resuming its `conversation_id` is ended at once. If resuming resets the clock, `resumesAtRollover` can be turned on | pending (needs xAI credentials and two hours) |
+| Renewal on a device | Hold a conversation past 110 minutes (or set `rolloverAfter` to 5 minutes in a debug build): the next reply after the renewal shows Grok still knows the conversation; the HUD's Session row shows `1 renewed · 1 reseeded` | pending (needs a device and xAI credentials) |
+| Soak | The 1–2 h soak test (#76) covers renewal with real audio | pending (#76) |
 
 ## Testing
 

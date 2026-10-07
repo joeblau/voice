@@ -74,3 +74,17 @@ extension ConversationStore: TurnTranscriptRecording {
         try endConversation(id, at: date)
     }
 }
+
+extension ConversationStore: RealtimeReseedContextProviding {
+    /// The conversation's current topic, for reseeding a new realtime
+    /// session (#39).
+    public func topicContext(for conversation: ConversationID) async -> RealtimeTopicContext? {
+        do {
+            guard let digest = try topicDigest(for: conversation) else { return nil }
+            let context = RealtimeTopicContext(title: digest.title, summary: digest.summary)
+            return context.isEmpty ? nil : context
+        } catch {
+            return nil
+        }
+    }
+}

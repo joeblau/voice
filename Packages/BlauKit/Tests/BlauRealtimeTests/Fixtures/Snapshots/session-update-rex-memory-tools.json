@@ -14,6 +14,9 @@
     "reasoning" : {
       "effort" : "none"
     },
+    "resumption" : {
+      "enabled" : true
+    },
     "tools" : [
       {
         "description" : "Search past conversations and notes.",

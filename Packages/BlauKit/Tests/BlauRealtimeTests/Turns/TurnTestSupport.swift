@@ -166,15 +166,28 @@ struct TurnHarness {
     let signposts = RecordingSignpostBackend()
     let orchestrator: TurnOrchestrator
     let conversationID = ConversationID()
+    let tokens: FakeTokenProvider
 
+    /// - Parameter sessionTimers: Whether the session's age timers (renewal
+    ///   at 110 minutes, #39) run. Off by default: they are always asleep on
+    ///   the manual clock, which would confuse tests that wait for "the"
+    ///   sleeper (a response timeout, a reconnect backoff).
     init(
         connector: FakeConnector = FakeConnector(),
         transcript: (any TurnTranscriptRecording)? = nil,
-        configuration: TurnOrchestrator.Configuration = .standard
+        configuration: TurnOrchestrator.Configuration = .standard,
+        reseedContext: any RealtimeReseedContextProviding = NoRealtimeReseedContext(),
+        tokens: FakeTokenProvider = FakeTokenProvider(),
+        sessionTimers: Bool = false
     ) {
         self.connector = connector
+        self.tokens = tokens
+        var configuration = configuration
+        if !sessionTimers {
+            configuration.continuity.rolloverAfter = nil
+        }
         client = RealtimeClient(
-            endpoint: .realtimeTest, tokenProvider: FakeTokenProvider(), connector: connector, clock: clock,
+            endpoint: .realtimeTest, tokenProvider: tokens, connector: connector, clock: clock,
             configuration: .init(connectTimeout: nil, keepAliveInterval: nil),
             signposter: .disabled(.realtime), unitRandom: { 0.5 })
         configurator = RealtimeSessionConfigurator(
@@ -188,7 +201,8 @@ struct TurnHarness {
             self.recording = recording
         }
         orchestrator = TurnOrchestrator(
-            client: client, configurator: configurator, audio: audio, transcript: self.transcript, clock: clock,
+            client: client, configurator: configurator, audio: audio, transcript: self.transcript,
+            reseedContext: reseedContext, clock: clock,
             signposter: Signposter(category: .realtime, backend: signposts), configuration: configuration)
     }
 

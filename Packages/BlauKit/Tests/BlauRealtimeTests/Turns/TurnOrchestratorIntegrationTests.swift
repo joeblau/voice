@@ -47,6 +47,29 @@ struct TurnOrchestratorIntegrationTests {
         #expect(utterances[0].id == question.id)
     }
 
+    /// A new server session (#39) is reseeded with the current topic as the
+    /// SwiftData store holds it.
+    @Test func aReseedCarriesTheTopicFromTheConversationStore() async throws {
+        let container = try BlauModelContainer.makeInMemory()
+        let store = ConversationStore(modelContainer: container, savePolicy: .immediate)
+        let harness = TurnHarness(transcript: store, reseedContext: store)
+        let first = try await harness.start()
+        try await harness.converse("When do we launch?", at: 0, reply: "On the 14th.", id: "1")
+        await harness.orchestrator.waitUntilSettled()
+        let topic = try await store.openTopic(at: turnT0)
+        try await store.closeTopic(topic, title: "Launch plan", summary: "- Launch on the 14th")
+
+        first.push(ServerEvents.maxDuration)
+        let second = try await harness.connector.socket(1)
+        try await waitUntil("reseeded") { second.sentAssistantTexts == ["On the 14th."] }
+        guard case .conversationItemCreate(.message(let note), _) = second.sentEvents[1] else {
+            Issue.record("Expected the reseed note")
+            return
+        }
+        #expect(note.text.contains("Current topic: Launch plan"))
+        #expect(note.text.contains("- Launch on the 14th"))
+    }
+
     /// A rapid follow-up and an interruption, as the store ends up holding
     /// them: one merged user row, the agent's cut reply, the new question.
     @Test func mergedAndInterruptedTurnsAreStoredOnce() async throws {

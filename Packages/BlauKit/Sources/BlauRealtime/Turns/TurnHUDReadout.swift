@@ -1,8 +1,8 @@
 import BlauTelemetry
 
 /// The voice loop's lines in the debug performance HUD: turn state,
-/// connection, end of utterance → first audio (last / p50 / p95) and token
-/// usage. The app's HUD overlay renders the rows as they are; the full HUD
+/// connection, the session's continuity (#39), end of utterance → first
+/// audio (last / p50 / p95) and token usage. The app's HUD overlay renders the rows as they are; the full HUD
 /// (#71) adds the other subsystems' rows next to them.
 public struct TurnHUDReadout: Sendable, Equatable {
     public struct Row: Sendable, Equatable, Identifiable {
@@ -27,6 +27,7 @@ public struct TurnHUDReadout: Sendable, Equatable {
         rows = [
             Row(label: "Turn", value: state),
             Row(label: "Realtime", value: Self.describe(snapshot.connection)),
+            Row(label: "Session", value: Self.describe(snapshot.session)),
             Row(label: "EOU → audio", value: Self.describe(snapshot.latency.firstAudio)),
             Row(label: "Turn time", value: Self.describe(snapshot.latency.turn)),
             Row(
@@ -58,6 +59,19 @@ public struct TurnHUDReadout: Sendable, Equatable {
         case .disconnected(nil): "disconnected"
         case .disconnected(let error?): "disconnected: \(error.description)"
         }
+    }
+
+    /// `live · 42 min · 1 renewed · 2 resumed · 1 reseeded`; the counts
+    /// only once they are non-zero.
+    static func describe(_ session: RealtimeSessionContinuity) -> String {
+        var parts = [session.phase.rawValue]
+        if session.phase != .idle {
+            parts.append("\(session.sessionAge.components.seconds / 60) min")
+        }
+        if session.rollovers > 0 { parts.append("\(session.rollovers) renewed") }
+        if session.resumptions > 0 { parts.append("\(session.resumptions) resumed") }
+        if session.reseeds > 0 { parts.append("\(session.reseeds) reseeded") }
+        return parts.joined(separator: " · ")
     }
 
     private static func milliseconds(_ duration: Duration) -> String {

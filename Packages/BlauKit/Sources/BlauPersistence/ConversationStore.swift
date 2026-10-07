@@ -112,6 +112,24 @@ public actor ConversationStore: ModelActor {
     /// The active conversation's current topic, if one is open.
     public var openTopicID: UUID? { currentTopic?.id }
 
+    /// The current topic of conversation `id`: the open topic while it is
+    /// the active conversation, otherwise its most recent topic. `nil` when
+    /// the conversation has no topic yet (or doesn't exist). A new realtime
+    /// session is reseeded with it (#39).
+    public func topicDigest(for id: ConversationID) throws -> TopicDigest? {
+        let topic: Topic?
+        if let activeConversation, activeConversation.id == id.rawValue, let currentTopic {
+            topic = currentTopic
+        } else {
+            topic = try conversationIfExists(id)?.topics?.max { $0.startedAt < $1.startedAt }
+        }
+        guard let topic else { return nil }
+        return TopicDigest(
+            title: topic.title == Topic.placeholderTitle ? nil : topic.title,
+            titleIsProvisional: topic.titleIsProvisional,
+            summary: topic.summary)
+    }
+
     /// The latest partial transcript for `utteranceID`, if it hasn't been
     /// committed or discarded.
     public func partialText(for utteranceID: UUID) -> String? {

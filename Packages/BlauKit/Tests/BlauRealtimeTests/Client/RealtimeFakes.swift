@@ -25,6 +25,11 @@ final class FakeTokenProvider: RealtimeTokenProviding {
         state.withLock { $0.errors = errors }
     }
 
+    /// Makes the next requests fail with `errors`, in order.
+    func failNext(_ errors: any Error...) {
+        state.withLock { $0.errors.append(contentsOf: errors) }
+    }
+
     var minted: Int { state.withLock { $0.minted } }
     var invalidations: Int { state.withLock { $0.invalidations } }
     var requests: Int { state.withLock { $0.requests } }
