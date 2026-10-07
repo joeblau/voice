@@ -33,7 +33,10 @@ import os
 /// ordinary reply, further calls are answered with a `limit_reached` error
 /// (the follow-up still goes out, so Grok can answer with what it has); if
 /// it calls tools yet again, that round gets no follow-up, so a confused
-/// model can't loop forever.
+/// model can't loop forever. Only responses the runner asked for count
+/// toward the limit: a response someone else started (the user's next
+/// turn) begins a new chain, so a loop that was stopped never costs the
+/// user's next question its tools.
 ///
 /// - **Barge-in and reconnects.** A response that ends `cancelled` or
 ///   `failed` drops its calls without a follow-up: the user has moved on.
@@ -149,7 +152,13 @@ public actor RealtimeToolRunner {
     private var abandonedResponseIDs: Set<String> = []
     private var abandonedOrder: [String] = []
     private var currentResponseID: String?
+    /// Follow-ups requested in a row by the current tool chain.
     private var consecutiveRounds = 0
+    /// Whether the runner sent a `response.create` whose
+    /// `response.created` hasn't arrived yet. The next response is then
+    /// the runner's follow-up and continues the chain; any other response
+    /// was started by someone else and begins a new one.
+    private var followUpPending = false
     private var nextToken: UInt64 = 0
 
     private static let memoryLimit = 256
@@ -207,6 +216,13 @@ public actor RealtimeToolRunner {
         switch event {
         case .responseCreated(let created):
             currentResponseID = created.response.id
+            if followUpPending {
+                followUpPending = false
+            } else {
+                // The user's turn (or anything else the runner didn't ask
+                // for): a new tool chain starts here.
+                consecutiveRounds = 0
+            }
         case .responseOutputItemAdded(let added):
             if case .functionCall(let call) = added.item, let callID = call.callID, let name = call.name {
                 announcedNames[callID] = name
@@ -239,6 +255,7 @@ public actor RealtimeToolRunner {
         announcedNames = [:]
         currentResponseID = nil
         consecutiveRounds = 0
+        followUpPending = false
     }
 
     // MARK: Starting calls
@@ -414,10 +431,16 @@ public actor RealtimeToolRunner {
             Log.realtime.fault(
                 "Grok kept calling tools after being refused; not requesting another response")
             abandon(key)
+            // The chain ends here and the next response is the user's, so
+            // their next question gets its tools again.
+            consecutiveRounds = 0
             return
         }
         rounds[key]?.followUpSent = true
         consecutiveRounds += 1
+        // Set before sending: the follow-up's `response.created` can be
+        // handled while this send is still suspended.
+        followUpPending = true
         do {
             try await sender.send(.responseCreate())
             Log.realtime.notice(
@@ -426,6 +449,9 @@ public actor RealtimeToolRunner {
             activityContinuation.yield(.followUpRequested(responseID: key.responseID))
         } catch {
             Log.realtime.error("Couldn't request the follow-up response: \(error.description, privacy: .public)")
+            // No follow-up will come; the next response is the user's.
+            followUpPending = false
+            consecutiveRounds = 0
             activityContinuation.yield(.abandoned(responseID: key.responseID))
         }
         removeRound(key)

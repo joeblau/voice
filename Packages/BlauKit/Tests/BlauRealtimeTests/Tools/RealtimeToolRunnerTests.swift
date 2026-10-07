@@ -1,6 +1,7 @@
 import BlauCore
 import BlauTelemetry
 import Foundation
+import Synchronization
 import Testing
 
 @testable import BlauRealtime
@@ -14,11 +15,12 @@ struct RealtimeToolRunnerTests {
 
     private func makeRunner(
         _ tools: [any RealtimeFunctionTool]? = nil,
-        configuration: RealtimeToolRunner.Configuration = .standard
+        configuration: RealtimeToolRunner.Configuration = .standard,
+        sender: (any RealtimeEventSending)? = nil
     ) throws -> RealtimeToolRunner {
         RealtimeToolRunner(
             registry: try RealtimeToolRegistry(tools ?? [EchoTool(), GateTool(gate: gate)]),
-            sender: sender,
+            sender: sender ?? self.sender,
             clock: clock,
             configuration: configuration,
             signposter: Signposter(category: .realtime, backend: signposts))
@@ -373,16 +375,22 @@ struct RealtimeToolRunnerTests {
 
     // MARK: Loops
 
+    /// Response `resp_<n>` calls `echo` with `"<n>"` and finishes.
+    /// `created: false` leaves out its `response.created`.
+    private func toolRound(_ runner: RealtimeToolRunner, _ n: Int, created: Bool = true) async {
+        if created {
+            await feed(runner, ToolEvents.created("resp_\(n)"))
+        }
+        await feed(
+            runner,
+            ToolEvents.argumentsDone(
+                "call_\(n)", name: "echo", arguments: #"{"text":"\#(n)"}"#, responseID: "resp_\(n)"),
+            ToolEvents.done("resp_\(n)"))
+    }
+
     @Test func refusesCallsAfterTooManyRoundsInARow() async throws {
         let runner = try makeRunner(configuration: .init(maximumConsecutiveRounds: 2))
-        func round(_ n: Int) async {
-            await feed(
-                runner,
-                ToolEvents.created("resp_\(n)"),
-                ToolEvents.argumentsDone(
-                    "call_\(n)", name: "echo", arguments: #"{"text":"\#(n)"}"#, responseID: "resp_\(n)"),
-                ToolEvents.done("resp_\(n)"))
-        }
+        func round(_ n: Int) async { await toolRound(runner, n) }
         await round(1)
         try await sender.waitForSent(2)
         await round(2)
@@ -411,6 +419,72 @@ struct RealtimeToolRunnerTests {
         #expect(sender.sent.last == .responseCreate())
     }
 
+    /// Once the loop breaker has stopped a chain, the next response is the
+    /// user's. If it calls a tool straight away (no ordinary reply in
+    /// between), the call runs and gets its follow-up instead of dead air.
+    /// Without `response.created` events the runner still knows the chain
+    /// ended, because the loop breaker itself ends it.
+    @Test(arguments: [true, false])
+    func theUsersNextQuestionAfterAStoppedLoopGetsItsTools(withResponseCreated: Bool) async throws {
+        let runner = try makeRunner(configuration: .init(maximumConsecutiveRounds: 2))
+        func round(_ n: Int) async { await toolRound(runner, n, created: withResponseCreated) }
+        await round(1)
+        try await sender.waitForSent(2)
+        await round(2)
+        try await sender.waitForSent(4)
+        await round(3)
+        try await sender.waitForSent(6)
+        // Round 4 is refused and gets no follow-up: the loop is stopped.
+        await round(4)
+        try await sender.waitForSent(7)
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(sender.sent.count == 7)
+        #expect(try outputObject(sender.outputs[3].output)["error"] == "limit_reached")
+        #expect(await runner.isIdle)
+
+        // The user asks something new and Grok calls a tool for it.
+        await round(5)
+        try await sender.waitForSent(9)
+        #expect(sender.outputs.last?.output == #"{"text":"5"}"#)
+        #expect(sender.sent.last == .responseCreate())
+        #expect(sender.responseCreates == 4)
+    }
+
+    /// Only responses the runner asked for continue a chain: a response it
+    /// didn't request (the user's next turn) starts counting from zero,
+    /// even if the follow-up before it never reported `response.done`.
+    @Test func aResponseTheRunnerDidNotRequestStartsANewChain() async throws {
+        let runner = try makeRunner(configuration: .init(maximumConsecutiveRounds: 2))
+        await toolRound(runner, 1)
+        try await sender.waitForSent(2)
+        await toolRound(runner, 2)
+        try await sender.waitForSent(4)
+        // The follow-up starts but is lost before it finishes (no
+        // `response.done`), and the user's turn starts the next response.
+        await feed(runner, ToolEvents.created("resp_3"))
+        await toolRound(runner, 4)
+        try await sender.waitForSent(6)
+        #expect(sender.outputs.last?.output == #"{"text":"4"}"#)
+        #expect(sender.sent.last == .responseCreate())
+    }
+
+    /// A follow-up that couldn't be sent ends the chain: no follow-up
+    /// response will come, so the next round isn't counted against it.
+    @Test func aFailedFollowUpEndsTheChain() async throws {
+        let failing = FailingFollowUpSender(recorder: sender, failures: 1)
+        let runner = try makeRunner(configuration: .init(maximumConsecutiveRounds: 1), sender: failing)
+        let activity = StreamCollector(runner.activity)
+        await toolRound(runner, 1, created: false)
+        try await activity.waitFor(.abandoned(responseID: "resp_1"))
+        #expect(sender.outputs.map(\.output) == [#"{"text":"1"}"#])
+        #expect(sender.responseCreates == 0)
+
+        await toolRound(runner, 2, created: false)
+        try await sender.waitForSent(3)
+        #expect(sender.outputs.last?.output == #"{"text":"2"}"#)
+        #expect(sender.sent.last == .responseCreate())
+    }
+
     @Test func setRegistryChangesWhatCanBeCalled() async throws {
         let runner = try makeRunner([])
         await runner.setRegistry(try RealtimeToolRegistry([EchoTool()]))
@@ -420,5 +494,29 @@ struct RealtimeToolRunnerTests {
         try await sender.waitForSent(2)
         #expect(sender.outputs.map(\.output) == [#"{"text":"ok"}"#])
         #expect(await runner.registry.names == ["echo"])
+    }
+}
+
+/// Forwards to `recorder`, but fails the first `failures` `response.create`s
+/// with `notConnected`.
+private final class FailingFollowUpSender: RealtimeEventSending {
+    private let recorder: RecordingSender
+    private let remainingFailures: Mutex<Int>
+
+    init(recorder: RecordingSender, failures: Int) {
+        self.recorder = recorder
+        remainingFailures = Mutex(failures)
+    }
+
+    func send(_ event: RealtimeClientEvent) async throws(RealtimeClientError) {
+        if case .responseCreate = event {
+            let fails = remainingFailures.withLock { remaining in
+                guard remaining > 0 else { return false }
+                remaining -= 1
+                return true
+            }
+            if fails { throw .notConnected }
+        }
+        try await recorder.send(event)
     }
 }

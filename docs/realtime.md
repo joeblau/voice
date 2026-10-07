@@ -270,7 +270,9 @@ response.done (completed)                                     │
 - **Loops.** A follow-up can call tools again. After four rounds in a row
   without an ordinary reply, calls get a `limit_reached` error (the
   follow-up still goes out so Grok can answer); a further round gets no
-  follow-up at all.
+  follow-up at all. Only responses the runner requested count: a response
+  someone else starts (the user's next turn) begins a new chain, so the
+  user's next question gets its tools again after a loop was stopped.
 - **Disconnected.** If an output can't be sent (`notConnected`), the round
   is dropped. A new connection is a new server session without those calls.
 
