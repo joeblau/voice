@@ -398,7 +398,7 @@ lands after the conversation ended still changes the right topic.
 | Candidate the model agreed with | Splits the current topic at the boundary: the new topic appears with the model's provisional title, shown in italics (`titleIsProvisional`) |
 | Candidate vetoed in the same step | Nothing is opened |
 | Boundary confirmed | Moves the new topic's start to the confirmed gap if it moved, keeps the topic, and **refines the closed topic**: labels all of its exchanges and makes that title final, with a summary |
-| Candidate taken back (digression, end of stream) | Merges the provisional topic back into the one before it |
+| Candidate taken back (digression, end of stream) | Merges the provisional topic back into the one before it. If the user renamed the provisional topic, the break is theirs: the topic stays and the one before it is closed and refined instead |
 | Conversation ends | Scores the last exchange, takes back an unconfirmed break, refines the last topic; a topic with no utterances is removed. Utterances that arrive afterwards (late transcripts) never reopen topics |
 
 The new topic appears about two exchanges after a real switch: the
@@ -431,9 +431,14 @@ instead (three to five exchanges).
   manual title is therefore never overwritten, whatever label lands later.
   The summary is still refreshed.
 - **Merge with previous** gives the earlier topic the later one's utterances
-  and end, deletes the later topic, and refreshes the summary. A manual
-  title on either side survives. Merging away a provisional topic also
-  ignores the segmenter's later confirmation of that boundary.
+  and end, deletes the later topic, and refreshes the summary. The earlier
+  topic keeps its title unless that title is provisional and the later
+  one's is final (refined and manual titles are both final, so a refined
+  earlier title wins over a manual later one). Merging away a provisional
+  topic also ignores the segmenter's later confirmation of that boundary.
+- **Renaming a provisional topic** accepts its break: if the segmenter
+  later takes the candidate back, the named topic is kept rather than
+  merged away, and the topic before it is closed and refined.
 - **Split here** starts a new topic at an utterance (not the first). Both
   parts are labeled again; a manual title on the first part stays.
 

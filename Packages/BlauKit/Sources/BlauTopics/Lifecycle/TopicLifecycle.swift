@@ -58,7 +58,9 @@ public enum TopicLifecycleEvent: Hashable, Sendable {
 /// title is final, and the store only writes a labeler's title over a
 /// provisional one (`ConversationStore.applyTopicLabel`), so a manual title
 /// is never overwritten. If the user merges away a provisional break, the
-/// segmenter's later confirmation of it is ignored.
+/// segmenter's later confirmation of it is ignored; if the user renames a
+/// provisional topic, the break is theirs and is kept even when the
+/// segmenter takes the candidate back.
 ///
 /// **Ordering.** Labeling takes seconds, so ``ingest(_:)``,
 /// ``beginConversation(_:at:)`` and ``finishConversation(_:)`` queue their
@@ -209,6 +211,11 @@ public actor TopicLifecycle: TopicService {
     /// - Throws: `ConversationStoreError.emptyTitle` or `.topicNotFound`.
     public func rename(_ topicID: UUID, to title: String) async throws {
         try await store.renameTopic(topicID, to: title)
+        if let live, live.provisional?.topicID == topicID {
+            // Naming a provisional topic accepts its break: the segmenter
+            // taking the candidate back must not merge the named topic away.
+            live.provisional?.isUserOwned = true
+        }
         if let live, live.currentTopicID == topicID {
             live.titledTopics.insert(topicID)
             await syncPipelineTitle(live)
@@ -508,13 +515,31 @@ public actor TopicLifecycle: TopicService {
     }
 
     /// The segmenter took a candidate back: merge its provisional topic
-    /// into the one before it.
+    /// into the one before it, unless the user named it. A named topic is
+    /// the user's: it stays, and the topic before it is closed and refined
+    /// as if the break had been confirmed.
     private func takeBack(
         _ boundary: TopicBoundary, reason: TopicRejectionReason, in conversation: LiveConversation
     ) async {
         conversation.ignoresPendingCandidate = false
         guard let provisional = conversation.provisional else { return }
         conversation.provisional = nil
+        // The title check also covers a rename that reached the store some
+        // other way (another device, or a rename still in flight here).
+        let keptByUser: Bool
+        if provisional.isUserOwned {
+            keptByUser = true
+        } else {
+            let snapshot = try? await store.topicSnapshot(provisional.topicID)
+            keptByUser = snapshot.map { !$0.titleIsProvisional } ?? false
+        }
+        if keptByUser {
+            Log.topics.notice(
+                "Kept the user's topic before exchange \(boundary.unitIndex, privacy: .public) the segmenter took back: \(reason.rawValue, privacy: .public)"
+            )
+            await refine(provisional.previousTopicID, in: conversation.id, finalizing: true)
+            return
+        }
         do {
             let survivor = try await store.mergeTopicWithPrevious(provisional.topicID)
             if conversation.currentTopicID == provisional.topicID {
@@ -683,6 +708,9 @@ private struct ProvisionalBreak {
     /// The topic it was split from, which the boundary closes.
     var previousTopicID: UUID
     var previousStartUnit: Int
+    /// The user renamed the provisional topic, which accepts the break: it
+    /// is kept even if the segmenter takes the candidate back.
+    var isUserOwned = false
 }
 
 /// What the lifecycle tracks about the conversation being recorded. Only

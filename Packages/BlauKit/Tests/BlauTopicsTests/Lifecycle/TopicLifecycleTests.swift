@@ -152,6 +152,51 @@ struct TopicLifecycleTests {
         #expect(try await fixture.topicOfExchange(6) == topics.first?.id)
     }
 
+    @Test func aRenamedProvisionalTopicIsKeptWhenTheSegmenterTakesItBack() async throws {
+        let fixture = try LifecycleFixture(.briefDigression)
+        try await fixture.begin()
+        let log = LifecycleEventLog(fixture.lifecycle)
+        try await fixture.play(0..<8)
+        let before = try await fixture.topics()
+        #expect(before.count == 2)
+        let first = try #require(before.first)
+        let digression = try #require(before.last)
+        #expect(digression.titleIsProvisional)
+
+        // Naming the provisional topic accepts the break: the segmenter's
+        // take-back must neither delete it nor move its title.
+        try await fixture.lifecycle.rename(digression.id, to: "My Digression")
+        try await fixture.play(8..<ScriptedTranscript.briefDigression.count)
+        try await fixture.finish()
+
+        let topics = try await fixture.topics()
+        #expect(Array(topics.prefix(2).map(\.id)) == [first.id, digression.id])
+        #expect(topics.first?.title == "Topic of 6 Exchanges")
+        #expect(topics.first?.titleIsProvisional == false)
+        #expect(topics.dropFirst().first?.title == "My Digression")
+        #expect(topics.dropFirst().first?.titleIsProvisional == false)
+        #expect(!log.removed.contains(digression.id))
+        // The topic the break closed was still refined.
+        try await waitFor { log.closed.contains { $0.id == first.id } }
+    }
+
+    @Test func renamingBothSidesOfAProvisionalBreakKeepsBothTitles() async throws {
+        let fixture = try LifecycleFixture(.briefDigression)
+        try await fixture.begin()
+        try await fixture.play(0..<8)
+        let before = try await fixture.topics()
+        #expect(before.count == 2)
+        try await fixture.lifecycle.rename(before[0].id, to: "YC Prep")
+        try await fixture.lifecycle.rename(before[1].id, to: "My Digression")
+
+        try await fixture.play(8..<ScriptedTranscript.briefDigression.count)
+        try await fixture.finish()
+
+        let topics = try await fixture.topics()
+        #expect(Array(topics.prefix(2).map(\.id)) == before.map(\.id))
+        #expect(Array(topics.prefix(2).map(\.title)) == ["YC Prep", "My Digression"])
+    }
+
     @Test func aVetoedCandidateNeverOpensATopic() async throws {
         let fixture = try LifecycleFixture(.threeTopics, labeler: .lifecycle(confirms: false))
         try await fixture.begin()
