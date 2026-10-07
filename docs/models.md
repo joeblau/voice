@@ -11,7 +11,7 @@ the rest of the app's life.
 
 | `ModelID` | Model | Size | Required | Used by |
 | --- | --- | --- | --- | --- |
-| `.sileroVAD` | Silero VAD v6.2.1 (256 ms, unified) | 1 MB | yes | VAD segmenter (#28) |
+| `.sileroVAD` | Silero VAD v6.2.1 (256 ms, unified) | 1 MB | yes | VAD segmenter (#28, [vad.md](vad.md)) |
 | `.speakerEmbedding` | WeSpeaker ResNet34 (`wespeaker_v2`, 256-d) | 8 MB | yes | Voice ID (#45) |
 | `.parakeetRealtimeEOU` | Parakeet realtime EOU 120M, 320 ms chunks | 224 MB | yes | Streaming ASR (#29) |
 | `.parakeetTDTv3` | Parakeet TDT 0.6B v3 (int8 encoder) | 483 MB | no | Second pass (#30) |
@@ -144,7 +144,7 @@ APIs; never with its downloading convenience loaders.
 
 | Model | FluidAudio call |
 | --- | --- |
-| `.sileroVAD` | `VadManager(config:vadModel:)` with `MLModel(contentsOf: directory/FluidAudioModels.vadModelBundle)` |
+| `.sileroVAD` | `SileroSpeechProbabilityModel(modelDirectory: directory)`, which wraps `VadManager(config:vadModel:)` with `MLModel(contentsOf: directory/FluidAudioModels.vadModelBundle)` |
 | `.parakeetRealtimeEOU` | `StreamingEouAsrManager(chunkSize: .ms320).loadModels(from: directory)` |
 | `.parakeetTDTv3` | `AsrModels.loadLocal(from: directory, version: .v3)` |
 | `.speakerEmbedding` | `MLModel(contentsOf: directory/FluidAudioModels.speakerEmbeddingBundle)`; Blau wraps it as `WeSpeakerEmbedder.load(modelDirectory: directory)` ([voice-id.md](voice-id.md)) |

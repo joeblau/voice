@@ -1,0 +1,12 @@
+{
+  "description": "Twelve seconds of continuous speech with only short breaths between sentences; longer than the 8 s maximum segment, so it must be force-split.",
+  "sampleRate": 16000,
+  "sampleCount": 254080,
+  "noiseDBFS": -58.0,
+  "segments": [
+    {
+      "start": 16000,
+      "end": 230080
+    }
+  ]
+}

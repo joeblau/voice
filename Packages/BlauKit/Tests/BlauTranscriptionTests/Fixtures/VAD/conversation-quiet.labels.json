@@ -1,0 +1,28 @@
+{
+  "description": "Five utterances from different voices over a quiet room (-62 dBFS), as voice processing delivers it.",
+  "sampleRate": 16000,
+  "sampleCount": 288800,
+  "noiseDBFS": -62.0,
+  "segments": [
+    {
+      "start": 19200,
+      "end": 64640
+    },
+    {
+      "start": 90240,
+      "end": 99360
+    },
+    {
+      "start": 120160,
+      "end": 159360
+    },
+    {
+      "start": 192960,
+      "end": 206560
+    },
+    {
+      "start": 224160,
+      "end": 264800
+    }
+  ]
+}

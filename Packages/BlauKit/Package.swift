@@ -102,6 +102,9 @@ enum KitModule: String, CaseIterable {
             // CMU ARCTIC speech clips from four speakers, for the speaker
             // embedding tests.
             [.copy("Fixtures")]
+        case .transcription:
+            // Labelled speech WAVs and recorded Silero probabilities (VAD tests).
+            [.copy("Fixtures")]
         default:
             []
         }

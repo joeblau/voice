@@ -1,0 +1,24 @@
+{
+  "description": "Four utterances over loud room noise (-42 dBFS, about 18 dB SNR).",
+  "sampleRate": 16000,
+  "sampleCount": 253120,
+  "noiseDBFS": -42.0,
+  "segments": [
+    {
+      "start": 24000,
+      "end": 63840
+    },
+    {
+      "start": 92640,
+      "end": 118240
+    },
+    {
+      "start": 140640,
+      "end": 174560
+    },
+    {
+      "start": 206560,
+      "end": 229120
+    }
+  ]
+}
