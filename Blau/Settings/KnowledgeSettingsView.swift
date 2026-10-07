@@ -1,8 +1,10 @@
 import BlauCore
 import BlauMemory
 import BlauPersistence
+import BlauTelemetry
 import SwiftData
 import SwiftUI
+import os
 
 /// Accessibility identifiers for Settings → Knowledge, shared with UI tests.
 enum KnowledgeSettingsIdentifiers {
@@ -22,18 +24,36 @@ enum KnowledgeSettingsIdentifiers {
 /// stored and says what's coming.
 struct KnowledgeSettingsView: View {
     @Environment(FeatureFlags.self) private var flags
-    @Query private var documents: [MemoryDocument]
-    @Query private var profileBlocks: [ProfileBlock]
-    @Query private var entities: [MemoryEntity]
-    @Query(filter: #Predicate<Fact> { $0.invalidatedAt == nil }) private var facts: [Fact]
+    @Environment(\.modelContext) private var modelContext
+    @State private var counts: Counts?
+
+    /// What the summary shows. Counted in the store (`fetchCount`) rather
+    /// than with `@Query`, which would load every document, entity and fact
+    /// on the main thread just to count them.
+    struct Counts: Equatable {
+        var hasProfile: Bool
+        var documents: Int
+        var entities: Int
+        var facts: Int
+
+        @MainActor
+        init(in context: ModelContext) throws {
+            var profile = FetchDescriptor<ProfileBlock>()
+            profile.fetchLimit = 1
+            hasProfile = try context.fetchCount(profile) > 0
+            documents = try context.fetchCount(FetchDescriptor<MemoryDocument>())
+            entities = try context.fetchCount(FetchDescriptor<MemoryEntity>())
+            facts = try context.fetchCount(FetchDescriptor<Fact>(predicate: #Predicate { $0.invalidatedAt == nil }))
+        }
+    }
 
     var body: some View {
         Form {
             Section {
-                LabeledContent("About you", value: profileBlocks.isEmpty ? "Empty" : "Saved")
-                LabeledContent("Notes and documents", value: documents.count.formatted())
-                LabeledContent("People and things", value: entities.count.formatted())
-                LabeledContent("Facts", value: facts.count.formatted())
+                LabeledContent("About you", value: counts.map { $0.hasProfile ? "Saved" : "Empty" } ?? "—")
+                LabeledContent("Notes and documents", value: counts?.documents.formatted() ?? "—")
+                LabeledContent("People and things", value: counts?.entities.formatted() ?? "—")
+                LabeledContent("Facts", value: counts?.facts.formatted() ?? "—")
             } header: {
                 Text("What Blau Knows")
             } footer: {
@@ -59,6 +79,15 @@ struct KnowledgeSettingsView: View {
         }
         .accessibilityIdentifier(KnowledgeSettingsIdentifiers.view)
         .navigationTitle("Knowledge")
+        .task { refreshCounts() }
+    }
+
+    private func refreshCounts() {
+        do {
+            counts = try Counts(in: modelContext)
+        } catch {
+            Log.ui.error("Couldn't count the knowledge base: \(String(describing: error), privacy: .public)")
+        }
     }
 }
 

@@ -224,6 +224,7 @@ final class SettingsUITests: XCTestCase {
         export.tap()
         let share = app.buttons["settings.icloud.export.share"]
         XCTAssertTrue(share.waitForExistence(timeout: 10), "No share button after exporting")
+        XCTAssertTrue(app.buttons["settings.icloud.export.again"].exists, "No Export Again after exporting")
         share.tap()
         let opened =
             app.otherElements["ActivityListView"].waitForExistence(timeout: 10)

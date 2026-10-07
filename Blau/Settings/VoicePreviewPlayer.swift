@@ -52,19 +52,20 @@ final class VoicePreviewPlayer {
         }
     }
 
-    /// Stops the sample and releases the audio session.
+    /// Stops the sample, releases the audio session and clears an earlier
+    /// failure (it was about the voice the user has moved on from).
     func stop() {
         playback?.cancel()
         playback = nil
         finishPlayback()
-        if case .failed = state {
-            return
-        }
         state = .idle
     }
 
     private func run(_ voice: RealtimeVoice, speed: Double) async {
-        if await audio.isCapturing {
+        let isCapturing = await audio.isCapturing
+        // A newer preview (or `stop()`) took over while this one waited.
+        guard !Task.isCancelled else { return }
+        if isCapturing {
             state = .failed(String(localized: "Stop the conversation to hear a voice preview."))
             return
         }

@@ -102,6 +102,11 @@ struct PrivacySettingsView: View {
         }
         do {
             let summary = try DataEraser.erase(scope, in: modelContext)
+            if scope.components.contains(.conversations) {
+                // The share sheet's copy holds the full text of every
+                // conversation; it goes with them.
+                ConversationExportFiles.removeAll()
+            }
             result = Self.resultMessage(scope, summary: summary)
         } catch {
             problem = String(localized: "Couldn't delete the data. Nothing was changed. Try again.")

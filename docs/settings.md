@@ -53,7 +53,10 @@ developer's own choices. Fake environments (previews, unit tests,
 **Test Connection** re-runs the unbilled key checks against the stored key
 (`GET /v1/api-key`, then minting a throwaway realtime client secret) and
 reports the result under the button. The key is never removed by a failed
-test.
+test. Only a key or account problem (invalid, switched off, no credits,
+not permitted) marks the key unverified; a transient failure (offline, a
+timeout, rate limiting, a server error) is reported under the button but
+leaves a verified key verified.
 
 **Usage and cost** (`RealtimeUsageEstimator`, BlauRealtime) counts this
 calendar month from the stored transcript: Grok's speaking time (each agent
@@ -71,7 +74,9 @@ and speed for the session, and `VoicePreviewPlayer` plays it with
 `AVAudioPlayer` in the `.playback` category. Realtime and TTS voices share
 their ids. A preview is refused while the microphone is capturing, so it
 never fights the conversation for the audio session. Each new sample is a
-small TTS request on the user's xAI bill, which the footer says.
+small TTS request on the user's xAI bill, which the footer says. Starting
+another preview, or picking another voice, cancels the one in flight and
+clears an earlier failure message.
 
 **Voice ID sensitivity** (`VoiceIDSensitivity`, BlauVoiceID) is a slider
 from Relaxed (0) through Balanced (0.5, the calibrated thresholds) to
@@ -86,13 +91,19 @@ Parakeet's realtime model understands English only, so choosing any other
 language makes `effectiveEnginePreference` Apple's engine (the user's own
 engine choice is kept for when they switch back), and the Apple engine's
 availability is checked for that language. The language list is Apple's
-`SpeechTranscriber.supportedLocales` on the device.
+`SpeechTranscriber.supportedLocales` on the device. An availability check
+that finishes after the language changed is dropped, so the old language's
+result never shows for the new one.
 
 **Export Conversations** (`ConversationExporter`, BlauPersistence) writes
 every conversation, oldest first, as one Markdown file: a heading per
 conversation (its title or its date), its time span, a heading per topic,
 and a paragraph per committed utterance led by **You**, **Grok** or
-**Blau**. Partials are left out. The Markdown Export section above it
+**Blau**. Partials are left out. The conversations are read on the main
+context and formatted and written off the main actor; the file is a
+snapshot, so **Export Again** makes a fresh one. It lives in the app's
+temporary directory (`ConversationExportFiles`): each export replaces the
+last, and deleting conversations in Privacy & Data removes it. The Markdown Export section above it
 keeps one file per conversation in iCloud Drive → Blau instead (#78,
 [export.md](export.md)).
 
@@ -102,6 +113,10 @@ in the persistent history and the CloudKit mirror removes it from iCloud
 and the user's other devices (a batch delete would bypass that). Each
 action asks first, with a count. Nothing is deleted while a conversation is
 recording.
+
+**Knowledge** counts documents, people and things, and current facts with
+`ModelContext.fetchCount` when the pane opens, rather than loading every
+record through `@Query` just to count it.
 
 **Export Logs** (`LogExporter`, BlauTelemetry) reads the last hour of
 Blau's subsystem from the running process's unified log (`OSLogStore`,
