@@ -298,6 +298,56 @@ is the quick, hermetic check: the committed template has exactly the listed
 instruments and Blau's os_signpost options, carries no recorded run or local
 paths, and loads in xctrace.
 
+## Baselines
+
+### Persistence write path (`ConversationStore`, #21)
+
+`ConversationStoreStressTests` (in `Packages/BlauKit`) commits 10,000
+utterances through `ConversationStore` into an on-disk SQLite store, with a
+topic change every 100 utterances, and prints a `DBSTRESS` line. The timed
+span covers every `startConversation`, `openTopic`, `commitUtterance` and
+`endConversation` call, including the saves.
+
+The always-on test (10 conversations of 1,000) fails if it uses more than
+**15,000 ms of process CPU time** (override with
+`BLAU_DB_STRESS_BUDGET_MS`). It checks CPU time, not wall time, because CI
+and dev machines run other work in parallel; the budget is about 7x the
+debug baseline so it only trips on a real regression (for example a save
+per utterance). The worst case and the save-every-change comparison run
+with `BLAU_DB_STRESS=1`:
+
+```sh
+cd Packages/BlauKit
+swift test --filter ConversationStoreStressTests                          # debug, budget check
+BLAU_DB_STRESS=1 swift test -c release --filter ConversationStoreStressTests  # all three, optimized
+```
+
+Recorded 2026-10-07 on an Apple M3 Max (Mac15,8), macOS 27.2, Xcode 27.2.
+The debug 1 x 10,000 run shared the host with heavy parallel builds, so only
+its CPU time is meaningful.
+
+| Run                                   | Build   | Utterances | CPU      | Per utterance | Wall     | Saves |
+| ------------------------------------- | ------- | ---------- | -------- | ------------- | -------- | ----- |
+| 10 conversations x 1,000, coalesced   | release | 10,000     | 1,628 ms | 163 µs        | 1,615 ms | 40    |
+| 1 conversation x 10,000, coalesced    | release | 10,000     | 4,054 ms | 405 µs        | 4,068 ms | 22    |
+| 1 conversation x 500, save every change | release | 500      | 907 ms   | 1,813 µs      | 951 ms   | 507   |
+| 10 conversations x 1,000, coalesced   | debug   | 10,000     | 2,178 ms | 218 µs        | 1,922 ms | 40    |
+| 1 conversation x 10,000, coalesced    | debug   | 10,000     | 9,530 ms | 953 µs        | n/a      | 24    |
+
+Coalescing is about 11x cheaper per utterance than saving every change.
+The cost per utterance grows with the conversation's size because SwiftData
+updates the inverse `Conversation.utterances` relationship on every link
+(see docs/data-model.md).
+
+**On device: pending.** The same numbers on an iPhone, and a check with
+Instruments' os_signpost track that `db.save` never appears on the main
+thread during a live session, need a physical device:
+
+| Run                                 | Device | CPU     | Wall    | Notes |
+| ----------------------------------- | ------ | ------- | ------- | ----- |
+| 10 x 1,000, coalesced (release)     | iPhone | pending | pending |       |
+| 1 x 10,000, coalesced (release)     | iPhone | pending | pending |       |
+
 ## What comes next
 
 The rest of the performance epic (#11) builds on these names: MetricKit and
