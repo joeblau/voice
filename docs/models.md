@@ -60,7 +60,9 @@ a second, unpinned copy.
   `allowsConstrainedNetworkAccess` to `false`, so the system enforces it even
   if the path monitor is late. Settings has **Download on Wi-Fi Only**;
   onboarding offers **Download Using Cellular Data** for the current launch
-  only.
+  only. Turning **Download on Wi-Fi Only** on takes effect at once: a
+  download already running over cellular stops and waits for Wi-Fi, keeping
+  its partial file, and the launch-only cellular override ends.
 - **Resume.** Bytes stream straight to `<file>.partial` in a staging
   directory. A dropped connection, a retry or a relaunch continues with an
   HTTP `Range` request from the bytes on disk. A server that answers with
@@ -133,7 +135,7 @@ progress of the required models), `diskUsage` and `preferences`.
 | UI | Where |
 | --- | --- |
 | Setup card: progress, Wi-Fi wait, cellular override, preparing, retry | `Blau/SpeechModels/SpeechModelSetupView.swift` (shown by `RootView` until onboarding, #44) |
-| Settings: Wi-Fi only, optional model, per-model status and size, delete, total usage | `Blau/SpeechModels/SpeechModelSettingsView.swift` (linked from the settings sheet, #43) |
+| Settings: Wi-Fi only, optional model, per-model status and size, delete, total usage | `Blau/SpeechModels/SpeechModelSettingsView.swift` (Settings → Speech Models, from the gear on the main screen) |
 
 ## Loading a model
 
@@ -161,7 +163,7 @@ only). Signposts: `model.download` (one per model download) and
 | What | How |
 | --- | --- |
 | Unit tests (hermetic) | `swift test` in `Packages/BlauKit`: manifest, store, downloader (resume, retry, checksum, network policy, disk space), the `URLSession` transport against a stub `URLProtocol`, and the manager end to end on fixture models with fake network, transport and warmer |
-| App and UI tests (hermetic) | `make test`. `BLAU_MODEL_FIXTURES=1` makes the app use tiny in-memory fixture models (`ModelFixtures`) through the real download, verify, install and warm-up path. Unit tests hosted in the app use fixtures automatically, and the launch and performance tests set the variable, so no test downloads real models |
+| App and UI tests (hermetic) | `make test`. `BLAU_MODEL_FIXTURES=1` makes the app use tiny in-memory fixture models (`ModelFixtures`) through the real download, verify, install and warm-up path. Unit tests hosted in the app and UI tests that set any `BLAU_UI_TEST_*` stub variable use fixtures automatically, and the launch and performance tests set the variable, so no test downloads real models |
 | Real download (opt-in) | `BLAU_MODEL_DOWNLOAD_SMOKE=1 swift test --filter ModelDownloadSmokeTests` in `Packages/BlauKit`: downloads the real pinned models from Hugging Face, warms them up with Core ML, loads them with FluidAudio, then relaunches offline. `BLAU_MODEL_DOWNLOAD_SMOKE_MODELS=sileroVAD,parakeetTDTv3` picks models; `BLAU_MODEL_DOWNLOAD_SMOKE_DIR` keeps the store (run twice to test resume) |
 
 ### On-device checks

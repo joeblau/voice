@@ -204,6 +204,101 @@ struct ModelManagerTests {
         #expect(harness.preferences.load().downloadPolicy == .wifiOnly, "The saved preference is unchanged")
     }
 
+    /// Turning on Wi-Fi only during a cellular download stops it right
+    /// away instead of letting it finish over cellular. The partial file is
+    /// kept, so the download picks up from there on Wi-Fi.
+    @Test func turningOnWiFiOnlyStopsACellularDownload() async throws {
+        let temp = try TemporaryDirectory()
+        let harness = Harness(
+            root: temp.url, network: .cellular,
+            preferences: ModelPreferences(downloadPolicy: .anyNetwork, downloadsOptionalModels: true))
+        let weights = "parakeetRealtimeEOU/parakeetRealtimeEOU.mlmodelc/weights/weight.bin"
+        let gate = Gate()
+        harness.transport.script(weights, .pause(afterBytes: 8000, gate: gate))
+        let manager = harness.makeManager()
+        await manager.start()
+        await waitUntil("EOU is downloading over cellular") {
+            if case .downloading(let bytes, _) = manager.state(of: .parakeetRealtimeEOU) {
+                bytes > 0 && harness.transport.calls.contains { $0.path == weights }
+            } else {
+                false
+            }
+        }
+
+        manager.preferences.downloadPolicy = .wifiOnly
+        await waitUntil("the download stops") {
+            manager.state(of: .parakeetRealtimeEOU) == .waiting(for: .unmeteredNetwork)
+        }
+        // Even if the transfer could continue now, it doesn't.
+        gate.open()
+        await manager.waitUntilIdle()
+
+        #expect(manager.state(of: .parakeetRealtimeEOU) == .waiting(for: .unmeteredNetwork))
+        #expect(manager.state(of: .parakeetTDTv3) == .waiting(for: .unmeteredNetwork))
+        #expect(manager.setupStatus.phase == .waiting(for: .unmeteredNetwork))
+        #expect(!manager.isReady)
+        #expect(harness.store.diskUsage(of: .parakeetRealtimeEOU) > 0, "The partial download is kept")
+        #expect(harness.preferences.load().downloadPolicy == .wifiOnly)
+
+        harness.network.set(.unmetered)
+        await waitUntil("the download resumes on Wi-Fi") {
+            manager.isReady && manager.state(of: .parakeetTDTv3) == .ready
+        }
+        await manager.waitUntilIdle()
+        let weightCalls = harness.transport.calls.filter { $0.path == weights }
+        #expect(weightCalls.count == 2)
+        #expect(weightCalls.last == TransportCall(path: weights, offset: 8000, allowsExpensiveNetwork: false))
+    }
+
+    /// The same switch on Wi-Fi leaves the download alone.
+    @Test func turningOnWiFiOnlyOnWiFiKeepsDownloading() async throws {
+        let temp = try TemporaryDirectory()
+        let harness = Harness(
+            root: temp.url, preferences: ModelPreferences(downloadPolicy: .anyNetwork, downloadsOptionalModels: false))
+        let weights = "parakeetRealtimeEOU/parakeetRealtimeEOU.mlmodelc/weights/weight.bin"
+        let gate = Gate()
+        harness.transport.script(weights, .pause(afterBytes: 8000, gate: gate))
+        let manager = harness.makeManager()
+        await manager.start()
+        await waitUntil("EOU is downloading") { harness.transport.calls.contains { $0.path == weights } }
+
+        manager.preferences.downloadPolicy = .wifiOnly
+        gate.open()
+        await manager.waitUntilIdle()
+
+        #expect(manager.isReady)
+        #expect(harness.transport.calls.filter { $0.path == weights }.count == 1, "Never restarted")
+    }
+
+    /// Choosing Wi-Fi only after "Download Using Cellular Data" ends that
+    /// override: the explicit choice wins.
+    @Test func choosingWiFiOnlyEndsTheCellularOverrideForThisLaunch() async throws {
+        let temp = try TemporaryDirectory()
+        let harness = Harness(root: temp.url, network: .cellular)
+        let weights = "parakeetRealtimeEOU/parakeetRealtimeEOU.mlmodelc/weights/weight.bin"
+        let gate = Gate()
+        harness.transport.script(weights, .pause(afterBytes: 8000, gate: gate))
+        let manager = harness.makeManager()
+        await manager.start()
+        await manager.waitUntilIdle()
+        manager.allowExpensiveNetworkThisSession()
+        await waitUntil("EOU is downloading over cellular") {
+            harness.transport.calls.contains { $0.path == weights }
+        }
+
+        manager.preferences.downloadPolicy = .anyNetwork
+        #expect(manager.allowsExpensiveNetworkThisSession)
+        #expect(manager.state(of: .parakeetRealtimeEOU) != .waiting(for: .unmeteredNetwork))
+        manager.preferences.downloadPolicy = .wifiOnly
+        #expect(!manager.allowsExpensiveNetworkThisSession)
+        await waitUntil("the download stops") {
+            manager.state(of: .parakeetRealtimeEOU) == .waiting(for: .unmeteredNetwork)
+        }
+        gate.open()
+        await manager.waitUntilIdle()
+        #expect(manager.state(of: .parakeetRealtimeEOU) == .waiting(for: .unmeteredNetwork))
+    }
+
     @Test func waitsWhileOfflineAndResumesWhenConnected() async throws {
         let temp = try TemporaryDirectory()
         let harness = Harness(root: temp.url, network: .offline)

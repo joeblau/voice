@@ -56,7 +56,9 @@ public final class ModelManager {
     public private(set) var warmUpDurations: [ModelID: Duration] = [:]
 
     /// The user's download settings. Changing them is saved and takes
-    /// effect immediately.
+    /// effect immediately: turning on Wi-Fi only stops a download running
+    /// over cellular (it waits for Wi-Fi and resumes from its partial
+    /// file), and turning off optional models stops theirs.
     public var preferences: ModelPreferences {
         didSet {
             guard preferences != oldValue else { return }
@@ -67,7 +69,7 @@ public final class ModelManager {
 
     /// Lets this launch download over cellular even under the Wi-Fi-only
     /// policy, without changing the saved preference ("Download now" in
-    /// onboarding).
+    /// onboarding). Choosing Wi-Fi only in ``preferences`` ends it.
     public private(set) var allowsExpensiveNetworkThisSession = false
 
     public let manifest: ModelManifest
@@ -394,6 +396,7 @@ public final class ModelManager {
     }
 
     private func preferencesChanged(from old: ModelPreferences) {
+        var stopped: ModelID?
         if preferences.downloadsOptionalModels != old.downloadsOptionalModels {
             for descriptor in manifest.optional {
                 switch state(of: descriptor.id) {
@@ -402,10 +405,26 @@ public final class ModelManager {
                 case .queued, .waiting:
                     if !preferences.downloadsOptionalModels { states[descriptor.id] = .notDownloaded }
                 case .downloading where !preferences.downloadsOptionalModels:
-                    cancelDownload(of: descriptor.id)
+                    if cancelDownload(of: descriptor.id, then: .notDownloaded) { stopped = descriptor.id }
                 default:
                     break
                 }
+            }
+        }
+        if preferences.downloadPolicy != old.downloadPolicy {
+            // Choosing Wi-Fi only is explicit, so it also ends a "download
+            // using cellular data" override for this launch.
+            if preferences.downloadPolicy == .wifiOnly {
+                allowsExpensiveNetworkThisSession = false
+            }
+            // A transfer started under the old policy captured permission
+            // to use cellular; stop it if that is no longer allowed. Its
+            // partial file stays, so it resumes on Wi-Fi.
+            if let id = current, id != stopped, case .downloading = state(of: id),
+                unmetRequirement == .unmeteredNetwork
+            {
+                Log.asr.notice("Download of \(id.rawValue, privacy: .public) paused: Wi-Fi only was turned on")
+                cancelDownload(of: id, then: .waiting(for: .unmeteredNetwork))
             }
         }
         blockedUntilNetworkChange.removeAll()
@@ -419,19 +438,24 @@ public final class ModelManager {
         await worker.value
     }
 
-    /// Cancels the worker now if it is downloading `id`, then marks the
-    /// model not downloaded once the worker has stopped.
-    private func cancelDownload(of id: ModelID) {
-        guard current == id, let worker else { return }
+    /// Cancels the worker now if it is downloading `id`, then moves the
+    /// model to `state` once the worker has stopped. Files already on disk
+    /// (including partial ones) are kept. Returns whether it cancelled.
+    @discardableResult
+    private func cancelDownload(of id: ModelID, then state: ModelState) -> Bool {
+        guard current == id, let worker else { return false }
         worker.cancel()
         Task {
             await worker.value
-            if case .downloading = state(of: id) {
-                states[id] = .notDownloaded
+            if case .downloading = self.state(of: id) {
+                states[id] = state
             }
-            await refreshDiskUsage()
+            // Schedule in the same step as the state change, so
+            // `waitUntilIdle()` never sees a gap with work left to do.
             scheduleWork()
+            await refreshDiskUsage()
         }
+        return true
     }
 
     // MARK: Download
