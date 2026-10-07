@@ -178,7 +178,7 @@ struct UsageEstimateSection: View {
     @State private var estimate: RealtimeUsageEstimate?
     @State private var failed = false
 
-    private let pricing = RealtimePricing.grokVoiceThinkFast
+    private let pricing = RealtimePricing.grokVoice
 
     var body: some View {
         Section {
@@ -203,8 +203,8 @@ struct UsageEstimateSection: View {
         } footer: {
             Text(
                 "An estimate from your saved conversations at xAI's voice rates "
-                    + "(\(Self.dollars(pricing.audioPerMinute)) a minute of Grok speaking, "
-                    + "\(Self.dollars(pricing.perTextInput)) a turn). Searches and voice previews are extra. "
+                    + "(\(Self.dollars(pricing.audioPerMinuteUSD)) a minute of Grok speaking, "
+                    + "\(Self.dollars(pricing.textInputUSD)) a turn). Searches and voice previews are extra. "
                     + "Your exact usage is at console.x.ai."
             )
         }
@@ -227,7 +227,7 @@ struct UsageEstimateSection: View {
             .units(allowed: [.hours, .minutes, .seconds], width: .abbreviated, maximumUnitCount: 2))
     }
 
-    static func dollars(_ amount: Decimal) -> String {
+    static func dollars(_ amount: Double) -> String {
         amount.formatted(.currency(code: "USD").precision(.fractionLength(2...3)))
     }
 }

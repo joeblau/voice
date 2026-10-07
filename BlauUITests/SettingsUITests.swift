@@ -99,11 +99,11 @@ final class SettingsUITests: XCTestCase {
 
     func testThePerformanceHUDAppearsAsSoonAsItIsSwitchedOn() {
         let app = launchOnFakes()
-        let hud = app.descendants(matching: .any)["blau.hud.voiceLoop"]
+        let hud = app.descendants(matching: .any)["blau.hud"]
         XCTAssertFalse(hud.exists)
 
         openSettingsPane(SettingsPaneID.developer, in: app)
-        let toggle = app.switches["settings.developer.perfHUD"]
+        let toggle = app.switches["settings.developer.performanceHUD"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 10))
         XCTAssertEqual(toggle.value as? String, "0")
         flip(toggle)
@@ -118,7 +118,7 @@ final class SettingsUITests: XCTestCase {
         scrollTo(developer, in: app.collectionViews["settings.list"])
         XCTAssertTrue(developer.label.contains("HUD on"), developer.label)
         developer.tap()
-        flip(app.switches["settings.developer.perfHUD"])
+        flip(app.switches["settings.developer.performanceHUD"])
         app.buttons["settings.done"].tap()
         XCTAssertTrue(hud.waitForNonExistence(timeout: 5), "The HUD didn't go away")
     }

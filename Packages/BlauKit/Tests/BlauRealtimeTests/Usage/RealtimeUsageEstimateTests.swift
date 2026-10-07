@@ -38,7 +38,7 @@ struct RealtimeUsageEstimateTests {
         #expect(estimate.agentMinutes == 2)
         #expect(estimate.conversations == 1)
         // 2 min × $0.08 + 2 × $0.004
-        #expect(estimate.cost() == Decimal(string: "0.168"))
+        #expect(abs(estimate.cost() - 0.168) < 1e-9)
     }
 
     @Test func partialsUnfinishedRepliesAndOtherMonthsDontCount() {
@@ -59,13 +59,11 @@ struct RealtimeUsageEstimateTests {
 
     @Test func costFollowsThePricing() {
         let estimate = RealtimeUsageEstimate(period: october, textInputs: 10, agentSpeech: .seconds(30))
-        let pricing = RealtimePricing(
-            audioPerMinute: Decimal(string: "0.10")!, perTextInput: Decimal(string: "0.01")!, model: "test",
-            asOf: "2026-10")
+        let pricing = RealtimePricing(audioPerMinuteUSD: 0.10, textInputUSD: 0.01)
         // 0.5 min × $0.10 + 10 × $0.01
-        #expect(estimate.cost(at: pricing) == Decimal(string: "0.15"))
-        #expect(RealtimePricing.grokVoiceThinkFast.audioPerMinute == Decimal(string: "0.08"))
-        #expect(RealtimePricing.grokVoiceThinkFast.perTextInput == Decimal(string: "0.004"))
+        #expect(abs(estimate.cost(at: pricing) - 0.15) < 1e-9)
+        // The default is xAI's published rates, the same ones the HUD uses.
+        #expect(abs(estimate.cost() - (0.5 * 0.08 + 10 * 0.004)) < 1e-9)
     }
 
     @Test func monthContainingADate() {
@@ -105,6 +103,6 @@ struct RealtimeUsageEstimateTests {
         #expect(estimate.conversations == 1)
         #expect(estimate.textInputs == 1)
         #expect(estimate.agentSpeech == .seconds(60))
-        #expect(estimate.cost() == Decimal(string: "0.084"))
+        #expect(abs(estimate.cost() - 0.084) < 1e-9)
     }
 }

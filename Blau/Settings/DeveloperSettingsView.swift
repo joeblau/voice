@@ -5,7 +5,6 @@ import os
 
 /// Accessibility identifiers for Settings → Developer, shared with UI tests.
 enum DeveloperSettingsIdentifiers {
-    static let perfHUD = "settings.developer.perfHUD"
     static let resetFlags = "settings.developer.resetFlags"
     static let exportLogs = "settings.developer.exportLogs"
     static let shareLogs = "settings.developer.shareLogs"
@@ -14,10 +13,11 @@ enum DeveloperSettingsIdentifiers {
 /// Settings → Developer: the performance HUD, feature flags, MetricKit
 /// diagnostics and a log export.
 ///
-/// Flags (the HUD is one) can only be changed where overrides are allowed,
-/// which is DEBUG builds (`FeatureFlags.allowsOverrides`); release builds
-/// show the shipping values, disabled. A change applies at once: the HUD
-/// appears over the main screen as soon as it is switched on.
+/// The HUD toggle is `PerformanceHUDToggle` (#71), available in every
+/// build; it applies at once: the HUD appears over the main screen as soon
+/// as it is switched on. Flags can only be changed where overrides are
+/// allowed, which is DEBUG builds (`FeatureFlags.allowsOverrides`); release
+/// builds show the shipping values, disabled.
 struct DeveloperSettingsView: View {
     @Environment(FeatureFlags.self) private var flags
     @State private var logExport: URL?
@@ -27,15 +27,9 @@ struct DeveloperSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Performance HUD", isOn: hudBinding)
-                    .disabled(!flags.allowsOverrides)
-                    .accessibilityIdentifier(DeveloperSettingsIdentifiers.perfHUD)
+                PerformanceHUDToggle()
             } footer: {
-                Text(
-                    flags.allowsOverrides
-                        ? "Shows live pipeline numbers over the main screen: turn state, latency and tokens."
-                        : "Available in development builds."
-                )
+                PerformanceHUDToggle.footer
             }
 
             Section {
@@ -105,13 +99,6 @@ struct DeveloperSettingsView: View {
         .navigationTitle("Developer")
     }
 
-    private var hudBinding: Binding<Bool> {
-        Binding(
-            get: { flags.isEnabled(.perfHUD) },
-            set: { flags.setOverride($0, for: .perfHUD) }
-        )
-    }
-
     private func exportLogs() async {
         isExportingLogs = true
         logExportFailed = false
@@ -137,7 +124,7 @@ struct DeveloperSettingsView: View {
         NavigationStack {
             DeveloperSettingsView()
         }
-        .environment(FeatureFlags.inMemory([.perfHUD: true]))
+        .appEnvironment(.preview(flags: [.perfHUD: true]))
         .environment(AppDiagnostics(store: nil))
     }
 #endif

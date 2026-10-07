@@ -178,7 +178,7 @@ private struct SettingsPaneRow: View {
     @Environment(TranscriptionSettings.self) private var transcription
     @Environment(PersistenceController.self) private var persistence
     @Environment(ModelManager.self) private var models
-    @Environment(FeatureFlags.self) private var flags
+    @Environment(AppEnvironment.self) private var environment
 
     var body: some View {
         LabeledContent {
@@ -210,7 +210,7 @@ private struct SettingsPaneRow: View {
                 engine: transcription.effectiveEnginePreference, language: transcription.language)
         case .iCloud: SyncStatusPresentation(persistence.syncState).title
         case .models: models.hasCheckedInstalledModels ? models.totalDiskUsage.formattedByteCount : nil
-        case .developer: flags.isEnabled(.perfHUD) ? String(localized: "HUD on") : nil
+        case .developer: environment.performanceHUD.isVisible ? String(localized: "HUD on") : nil
         case .knowledge, .privacy: nil
         }
     }

@@ -120,16 +120,8 @@ struct SettingsAppTests {
         #expect(second.level == 0.25)
     }
 
-    @Test func thePerformanceHUDFollowsTheFlag() {
-        // Settings → Developer's toggle writes the flag the HUD overlay reads.
-        let flags = FeatureFlags.inMemory()
-        #expect(!flags.isEnabled(.perfHUD))
-        #expect(flags.setOverride(true, for: .perfHUD))
-        #expect(flags.isEnabled(.perfHUD))
-    }
-
     @Test func usageFormatting() {
-        #expect(UsageEstimateSection.dollars(Decimal(string: "0.168")!).contains("0.168"))
+        #expect(UsageEstimateSection.dollars(0.168).contains("0.168"))
         #expect(UsageEstimateSection.minutes(0).isEmpty == false)
     }
 }

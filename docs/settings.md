@@ -41,7 +41,7 @@ ToolbarItem(placement: .bottomBar) { SettingsButton { isShowingSettings = true }
 | iCloud | `ICloudSettingsView` | Sync status, account, last sync; **Export Conversations** as Markdown through the share sheet | – | – |
 | Speech Models | `SpeechModelSettingsView` | Wi-Fi only, extra models, per-model download and delete, disk usage | `UserDefaults` (`blau.models.preferences`) | At once |
 | Privacy & Data | `PrivacySettingsView` | Where data lives; delete conversations, the knowledge base, the voiceprint, or everything | – | At once, and on the user's other devices as iCloud syncs the deletions |
-| Developer | `DeveloperSettingsView` | Performance HUD, feature flags, MetricKit diagnostics, **Export Logs** | `UserDefaults` flag overrides, DEBUG builds only | At once: the HUD appears over the main screen as soon as it is on |
+| Developer | `DeveloperSettingsView` | Performance HUD (`PerformanceHUDToggle`, #71, every build), feature flags, MetricKit diagnostics, **Export Logs** | HUD: `UserDefaults` (`blau.performanceHUD.*`); flag overrides: `UserDefaults`, DEBUG builds only | At once: the HUD appears over the main screen as soon as it is on |
 
 DEBUG UI-test launches (`BLAU_UI_TEST_XAI`) keep every `UserDefaults`
 setting in the `blau.uitests` suite, so UI tests never change the
@@ -58,7 +58,7 @@ test.
 **Usage and cost** (`RealtimeUsageEstimator`, BlauRealtime) counts this
 calendar month from the stored transcript: Grok's speaking time (each agent
 utterance's length is the audio it sent) and one text input per committed
-user utterance, priced at `RealtimePricing.grokVoiceThinkFast` ($0.08 per
+user utterance, priced at `RealtimePricing.grokVoice` (the rates the performance HUD uses too: $0.08 per
 minute of audio, $0.004 per text input, xAI's pricing page in October
 2026). It is an estimate; replies interrupted before they were stored,
 merged turns, searches and previews make the bill differ. The footer points

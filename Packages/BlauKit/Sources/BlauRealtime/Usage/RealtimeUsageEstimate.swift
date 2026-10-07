@@ -2,41 +2,6 @@ import BlauPersistence
 import Foundation
 import SwiftData
 
-/// What xAI charges for a realtime voice session, for the usage estimate in
-/// Settings → xAI account.
-///
-/// Speech to speech bills the audio exchanged by the minute and each text
-/// input separately (https://docs.x.ai/developers/pricing). Blau commits the
-/// user's verified utterances as **text** (`turn_detection: null`) and gets
-/// Grok's reply as audio, so the bill is Grok's speaking time plus one text
-/// input per turn.
-public struct RealtimePricing: Sendable, Hashable {
-    /// Price per minute of audio.
-    public var audioPerMinute: Decimal
-    /// Price per text input.
-    public var perTextInput: Decimal
-    /// The model the prices are for.
-    public var model: String
-    /// When the prices were read from xAI's pricing page.
-    public var asOf: String
-
-    public init(audioPerMinute: Decimal, perTextInput: Decimal, model: String, asOf: String) {
-        self.audioPerMinute = audioPerMinute
-        self.perTextInput = perTextInput
-        self.model = model
-        self.asOf = asOf
-    }
-
-    /// `grok-voice-think-fast-2.0`: $0.08 per minute of audio, $0.004 per
-    /// text input (xAI's pricing page, October 2026). Update this with the
-    /// pinned realtime model (`AppConfig.xaiRealtimeModel`).
-    public static let grokVoiceThinkFast = RealtimePricing(
-        audioPerMinute: Decimal(string: "0.08")!,
-        perTextInput: Decimal(string: "0.004")!,
-        model: "grok-voice-think-fast-2.0",
-        asOf: "2026-10")
-}
-
 /// How much Blau used Grok's realtime voice in a period, from the stored
 /// transcript, and what that likely cost.
 ///
@@ -70,12 +35,11 @@ public struct RealtimeUsageEstimate: Sendable, Hashable {
         Double(agentSpeech.components.seconds) / 60 + Double(agentSpeech.components.attoseconds) / 6e19
     }
 
-    /// The estimated charge in US dollars at `pricing`.
-    public func cost(at pricing: RealtimePricing = .grokVoiceThinkFast) -> Decimal {
-        let milliseconds =
-            agentSpeech.components.seconds * 1_000 + agentSpeech.components.attoseconds / 1_000_000_000_000_000
-        let minutes = Decimal(milliseconds) / 60_000
-        return minutes * pricing.audioPerMinute + Decimal(textInputs) * pricing.perTextInput
+    /// The estimated charge in US dollars at `pricing` (xAI's published
+    /// speech-to-speech rates, shared with the performance HUD's estimate):
+    /// Grok's speaking time by the minute plus one charge per text input.
+    public func cost(at pricing: RealtimePricing = .grokVoice) -> Double {
+        agentMinutes * pricing.audioPerMinuteUSD + Double(textInputs) * pricing.textInputUSD
     }
 }
 
