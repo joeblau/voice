@@ -133,9 +133,11 @@ public struct RealtimeInstructions: Sendable, Hashable {
         return """
             # Tools
             You can use these tools: \(names.joined(separator: ", ")). Use one when it genuinely helps, for \
-            example to look up something you don't know or to recall what the user told you before. Don't name \
-            the tools or say that you are using one; if a lookup takes a moment, say a few natural words first. \
-            Never make up a tool's result.
+            example to look up something you don't know or to recall what the user told you before.
+            - A lookup takes a moment, and silence on a call feels broken. Before you call a tool, say a few \
+            natural words such as "let me check" or "one sec, let me look", then call it in the same reply.
+            - Don't name the tools or explain how they work. Never make up a tool's result.
+            - If a tool returns an error or nothing useful, say so briefly and carry on without it.
             """
     }
 

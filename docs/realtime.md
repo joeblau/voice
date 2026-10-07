@@ -130,7 +130,7 @@ complete `session.update` (issue #35). The code is in
 | `audio.output.speed` | 0.7–1.5 in steps of 0.05, default 1.0 | Settings → Voice |
 | `reasoning.effort` | `high` (default) or `none` | Settings → Voice ("Think Before Answering") |
 | `instructions` | `RealtimeInstructions` | Persona, long-form style, short spoken answers, how to read transcribed input, tool guidance, ProfileBlock and active facts, today's date |
-| `tools` | Only when there are tools (#38) | `RealtimeSessionConfigurator.setTools` |
+| `tools` | Only when there are tools: the registry's function tools, then the built-in search tools turned on | `RealtimeToolRegistry` and Settings → Search, see [Function calling](#function-calling) |
 
 Not sent: `audio.input` (Blau sends the *text* of utterances, never audio)
 and `model` (it is on the WebSocket URL, see below).
@@ -202,6 +202,111 @@ BLAU_RECORD_SNAPSHOTS=1 swift test --filter SessionUpdateSnapshotTests
 git diff Tests/BlauRealtimeTests/Fixtures/Snapshots
 ```
 
+## Function calling
+
+Grok can call tools during a session (issue #38). The code is in
+`Packages/BlauKit/Sources/BlauRealtime/Tools/`.
+
+| Type | Role |
+| ---- | ---- |
+| `RealtimeFunctionTool` | A client-side tool: static `name`, `description`, `parameters: JSONSchema` and `timeout` (3 s by default), and `call(_ arguments: Data) async throws -> String`. `RealtimeTypedFunctionTool` decodes the arguments into a `Decodable` type first |
+| `JSONSchema` | The arguments schema, built with `.object(properties:required:)`, `.string`, `.integer`, `.number`, `.boolean`, `.array(of:)`, or wrapped from JSON |
+| `RealtimeToolRegistry` | The tools by name. `definitions` go into `session.tools`; names are checked (1–64 of `A-Z a-z 0-9 _ -`, unique) when a tool is registered |
+| `RealtimeToolRunner` | Answers the calls: runs each tool, sends its output and the one follow-up `response.create` |
+| `RealtimeBuiltInTool` | xAI's server-side `web_search` and `x_search`, turned on in Settings → Search |
+| `EchoTool` | `echo {"text"}` → `{"text"}`, for testing the round trip |
+
+The protocol is called `RealtimeFunctionTool`, not `RealtimeTool` as the
+issue sketched, because `RealtimeTool` is already the wire type of a
+`session.tools` entry (#34).
+
+```swift
+// Composition root: one registry for both halves.
+var registry = RealtimeToolRegistry()
+try registry.register(SearchMemoryTool(index: index))       // #68, behind the memoryTools flag
+let configurator = RealtimeSessionConfigurator(settings: store, memory: memory, tools: registry.definitions)
+let runner = RealtimeToolRunner(registry: registry, sender: client)
+
+// The turn orchestrator (#36), which reads client.events:
+for await event in client.events {
+    await runner.handle(event)         // every event, in order; returns at once
+    ...
+}
+// On barge-in (#37) and after every reconnect:
+await runner.cancelAll()
+```
+
+### One round
+
+```
+response.function_call_arguments.done (call_a) ─▶ run tool a ┐   (each call runs as soon as its arguments are complete,
+response.function_call_arguments.done (call_b) ─▶ run tool b ┤    in parallel, with its own timeout)
+response.done (completed)                                     │
+                                  tool b done ─▶ conversation.item.create {function_call_output, call_b}
+                                  tool a done ─▶ conversation.item.create {function_call_output, call_a}
+                       every output sent and response.done ─▶ response.create   (exactly one)
+```
+
+- **Exactly one `response.create`** per response that made calls, sent only
+  when that response is done, every output has been written, *and* no other
+  response is in progress. xAI's guide: "Do not send `response.create` until
+  all function call outputs have been submitted"; and a `response.create`
+  while any response is active is rejected
+  (`conversation_already_has_active_response`), so the runner waits for
+  `response.done` too.
+- **Someone else's response.** If the user speaks while a tool runs, the
+  orchestrator starts their response (barge-in only fires while Grok is
+  speaking, so nothing is cancelled). The tool's output still goes out at
+  once, but the follow-up waits for that response's `response.done`; rounds
+  that become ready together share one `response.create`. While the runner's
+  own `response.create` hasn't started yet, no second one is sent. If the
+  server rejects the follow-up anyway (an `error` with code
+  `conversation_already_has_active_response`), the runner forgets it, so the
+  next response isn't counted as its follow-up. This relies on the
+  orchestrator passing `response.created` and `response.done`; without
+  `response.created` the runner can't see other responses.
+- **Every call gets an output**, so the model can always say something:
+  the tool's result, or `{"error": "<code>", "message": "…"}` with code
+  `timeout` (past the tool's `timeout`; the tool's task is cancelled and a
+  late result is dropped), `failed` (the tool threw; a
+  `RealtimeToolError.failed(message)` passes its message to the model, any
+  other error gets a generic one), `invalid_arguments` (bad JSON or wrong
+  shape) or `unknown_tool`.
+- **Found once.** A call is run when its `arguments.done` arrives; one only
+  reported in `response.output_item.done` or `response.done`'s output is
+  run from there. A call id is never run twice. A name missing from
+  `arguments.done` is taken from `response.output_item.added`.
+- **Cancelled responses.** If the response ends `cancelled` (barge-in) or
+  `failed`, its calls are dropped: running tools are cancelled and no
+  follow-up is sent. `cancelAll()` does the same for everything in flight,
+  and calls that still arrive for a dropped response are ignored.
+- **Loops.** A follow-up can call tools again. After four rounds in a row
+  without an ordinary reply, calls get a `limit_reached` error (the
+  follow-up still goes out so Grok can answer); a further round gets no
+  follow-up at all. Only responses the runner requested count: a response
+  someone else starts (the user's next turn) begins a new chain, so the
+  user's next question gets its tools again after a loop was stopped.
+- **Disconnected.** If an output can't be sent (`notConnected`), the round
+  is dropped. A new connection is a new server session without those calls.
+
+`runner.activity` reports `started`, `finished(outcome:)`,
+`followUpRequested` and `abandoned`, for a "Searching…" hint in the UI.
+
+### Built-in search tools and spoken filler
+
+- **Settings → Search** turns on xAI's `web_search` and `x_search`
+  (`RealtimeVoiceSettings.builtInTools`, off by default, saved with the
+  voice settings). They are sent as `{"type": "web_search"}` and
+  `{"type": "x_search"}` after the function tools, per the Tools section of
+  xAI's speech-to-speech guide (checked 2026-10-07). xAI runs them; the
+  runner never sees them. A change goes out with the next debounced
+  `session.update`, like a voice change.
+- **Filler.** While a tool runs Grok would otherwise be silent. The
+  instructions' Tools section asks it to say a few natural words ("let me
+  check") before calling a tool, in the same reply, and to say briefly when
+  a tool fails. The `echo-tool` fixture shows the shape: an audio message,
+  then the function call, in one response.
+
 ## Telemetry
 
 | Signpost | Kind | Meaning |
@@ -210,8 +315,12 @@ git diff Tests/BlauRealtimeTests/Fixtures/Snapshots
 | `realtime.event` | interval | One received frame: decode and delivery to `events`. End message is the event type |
 | `realtime.drop` | event | A connection was lost |
 | `realtime.reconnected` | event | A reconnect succeeded |
+| `realtime.toolCall` | interval | One function call, from its arguments being complete to its output being decided. End message: tool name and outcome (`echo succeeded`, `search_memory timed_out`, `unknown unknown_tool`) |
 
-Both intervals are canonical (see [performance.md](performance.md)). Logs go
+`realtime.connect` and `realtime.event` are canonical (see
+[performance.md](performance.md)); `realtime.toolCall` is not a pipeline
+stage of its own (it happens inside `realtime.turn`), so it is a plain named
+interval. Logs go
 to `Log.realtime`: lifecycle at `notice`, failures at `error`, error-event
 messages from the server as `private`. Secrets and conversation text are
 never logged.
@@ -254,6 +363,12 @@ audio, so treat recordings of real conversations as private.
 - connecting, refused secrets, token failures, timeouts, backoff, giving up,
   reconnecting after drops and server closes, keepalive, signposts and
   recording, all against fakes driven by `ManualClock`;
+- function calling: the echo tool round trip through a real client over the
+  `echo-tool` fixture (every frame Blau sends matches), the two parallel
+  calls of `function-call` producing one `response.create`, and the runner
+  against fakes and `ManualClock` (finish orders, timeouts, errors,
+  duplicates, cancelled responses, `cancelAll()`, send failures, the round
+  limit);
 - the real `URLSessionWebSocketTask` path against a WebSocket server on
   127.0.0.1: subprotocol, frames both ways, pings, HTTP 401/503 on the
   upgrade, and a connection reset mid-session that the client recovers from.
@@ -267,3 +382,7 @@ audio, so treat recordings of real conversations as private.
 | Wi-Fi to cellular | Walk out of Wi-Fi range mid-session; the keepalive should notice within 25 s and reconnect | pending (needs a device and #36) |
 | Session accepted | With a real key, `session.updated` echoes `turn_detection.type: null`, the voice, 24 kHz PCM output and the speed; no `error` event | pending (needs xAI credentials and #36) |
 | Voice change mid-session | Change the voice and speed in Settings during a conversation; the next reply uses them | pending (needs xAI credentials and #36) |
+| Echo tool, live | Register `EchoTool`, ask Grok to "test the echo tool with the words blue harbor" with a real key, record it with `RealtimeTranscriptRecorder`; the session should match `echo-tool.jsonl` in shape (filler, `function_call`, one output, one `response.create`, an answer using the result) | pending (needs xAI credentials) |
+| Parallel calls, live | Ask a question that needs two lookups at once; Console (`category:realtime`) shows two `Running tool` lines and one `requested the follow-up`; no `conversation_already_has_active_response` error | pending (needs xAI credentials and #68 tools) |
+| Web and X search | Turn on Settings → Search → Web Search, ask about today's news; `session.updated` echoes `{"type": "web_search"}` and the answer is current | pending (needs xAI credentials and #36) |
+| Spoken filler | With a slow tool, Grok says something like "let me check" before the pause | pending (needs xAI credentials, a device and #36) |

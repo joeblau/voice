@@ -17,6 +17,7 @@ in tests of anything built on `RealtimeClient`.
 | `server-vad-and-errors.jsonl` | Input audio with server VAD, input transcription, clear, idle timeout, `force_message`, DTMF, `error` events, a server close |
 | `binary-audio.jsonl` | Binary audio frames in both directions |
 | `mcp-tools.jsonl` | Remote MCP discovery and calls, including failures |
+| `echo-tool.jsonl` | The function-calling round trip (#38): `session.tools` with the `echo` tool, a spoken filler, the call, its `function_call_output`, one `response.create` and the answer |
 | `drop-and-resume.jsonl` | A drop without a close frame (1006), then a second connection with `?conversation_id=` replaying history as `conversation.item.created` |
 
 `Snapshots/` holds the `session.update` and instruction snapshots checked by
