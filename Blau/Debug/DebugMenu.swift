@@ -38,6 +38,7 @@
                     VoiceLoopDebugSection()
                     environmentSection
                     lifecycleSection
+                    PerformanceDebugSection(policy: environment.performance)
                     VoiceIDThresholdsSection(config: .calibrated)
                     longSessionSection
                     modulesSection

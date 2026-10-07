@@ -24,6 +24,9 @@ public enum LogCategory: String, CaseIterable, Sendable {
     case data
     /// SwiftUI views and the app's composition root (`Blau`).
     case ui
+    /// The thermal and power policy: device conditions and the performance
+    /// level the pipeline adapts to (`BlauTelemetry`, #75).
+    case performance = "perf"
 }
 
 /// Blau's loggers, one per `LogCategory`.
@@ -57,6 +60,7 @@ public enum Log {
     public static let memory = logger(for: .memory)
     public static let data = logger(for: .data)
     public static let ui = logger(for: .ui)
+    public static let performance = logger(for: .performance)
 
     /// A logger for `category` in Blau's subsystem. The static properties
     /// above are the usual entry point; this is for code that picks the

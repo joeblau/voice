@@ -480,6 +480,53 @@ struct ParakeetStreamingTranscriberTests {
         #expect(policy.preferredChunkSize(current: .ms1280) == .ms320)
     }
 
+    @Test func performancePolicyUses1280msChunksBelowNormal() {
+        let performance = ManualPerformanceLevel(.normal)
+        let policy = PerformanceASRChunkSizePolicy(performance)
+        #expect(policy.preferredChunkSize(current: .ms320) == .ms320)
+        performance.set(.reduced)
+        #expect(policy.preferredChunkSize(current: .ms320) == .ms1280)
+        performance.set(.minimal)
+        #expect(policy.preferredChunkSize(current: .ms1280) == .ms1280)
+        performance.set(.normal)
+        #expect(policy.preferredChunkSize(current: .ms1280) == .ms320)
+    }
+
+    /// The thermal and power policy (#75) drives the chunk size: up to
+    /// 1280 ms when the level drops, back to 320 ms when it recovers, each
+    /// time between utterances.
+    @Test func theChunkSizeFollowsThePerformanceLevelBothWays() async throws {
+        let scenario = Scenario(seconds: 10)
+            .speech("normal start", from: 0.5, to: 1.5, endsUtterance: true)
+            .speech("running warm", from: 3.5, to: 4.5, endsUtterance: true)
+            .speech("cooled down", from: 6.5, to: 7.5, endsUtterance: true)
+        let standard = SimulatedEouRecognizer(words: scenario.words)
+        let lowPower = SimulatedEouRecognizer(words: scenario.words, chunkSize: .ms1280)
+        let performance = ManualPerformanceLevel(.normal)
+        let requested = RequestLog()
+        let source = FixtureAudioSource(block: scenario.samples)
+        let transcriber = ParakeetStreamingTranscriber(
+            recognizer: standard, audio: source, voiceActivity: ScriptedVoiceActivity(),
+            chunkSizePolicy: PerformanceASRChunkSizePolicy(performance),
+            recognizerProvider: { size in
+                requested.append(size)
+                return size == .ms1280 ? lowPower : standard
+            },
+            signposter: .disabled(.asr), clock: ManualClock())
+
+        let replay = await TranscriptionReplay.run(transcriber, source: source, vadEvents: scenario.events) {
+            position in
+            if position == 40_000 { performance.set(.reduced) }
+            if position == 88_000 { performance.set(.normal) }
+        }
+
+        #expect(replay.finals.map(\.text) == ["normal start", "running warm", "cooled down"])
+        #expect(requested.sizes == [.ms1280, .ms320])
+        #expect(replay.statistics.chunkSizeChanges == 2)
+        #expect(await lowPower.transcribed.isEmpty == false)
+        #expect(await transcriber.chunkSize == .ms320)
+    }
+
     // MARK: Helpers
 
     func makeTranscriber(
@@ -593,4 +640,15 @@ func waitUntil(
         }
         try await Task.sleep(for: .milliseconds(5))
     }
+}
+
+/// The chunk sizes a `RecognizerProvider` was asked for, in order.
+private final class RequestLog: Sendable {
+    private let state = Mutex<[ASRChunkSize]>([])
+
+    func append(_ size: ASRChunkSize) {
+        state.withLock { $0.append(size) }
+    }
+
+    var sizes: [ASRChunkSize] { state.withLock { $0 } }
 }

@@ -1,5 +1,6 @@
 #if DEBUG
     import BlauAudio
+    import BlauTelemetry
     import BlauTranscription
     import SwiftUI
 
@@ -145,6 +146,16 @@
                 .foregroundStyle(report.verdict.passed ? .green : .red)
                 ForEach(report.verdict.findings, id: \.self) { finding in
                     Text(finding).font(.caption)
+                }
+                if let performance = report.performance {
+                    // #75: an hour should stay at or below fair, or degrade.
+                    LabeledContent("Worst thermal state", value: performance.worstThermalState.rawValue)
+                    LabeledContent("At or below fair", value: Self.minutes(performance.secondsAtOrBelowFair))
+                    LabeledContent("Worst level", value: performance.worstLevel.rawValue)
+                    if let drain = performance.batteryDrainPercentPerHour {
+                        LabeledContent(
+                            "Battery drain", value: "\(drain.formatted(.number.precision(.fractionLength(1))))%/h")
+                    }
                 }
                 if let url = soak.reportURL {
                     ShareLink("Share JSON report", item: url)

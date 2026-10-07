@@ -375,7 +375,7 @@ public final class ModelManager {
     }
 
     /// Whether `id` downloads without the user asking: required models,
-    /// optional ones that don't follow the "Download High-Accuracy Model"
+    /// optional ones that don't follow the "Download Extra Speech Models"
     /// preference (the text embedding model), and the rest while it is on.
     private func wantsDownload(_ id: ModelID) -> Bool {
         id.isRequired || !id.followsOptionalModelsPreference || preferences.downloadsOptionalModels

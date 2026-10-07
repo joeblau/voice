@@ -141,6 +141,15 @@ runtime policy that works whatever the verdict turns out to be:
   starts there instead of failing its way down again.
 - **Inactive changes nothing.** Pulling down Control Center or the app
   switcher (`inactive`) never reloads a model; only `background` does.
+- **The `minimal` performance level** (#75: critically hot or almost out
+  of battery, see [performance.md](performance.md#thermal-and-power-adaptation))
+  holds every stage that offers `systemSpeech` (streaming ASR, once #31
+  adds it) on Apple's `SpeechTranscriber`, on screen or off. Other stages
+  are left alone: moving the VAD to the CPU would only add heat. When the
+  level improves, stages go back to where the phase puts them, and a trip
+  off screen spent on `SpeechTranscriber` only because of the level isn't
+  learned. The app feeds the level in with
+  `BackgroundInferenceMonitor.follow(performance.performanceLevels())`.
 
 A switch loads the replacement model while the current one keeps serving
 requests, then swaps, so a stage never misses a chunk. Stages adopt
@@ -207,7 +216,8 @@ without unlocking (privacy and control).
 | `BlauAudioTests/Background/AudioSessionKeeperTests.swift` | A **simulated 30-minute locked session** (live throughout, no re-activation or restart, time split by phase); silent stalls rebuilt without deactivating; a stall that won't clear pausing off screen and restarting on return (or restarting at once on screen); interruptions with and without `.shouldResume`; a call still in progress left alone; failed rebuilds off and on screen; start failures; stop; the watchdog timer; the indicator mapping. Also `recoverFromStall`, `isAwaitingManualResume` and `ConversationAudio` | `swift test` on the Mac |
 | `BlauTranscriptionTests/Background/BackgroundInferencePolicyTests.swift` | The mitigation table, phases, errors and latency off screen, warm-up, failed switches, learning across trips | `swift test` on the Mac |
 | `BlauTranscriptionTests/Background/BackgroundInferenceMonitorTests.swift` | Switches performed and recorded, failures falling through, quick bounces, lock refinement, snapshots; **the VAD surviving a Neural Engine that throws once the device locks** (moved to the CPU after two errors, back on return) | `swift test` on the Mac |
-| `BlauTranscriptionTests/Background/LongSessionReportTests.swift` | The soak report's rules and JSON | `swift test` on the Mac |
+| `BlauTranscriptionTests/Background/PerformanceLevelInferenceTests.swift` | The `minimal` level moving only `systemSpeech`-capable stages, on and off screen, recovery, no learning, failed moves; the monitor following a level stream | `swift test` on the Mac |
+| `BlauTranscriptionTests/Background/LongSessionReportTests.swift` | The soak report's rules (including heat without degrading, #75) and JSON | `swift test` on the Mac |
 | `BlauTranscriptionTests/VAD/SileroLiveTests.swift`, `switchingBackendsMidStreamKeepsTheResults` | The real Silero model switching Neural Engine → CPU → Neural Engine mid-fixture: identical probabilities, boundaries within tolerance | `BLAU_VAD_MODEL_DIR=<installed sileroVAD dir> swift test --filter SileroLiveTests` |
 | `BlauTests/LongSessionTests.swift` | The built app declares `audio` and Live Activities and embeds the extension; the activity mirrors the indicator; Stop ends the conversation; scene phases reach the monitor | `make test-unit` (simulator) |
 | `BlauTests/LongSessionTests.swift`, `ConversationAudioLiveTests` | The live keeper on the real voice-processing engine: audio flows, no stall | `BLAU_DEVICE_TESTS=1`, microphone permission |
@@ -242,4 +252,4 @@ doesn't hide it).
 | B9 | AirPods while locked | Locked session; take AirPods out and back in | Route follows; capture continues (no `Capture dropped` beyond the rebuild) | Pending |
 | B10 | Killed mid-session | Start, then kill Blau from the app switcher; relaunch | The stale Live Activity is gone after relaunch | Pending |
 | B11 | Live Activities off | Settings → Blau → Live Activities off; start | No activity, conversation works, a `Live Activities are off` log | Pending |
-| B12 | One hour | As B1 for 60+ minutes, plugged in and on battery | Report passes; note battery drain and thermal state | Pending |
+| B12 | One hour | As B1 for 60+ minutes, plugged in and on battery | Report passes (including the #75 rule: no time hot at the `normal` level); note the report's worst thermal state, time at or below `fair` and battery drain | Pending |

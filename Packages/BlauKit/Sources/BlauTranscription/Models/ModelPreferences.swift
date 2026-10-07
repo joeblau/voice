@@ -13,8 +13,9 @@ public struct ModelPreferences: Codable, Hashable, Sendable {
     }
 
     public var downloadPolicy: DownloadPolicy
-    /// Whether optional models (the Parakeet TDT v3 second pass) download
-    /// automatically after the required ones.
+    /// Whether the extra speech models (the Parakeet TDT v3 second pass and
+    /// the 1280 ms streaming export) download automatically after the
+    /// required ones.
     public var downloadsOptionalModels: Bool
 
     public init(downloadPolicy: DownloadPolicy = .wifiOnly, downloadsOptionalModels: Bool = true) {

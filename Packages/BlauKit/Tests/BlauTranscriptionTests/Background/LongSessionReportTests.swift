@@ -114,6 +114,37 @@ struct LongSessionReportTests {
         #expect(verdict.findings == ["The vad stage couldn't keep up on any backend off screen (1 time)"])
     }
 
+    // MARK: Thermal and power (#75)
+
+    /// An hour that got hot, with the policy degrading at once.
+    static func hotHour(hotAtNormal: Duration) -> PerformanceStatistics {
+        var recorder = PerformanceStatisticsRecorder(start: .zero)
+        recorder.record(PerformanceSnapshot(), at: .zero)
+        let serious = DeviceConditions(thermalState: .serious)
+        recorder.record(PerformanceSnapshot(level: .normal, conditions: serious), at: .seconds(1_800))
+        recorder.record(
+            PerformanceSnapshot(level: .reduced, reasons: [.thermal(.serious)], conditions: serious),
+            at: .seconds(1_800) + hotAtNormal)
+        return recorder.statistics(at: .seconds(3_600))
+    }
+
+    @Test func aDeviceThatDegradesWhenHotPasses() {
+        let performance = Self.hotHour(hotAtNormal: .seconds(1))
+        #expect(performance.worstThermalState == .serious)
+        let verdict = LongSessionReport.evaluate(
+            keeper: Self.goodRun, vad: Self.vad(seconds: 2_100), inference: Self.inference, performance: performance,
+            rules: .init())
+        #expect(verdict.passed)
+    }
+
+    @Test func aDeviceThatStaysHotAtNormalFails() {
+        let performance = Self.hotHour(hotAtNormal: .seconds(120))
+        let verdict = LongSessionReport.evaluate(
+            keeper: Self.goodRun, vad: Self.vad(seconds: 2_100), inference: Self.inference, performance: performance,
+            rules: .init())
+        #expect(verdict.findings == ["Hot (serious at worst) for 120 s without the pipeline degrading"])
+    }
+
     @Test func roundTripsThroughJSON() throws {
         var capture = CaptureStatistics()
         capture.framesPublished = 105_000
@@ -125,7 +156,8 @@ struct LongSessionReportTests {
             keeper: Self.goodRun,
             capture: .init(capture),
             vad: Self.vad(seconds: 2_100),
-            inference: Self.inference
+            inference: Self.inference,
+            performance: Self.hotHour(hotAtNormal: .seconds(1))
         )
         #expect(report.verdict.passed)
         let decoder = JSONDecoder()

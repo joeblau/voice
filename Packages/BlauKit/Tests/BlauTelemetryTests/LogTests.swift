@@ -11,7 +11,7 @@ struct LogTests {
     @Test func coversEveryArea() {
         #expect(
             LogCategory.allCases.map(\.rawValue) == [
-                "audio", "asr", "voiceid", "realtime", "topics", "memory", "data", "ui",
+                "audio", "asr", "voiceid", "realtime", "topics", "memory", "data", "ui", "perf",
             ]
         )
     }
@@ -30,6 +30,7 @@ struct LogTests {
     @Test func everyLoggerAcceptsMessages() {
         let loggers: [Logger] = [
             Log.audio, Log.asr, Log.voiceID, Log.realtime, Log.topics, Log.memory, Log.data, Log.ui,
+            Log.performance,
         ]
         let transcript = "a private sentence"
         for (index, logger) in loggers.enumerated() {

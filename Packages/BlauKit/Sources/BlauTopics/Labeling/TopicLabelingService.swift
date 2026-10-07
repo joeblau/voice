@@ -21,6 +21,8 @@ import os
 ///
 /// The thermal policy decides how much inference to spend: confirmation is
 /// skipped at `.serious` and only keyword labels are made at `.critical`.
+/// The thermal and power policy (#75), when given, tightens that: only
+/// strong candidates are confirmed at `reduced` and none at `minimal`.
 ///
 /// Each call runs inside the `topics.label` signpost interval, and its
 /// latency is kept per source (`latency(for:)`) for the p50.
@@ -29,6 +31,7 @@ public actor TopicLabelingService {
     private let keywords: KeywordTopicLabeler
     public let policy: TopicLabelingPolicy
     private let thermal: any ThermalStateProviding
+    private let performance: (any PerformanceLevelProviding)?
     private let clock: any BlauClock
     private let signposter: Signposter
 
@@ -46,6 +49,7 @@ public actor TopicLabelingService {
         keywords: KeywordTopicLabeler = KeywordTopicLabeler(),
         policy: TopicLabelingPolicy = .default,
         thermal: any ThermalStateProviding = SystemThermalState(),
+        performance: (any PerformanceLevelProviding)? = nil,
         clock: any BlauClock = SystemClock(),
         timeout: Duration = .seconds(10),
         signposter: Signposter = Signposts.topics
@@ -54,6 +58,7 @@ public actor TopicLabelingService {
         self.keywords = keywords
         self.policy = policy
         self.thermal = thermal
+        self.performance = performance
         self.clock = clock
         self.timeout = timeout
         self.signposter = signposter
@@ -70,7 +75,8 @@ public actor TopicLabelingService {
         textGenerator: (any TextGenerator)?,
         onDevice: (any TopicLabeler)? = defaultOnDeviceLabeler(),
         policy: TopicLabelingPolicy = .default,
-        thermal: any ThermalStateProviding = SystemThermalState()
+        thermal: any ThermalStateProviding = SystemThermalState(),
+        performance: (any PerformanceLevelProviding)? = nil
     ) -> TopicLabelingService {
         var labelers: [any TopicLabeler] = []
         if let onDevice {
@@ -79,7 +85,7 @@ public actor TopicLabelingService {
         if let textGenerator {
             labelers.append(RemoteTopicLabeler(generator: textGenerator))
         }
-        return TopicLabelingService(labelers: labelers, policy: policy, thermal: thermal)
+        return TopicLabelingService(labelers: labelers, policy: policy, thermal: thermal, performance: performance)
     }
 
     /// Apple's on-device model where the SDK has FoundationModels, else
@@ -92,8 +98,10 @@ public actor TopicLabelingService {
         #endif
     }
 
-    /// What the thermal policy allows right now.
-    public var mode: TopicLabelingMode { policy.mode(for: thermal.thermalState) }
+    /// What the thermal state and the performance level allow right now.
+    public var mode: TopicLabelingMode {
+        policy.mode(for: thermal.thermalState, level: performance?.performanceLevel ?? .normal)
+    }
 
     /// Recent latencies of labels from `source`.
     public func latency(for source: TopicLabelSource) -> LatencyStatistics {
@@ -106,7 +114,9 @@ public actor TopicLabelingService {
     /// Labels `request`. Never fails: the keyword labeler is the floor.
     ///
     /// In `.skipConfirmation` mode the request's `confirmsBoundary` is
-    /// turned off; in `.keywordsOnly` mode only keywords are used.
+    /// turned off; in `.keywordsOnly` mode only keywords are used. In
+    /// `.confirmStrongCandidates` mode the caller decides (`TopicPipeline`
+    /// only asks for confirmation of strong candidates).
     public func label(_ request: TopicLabelRequest) async -> TopicLabelResult {
         let start = clock.uptime
         let result = await signposter.withInterval(.topicsLabel) {
@@ -130,7 +140,7 @@ public actor TopicLabelingService {
 
     private func runChain(_ original: TopicLabelRequest, mode: TopicLabelingMode) async -> TopicLabelResult {
         var request = original
-        if mode != .full {
+        if mode > .confirmStrongCandidates {
             request.confirmsBoundary = false
         }
         let judges = request.kind == .boundary && request.confirmsBoundary

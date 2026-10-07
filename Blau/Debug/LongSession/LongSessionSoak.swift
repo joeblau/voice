@@ -36,6 +36,9 @@
         @ObservationIgnored private var vadTask: Task<Void, Never>?
         @ObservationIgnored private var pollTask: Task<Void, Never>?
         @ObservationIgnored private var registeredStage: String?
+        /// Thermal state, performance level and battery over the run (#75).
+        @ObservationIgnored private var performance = PerformanceStatisticsRecorder(start: .zero)
+        @ObservationIgnored private var performanceTask: Task<Void, Never>?
 
         func start(_ environment: AppEnvironment) async {
             guard !isRunning else { return }
@@ -54,6 +57,7 @@
             }
             isRunning = true
             startedAt = Date()
+            recordPerformance(environment)
 
             let model: any SpeechProbabilityModel
             if let directory = environment.speechModels.directory(for: .sileroVAD),
@@ -84,6 +88,8 @@
             guard isRunning, let conversation = environment.conversationAudio else { return }
             pollTask?.cancel()
             vadTask?.cancel()
+            performanceTask?.cancel()
+            performanceTask = nil
             await vadTask?.value
             // Read everything for the report while the VAD stage is still
             // registered: unregistering drops it from the inference
@@ -108,7 +114,8 @@
                 keeper: keeperStatistics,
                 capture: LongSessionReport.Capture(capture ?? CaptureStatistics()),
                 vad: vad.map { LongSessionReport.VAD(model: vadModel, statistics: $0) },
-                inference: inference
+                inference: inference,
+                performance: performance.statistics(at: environment.clock.uptime)
             )
             self.report = report
             reportURL = save(report)
@@ -116,6 +123,19 @@
             registeredStage = nil
             Log.ui.notice(
                 "Long-session soak stopped: \(report.verdict.passed ? "passed" : "failed", privacy: .public)")
+        }
+
+        /// Records every change of the thermal and power policy from now on.
+        private func recordPerformance(_ environment: AppEnvironment) {
+            let clock = environment.clock
+            performance = PerformanceStatisticsRecorder(
+                start: clock.uptime, hotThermalState: environment.performance.configuration.reducedThermalState)
+            let updates = environment.performance.updates()
+            performanceTask = Task { [weak self] in
+                for await snapshot in updates {
+                    self?.performance.record(snapshot, at: clock.uptime)
+                }
+            }
         }
 
         private func refresh(_ environment: AppEnvironment) async {

@@ -296,8 +296,21 @@ step goes first:
 | `.serious` | `.skipConfirmation` | No call at candidates; the segmenter's decision stands. Each confirmed topic is still titled by a model |
 | `.critical` | `.keywordsOnly` | No model calls; keyword titles |
 
-The thermal source is a `ThermalStateProviding`, so the performance policy
-(#75) can drive it.
+The thermal source is a `ThermalStateProviding`. The thermal and power
+policy (#75, [performance.md](performance.md#thermal-and-power-adaptation))
+tightens this through `TopicLabelingService(performance:)`; the mode is the
+stricter of the two:
+
+| `PerformanceLevel` | Mode | Behaviour |
+| ------------------ | ---- | --------- |
+| `normal` | `.full` | As above |
+| `reduced` | `.confirmStrongCandidates` | Only strong candidates (score at least `strongCandidateRatio`, 1.5×, the threshold they cleared) go to the model; weaker ones are left to the segmenter's hysteresis, which drops most of them anyway. Confirmed topics are titled by a model |
+| `minimal` | `.skipConfirmation` | No call at candidates; confirmed topics are still titled |
+
+Strong candidates are the ones most likely to be confirmed, so their
+provisional title is usually reused and the call isn't wasted; the
+`TopicPerformanceLevelTests` check that exactly the strong candidates of a
+scripted transcript are sent and that the same topics come out.
 
 ### Evaluation
 

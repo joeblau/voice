@@ -27,6 +27,7 @@ call `print`.
 | `memory`   | `Log.memory`   | `Signposts.memory`   | `BlauMemory`: embeddings, index, retrieval                |
 | `data`     | `Log.data`     | `Signposts.data`     | `BlauPersistence`: SwiftData, CloudKit sync               |
 | `ui`       | `Log.ui`       | `Signposts.ui`       | App target: views and composition root                    |
+| `perf`     | `Log.performance` | `Signposts.performance` | `BlauTelemetry`: the thermal and power policy (#75)  |
 
 ```swift
 import BlauTelemetry
@@ -492,8 +493,152 @@ which intervals reach MetricKit. Delivery itself needs a device:
 | Simulated payload stored and shown (device, Xcode) | Pending |
 | Real metric payload on a TestFlight build          | Pending |
 | Real diagnostic payload (hang) on a TestFlight build | Pending |
-| `realtime.firstAudio` in `signpostMetrics`         | Pending (needs a device and xAI credentials) |
+| `realtime.firstAudio` in `signpostMetrics`         | Pending (needs #36) |
 | Export opens in Files / AirDrop on device          | Pending |
+
+## Thermal and power adaptation
+
+An hour-long conversation must not cook the phone or drain the battery
+(#75). `PerformancePolicy` (BlauTelemetry) watches the device and publishes
+a `PerformanceLevel`; every stage of the pipeline reads it and sheds work
+when it drops.
+
+### Levels
+
+The policy reads `ProcessInfo.thermalState`, `ProcessInfo.isLowPowerModeEnabled`
+and, on iOS, `UIDevice.batteryLevel` and `batteryState`
+(`SystemDeviceConditionsSource`, updated on their change notifications).
+The strictest condition wins (`PerformancePolicyConfiguration`):
+
+| Condition | Level |
+| --- | --- |
+| Thermal state `nominal` or `fair`, Low Power Mode off, battery fine or charging | `normal` |
+| Thermal state `serious` | `reduced` |
+| Low Power Mode on | `reduced` |
+| On battery at 20% or less (held until 25%, or plugged in) | `reduced` |
+| Thermal state `critical` | `minimal` |
+| On battery at 10% or less (held until 15%, or plugged in) | `minimal` |
+
+**Hysteresis.** A worse level applies on the reading that calls for it. A
+better one waits until conditions have allowed it for `recoveryDelay`
+(60 s), then relaxes one level; the next level waits another 60 s. The
+policy runs a timer for the delay, so recovery happens even when no new
+notification arrives. A device hovering at the `serious` boundary keeps
+`reduced` instead of flipping the pipeline every few seconds. The
+decision logic is the value type `PerformanceLevelTracker`, tested on the
+Mac with explicit times.
+
+### What each level changes
+
+| Stage | `normal` | `reduced` | `minimal` | Where |
+| --- | --- | --- | --- | --- |
+| Streaming ASR | Parakeet, 320 ms chunks | Parakeet, 1280 ms chunks (about a quarter of the model calls; partials slower, end of utterance unchanged) | Apple's `SpeechTranscriber` where the stage offers it, else 1280 ms | `PerformanceASRChunkSizePolicy`, `ParakeetEouRecognizer.provider(modelManager:)`, `BackgroundInferenceMonitor.setPerformanceLevel` ([asr.md](asr.md#chunk-size-and-the-thermal-and-power-policy), [background.md](background.md)) |
+| Second pass (Parakeet TDT v3) | On | Off (`SecondPassSkipReason.reducedPerformance`) | Off | `SecondPassTranscriber(performance:)` |
+| Topic LLM | Confirms every candidate, titles topics | Confirms strong candidates only (score ≥ 1.5× threshold), titles topics | Titles topics only | `TopicLabelingService(performance:)`, `TopicLabelingPolicy` ([topics.md](topics.md#thermal-policy)) |
+| Memory indexing | Immediate | Deferred: up to 5 min, or until `normal` | Suspended until the level improves | `IndexingGate` (BlauMemory), for the incremental indexer (#63) |
+| UI | Nothing | A small "Cooling down", "Saving battery" or "Low Power Mode" capsule at the top of the main screen | Same | `PerformanceIndicator` (app) |
+
+Stages switch only where it is safe: ASR between utterances (a
+recognizer's state can't change chunk size mid-utterance), the second pass
+and topic confirmation per utterance or candidate, model backends through
+the inference monitor's load-then-swap. The thermal checks that existed
+before (#29, #30, #53: the second pass off and topic confirmation skipped
+at `serious`) stay; the stricter of the two applies.
+
+The 1280 ms export is an optional 225 MB model
+(`ModelID.parakeetRealtimeEOU1280`, [models.md](models.md)). Without it
+ASR stays at 320 ms and only the other stages back off. Apple's
+`SpeechTranscriber` arrives with #31; until a stage offers `systemSpeech`,
+`minimal` keeps ASR on 1280 ms Parakeet.
+
+### Wiring
+
+`AppEnvironment` owns one policy: the device's readings in the live app,
+fixed nominal readings in previews and tests. `start()` starts it, feeds
+its levels to the background inference monitor
+(`backgroundInference.follow(performance.performanceLevels())`) and to the
+views (`PerformanceStatus`). The live transcriber, topic pipeline and
+indexer are still `UnavailableService` in `AppEnvironment.live()`; the issues
+that compose them pass `environment.performance` where the table above
+says:
+
+```swift
+let streaming = ParakeetStreamingTranscriber(
+    recognizer: recognizer, audio: hub, voiceActivity: vad,
+    chunkSizePolicy: PerformanceASRChunkSizePolicy(environment.performance),
+    recognizerProvider: ParakeetEouRecognizer.provider(modelManager: environment.speechModels))
+let transcriber = SecondPassTranscriber(
+    wrapping: streaming, audio: hub, recognizer: ParakeetTdtRecognizer.provider(modelManager: models),
+    flags: environment.flags, performance: environment.performance)
+let labeling = TopicLabelingService.standard(textGenerator: xai, performance: environment.performance)
+let gate = IndexingGate(performance: environment.performance)   // await gate.waitUntilAllowed() per batch
+```
+
+The debug menu's **Thermal and power** section shows the readings, the
+level and why, and overrides the level (Automatic, Normal, Reduced,
+Minimal), which is how to see each level on a cool, plugged-in device or in
+the simulator (which always reads `nominal` and reports no battery). UI
+tests launch with `-BlauPerformanceLevel reduced`.
+
+### Telemetry
+
+- `Log.performance` (category `perf`) logs every level change with its
+  reasons and the readings, e.g. `Performance level normal -> reduced
+  (thermal state serious; thermal serious, Low Power Mode false, battery
+  64% unplugged)`.
+- Each stretch below `normal` is a **`perf.degraded`** interval on
+  `Signposts.performance`; its end message is the worst level reached. Every
+  change is a **`perf.levelChange`** event. In the Blau Instruments template
+  they line up with the Thermal State track.
+- `PerformancePolicy.statistics` (`PerformanceStatistics`) keeps time at
+  each level and thermal state, the worst of each, level changes, time in
+  Low Power Mode and on battery, and battery drain per hour. The long-session
+  soak report (#26, the debug menu's **Long session soak test**) records
+  them for the run and fails if the device spent more than 10 s at `serious`
+  or hotter while the pipeline still ran at `normal`.
+
+### Tests
+
+| Where | What |
+| --- | --- |
+| `BlauTelemetryTests/Performance/PerformanceLevelTrackerTests.swift` | The decision table (thermal, Low Power Mode, battery on and off charge, hysteresis margins, strictest cause first), immediate escalation, the recovery delay, one level at a time, flapping, overrides |
+| `BlauTelemetryTests/Performance/PerformancePolicyTests.swift` | Following a source, snapshot and level streams, the recovery timer on a `ManualClock`, `perf.degraded` and `perf.levelChange` signposts, statistics, the system source on the Mac |
+| `BlauTelemetryTests/Performance/PerformanceStatisticsTests.swift` | Time per level and thermal state, heat at `normal`, battery drain, transitions, JSON |
+| `BlauTranscriptionTests/ASR/ParakeetStreamingTranscriberTests.swift` | The chunk size following the level both ways, between utterances |
+| `BlauTranscriptionTests/SecondPass/SecondPassTranscriberTests.swift` | The second pass skipped below `normal`, resumed at `normal`, and skipped for a waiting utterance when the level drops |
+| `BlauTranscriptionTests/Background/PerformanceLevelInferenceTests.swift` | `minimal` moving ASR to `SpeechTranscriber` through the monitor |
+| `BlauTranscriptionTests/Models/ModelManifestTests.swift` | The 1280 ms export pinned from the same revision as the 320 ms one |
+| `BlauTopicsTests/Labeling/TopicPerformanceLevelTests.swift` | Level modes, strong candidates, the pipeline sending exactly the strong candidates at `reduced` and none at `minimal` |
+| `BlauMemoryTests/IndexingGateTests.swift` | Immediate, deferred and suspended indexing on a `ManualClock` |
+| `BlauTests/PerformanceIndicatorTests.swift`, `BlauUITests/PerformanceIndicatorUITests.swift` | The indicator's text per cause, the status following the policy, the environment feeding the monitor; the capsule hidden at `normal`, shown with `-BlauPerformanceLevel reduced` and after a debug-menu override |
+
+### Verifying on a device
+
+The acceptance criterion is a **1-hour soak on an A17 iPhone (iPhone 15 Pro)
+that stays at or below `fair` at the `normal` level, or degrades
+gracefully**. It needs the hardware:
+
+1. Install a Debug build on the iPhone, unplugged, Low Power Mode off, at
+   room temperature, with every model installed (including the optional
+   1280 ms export).
+2. Debug menu → **Long session soak test** → Start, talk now and then for
+   60+ minutes (screen locked most of the time), unlock, Stop and share the
+   JSON report.
+3. Record Instruments with the Blau template alongside (`make trace`) to see
+   `perf.degraded` against the Thermal State track.
+4. Pass: the report's verdict passes (no time hot at `normal`), and either
+   `performance.worstThermalState` is `fair` or better, or every period at
+   `serious` shows a `perf.degraded` interval with 1280 ms chunks, no
+   `asr.secondPass` intervals and a return to `normal` after cooling.
+
+| Check | Device | Result |
+| --- | --- | --- |
+| 1 h soak at `normal`: worst thermal state, time at or below `fair` | iPhone 15 Pro (A17 Pro) | Pending |
+| Degrades on `serious`, recovers about 60 s after `fair` | iPhone 15 Pro (A17 Pro) | Pending |
+| Battery drain per hour on battery | iPhone 15 Pro (A17 Pro) | Pending |
+| Low Power Mode → `reduced`, the indicator shows "Low Power Mode" | Any iPhone | Pending |
+| Battery 20% and 10% thresholds on discharge | Any iPhone | Pending |
+| 1280 ms export downloads, loads and transcribes (`BLAU_MODEL_DOWNLOAD_SMOKE=1 BLAU_MODEL_DOWNLOAD_SMOKE_MODELS=parakeetRealtimeEOU1280`) | Mac or iPhone | Pending |
 
 ## Model benchmarks
 
@@ -502,19 +647,9 @@ real-time factor and memory, and probes background Neural Engine behaviour.
 It emits the canonical intervals above around every measured step. Running
 it and the results are in [docs/benchmarks.md](benchmarks.md).
 
-## Turn latency in the HUD
-
-The turn orchestrator (#36) measures each turn as it happens: end of
-utterance → first audio (`realtime.firstAudio`'s span) and end of utterance
-→ `response.done` (`realtime.turn`'s), kept as last / p50 / p95 over the last
-200 turns. With the **Performance HUD** flag on, the main screen shows them
-with the turn state, the connection and token usage
-([realtime.md](realtime.md#latency-and-the-hud)). Device numbers go in the
-pending table there.
-
 ## What comes next
 
 The rest of the performance epic (#11) builds on these names: the XCTest
 performance suite with `XCTOSSignpostMetric` baselines (#73), the end-to-end
-latency budget (#74), thermal adaptation (#75), the soak test (#76) and the
-debug HUD (#71).
+latency budget (#74), the soak test (#76) and the debug HUD (#71). Thermal
+and power adaptation (#75) is described above.

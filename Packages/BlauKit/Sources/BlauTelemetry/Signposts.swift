@@ -116,6 +116,7 @@ public enum Signposts {
     public static let memory = Signposter(category: .memory, backend: defaultBackend(for: .memory))
     public static let data = Signposter(category: .data, backend: defaultBackend(for: .data))
     public static let ui = Signposter(category: .ui, backend: defaultBackend(for: .ui))
+    public static let performance = Signposter(category: .performance, backend: defaultBackend(for: .performance))
 
     /// The shared signposter for `category`.
     public static func signposter(for category: LogCategory) -> Signposter {
@@ -128,6 +129,7 @@ public enum Signposts {
         case .memory: memory
         case .data: data
         case .ui: ui
+        case .performance: performance
         }
     }
 

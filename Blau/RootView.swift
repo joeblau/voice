@@ -45,6 +45,13 @@ struct MainScreenScaffold: View {
     var body: some View {
         NavigationStack {
             MainScreen(onConnectAccount: { isShowingKeyOnboarding = true })
+                .voiceLoopHUD()
+                // Shown only while the device is hot or short on power (#75).
+                // An inset, not an overlay: the DEBUG voice loop HUD (applied
+                // just before, top-leading on the content) then sits below the
+                // indicator instead of under it, and the conversation scrolls
+                // beneath it like it does beneath the bars.
+                .safeAreaInset(edge: .top, spacing: 0) { PerformanceIndicator() }
                 .toolbar {
                     #if DEBUG
                         ToolbarItem(placement: .topBarTrailing) {
@@ -61,7 +68,6 @@ struct MainScreenScaffold: View {
                         }
                     }
                 }
-                .voiceLoopHUD()
                 // Inside the stack, after the toolbar, so the card is inset
                 // above the bottom bar instead of drawn over Settings and
                 // Record while the speech models download.

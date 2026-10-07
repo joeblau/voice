@@ -79,6 +79,20 @@ MODELS = [
         ],
     },
     {
+        "id": "parakeetRealtimeEOU1280",
+        "repo": "FluidInference/parakeet-realtime-eou-120m-coreml",
+        "revision": "40a23f4c0b333aa17ad8c0f2ea47ec2347f2f355",
+        "directory": "1280ms",
+        # The 1280 ms export of the same model (`Repo.parakeetEou1280`), for
+        # the thermal and power policy (#75). Same entries as 320 ms.
+        "entries": [
+            "streaming_encoder.mlmodelc",
+            "decoder.mlmodelc",
+            "joint_decision.mlmodelc",
+            "vocab.json",
+        ],
+    },
+    {
         "id": "speakerEmbedding",
         "repo": "FluidInference/speaker-diarization-coreml",
         # The commit FluidAudio 0.17.5 itself pins in `Repo.diarizer.revision`.

@@ -8,9 +8,12 @@ struct ModelManifestTests {
     let manifest = ModelManifest.pinned
 
     @Test func coversEveryModelOnce() {
-        #expect(manifest.models.map(\.id) == [.sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU, .parakeetTDTv3])
+        #expect(
+            manifest.models.map(\.id) == [
+                .sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU, .parakeetTDTv3, .parakeetRealtimeEOU1280,
+            ])
         #expect(manifest.required.map(\.id) == [.sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU])
-        #expect(manifest.optional.map(\.id) == [.parakeetTDTv3])
+        #expect(manifest.optional.map(\.id) == [.parakeetTDTv3, .parakeetRealtimeEOU1280])
     }
 
     @Test(arguments: ModelManifest.pinned.models)
@@ -75,6 +78,7 @@ struct ModelManifestTests {
     @Test func sizesMatchTheExpectedModels() throws {
         let megabytes = { (id: ModelID) throws -> Int64 in try #require(manifest[id]).totalBytes / 1_000_000 }
         #expect(try (200...250).contains(megabytes(.parakeetRealtimeEOU)))
+        #expect(try (200...250).contains(megabytes(.parakeetRealtimeEOU1280)))
         #expect(try (430...530).contains(megabytes(.parakeetTDTv3)))
         #expect(try (1...10).contains(megabytes(.sileroVAD)))
         #expect(try (1...40).contains(megabytes(.speakerEmbedding)))
@@ -100,6 +104,7 @@ struct ModelManifestTests {
         #expect(
             shuffled.models.map(\.id) == [
                 .sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU, .parakeetTDTv3, .textEmbedding,
+                .parakeetRealtimeEOU1280,
             ])
     }
 
@@ -118,7 +123,8 @@ struct ModelManifestTests {
 
     @Test func requiredModelsAreTheOnesBlauCannotListenWithout() {
         #expect(ModelID.allCases.filter(\.isRequired) == [.sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU])
-        #expect(ModelID.allCases.filter(\.followsOptionalModelsPreference) == [.parakeetTDTv3])
+        #expect(
+            ModelID.allCases.filter(\.followsOptionalModelsPreference) == [.parakeetTDTv3, .parakeetRealtimeEOU1280])
         for id in ModelID.allCases {
             #expect(!id.displayName.isEmpty)
             #expect(!id.summary.isEmpty)
@@ -133,6 +139,26 @@ struct ModelManifestTests {
         #expect(FluidAudioModels.upstream(for: .textEmbedding) == nil)
         #expect(FluidAudioModels.requiredEntries(for: .textEmbedding).isEmpty)
         #expect(Set(FluidAudioModels.models).isSubset(of: Set(manifest.models.map(\.id))))
+    }
+
+    /// Each streaming chunk size Blau can switch to has its own export,
+    /// from the matching directory of the same repository.
+    @Test func chunkSizeExportsComeFromTheirOwnDirectories() throws {
+        #expect(ASRChunkSize.ms320.modelID == .parakeetRealtimeEOU)
+        #expect(ASRChunkSize.ms1280.modelID == .parakeetRealtimeEOU1280)
+        #expect(ASRChunkSize.ms160.modelID == nil)
+        let standard = try #require(manifest[.parakeetRealtimeEOU])
+        let lowPower = try #require(manifest[.parakeetRealtimeEOU1280])
+        #expect(lowPower.repository == standard.repository)
+        #expect(lowPower.revision == standard.revision)
+        #expect(standard.remoteDirectory == "320ms")
+        #expect(lowPower.remoteDirectory == "1280ms")
+        #expect(lowPower.bundles == standard.bundles)
+        // Different exports: the encoder weights differ.
+        let encoder = "streaming_encoder.mlmodelc/weights/weight.bin"
+        #expect(
+            lowPower.files.first { $0.path == encoder }?.sha256 != standard.files.first { $0.path == encoder }?.sha256)
+        #expect(!ModelID.parakeetRealtimeEOU1280.isRequired)
     }
 
     @Test func warmUpUsesFluidAudiosComputeUnits() {

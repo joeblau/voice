@@ -80,11 +80,12 @@ extension TopicLabelingService {
         clock: any BlauClock = ManualClock(),
         timeout: Duration = .seconds(10),
         policy: TopicLabelingPolicy = .default,
+        performance: (any PerformanceLevelProviding)? = nil,
         signposter: Signposter = .disabled(.topics)
     ) -> TopicLabelingService {
         TopicLabelingService(
-            labelers: labelers, policy: policy, thermal: thermal, clock: clock, timeout: timeout,
-            signposter: signposter)
+            labelers: labelers, policy: policy, thermal: thermal, performance: performance, clock: clock,
+            timeout: timeout, signposter: signposter)
     }
 }
 
