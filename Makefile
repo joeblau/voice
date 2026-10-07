@@ -95,6 +95,10 @@ microbench: ## Run the BlauKit micro-benchmarks (topic engine, RRF, int8 search)
 microbench-check: ## Run the micro-benchmarks and fail on a >10% regression against Thresholds/
 	scripts/perf/microbench.sh check
 
+.PHONY: microbench-compare
+microbench-compare: ## Compare the micro-benchmarks with BlauKit at BASE (default origin/main) on this Mac
+	scripts/perf/microbench.sh compare $(or $(BASE),origin/main)
+
 .PHONY: microbench-baseline
 microbench-baseline: ## Rewrite the micro-benchmark thresholds from a run on this Mac (commit them)
 	scripts/perf/microbench.sh update

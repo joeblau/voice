@@ -167,6 +167,7 @@ def compare(results: dict, baseline: dict) -> list:
         for metric_id, metric in sorted(metrics.items()):
             if metric_id in baseline.get("tests", {}).get(test_id, {}):
                 continue
+            unavailable = not any(metric["values"])
             rows.append(
                 {
                     "test": test_id,
@@ -177,7 +178,7 @@ def compare(results: dict, baseline: dict) -> list:
                     "tolerance": None,
                     "current": float(statistic(metric["values"])),
                     "change": None,
-                    "status": "new",
+                    "status": "unavailable" if unavailable else "new",
                 }
             )
     return rows
@@ -209,7 +210,13 @@ def report(rows: list, baseline: dict, results: dict) -> str:
         "| Result | Test | Metric | Baseline | Current | Change | Tolerance |",
         "| --- | --- | --- | ---: | ---: | ---: | ---: |",
     ]
-    marks = {"ok": "ok", "regressed": "**REGRESSED**", "missing": "**NOT MEASURED**", "new": "new, not gated"}
+    marks = {
+        "ok": "ok",
+        "regressed": "**REGRESSED**",
+        "missing": "**NOT MEASURED**",
+        "new": "new, not gated",
+        "unavailable": "all zero on this machine, not gated",
+    }
     for row in rows:
         change = "–" if row["change"] is None else f"{row['change'] + 0.0:+.1f}%".replace("-0.0%", "+0.0%")
         tolerance = "–" if row["tolerance"] is None else f"{row['tolerance']:.0f}%"
@@ -238,8 +245,15 @@ def record(results: dict, baseline_path: str, environment: str | None, note: str
     statistic_name = previous.get("statistic", "median")
     statistic = STATISTICS[statistic_name]
     tests = {}
+    unavailable = []
     for test_id, metrics in sorted(results.get("tests", {}).items()):
         for metric_id, metric in sorted(metrics.items()):
+            # A counter the machine doesn't provide (CPU instructions and
+            # cycles in a virtual machine) reads zero every time: nothing to
+            # gate.
+            if not any(metric["values"]):
+                unavailable.append(f"{test_id} {metric.get('name', metric_id)}")
+                continue
             old = previous.get("tests", {}).get(test_id, {}).get(metric_id, {})
             entry = {
                 "name": metric.get("name", metric_id),
@@ -267,6 +281,7 @@ def record(results: dict, baseline_path: str, environment: str | None, note: str
             "device": ", ".join(results.get("devices", [])) or "unknown",
             "note": note or previous.get("recorded", {}).get("note", ""),
         },
+        "unavailable": unavailable,
         "tests": tests,
     }
 

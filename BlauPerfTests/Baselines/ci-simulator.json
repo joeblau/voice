@@ -1,0 +1,185 @@
+{
+  "description": "Baselines for the XCTest performance suite (#73) on one machine type; see docs/performance.md.",
+  "environment": "ci-simulator",
+  "statistic": "median",
+  "defaultTolerancePercent": 10.0,
+  "recorded": {
+    "date": "2026-10-08",
+    "commit": "3c61c27",
+    "device": "iPhone 17",
+    "note": "GitHub Actions xcode-27 runner (Apple silicon VM), iPhone 17 simulator, iOS 27.0, Release with BLAU_PERF; CI run 37674414639"
+  },
+  "unavailable": [
+    "ReplaySessionPerformanceTests/testScriptedSession() CPU Cycles (blau)",
+    "ReplaySessionPerformanceTests/testScriptedSession() CPU Instructions Retired (blau)"
+  ],
+  "tests": {
+    "LaunchPerformanceTests/testColdLaunch()": {
+      "com.apple.dt.XCTMetric_ApplicationLaunch-AppLaunch.duration": {
+        "name": "Duration (AppLaunch)",
+        "unit": "s",
+        "polarity": "prefers smaller",
+        "baseline": 4.681254,
+        "samples": [
+          5.716677,
+          4.493103,
+          5.114224,
+          4.681254,
+          4.610924
+        ],
+        "tolerancePercent": 50,
+        "note": "Launch time on the shared CI VMs moves by a third between runs on different hosts (median 7.30 s on the 2026-10-07 nightly, 4.68 s here), so only a gross regression trips it; the device numbers are the launch baseline that matters (docs/performance.md)."
+      }
+    },
+    "LaunchPerformanceTests/testLaunchUntilResponsive()": {
+      "com.apple.dt.XCTMetric_ApplicationLaunch-ApplicationFirstFramePresentationResponsive.duration": {
+        "name": "Duration (ApplicationFirstFramePresentationResponsive)",
+        "unit": "s",
+        "polarity": "prefers smaller",
+        "baseline": 5.015631,
+        "samples": [
+          5.745152,
+          4.841364,
+          5.276718,
+          4.391315,
+          5.015631
+        ],
+        "tolerancePercent": 50,
+        "note": "Launch time on the shared CI VMs moves by a third between runs on different hosts (median 7.30 s on the 2026-10-07 nightly, 4.68 s here), so only a gross regression trips it; the device numbers are the launch baseline that matters (docs/performance.md)."
+      }
+    },
+    "ReplaySessionPerformanceTests/testScriptedSession()": {
+      "com.apple.dt.XCTMetric_CPU-com.joeblau.blau.time": {
+        "name": "CPU Time (blau)",
+        "unit": "s",
+        "polarity": "prefers smaller",
+        "baseline": 3.231754,
+        "samples": [
+          3.197191,
+          2.887117,
+          3.231754,
+          3.275436,
+          3.724159
+        ]
+      },
+      "com.apple.dt.XCTMetric_Clock.time.monotonic": {
+        "name": "Clock Monotonic Time",
+        "unit": "s",
+        "polarity": "prefers smaller",
+        "baseline": 31.985598,
+        "samples": [
+          33.430524,
+          31.947143,
+          32.032042,
+          31.985598,
+          31.949196
+        ]
+      },
+      "com.apple.dt.XCTMetric_Memory-com.joeblau.blau.physical": {
+        "name": "Memory Physical (blau)",
+        "unit": "kB",
+        "polarity": "prefers smaller",
+        "baseline": -32.768,
+        "samples": [
+          -32.768,
+          -245.76,
+          114.688,
+          327.68,
+          -376.832
+        ],
+        "minimumDelta": 2048,
+        "note": "The memory a session leaves behind: a few hundred kB either way, so changes under 2 MB are noise."
+      },
+      "com.apple.dt.XCTMetric_Memory-com.joeblau.blau.physical_absolute": {
+        "name": "Absolute Memory Physical (blau)",
+        "unit": "kB",
+        "polarity": "prefers smaller",
+        "baseline": 37903.168,
+        "samples": [
+          38034.24,
+          37788.48,
+          37903.168,
+          38230.848,
+          37854.016
+        ]
+      },
+      "com.apple.dt.XCTMetric_Memory-com.joeblau.blau.physical_peak": {
+        "name": "Memory Peak Physical (blau)",
+        "unit": "kB",
+        "polarity": "prefers smaller",
+        "baseline": 38263.616,
+        "samples": [
+          38329.152,
+          38067.008,
+          38263.616,
+          41229.12,
+          38263.616
+        ]
+      },
+      "com.apple.dt.XCTMetric_OSSignpost-db.save.duration": {
+        "name": "Duration (db.save)",
+        "unit": "s",
+        "polarity": "prefers smaller",
+        "baseline": 0.011792,
+        "samples": [
+          0.106214,
+          0.00799,
+          0.01291,
+          0.010068,
+          0.011792
+        ],
+        "tolerancePercent": 200,
+        "minimumDelta": 0.05,
+        "note": "XCTOSSignpostMetric reports one interval per iteration, not the session's total, so it swings far more than 10% between runs; gated only against gross regressions. The session's CPU and memory metrics carry the 10% gate."
+      },
+      "com.apple.dt.XCTMetric_OSSignpost-memory.search.duration": {
+        "name": "Duration (memory.search)",
+        "unit": "s",
+        "polarity": "prefers smaller",
+        "baseline": 0.00149,
+        "samples": [
+          0.005641,
+          0.001183,
+          0.001074,
+          0.005882,
+          0.00149
+        ],
+        "tolerancePercent": 200,
+        "minimumDelta": 0.02,
+        "note": "XCTOSSignpostMetric reports one interval per iteration, not the session's total, so it swings far more than 10% between runs; gated only against gross regressions. The session's CPU and memory metrics carry the 10% gate."
+      },
+      "com.apple.dt.XCTMetric_OSSignpost-topics.segment.duration": {
+        "name": "Duration (topics.segment)",
+        "unit": "s",
+        "polarity": "prefers smaller",
+        "baseline": 0.000127,
+        "samples": [
+          9.5e-05,
+          0.000153,
+          8.3e-05,
+          0.000127,
+          0.000234
+        ],
+        "tolerancePercent": 200,
+        "minimumDelta": 0.002,
+        "note": "XCTOSSignpostMetric reports one interval per iteration, not the session's total, so it swings far more than 10% between runs; gated only against gross regressions. The session's CPU and memory metrics carry the 10% gate."
+      },
+      "com.apple.dt.XCTMetric_OSSignpost-voiceid.verify.duration": {
+        "name": "Duration (voiceid.verify)",
+        "unit": "s",
+        "polarity": "prefers smaller",
+        "baseline": 1.5e-05,
+        "samples": [
+          2e-05,
+          1.5e-05,
+          2e-06,
+          7.9e-05,
+          1.3e-05
+        ],
+        "tolerancePercent": 200,
+        "minimumDelta": 0.001,
+        "note": "XCTOSSignpostMetric reports one interval per iteration, not the session's total, so it swings far more than 10% between runs; gated only against gross regressions. The session's CPU and memory metrics carry the 10% gate."
+      }
+    }
+  }
+}

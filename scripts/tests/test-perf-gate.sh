@@ -95,6 +95,31 @@ expect "extract fails cleanly on a missing bundle" 2 \
 
 # --- record ---------------------------------------------------------------------
 
+# A counter the machine doesn't provide reads zero: it is left out of the
+# baseline and reported as unavailable.
+python3 -I -c '
+import json, sys
+results = json.load(open(sys.argv[1]))
+results["tests"]["ReplaySessionPerformanceTests/testScriptedSession()"]["instructions"] = {
+    "name": "CPU Instructions Retired", "unit": "kI", "polarity": "prefers smaller", "values": [0.0, 0.0]}
+json.dump(results, open(sys.argv[2], "w"))
+' "$work/results.json" "$work/results-zero.json"
+expect "record skips all-zero counters" 0 \
+    python3 -I "$gate" record --results "$work/results-zero.json" --baseline "$work/baseline-zero.json"
+if python3 -I -c '
+import json, sys
+baseline = json.load(open(sys.argv[1]))
+assert "instructions" not in baseline["tests"]["ReplaySessionPerformanceTests/testScriptedSession()"]
+assert any("CPU Instructions Retired" in item for item in baseline["unavailable"]), baseline["unavailable"]
+' "$work/baseline-zero.json"; then
+    pass "all-zero counters are listed as unavailable"
+else
+    fail "all-zero counters are listed as unavailable"
+fi
+expect "check passes with an unavailable counter" 0 \
+    python3 -I "$gate" check --results "$work/results-zero.json" --baseline "$work/baseline-zero.json"
+expect_output "the unavailable counter is reported" "all zero on this machine"
+
 expect "record writes a baseline" 0 \
     python3 -I "$gate" record --results "$work/results.json" --baseline "$work/baseline.json" --environment ci-simulator
 if python3 -I -c '
@@ -230,6 +255,8 @@ expect "microbench check fails on the tool's own regression status" 1 \
     env PATH="$work/bin:$PATH" FAKE_SWIFT_STATUS=2 "$microbench" check
 if [ -s "$work/microbench.txt" ]; then pass "microbench check saves its report"; else fail "microbench check saves its report"; fi
 expect "microbench rejects an unknown command" 64 "$microbench" frobnicate
+expect "microbench compare fails cleanly on an unknown ref" 1 \
+    env PATH="$work/bin:$PATH" "$microbench" compare refs/heads/no-such-branch-for-perf-gate-tests
 
 echo
 echo "$passed passed, $failed failed"

@@ -15,20 +15,24 @@ import BlauTopics
 import Foundation
 
 let benchmarks: @Sendable () -> Void = {
-    // The regression gate: a p90 more than 10% worse than the committed
-    // threshold fails `make microbench-check` (and CI).
+    // The regression gate (docs/performance.md, "Micro-benchmarks"): a p90
+    // more than 10% worse than the committed thresholds (`make
+    // microbench-check`, every CI run) or than another revision
+    // (`make microbench-compare`) fails.
     //
-    // Only the deterministic counters are gated: instructions retired and
-    // allocations don't depend on what else the machine is doing.
-    // Wall-clock and CPU time are reported for people, not gated, because
-    // they move by more than 10% between runs on shared CI machines. A
-    // metric missing from this table would be checked with zero tolerance,
-    // so every measured metric is listed.
+    // Only the deterministic counters are gated: allocations, which come out
+    // the same on every run and every machine, and instructions retired,
+    // where the machine exposes them (Apple silicon Macs do; GitHub's macOS
+    // VMs don't, so CI gates allocations). CPU and wall-clock time are
+    // reported, never gated: on Apple silicon a run that lands on the
+    // efficiency cores is about a third slower with identical code. A metric
+    // missing from this table would be checked with package-benchmark's
+    // defaults, so every measured metric is listed.
     let gate: [BenchmarkMetric: BenchmarkThresholds] = [
         .instructions: .init(relative: [.p90: 10]),
         .mallocCountTotal: .init(relative: [.p90: 10]),
-        .wallClock: .init(),
         .cpuTotal: .init(),
+        .wallClock: .init(),
         .throughput: .init(),
     ]
 
