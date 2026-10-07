@@ -140,6 +140,47 @@ struct TopicResegmenterTests {
         #expect(result.boundaries == [10])
     }
 
+    // MARK: Forbidden positions
+
+    /// The second merge pass is scored against the boundaries the split
+    /// added, so a removal can depend on an addition: here the break at 8
+    /// first moves to 10, then goes once 16 is added. If the labeling model
+    /// vetoes the new boundaries, the engine keeps the moved break instead.
+    /// That is why a veto runs the engine again with the position forbidden
+    /// rather than dropping the addition from `changes`, which would leave
+    /// no boundary at all.
+    @Test func aRemovalThatDependedOnAForbiddenAdditionIsNotProposed() {
+        let topics = Self.topics((0, 8), (0, 8), (1, 8))
+        let (embeddings, timeRanges) = Self.conversation(topics)
+        func resegment(forbidden: Set<Int>) -> TopicResegmentation {
+            TopicResegmenter().resegment(
+                embeddings: embeddings, timeRanges: timeRanges, boundaries: [8], forbidden: forbidden)
+        }
+        let free = resegment(forbidden: [])
+        #expect(free.changes == [.removed(8), .added(16)])
+
+        // With 16 forbidden the next best cut is proposed instead...
+        let once = resegment(forbidden: [16])
+        #expect(!once.boundaries.contains(16))
+        #expect(once.changes.contains { if case .added = $0 { true } else { false } })
+        // ...and with every new boundary forbidden, nothing relies on one.
+        let vetoed = resegment(forbidden: Set(1..<topics.count))
+        #expect(vetoed.changes == [.moved(from: 8, to: 10)])
+        #expect(vetoed.boundaries == [10])
+    }
+
+    @Test func noBoundaryIsAddedAtAForbiddenPosition() {
+        let (embeddings, timeRanges) = Self.conversation(Self.topics((0, 8), (1, 8), (2, 8)))
+        let result = TopicResegmenter().resegment(
+            embeddings: embeddings, timeRanges: timeRanges, boundaries: [8], forbidden: [16])
+        #expect(!result.boundaries.contains(16))
+        #expect(!result.changes.contains(.added(16)))
+        // A boundary that is already there stays, forbidden or not.
+        let kept = TopicResegmenter().resegment(
+            embeddings: embeddings, timeRanges: timeRanges, boundaries: [8, 16], forbidden: [8, 16])
+        #expect(kept.isUnchanged)
+    }
+
     // MARK: What the user owns
 
     @Test func aLockedTopicIsNeverSplit() {
@@ -210,7 +251,9 @@ struct TopicResegmenterTests {
     /// embedder, 20 topics) the streaming segmenter got badly wrong: every
     /// other boundary missing and a false one inside every remaining topic.
     /// Re-segmentation runs once per conversation, off the audio path;
-    /// measured 0.5 s in a debug build on an M3 Max (budget 2 s here).
+    /// measured 0.5 s in a debug build on an M3 Max. The budget here is
+    /// loose (10 s) so a slow, shared CI runner doesn't flake; the timing
+    /// that matters is logged on device under `Log.topics`.
     @Test func aLongConversationIsQuick() {
         var vectors = TopicVectors(dimension: 1024, noise: 0.03, seed: 7)
         let topics = (0..<400).map { $0 / 20 }
@@ -224,7 +267,7 @@ struct TopicResegmenterTests {
                 embeddings: embeddings, timeRanges: timeRanges, boundaries: streaming)
         }
         #expect(result?.boundaries == Array(stride(from: 20, to: 400, by: 20)), "\(String(describing: result))")
-        #expect(elapsed < .seconds(2), "Took \(elapsed)")
+        #expect(elapsed < .seconds(10), "Took \(elapsed)")
         if ProcessInfo.processInfo.environment["BLAU_PRINT_RESEGMENTATION"] == "1" {
             print("Re-segmented 400 exchanges in \(elapsed)")
         }

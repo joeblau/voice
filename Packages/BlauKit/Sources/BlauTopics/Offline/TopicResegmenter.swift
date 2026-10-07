@@ -41,7 +41,15 @@ import Foundation
 /// Ranges in `locked` (topics the user named, merged or split, and topics
 /// from an earlier session) are left exactly as they are: no boundary is
 /// added inside them and their edges never move. `pinned` boundaries (a
-/// change of subject the user announced) never move or go away.
+/// change of subject the user announced) never move or go away. No
+/// boundary is added at a `forbidden` position (one the labeling model
+/// said doesn't start a new topic).
+///
+/// The passes depend on each other: the second merge pass is scored against
+/// the boundaries the split pass added, so a removal can rely on an
+/// addition. A caller that may reject an `.added` change must therefore
+/// run the engine again with that position `forbidden` rather than drop it
+/// from `changes`.
 ///
 /// Pure and deterministic, like `TopicSegmenter`: no clock, I/O or
 /// concurrency.
@@ -129,6 +137,8 @@ public struct TopicResegmenter: Sendable {
     ///   `boundaries`.
     ///   - pinned: Boundaries that must stay where they are, such as one the
     ///     user announced ("let's switch gears").
+    ///   - forbidden: Positions where no boundary may be added, such as one
+    ///     the labeling model vetoed. Existing boundaries there are kept.
     /// - Returns: The proposed boundaries and the changes that lead there.
     ///   Unchanged (`changes` empty) when the input is inconsistent.
     public func resegment(
@@ -136,7 +146,8 @@ public struct TopicResegmenter: Sendable {
         timeRanges: [TimeRange],
         boundaries: [Int],
         locked: [Range<Int>] = [],
-        pinned: Set<Int> = []
+        pinned: Set<Int> = [],
+        forbidden: Set<Int> = []
     ) -> TopicResegmentation {
         let count = embeddings.count
         let original = Array(Set(boundaries.filter { $0 > 0 && $0 < count })).sorted()
@@ -156,7 +167,8 @@ public struct TopicResegmenter: Sendable {
             end: timeRanges.map(\.end).max() ?? .zero,
             boundaries: original,
             locked: locked,
-            pinned: pinned
+            pinned: pinned,
+            forbidden: forbidden
         )
         run.mergeIndistinctTopics()
         run.moveBoundaries()
@@ -209,6 +221,8 @@ private struct Run {
     let fixed: Set<Int>
     /// Exchanges inside a locked range, where no boundary may be added.
     private let lockedUnits: IndexSet
+    /// Positions where no boundary may be added.
+    private let forbidden: Set<Int>
     /// `σ²`: the mean within-topic spread per exchange. Measured on the
     /// starting segmentation, and again after each round of splits.
     private(set) var spread: Double
@@ -222,7 +236,8 @@ private struct Run {
         end: Duration,
         boundaries: [Int],
         locked: [Range<Int>],
-        pinned: Set<Int>
+        pinned: Set<Int>,
+        forbidden: Set<Int>
     ) {
         self.configuration = configuration
         self.sums = sums
@@ -238,6 +253,7 @@ private struct Run {
         }
         self.fixed = fixed
         self.lockedUnits = lockedUnits
+        self.forbidden = forbidden
 
         self.spread = Self.pooledSpread(sums, boundaries: boundaries)
     }
@@ -348,12 +364,13 @@ private struct Run {
     // MARK: Scores
 
     /// The best place to cut `segment` in two full topics, outside locked
-    /// ranges.
+    /// ranges and away from forbidden positions.
     private func bestCut(in segment: Range<Int>) -> (position: Int, score: Double)? {
         guard segment.count >= 2 * configuration.minimumTopicUnits else { return nil }
         var best: (position: Int, score: Double)?
         for position in (segment.lowerBound + 1)..<segment.upperBound {
-            guard !lockedUnits.contains(position), !lockedUnits.contains(position - 1),
+            guard !forbidden.contains(position),
+                !lockedUnits.contains(position), !lockedUnits.contains(position - 1),
                 isTopic(segment.lowerBound..<position), isTopic(position..<segment.upperBound)
             else { continue }
             let score = cutScore(segment.lowerBound, position, segment.upperBound)

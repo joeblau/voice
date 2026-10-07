@@ -80,6 +80,10 @@ public enum ConversationStoreError: Error, Hashable, Sendable {
     case invalidTopicBoundary(UUID)
     /// A manual title was empty or only whitespace.
     case emptyTitle
+    /// A compare-and-swap edit was refused: the topic's title or span is no
+    /// longer what the caller read (it was renamed, moved, merged or split
+    /// meanwhile).
+    case topicChanged(UUID)
 }
 
 /// A topic's title and summary, as `ConversationStore.topicDigest(for:)`

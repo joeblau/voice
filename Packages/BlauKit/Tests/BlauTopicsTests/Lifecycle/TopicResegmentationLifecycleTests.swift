@@ -3,6 +3,7 @@ import BlauPersistence
 import BlauTelemetry
 import BlauTopics
 import Foundation
+import Synchronization
 import Testing
 
 /// Offline re-segmentation as the lifecycle runs it when a conversation
@@ -77,19 +78,109 @@ struct TopicResegmentationLifecycleTests {
 
     @Test func aBoundaryTheModelVetoesIsNotAdded() async throws {
         let transcript = Self.missedChange
-        let vetoed = transcript.exchanges[17].user
-        // Agrees with every streaming candidate, but not with a new topic at
-        // exchange 17.
+        let exchanges = transcript.exchanges.map(\.user)
+        // Says no to a new topic anywhere between exchanges 9 and 27 (a
+        // streaming candidate there included). Re-segmentation proposes 17
+        // first, then, with 17 forbidden, the next best cut, and so on.
         let labeler = ScriptedLabeler { request in
-            let isNew = !(request.kind == .boundary && request.after.first?.userText == vetoed)
+            let position = request.after.first.flatMap { first in exchanges.firstIndex(of: first.userText) }
+            let isNew = !(request.kind == .boundary && position.map { 9 < $0 && $0 < 27 } ?? false)
             return TopicShift(
                 isNewTopic: isNew, title: "Topic of \(request.after.count) Exchanges",
                 summary: "Covers \(request.after.count) exchanges.")
         }
         let fixture = try LifecycleFixture(transcript, labeler: labeler)
-        try await Self.play(fixture)
+        try await fixture.begin()
+        try await fixture.play(0..<transcript.count)
+        let streamed = labeler.requests.count
+        try await fixture.finish()
         #expect(try await fixture.topicStarts() == [0, 9, 27, 36])
-        #expect(labeler.requests.contains { $0.kind == .boundary && $0.after.first?.userText == vetoed })
+        let asked = labeler.requests[streamed...].filter { $0.kind == .boundary }.compactMap { request in
+            request.after.first.flatMap { exchanges.firstIndex(of: $0.userText) }
+        }
+        #expect(asked.first == 17)
+        #expect(asked.count > 1, "Only \(asked)")
+        // Each position is asked about once, and the model is asked at most
+        // `resegmentationQuestionLimit` times however often it says no.
+        #expect(asked.count == Set(asked).count, "\(asked)")
+        #expect(asked.count <= TopicLifecycle.resegmentationQuestionLimit, "\(asked)")
+    }
+
+    /// The engine's second merge pass can remove a streaming break because
+    /// of a boundary it added (it is scored against it). Here the stream
+    /// broke one topic at 8 and missed the change at 14; the engine moves
+    /// the break to 10, adds 14, and then drops 10 as the same topic as the
+    /// exchanges before it. If the model vetoes 14, the break must survive
+    /// (moved to 10, the engine's result without 14), not vanish with it.
+    @Test func aVetoedAdditionTakesNothingElseWithIt() async throws {
+        let layout = IndexedTextEmbedder.Layout(topics: [(0, 14), (1, 8)], noise: 0.6, seed: 8)
+        let embedder = IndexedTextEmbedder(layout)
+        let transcript = layout.transcript
+        let armed = Mutex(false)
+        // Agrees with every streaming candidate; vetoes every boundary
+        // re-segmentation proposes once `armed`.
+        let labeler = ScriptedLabeler { request in
+            let vetoes = request.kind == .boundary && armed.withLock { $0 }
+            return TopicShift(
+                isNewTopic: !vetoes, title: "Topic of \(request.after.count) Exchanges",
+                summary: "Covers \(request.after.count) exchanges.")
+        }
+        func run(_ configuration: TopicLifecycle.Configuration, vetoing: Bool) async throws -> [Int] {
+            armed.withLock { $0 = false }
+            let fixture = try LifecycleFixture(
+                transcript, labeler: labeler, configuration: configuration, embedder: embedder)
+            try await fixture.begin()
+            try await fixture.play(0..<transcript.count)
+            armed.withLock { $0 = vetoing }
+            try await fixture.finish()
+            return try await fixture.topicStarts()
+        }
+
+        #expect(try await run(.init(resegmentation: nil), vetoing: false) == [0, 8])
+        #expect(try await run(.standard, vetoing: false) == [0, 14])
+
+        let before = labeler.requests.count
+        let vetoed = try await run(.standard, vetoing: true)
+        let asked = Set(
+            labeler.requests[before...].filter { $0.kind == .boundary }
+                .compactMap { $0.after.first.flatMap { IndexedTextEmbedder.index(in: $0.userText) } })
+        #expect(asked.contains(14))
+        // What the engine proposes with every position the model turned
+        // down forbidden.
+        let expected = TopicResegmenter().resegment(
+            embeddings: layout.vectors, timeRanges: transcript.units().map(\.timeRange), boundaries: [8],
+            forbidden: asked)
+        #expect(expected.changes == [.moved(from: 8, to: 10)])
+        #expect(vetoed == [0] + expected.boundaries)
+        #expect(vetoed == [0, 10])
+    }
+
+    /// After each veto the engine proposes the next best cut, so a model
+    /// that always says no is asked a bounded number of times, then nothing
+    /// is added.
+    @Test func aModelThatVetoesEverythingIsAskedABoundedNumberOfTimes() async throws {
+        let layout = IndexedTextEmbedder.Layout(
+            topics: (0..<6).map { (topic: $0, count: 8) }, noise: 0.3, seed: 3)
+        let armed = Mutex(false)
+        let labeler = ScriptedLabeler { request in
+            TopicShift(
+                isNewTopic: !(request.kind == .boundary && armed.withLock { $0 }),
+                title: "Topic of \(request.after.count) Exchanges", summary: "Covers \(request.after.count) exchanges.")
+        }
+        // The streaming segmenter misses every change of subject.
+        let fixture = try LifecycleFixture(
+            layout.transcript, labeler: labeler, topicConfig: TopicConfig(minimumDepth: 100),
+            embedder: IndexedTextEmbedder(layout))
+        try await fixture.begin()
+        try await fixture.play(0..<layout.transcript.count)
+        #expect(try await fixture.topicStarts() == [0])
+        let streamed = labeler.requests.count
+        armed.withLock { $0 = true }
+        try await fixture.finish()
+
+        let asked = labeler.requests[streamed...].filter { $0.kind == .boundary }
+        #expect(asked.count == TopicLifecycle.resegmentationQuestionLimit)
+        #expect(try await fixture.topicStarts() == [0])
     }
 
     @Test func turningItOffKeepsTheStreamingTopics() async throws {
@@ -151,6 +242,52 @@ struct TopicResegmentationLifecycleTests {
 
         #expect(try await fixture.topicStarts() == [0, 9, 27, 36])
         #expect(try await fixture.topicSnapshot(topic.id).title == "From My iPad")
+    }
+
+    /// `rename` isn't queued behind the lifecycle, so the user can rename
+    /// the topic re-segmentation is about to split while the model is still
+    /// being asked about the new boundary. The rename wins: the topic keeps
+    /// its edges and its title.
+    @Test(arguments: [false, true])
+    func aTopicRenamedWhileTheModelIsAskedIsNotSplit(fromAnotherDevice: Bool) async throws {
+        let transcript = Self.missedChange
+        let target = transcript.exchanges[17].user
+        let armed = Mutex(false)
+        let gate = Gate()
+        let labeler = ScriptedLabeler { request in
+            if request.kind == .boundary, request.after.first?.userText == target, armed.withLock({ $0 }) {
+                await gate.wait()
+            }
+            return switch request.kind {
+            case .boundary: TopicShift(isNewTopic: true, title: "Boundary Guess", summary: "A new subject.")
+            case .topic:
+                TopicShift(
+                    isNewTopic: true, title: "Topic of \(request.after.count) Exchanges",
+                    summary: "Covers \(request.after.count) exchanges.")
+            }
+        }
+        let fixture = try LifecycleFixture(transcript, labeler: labeler)
+        try await fixture.begin()
+        try await fixture.play(0..<transcript.count)
+        let topic = try #require(try await fixture.topics().dropFirst().first)
+        #expect(try await fixture.topicStarts() == [0, 9, 27, 36])
+
+        armed.withLock { $0 = true }
+        let finishing = Task { try await fixture.finish() }
+        await gate.waitForWaiter()
+        if fromAnotherDevice {
+            try await fixture.store.renameTopic(topic.id, to: "Everything")
+        } else {
+            try await fixture.lifecycle.rename(topic.id, to: "Everything")
+        }
+        gate.open()
+        try await finishing.value
+
+        #expect(try await fixture.topicStarts() == [0, 9, 27, 36])
+        let renamed = try await fixture.topicSnapshot(topic.id)
+        #expect(renamed.title == "Everything")
+        #expect(renamed.startedAt == topic.startedAt)
+        #expect(renamed.endedAt == topic.endedAt)
     }
 
     @Test func aTopicTheUserSplitKeepsItsEdges() async throws {
@@ -280,5 +417,57 @@ extension ScriptedTranscript {
 extension LifecycleFixture {
     func topicSnapshot(_ id: UUID) async throws -> TopicSnapshot {
         try await store.topicSnapshot(id)
+    }
+}
+
+/// Embeds exchange `#i` (the first `#` and number in the text) as the
+/// `i`-th vector of a seeded `TopicVectors` layout, so a lifecycle test can
+/// play a conversation with exact embeddings.
+struct IndexedTextEmbedder: TextEmbedder {
+    struct Layout: Sendable {
+        let vectors: [[Float]]
+        let reference: [Int]
+
+        /// `topics`: (topic, exchanges) runs, in order.
+        init(topics: [(topic: Int, count: Int)], noise: Float, seed: UInt64) {
+            var generator = TopicVectors(noise: noise, seed: seed)
+            vectors = topics.flatMap { Array(repeating: $0.topic, count: $0.count) }.map { generator.vector($0) }
+            var reference: [Int] = []
+            var start = 0
+            for run in topics.dropLast() {
+                start += run.count
+                reference.append(start)
+            }
+            self.reference = reference
+        }
+
+        var transcript: ScriptedTranscript {
+            ScriptedTranscript(
+                name: "indexed",
+                exchanges: vectors.indices.map {
+                    ScriptedTranscript.Exchange(user: "Exchange #\($0).", agent: "Reply.")
+                },
+                boundaries: reference)
+        }
+    }
+
+    let vectors: [[Float]]
+
+    init(_ layout: Layout) {
+        vectors = layout.vectors
+    }
+
+    var modelIdentifier: String { "indexed-test" }
+
+    func embed(_ text: String) async throws -> [Float] {
+        guard let index = Self.index(in: text), vectors.indices.contains(index) else {
+            return [Float](repeating: 0, count: vectors.first?.count ?? 1)
+        }
+        return vectors[index]
+    }
+
+    static func index(in text: String) -> Int? {
+        guard let range = text.range(of: "#[0-9]+", options: .regularExpression) else { return nil }
+        return Int(text[range].dropFirst())
     }
 }

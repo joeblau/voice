@@ -319,6 +319,63 @@ struct ConversationStoreTopicEditTests {
         #expect(!snapshot.titleIsProvisional)
     }
 
+    // MARK: Compare-and-swap edits
+
+    /// Offline re-segmentation (#55) decides on a snapshot; a rename that
+    /// lands before its write makes the write fail and change nothing.
+    @Test func compareAndSwapEditsApplyWhileTheTopicsAreUnchanged() async throws {
+        let fixture = try StoreFixture()
+        let store = fixture.store
+        let (id, first, _) = try await conversation(fixture, utterancesAt: [1, 5, 9, 12])
+        let snapshot = try await store.topicSnapshot(first)
+        let second = try await store.splitTopic(first, at: storeT0 + 9, title: "Next", ifUnchanged: [snapshot])
+        let pair = try await store.topicSnapshots(in: id)
+        try await store.moveTopicStart(second, to: storeT0 + 5, ifUnchanged: pair)
+        let moved = try await store.topicSnapshots(in: id)
+        #expect(moved.map(\.startedAt) == [storeT0, storeT0 + 5])
+        #expect(try await store.mergeTopicWithPrevious(second, ifUnchanged: moved) == first)
+        #expect(try await store.topicSnapshots(in: id).map(\.id) == [first])
+    }
+
+    @Test func compareAndSwapEditsRefuseARenamedTopic() async throws {
+        let fixture = try StoreFixture()
+        let store = fixture.store
+        let (id, first, _) = try await conversation(fixture, utterancesAt: [1, 5, 9, 12])
+        let stale = try await store.topicSnapshot(first)
+        try await store.renameTopic(first, to: "Mine")
+        await #expect(throws: ConversationStoreError.topicChanged(first)) {
+            try await store.splitTopic(first, at: storeT0 + 9, title: "Next", ifUnchanged: [stale])
+        }
+        #expect(try await store.topicSnapshots(in: id).map(\.id) == [first])
+
+        let second = try await store.splitTopic(first, at: storeT0 + 9, title: "Next")
+        let pair = try await store.topicSnapshots(in: id)
+        try await store.renameTopic(second, to: "Also Mine")
+        await #expect(throws: ConversationStoreError.topicChanged(second)) {
+            try await store.moveTopicStart(second, to: storeT0 + 5, ifUnchanged: pair)
+        }
+        await #expect(throws: ConversationStoreError.topicChanged(second)) {
+            try await store.mergeTopicWithPrevious(second, ifUnchanged: pair)
+        }
+        let after = try await store.topicSnapshots(in: id)
+        #expect(after.map(\.id) == [first, second])
+        #expect(after.map(\.startedAt) == [storeT0, storeT0 + 9])
+    }
+
+    /// A topic whose span changed since the snapshot (here split by
+    /// someone else) is refused too.
+    @Test func compareAndSwapEditsRefuseAMovedEdge() async throws {
+        let fixture = try StoreFixture()
+        let store = fixture.store
+        let (id, first, _) = try await conversation(fixture, utterancesAt: [1, 5, 9, 12])
+        let stale = try await store.topicSnapshot(first)
+        _ = try await store.splitTopic(first, at: storeT0 + 9, title: "Next")
+        await #expect(throws: ConversationStoreError.topicChanged(first)) {
+            try await store.splitTopic(first, at: storeT0 + 5, title: "Other", ifUnchanged: [stale])
+        }
+        #expect(try await store.topicSnapshots(in: id).count == 2)
+    }
+
     @Test func anEmptyRenameThrows() async throws {
         let fixture = try StoreFixture()
         let (_, topic, _) = try await conversation(fixture, utterancesAt: [1])

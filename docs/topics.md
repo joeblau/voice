@@ -513,6 +513,13 @@ only proposes changes that clearly improve coherence:
    boundaries it is measured again and the step repeats.
 4. **Merge again**, against the refreshed `σ²`, sparing the new boundaries.
 
+No boundary is added at a `forbidden` position (one the labeling model
+vetoed). The passes depend on each other: the second merge pass is scored
+against the boundaries the split added, so a removal can rely on an
+addition (a break at 8 moves to 10, then goes once 16 is added). A rejected
+addition therefore can't just be dropped from `changes`; the engine runs
+again with that position forbidden.
+
 Between 1.5 and 2.5 the streaming decision stands: a hysteresis, like the
 segmenter's. The thresholds come from the score distributions on the 60
 synthetic conversations: a cut inside a reference topic scored at most 1.93
@@ -524,14 +531,34 @@ synthetic conversations: a cut inside a reference topic scored at most 1.93
 When the conversation finishes, after the last exchange is scored and an
 unconfirmed break is taken back, the lifecycle lays the stored topics over
 the session's exchanges (an exchange belongs to the topic its first
-utterance is in), runs the engine, and applies its changes through the
-store in order:
+utterance is in) and works in two phases, so the slow model calls never sit
+between a check and the write it guards:
+
+1. **Plan.** It runs the engine and sends every boundary the engine adds to
+   the labeling service as a `.boundary` request, like a streaming
+   candidate, before changing anything. If the model vetoes one (and the
+   user didn't announce the change), that position is forbidden and the
+   engine runs again, until the model accepts every addition. Each question
+   is asked once, and at most eight per conversation
+   (`TopicLifecycle.resegmentationQuestionLimit`): after a veto the engine
+   proposes the next best cut, so a model that keeps saying no would
+   otherwise be asked about one exchange after another. Past the limit only
+   boundaries the model already accepted can be added. Then it reads the
+   stored topics again: if one changed
+   while the model was being asked (the user renamed it), it plans again
+   with that topic locked, up to three times.
+2. **Apply.** It applies the changes through the store in order:
 
 | Change | Store | Labels |
 | ------ | ----- | ------ |
-| Boundary removed | `mergeTopicWithPrevious`; `.removed` for the merged topic | The remaining topic is titled again over all its exchanges |
-| Boundary moved | `moveTopicStart` | Both topics' summaries are refreshed; titles stay |
-| Boundary added | First a `.boundary` request to the labeling service, as for a streaming candidate (a model's veto drops it, unless the user announced the change); then `splitTopic`; `.opened` for the new topic | Both parts are titled |
+| Boundary removed | `mergeTopicWithPrevious(_:ifUnchanged:)`; `.removed` for the merged topic | The remaining topic is titled again over all its exchanges |
+| Boundary moved | `moveTopicStart(_:to:ifUnchanged:)` | Both topics' summaries are refreshed; titles stay |
+| Boundary added | `splitTopic(_:at:title:ifUnchanged:)` with the title the model gave when it accepted the boundary; `.opened` for the new topic | Both parts are titled |
+
+Each write is a compare-and-swap: the lifecycle reads the topics it is
+about to change, checks that the user doesn't own them, and passes those
+snapshots; the store refuses the edit (`ConversationStoreError.topicChanged`)
+if a topic's title or span changed in between.
 
 A topic that closed during the conversation and changes here is reported as
 `.updated` with its new final label; a topic closing now (the last one, or
@@ -549,8 +576,15 @@ topic the user renamed, merged or split in this session, a topic carried
 over from an earlier session (its exchanges aren't in this session's
 segmenter), or a topic whose final title isn't the one a labeler wrote here
 (renamed some other way, such as on another device). A boundary the user
-announced ("let's switch gears") is pinned. If the user edits a topic while
-the changes are being applied, the rest are dropped.
+announced ("let's switch gears") is pinned.
+
+A rename isn't queued behind the lifecycle (it is written at once), so it
+can land while re-segmentation runs. One that lands while the model is
+being asked makes the lifecycle plan again with the topic locked. One that
+lands between a change's check and its write makes the store refuse the
+write, and the remaining changes are dropped. Either way the renamed topic
+is neither split, moved nor merged. A merge or split by the user is queued
+behind the whole pass.
 
 Why at the end of the conversation and not in a `BGProcessingTask`: the
 lifecycle already holds every exchange's embedding and knows which titles it
