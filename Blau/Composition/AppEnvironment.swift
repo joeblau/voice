@@ -62,6 +62,12 @@ final class AppEnvironment {
     /// over the in-memory store, so topic edits work in previews.
     let topicLifecycle: TopicLifecycle
 
+    /// Learning from conversations (#66): each topic the lifecycle closes is
+    /// sent for fact and entity extraction, and Settings → Memory binds to
+    /// its toggle and "What Blau Learned". Only the live app calls xAI;
+    /// every other kind runs on a text model that is never available.
+    let memoryLearning: MemoryLearning
+
     /// xAI access (#33): the key store, the REST client, on-device realtime
     /// token minting and the `XAIAccount` the key entry views bind to. The
     /// live app uses the Keychain and the network; every other kind runs on
@@ -196,7 +202,8 @@ final class AppEnvironment {
         topicLifecycle: TopicLifecycle? = nil,
         transcriptFeed: TranscriptFeed = TranscriptFeed(),
         markdownExport: MarkdownExportController? = nil,
-        networkMonitor: (any NetworkMonitor)? = nil
+        networkMonitor: (any NetworkMonitor)? = nil,
+        memoryLearning: MemoryLearning? = nil
     ) {
         self.kind = kind
         self.config = config
@@ -209,9 +216,12 @@ final class AppEnvironment {
         self.persistence = persistence
         self.topics = topics
         self.memory = memory
+        let offlineTranscript = PersistenceTranscriptRecorder(persistence: persistence)
         self.topicLifecycle =
             topicLifecycle ?? (topics as? TopicLifecycle)
-            ?? .offline(transcript: PersistenceTranscriptRecorder(persistence: persistence))
+            ?? .offline(transcript: offlineTranscript)
+        self.memoryLearning =
+            memoryLearning ?? .offline(persistence: persistence, transcript: offlineTranscript)
         self.xai = xai
         self.speechModels = speechModels
         self.textEmbeddings = textEmbeddings
@@ -264,6 +274,7 @@ final class AppEnvironment {
         issues.start(fixture: kind == .live ? nil : IssueCenter.fixtureCode())
         // #63: indexes the store once `PersistenceGate` has opened it.
         memoryIndexing.start()
+        memoryLearning.start(following: topicLifecycle)
         // Previews and UI tests only: a canned conversation (#42).
         async let fixture: Void = ChatTranscriptFixture.seedIfRequested(in: self)
         startMarkdownExport()
@@ -388,6 +399,13 @@ extension AppEnvironment {
         let topics = TopicLifecycle.app(
             transcript: transcript, labeling: .app(xai: xai), textEmbeddings: textEmbeddings)
         let transcriptFeed = TranscriptFeed()
+        // The device's thermal state, Low Power Mode and battery (#75).
+        // One policy, shared by the indexer (#63) and fact extraction (#66).
+        let performance = PerformancePolicy()
+        // #66: facts and entities extracted from every closed topic.
+        let memoryLearning = MemoryLearning.live(
+            xai: xai, transcript: transcript, persistence: persistence, textEmbeddings: textEmbeddings,
+            performance: performance)
         return AppEnvironment(
             kind: .live,
             config: config,
@@ -424,14 +442,15 @@ extension AppEnvironment {
             transcriptionSettings: TranscriptionSettings.make(),
             conversationAudio: conversationAudio,
             textEmbeddings: textEmbeddings,
-            // The device's thermal state, Low Power Mode and battery (#75).
-            performance: PerformancePolicy(),
+            // Also drives `memoryIndexing`, built from it in `init`.
+            performance: performance,
             topicLifecycle: topics,
             transcriptFeed: transcriptFeed,
             // #78: Markdown files in iCloud Drive → Blau.
             markdownExport: .live(persistence: persistence),
             // #80: offline mode follows the network path.
-            networkMonitor: SystemNetworkMonitor()
+            networkMonitor: SystemNetworkMonitor(),
+            memoryLearning: memoryLearning
         )
     }
 

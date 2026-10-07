@@ -111,6 +111,7 @@ struct SettingsView: View {
                 XAIAccountSettingsSection()
                 VoiceSettingsSection()
                 SearchToolsSettingsSection()
+                MemorySettingsSection()
                 ICloudSettingsSection()
                 MemoryIndexSettingsSection()
                 MarkdownExportSettingsSection()
@@ -153,5 +154,6 @@ struct SettingsView: View {
             .environment(TranscriptionSettings.preview())
             .environment(MemoryIndexingController(persistence: .preview(), embedder: nil, performance: nil))
             .environment(MarkdownExportController.local(persistence: .preview()))
+            .environment(MemoryLearningSettings(store: InMemoryMemoryLearningPreferenceStore()))
     }
 #endif

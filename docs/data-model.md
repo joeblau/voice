@@ -227,7 +227,9 @@ like every to-one side in v1.
 - **Facts are add-only and validity-dated** (Zep / Graphiti, issue #1). A fact
   is true over `[validFrom, invalidatedAt)`. When something stops being true,
   `invalidate(at:)` closes the old fact and the extractor adds a new one, so
-  "where did I work in March" still has an answer. Invalidating twice keeps
+  "where did I work in March" still has an answer (see
+  [memory-extraction.md](memory-extraction.md) for how the extractor
+  decides). Invalidating twice keeps
   the earlier date, so the same correction replayed on two devices converges.
   `createdAt` is when the fact was recorded, which can be later than
   `validFrom`. Current facts are `invalidatedAt == nil`, which works in a
