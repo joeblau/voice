@@ -15,7 +15,7 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `Blau/LiveActivity/` | The recording Live Activity: its attributes and Stop intent (shared with the `BlauWidgets` extension) and the `RecordingIndicator` that starts, updates and ends it ([background.md](background.md)) |
 | `Blau/RootView.swift` | The main screen ([below](#main-screen)): navigation stack, bottom bar, content area, the Settings and xAI onboarding sheets, and the DEBUG menu button |
 | `Blau/Branding/` | The brand's color tokens (`BrandColor`, `TopicDotColor`), type scale (`BrandTextStyle`) and the `BrandLockup` the empty main screen shows ([branding.md](branding.md)) |
-| `Blau/MainScreen/` | The bottom bar's `SettingsButton` and `RecordButton`, their accessibility identifiers, and the `RecordingController` behind Record |
+| `Blau/MainScreen/` | The bottom bar's `SettingsButton` and `RecordButton` (its face, VoiceOver text and the "You're muted" hint) and their accessibility identifiers; the button's logic is `RecordButtonModel` in `BlauRealtime/Control` ([below](#record)) |
 | `Blau/XAI/XAIServices.swift` | The xAI services (#33): `make(config:)` for the app, `hermetic(config:)` for previews and tests |
 | `Blau/VoiceLoop/` | `VoiceLoop` (the spoken conversation: the live audio pipeline feeding the `TurnOrchestrator`, #36), the SwiftData transcript recorder, the HUD rows and the DEBUG Voice Loop screen |
 | `Blau/Debug/` | The DEBUG menu and the reusable feature flag toggles |
@@ -43,6 +43,7 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `voiceGate` | `any VoiceGate` | unavailable until #47 | `FakeVoiceGate` |
 | `realtime` | `any RealtimeService` | `TurnOrchestrator` (#36, [realtime.md](realtime.md#turn-orchestration)): the xAI client, session configuration, a `StreamingAudioPlayer` and the SwiftData transcript | `FakeRealtimeService` |
 | `voiceLoop` | `VoiceLoop` | Starts the conversation audio (through its keeper), builds the VAD and Parakeet on `start()` and feeds the orchestrator; Debug menu → Voice Loop, and the Live Activity Stop button stops it | unavailable (no orchestrator) |
+| `conversation` | `any ConversationSession` | `VoiceLoopSession`: the voice loop and its conversation audio, for the record button (#41) | `FakeConversationSession` over the fake `audio` (a 400 ms start in previews) |
 | `persistence` | `PersistenceController` | `PersistenceController.live(isDebugBuild:)`: `Application Support/Blau/Blau.store`, mirrored to iCloud when the account allows | `PersistenceController.inMemory()` |
 | `topics` | `any TopicService` | `TopicLifecycle` (#54, [topics.md](topics.md#topic-lifecycle)): fed by the orchestrator's transcript (`TopicTrackingTranscript`), writing topics through the transcript's store | `FakeTopicService` |
 | `topicLifecycle` | `TopicLifecycle` | the same lifecycle as `topics`; the timeline's rename, merge and split go through it | keyword titles over the in-memory store (`TopicLifecycle.offline`) |
@@ -218,7 +219,7 @@ NavigationStack {
         .toolbar {
             ToolbarItem(placement: .bottomBar) { SettingsButton { ... } }
             ToolbarSpacer(.flexible, placement: .bottomBar)
-            ToolbarItem(placement: .bottomBar) { RecordButton(phase: ...) { ... } }
+            ToolbarItem(placement: .bottomBar) { RecordButton(model: record) }
         }
 }
 ```
@@ -226,8 +227,8 @@ NavigationStack {
 - Both controls are bottom-bar toolbar items with a flexible
   `ToolbarSpacer` (iOS 26) between them, so the system pins one to each end,
   keeps them clear of the home indicator and the landscape safe areas, and
-  draws them as Liquid Glass. Record uses the prominent (tinted) style; it
-  turns red while recording. Nothing is positioned by hand, which is what
+  draws them as Liquid Glass. Record uses the prominent (tinted) style,
+  tinted per state (see [Record](#record)). Nothing is positioned by hand, which is what
   keeps the layout right on every screen size.
 - `MainScreen` is a `ScrollView` anchored to the bottom
   (`defaultScrollAnchor(.bottom)`) that runs under the bar's glass, with
@@ -253,38 +254,118 @@ NavigationStack {
 | Content (scroll view) | `blau.root` | | |
 | Empty state | `blau.mainScreen.empty` | | |
 | Settings | `blau.settings.open` | Settings | |
-| Record | `blau.record` | Record / Stop Recording | Not recording, Starting, Recording, Stopping |
+| Record | `blau.record` | Start Conversation / End Conversation | See [Record](#record) |
+| "You're muted" | `blau.record.mutedHint`, Resume `blau.record.mutedHint.resume` | | |
 
 The identifiers live in `MainScreenAccessibility`.
 
 ### Record
 
-`RecordButton` shows the `RecordingController`'s `phase`. Tapping toggles
-microphone capture through the environment's `AudioService`: idle → starting
-→ recording → stopping → idle. Taps during a transition are ignored, and a
-failed start returns to idle and shows an alert. In the live app the audio
-slot is the `AudioSessionKeeper` ([background.md](background.md)); previews
-and UI tests use `FakeAudioService`. If the slot is an `UnavailableService`
-the alert says recording isn't available in this build.
-The controller re-reads `isCapturing` (`synchronize()`) when `RootView` is
-rebuilt (an iCloud account change replaces the store) and every time the
-scene becomes active, so the button matches what is running after capture
-stopped without it: the Live Activity's Stop calls
-`AppEnvironment.stopConversation()` directly, and an interruption leaves the
-keeper not `.live`.
-The record button issue (#41) replaces this with the full session control:
-connecting, listening with a level ring, agent speaking, paused, haptics.
+The record button (#41) is the main screen's primary control. It starts and
+ends a conversation, pauses listening, and shows where the conversation is.
+
+| State | Face | Fill ([branding.md](branding.md)) | VoiceOver value |
+| ----- | ---- | ---- | --------------- |
+| `idle` | `mic.fill` | `accentFill` | Not listening |
+| `connecting` | spinner (ellipsis with Reduce Motion) | `accentFill` | Connecting |
+| `listening` | `stop.fill` in a ring that follows the microphone level | `recordingFill` | Listening (", connecting to Grok" while the session opens) |
+| `agentSpeaking` | `speaker.wave.2.fill` in a ring and halo that follow Grok's level | `recordingFill` | Grok is speaking |
+| `paused` | `mic.slash.fill` | gray | Paused, microphone muted |
+| `reconnecting` | spinner (ellipsis with Reduce Motion) | `recordingFill` | Reconnecting the microphone (label End Conversation) |
+| `stopping` | spinner | `recordingFill` | Ending |
+| `error` | `exclamationmark.triangle.fill` | orange | Couldn't start / Lost the connection to Grok / Microphone in use by another app / ... |
+
+- **Tap** starts a conversation (also after a failed start) and ends a
+  running one, whatever it is doing, including while its audio comes back
+  (`reconnecting`: a stall, a route change, the return to the foreground).
+  Taps while the button's own start or stop is in flight are ignored, and
+  only then is the button disabled (`RecordButtonModel.isTransitioning`).
+  The label says what a tap does: Start Conversation or End Conversation.
+- **Touch and hold** while a conversation runs opens a menu (a `Menu` whose
+  primary action is the tap): Pause Listening / Resume Listening and End
+  Conversation. VoiceOver gets Pause / Resume as custom actions.
+- **Pause listening** mutes the microphone inside voice processing
+  (`MicrophoneMute`, [audio.md](audio.md#pause-listening-41)): the session,
+  the Live Activity and Grok's playback go on, nothing said reaches ASR or
+  Grok. If the user talks while paused, `setMutedSpeechActivityEventListener`
+  reports it and a "You're muted" capsule with a Resume button appears above
+  the button (VoiceOver announces it). It hides 3 s after they stop talking,
+  or at once on resume.
+- **Haptics** (`sensoryFeedback`): `.start` when the conversation is
+  listening, `.stop` on End, a light impact on pause and resume, `.error`
+  when a start fails (with an alert saying why).
+- **Reduce Motion**: the ring keeps its size and only its opacity follows
+  the level; the spinner becomes a static ellipsis; the hint fades instead
+  of sliding.
+
+How it is put together:
+
+- `RecordButtonModel` (`BlauRealtime/Control`, unit-tested on macOS) holds
+  the logic: its own phase (idle, starting, running, stopping), the
+  session's `ConversationStatus`, the derived `RecordButtonState`, smoothed
+  levels (`LevelMeter`, attack 40 ms, release 250 ms), the hint and the
+  haptic requests. `run()` (the scaffold's `.task`) follows the session, so
+  what ends or starts a conversation without the button (the Live
+  Activity's Stop, an interruption, a dropped connection, the debug Voice
+  Loop screen) shows at once; levels are only followed while a conversation
+  runs and the scene is active.
+- `ConversationSession` is what it drives. The live app's
+  `VoiceLoopSession` adapts `VoiceLoop` (#36) and its `ConversationAudio`:
+  status from the voice loop's phase and turn snapshot (`Observations`) and
+  the keeper's `updates()`, input levels from the capture hub, output
+  levels from the player, the mute and its speech reports from
+  `MicrophoneMute`. Previews and UI tests use `FakeConversationSession`.
+- `RecordButtonState` puts audio problems first (nothing is heard: the
+  keeper starting or recovering is `reconnecting`, an interruption or a
+  failed restart is an error), then a
+  lost connection, then the user's pause (a muted microphone never shows as
+  listening), then who is talking. The microphone counts as listening while
+  Grok is still connecting: utterances are queued.
+- **Start latency.** The `session.start` signpost spans the tap to the first
+  moment the button shows listening ([performance.md](performance.md)), also
+  logged (`Log.ui`) and kept in `lastStartLatency`. The target is under
+  500 ms with the models warm. `LiveVoicePipeline.start` loads Silero and
+  Parakeet while the audio session comes up, so the start costs the slower
+  of the two rather than their sum. Measuring it needs an iPhone: profile
+  with the Blau Instruments template and read `session.start`.
+- **Stop during a start.** Because the audio (and with it the Live
+  Activity and its Stop button) comes up while the models load, Stop can
+  arrive before the conversation is listening. `VoiceLoop.stop()` then
+  bumps a start generation and turns the microphone off; the start in
+  flight checks it after building the pipeline and after opening the
+  realtime session, releases what it built and leaves the loop idle, so
+  Grok is never left connected without a microphone. `LiveVoicePipeline`
+  also throws `CancellationError` when it finds the keeper `.inactive`
+  after the audio start. `ConversationSession.start()` reports that as
+  `CancellationError`, and `RecordButtonModel` goes back to idle quietly
+  (no error, alert or haptic; `session.start` ends as "cancelled"). A new
+  start waits for one still unwinding, so its release can't turn off the
+  new microphone.
 
 ### Tests
 
-- `BlauTests/RecordingControllerTests.swift`: the controller's phases,
-  failures and ignored taps against fake audio services.
+- `RecordButtonModelTests` and `RecordButtonStateTests` (BlauKit,
+  `swift test`): taps, ignored taps, ending while the audio recovers,
+  failures and retries, a stop during the start, pause and resume,
+  the muted hint, following the session, levels, haptics and the
+  `session.start` interval.
+- `BlauTests/RecordButtonSnapshotTests.swift`: a snapshot of the button's
+  face in every state, the ring at both extremes and with Reduce Motion
+  (references in `BlauTests/__Snapshots__/`, per iOS major version; record
+  with `TEST_RUNNER_BLAU_RECORD_SNAPSHOTS=1`, see `SnapshotAssertion`).
+- `BlauTests/VoiceLoopTests.swift`: the voice loop's start and stop over
+  fakes (`VoiceLoop.init(conversation:snapshots:startPipeline:...)`), including
+  a stop while the pipeline starts, a stop while the realtime session
+  opens, and a new start waiting for one that is unwinding.
+- `BlauTests/RecordButtonTests.swift`: VoiceOver labels, values and hints
+  per state, glyphs, tints, haptics, and the live and fake wiring.
 - `BlauUITests/MainScreenUITests.swift`: finds both controls by identifier
   and checks Settings is in the left quarter and Record in the right quarter
   of the window, on one row in the bottom quarter and clear of the
   speech-model setup card, in portrait, in landscape and at the largest
   accessibility text size; that the content runs under the
-  bar; that Settings opens; and that Record starts and stops. Run it on the
+  bar; that Settings opens; that Record starts and ends a conversation; and
+  that touch and hold pauses and resumes listening. Run it on the
   smallest and the largest iPhone to cover the sizes:
 
 ```sh

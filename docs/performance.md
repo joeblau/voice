@@ -147,6 +147,7 @@ case step.
 | `memory.search`       | `memory`   | `.memorySearch`       | A memory search starts (BM25 + vector)              | Fused, ranked results are out                   |
 | `memory.extract`      | `memory`   | `.memoryExtract`      | Fact extraction starts on a closed topic (#66)      | Its facts and entities are written (or it failed); the end message is the outcome |
 | `db.save`             | `data`     | `.dbSave`             | `ModelContext.save()` is called                     | It returns                                      |
+| `session.start`       | `ui`       | `.sessionStart`       | The user taps Record                                | The record button shows listening: the microphone is live and VAD and ASR are running (or the start failed; the end message says which) |
 
 ### Adding an interval
 
@@ -458,7 +459,8 @@ Per-chunk and per-frame intervals (`capture.frame`, `vad.chunk`,
 MetricKit's signpost budget. `playback.firstBuffer` also stays out: it
 starts where `realtime.firstAudio` ends and only times local jitter-buffer
 priming, so the `audio` category stays Instruments-only. `realtime.connect`
-runs once per session, before any turn, and stays Instruments-only for now.
+runs once per session, before any turn, and stays Instruments-only for now,
+like `session.start` (tap Record → listening, #41).
 `asr.secondPass` runs once per utterance off the turn's critical path (it
 never delays a turn), so it stays Instruments-only too; compare
 `realtime.firstAudio` with the second pass on and off instead (docs/asr.md).

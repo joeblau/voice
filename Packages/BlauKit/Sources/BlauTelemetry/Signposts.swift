@@ -59,6 +59,10 @@ public enum PipelineInterval: CaseIterable, Sendable {
     case memoryExtract
     /// One SwiftData save.
     case dbSave
+    /// Tapping Record until the conversation is listening (the microphone
+    /// is live and the speech pipeline is running): the start latency the
+    /// user feels (#41).
+    case sessionStart
 
     /// The signpost name Instruments shows.
     public var name: StaticString {
@@ -83,6 +87,7 @@ public enum PipelineInterval: CaseIterable, Sendable {
         case .memorySearch: "memory.search"
         case .memoryExtract: "memory.extract"
         case .dbSave: "db.save"
+        case .sessionStart: "session.start"
         }
     }
 
@@ -96,6 +101,7 @@ public enum PipelineInterval: CaseIterable, Sendable {
         case .topicsSegment, .topicsLabel: .topics
         case .memoryEmbed, .memorySearch, .memoryExtract: .memory
         case .dbSave: .data
+        case .sessionStart: .ui
         }
     }
 }

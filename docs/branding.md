@@ -79,8 +79,10 @@ The brand colors come in two kinds:
 - A **fill** (`accentFill`, `recordingFill`) is drawn behind a white label:
   a prominent button's background. It stays deep in dark mode and gets darker
   with Increased Contrast, so the label stays legible. Every prominent button
-  uses one through `.brandProminentButtonStyle()` (the record button passes
-  `.recordingFill` while recording).
+  uses one through `.brandProminentButtonStyle()`. The record button picks
+  its fill per state (`RecordButtonFace.tint(for:)`): `accentFill` to start,
+  `recordingFill` while a conversation runs, gray while paused and orange
+  for errors ([app-shell.md](app-shell.md#record)).
 
 One color can't be both. White on the dark accent `#4A7BFF` is 3.8:1, and on
 its increased-contrast variant `#8AAEFF` only 2.2:1.
