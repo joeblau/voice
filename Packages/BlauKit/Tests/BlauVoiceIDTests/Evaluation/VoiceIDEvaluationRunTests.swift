@@ -1,3 +1,4 @@
+import BlauAudio
 import BlauCore
 import Foundation
 import Testing
@@ -18,6 +19,9 @@ import Testing
 /// - `BLAU_VOICEID_EVAL_CHECK_COMMITTED=1`: fail if the proposed thresholds
 ///   differ from `VoiceIDConfig.calibrated` (for re-running the reference
 ///   calibration set after a change).
+/// - `BLAU_VOICEID_EVAL_SUPPRESSORS`: noise suppressors to compare with the
+///   unprocessed baseline (#51), e.g. `dfn3,apple-voice-isolation`;
+///   `dfn3` needs `BLAU_DFN3_MODEL_DIR` (docs/noise-suppression.md).
 @Suite(
     "Voice ID evaluation run (opt-in)",
     .enabled(if: VoiceIDEvaluationEnvironment.isConfigured),
@@ -35,7 +39,16 @@ struct VoiceIDEvaluationRunTests {
         let embedder = try await WeSpeakerEmbedder.load(modelDirectory: modelDirectory)
         let date = environment["BLAU_VOICEID_EVAL_DATE"] ?? Date.now.formatted(.iso8601.year().month().day())
         let started = ContinuousClock.now
-        let report = try await VoiceIDEvaluator(embedder: embedder).run(dataset, date: date) { line in
+        var preprocessors: [any VoiceIDAudioPreprocessor] = []
+        for kind in try NoiseSuppressorKind.list(environment["BLAU_VOICEID_EVAL_SUPPRESSORS"] ?? "") {
+            let factory = try await kind.factory(
+                deepFilterNet3Directory: environment["BLAU_DFN3_MODEL_DIR"].map {
+                    URL(filePath: $0, directoryHint: .isDirectory)
+                })
+            preprocessors.append(try NoiseSuppressionPreprocessor(makeSuppressor: factory))
+        }
+        let plan = VoiceIDEvaluationPlan(preprocessors: preprocessors)
+        let report = try await VoiceIDEvaluator(embedder: embedder).run(dataset, plan: plan, date: date) { line in
             print("[voiceid-eval] \(line)")
         }
         print("[voiceid-eval] finished in \(ContinuousClock.now - started)")

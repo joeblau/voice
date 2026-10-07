@@ -84,6 +84,13 @@ bench-kit: ## Run the model benchmarks on this Mac (reference numbers only, down
 eval-asr: ## Evaluate the ASR engines on the fixtures: a WER/latency/RTF table per engine (docs/asr-eval.md)
 	scripts/eval-asr.sh
 
+# Noise suppression A/B (#51): the ASR engines alone and behind DeepFilterNet3
+# and Apple's AUSoundIsolation, plus each suppressor's cost. Variables in
+# scripts/eval-noise-suppression.sh.
+.PHONY: eval-noise
+eval-noise: ## Compare noise suppressors on the ASR fixtures: WER and cost (docs/noise-suppression.md)
+	scripts/eval-noise-suppression.sh
+
 .PHONY: secrets
 secrets: ## Create Config/Secrets.xcconfig from the example (kept if it exists)
 	env -u XAI_DEV_API_KEY scripts/write-secrets-xcconfig.sh

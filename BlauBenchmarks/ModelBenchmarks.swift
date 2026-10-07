@@ -1,3 +1,4 @@
+import BlauAudio
 import BlauMemory
 import BlauTelemetry
 import BlauTopics
@@ -69,5 +70,36 @@ final class MemoryIndexBenchmarks: BenchmarkTestCase {
 final class TopicLabelBenchmarks: BenchmarkTestCase {
     func testFoundationModelsTopicLabel() async throws {
         try await measure(TopicLabelBenchmark(generator: FoundationModelsLabelBenchmarkGenerator()))
+    }
+}
+
+/// Noise suppression on the capture stream (#51, docs/noise-suppression.md).
+/// DeepFilterNet3 needs its model in `Assets/DeepFilterNet3`
+/// (`scripts/fetch-deepfilternet3.sh BlauBenchmarks/Assets/DeepFilterNet3`).
+final class NoiseSuppressionBenchmarks: BenchmarkTestCase {
+    static var deepFilterNet3Directory: URL? {
+        assetsDirectory?.appendingPathComponent("DeepFilterNet3", isDirectory: true)
+    }
+
+    func testDeepFilterNet3NeuralEngine() async throws {
+        try await measure(
+            NoiseSuppressionBenchmark.deepFilterNet3(
+                directory: Self.deepFilterNet3Directory, computeUnits: .cpuAndNeuralEngine, audio: Self.audio))
+    }
+
+    /// The configuration that keeps running with the screen locked on iOS 27
+    /// (no background Neural Engine).
+    func testDeepFilterNet3CPU() async throws {
+        try await measure(
+            NoiseSuppressionBenchmark.deepFilterNet3(
+                directory: Self.deepFilterNet3Directory, computeUnits: .cpuOnly, audio: Self.audio))
+    }
+
+    func testAppleVoiceIsolation() async throws {
+        try await measure(NoiseSuppressionBenchmark.soundIsolation(.voice, audio: Self.audio))
+    }
+
+    func testAppleVoiceIsolationHighQuality() async throws {
+        try await measure(NoiseSuppressionBenchmark.soundIsolation(.highQualityVoice, audio: Self.audio))
     }
 }

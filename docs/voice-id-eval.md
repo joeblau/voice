@@ -167,7 +167,7 @@ Decisions at the shipped thresholds (accept / uncertain / reject):
 | What | Status |
 | --- | --- |
 | Owner set: owner recordings across rooms and distances, other people, TV, podcasts, music with vocals, other languages, overlap ([Datasets/voice-id](../Datasets/voice-id/README.md)) | **Pending**: needs the recordings and consent. Re-run, then update the thresholds and this page |
-| With and without DeepFilterNet3 on the verification path | **Pending** (#51): the harness compares any `VoiceIDAudioPreprocessor` against the unprocessed baseline; plug the DeepFilterNet3 Core ML model in there |
+| With and without DeepFilterNet3 on the verification path | **Done** (#51) on the calibration set: see [noise-suppression.md](noise-suppression.md#voice-id). `BLAU_VOICEID_EVAL_SUPPRESSORS` runs it again on the owner set |
 | iPhone vs Mac score parity on the same audio | **Pending**: needs a device run |
 | AS-norm with the production cohort (#47) | **Pending**: the harness takes any cohort recordings |
 
@@ -222,7 +222,7 @@ committed; keep it with the dataset and re-render it with
 | `VoiceIDScoring`, `VoiceprintScorer`, `SpeakerCohort` | Cosine against the centroid or best match, optional AS-norm; shared with the gate |
 | `VoiceIDEvaluationDataset`, `VoiceIDDatasetManifest` | The evaluation set and its JSON manifest |
 | `VoiceIDCondition`, `EvaluationDSP` | Simulated rooms, noise, babble, loudspeaker and overlap |
-| `VoiceIDAudioPreprocessor` | A processing stage to compare (DeepFilterNet3, #51) |
+| `VoiceIDAudioPreprocessor`, `NoiseSuppressionPreprocessor` | A processing stage to compare: any `NoiseSuppressor` (#51, [noise-suppression.md](noise-suppression.md)) |
 | `VoiceIDEvaluator`, `VoiceIDEvaluationPlan` | The run: windows, conditions, scoring methods, preprocessors, budgets |
 | `DETCurve`, `VoiceIDThresholdCalibrator`, `Probit` | Metrics and calibration |
 | `VoiceIDEvaluationReport`, `VoiceIDEvaluationPlots` | Markdown, JSON and SVG output |

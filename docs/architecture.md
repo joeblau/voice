@@ -157,6 +157,10 @@ The complete list of declared edges:
 - [voice-id.md](voice-id.md): speaker embeddings (WeSpeaker on Core ML),
   their windows and padding, and how they are tested and benchmarked
   ([benchmarks.md](benchmarks.md)).
+- [noise-suppression.md](noise-suppression.md): the noise suppression
+  spike (#51): voice processing alone against DeepFilterNet3 and Apple's
+  voice isolation on the ASR and voice ID harnesses, the cost, and the
+  decision.
 - [vad.md](vad.md): the streaming voice activity segmenter (Silero VAD,
   segment rules, 16 ms boundary refinement, speech-gated audio for ASR).
 - [memory-index.md](memory-index.md): the local search index (chunking,
