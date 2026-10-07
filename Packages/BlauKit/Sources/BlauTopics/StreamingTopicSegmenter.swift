@@ -81,6 +81,14 @@ public actor StreamingTopicSegmenter {
         return events
     }
 
+    /// Drops the pending candidate because the labeling model judged it not
+    /// to be a topic change. See `TopicSegmenter.vetoPendingCandidate()`.
+    public func vetoPendingCandidate() -> [TopicSegmentationEvent] {
+        let events = segmenter.vetoPendingCandidate()
+        log(events)
+        return events
+    }
+
     private func log(_ events: [TopicSegmentationEvent]) {
         for event in events {
             let boundary = event.boundary

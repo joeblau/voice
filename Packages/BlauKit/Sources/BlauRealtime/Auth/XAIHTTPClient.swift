@@ -94,6 +94,12 @@ public struct XAIHTTPClient: Sendable {
         self.transport = transport
     }
 
+    /// Whether a key is stored. `false` when the store can't be read either
+    /// (for example before the first unlock).
+    public func hasAPIKey() async -> Bool {
+        ((try? await keyStore.load()) ?? nil) != nil
+    }
+
     /// Sends `request` with the stored key.
     ///
     /// - Throws: ``XAIError/missingAPIKey`` when no key is stored, or the

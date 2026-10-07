@@ -2,9 +2,10 @@
 
 `BlauTopics` watches the conversation as it streams and decides when it has
 moved to a new topic. This document describes the streaming segmentation
-engine (#52). Confirming boundaries and titling topics with Foundation Models
-(#53), the topic lifecycle (#54) and offline re-segmentation (#55) build on
-its events.
+engine (#52) and how its candidate boundaries are confirmed and titled by a
+language model ([Confirmation and labels](#confirmation-and-labels), #53).
+The topic lifecycle (#54) and offline re-segmentation (#55) build on their
+events.
 
 The engine is a streaming variant of TextTiling (Hearst, 1997) over exchange
 embeddings, with hysteresis so a brief digression doesn't split a topic.
@@ -32,7 +33,7 @@ var exchanges = ExchangeAssembler()
 if let unit = exchanges.add(utterance) {
     for event in try await segmenter.append(unit) {
         switch event {
-        case .candidate(let boundary): ...  // provisional break; #53 may start labelling
+        case .candidate(let boundary): ...  // provisional break (TopicPipeline labels it, below)
         case .confirmed(let boundary): ...  // new topic starts at boundary.unitID (#54)
         case .rejected(let boundary, let reason): ...  // drop the provisional break
         }
@@ -167,3 +168,153 @@ xcodebuild test -scheme BlauKit-Package \
 
 In the app, the `topics.segment` interval shows each update in Instruments
 (see [performance.md](performance.md)).
+
+## Confirmation and labels
+
+Every topic gets a short title and a one-sentence summary, and a language
+model reads each candidate boundary before it becomes a topic (#53). The code
+is in `Packages/BlauKit/Sources/BlauTopics/Labeling/`.
+
+| Type | What it does |
+| ---- | ------------ |
+| `TopicPipeline` | Actor wrapping `StreamingTopicSegmenter`: asks the model about each candidate, vetoes it or keeps the model's title, and emits `TopicEvent`s (`.candidate`, `.topicStarted`, `.candidateRejected`). Calls are processed in order even when they overlap |
+| `TopicLabelingService` | Actor that tries the labelers in order, normalizes the result, applies the thermal policy, runs the `topics.label` signpost interval and keeps the latency per source |
+| `FoundationModelsTopicLabeler` | Apple's on-device model with `@Generable TopicShift { isNewTopic, title, summary }` |
+| `RemoteTopicLabeler` | The same task through a `TextGenerator` (BlauCore). In the app that is `XAITextGenerator` (BlauRealtime): xAI's `POST /v1/chat/completions` with the user's Keychain key and JSON-schema structured output |
+| `KeywordTopicLabeler` | Nouns and names from `NLTagger`, ranked by TF-IDF against the previous topic. No model, never fails |
+| `TopicTitleFormatter` | Enforces ≤ 5 words in Title Case and a one-sentence summary on every label, whatever produced it |
+| `TopicLabelPrompt` | The shared instructions and prompt, and the trimming that keeps them inside the context window |
+| `TopicLabelingPolicy` | What the thermal state allows (below) |
+
+```swift
+let pipeline = TopicPipeline(
+    segmenter: StreamingTopicSegmenter(embedder: embedder, config: .contextualEmbedding),
+    labeling: .app(xai: xaiServices))  // Blau/Topics/TopicLabeling+App.swift
+for event in try await pipeline.append(unit) {
+    switch event {
+    case .candidate(let boundary, let provisional): ...  // provisional break, maybe a provisional title
+    case .topicStarted(let boundary, let label): ...     // open the new topic titled label.title (#54)
+    case .candidateRejected(let boundary, let reason): ...  // includes .vetoed
+    }
+}
+// The first topic, once it has a few exchanges, and a topic being refined
+// as it closes (#54):
+let first = await pipeline.labelTopic()
+let refined = await pipeline.labelTopic(in: closed.range, previousTitle: earlierTitle)
+```
+
+### Flow
+
+1. **Candidate.** The segmenter raises `.candidate`. The pipeline sends about
+   six units around it (up to half after it, never reaching back past the
+   start of the topic it would close) and the current topic's title. The
+   model answers `isNewTopic`, a title and a summary.
+2. **Veto.** If a model (not the keyword fallback) says `isNewTopic: false`,
+   the pipeline emits `.candidate` then `.candidateRejected(_, .vetoed)` and
+   calls `StreamingTopicSegmenter.vetoPendingCandidate()`, which drops the
+   candidate and resumes the scan after the gaps already scored. A boundary
+   the user announced ("let's switch gears") isn't vetoed
+   (`TopicLabelingPolicy.explicitCueOverridesVeto`).
+3. **Confirmation.** When the segmenter confirms, the candidate's title is
+   reused if the boundary moved by at most one unit; otherwise the new topic
+   is titled then. `.topicStarted` carries the label, and the title becomes
+   the "previous title" for the next boundary (`setCurrentTitle(_:)` replaces
+   it after a refinement or a manual rename).
+
+The model only sees the units around the candidate, so it can't tell a brief
+digression that will come back from a real change; that stays the job of the
+segmenter's hysteresis. The veto catches candidates whose words changed but
+whose subject didn't.
+
+### Fallbacks
+
+Each labeler is skipped when it isn't available and abandoned after 10 s, on
+an error, or when its title is unusable; the next one is tried.
+
+| Order | Labeler | Used when |
+| ----- | ------- | --------- |
+| 1 | Foundation Models | `SystemLanguageModel.default.isAvailable` (Apple Intelligence on an eligible device, model downloaded) |
+| 2 | xAI text API | Apple Intelligence is unavailable or failed, and an xAI key is stored. Model `grok-4.20-0309-non-reasoning` (`XAITextGenerator.defaultModel`), temperature 0, 160 tokens, 10 s timeout |
+| 3 | Keywords | Always: no Apple Intelligence and no key, offline, or thermal state `.critical` |
+
+On-device details:
+
+- A fresh `LanguageModelSession` per call; greedy sampling, at most 160
+  response tokens.
+- **Context window.** The whole request is kept under 75 % of
+  `min(contextSize, 4096)` tokens, after the instructions, the schema and the
+  reply. Tokens are counted with `SystemLanguageModel.tokenCount(for:)` on
+  iOS 26.4+ (estimated at one token per three bytes before). Units far from
+  the boundary are dropped first, then turns are cut shorter. If the model
+  still throws `exceededContextWindowSize` (`LanguageModelError.contextSizeExceeded`
+  on iOS 27), the request is retried once with half the units.
+- **Guardrails.** Guided generation always runs under the default
+  guardrails, and the model refuses ordinary personal-finance talk (the
+  mortgage and tax fixtures) with "May contain sensitive content". Labeling
+  only transforms what the user said, so on a guardrail violation or refusal
+  the labeler retries once as plain text with
+  `.permissiveContentTransformations` (which only relaxes `String` output)
+  and parses the JSON reply.
+
+### Thermal policy
+
+Confirmation runs for every candidate, including ones the segmenter later
+drops; titling runs once per topic. So under thermal pressure the confirm
+step goes first:
+
+| `ProcessInfo.thermalState` | Mode | Behaviour |
+| -------------------------- | ---- | --------- |
+| `.nominal`, `.fair` | `.full` | Confirm or veto candidates and title topics with a model |
+| `.serious` | `.skipConfirmation` | No call at candidates; the segmenter's decision stands. Each confirmed topic is still titled by a model |
+| `.critical` | `.keywordsOnly` | No model calls; keyword titles |
+
+The thermal source is a `ThermalStateProviding`, so the performance policy
+(#75) can drive it.
+
+### Evaluation
+
+`TopicLabelFixtureTests` runs all 5 scripted transcripts and the 60
+synthetic conversations through the whole pipeline and also titles every
+reference topic, with three labeler setups: keywords only, a model that
+ignores the five-word guide (long, quoted, "Title:"-prefixed answers), and
+the xAI path replying with the same. All 884 labels per setup are five
+words or fewer.
+
+The opt-in `FoundationModelsTopicLabelerTests`
+(`BLAU_DEVICE_TESTS=1 swift test --filter FoundationModelsTopicLabelerTests`)
+runs the real on-device model over every scripted boundary and topic:
+
+| Transcript | Model's titles (Mac, macOS 27.2) |
+| ---------- | --------------------------------- |
+| `threeTopics` | Baking Sourdough Bread · Marathon Training Advice · Mortgage Refinancing Options |
+| `briefDigression` | YC Interview Preparation Tips · Japan Trip Planning |
+| `explicitCues` | Companion Planting Tips · Kubernetes Deployment Issues · Birthday Party Planning |
+| `singleTopic` | Piano Practice Duration |
+| `fourTopics` | Car Maintenance Tips · Tax Preparation for Freelancers · Puppy Training Challenges · Podcast Equipment |
+
+All 22 titles were five words or fewer, all 8 real boundaries were
+confirmed, and the model did not veto the digression (see Flow above).
+
+### Label latency
+
+`TopicLabelingService.latency(for:)` keeps the last 256 latencies per source
+(`p50`, `p90`, `maximum`), and every label is logged under `Log.topics` with
+its latency and the running p50. Instruments shows each call as a
+`topics.label` interval.
+
+| Where | Labeler | p50 | p90 | Max | Labels |
+| ----- | ------- | --- | --- | --- | ------ |
+| Mac host (Apple silicon, macOS 27.2), `FoundationModelsTopicLabelerTests`, model warmed | Foundation Models | 2.38 s | 3.25 s | 3.46 s | 22 |
+| iPhone 15 Pro or later, Release | Foundation Models | **pending** (needs a device) | | | |
+| iPhone without Apple Intelligence | xAI | **pending** (needs a device and a real key) | | | |
+
+The Mac numbers come from a shared machine running other builds; earlier
+runs measured p50 2.26–2.70 s. Labeling runs off the audio path and only at
+candidate boundaries and topic changes, so seconds of latency don't delay
+the conversation; a new topic appears a couple of exchanges after a switch
+in any case (#54).
+
+To measure on a device, run the same suite on the package scheme with the
+environment variable set in the scheme's test action, or read the
+`topics.label` intervals from an Instruments recording of a real
+conversation (see [performance.md](performance.md)).

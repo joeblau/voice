@@ -140,6 +140,18 @@ public struct TopicSegmenter: Sendable {
         return [.rejected(pending.candidate, reason: .endOfStream)]
     }
 
+    /// Drops the pending candidate because something outside the engine (the
+    /// labeling model, #53) judged it not to be a topic change. The gaps
+    /// scored so far aren't raised again; the scan resumes with the next
+    /// unit, so a later, real change can still be found.
+    ///
+    /// - Returns: `.rejected(candidate, reason: .vetoed)`, or nothing when no
+    ///   candidate is pending.
+    public mutating func vetoPendingCandidate() -> [TopicSegmentationEvent] {
+        guard let pending else { return [] }
+        return reject(pending, reason: .vetoed, scanFrom: (latestGap ?? pending.gap) + 1)
+    }
+
     // MARK: Inspection
 
     /// The candidate waiting to be confirmed or rejected.

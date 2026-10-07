@@ -89,6 +89,9 @@ public enum TopicRejectionReason: String, Hashable, Sendable {
     case belowThreshold
     /// The stream ended before the candidate could be sustained.
     case endOfStream
+    /// A language model read the exchanges around the candidate and judged
+    /// them to be the same topic (#53).
+    case vetoed
 }
 
 extension TopicSegmentationEvent {
