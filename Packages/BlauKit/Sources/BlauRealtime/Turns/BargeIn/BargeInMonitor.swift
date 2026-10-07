@@ -32,9 +32,10 @@ import Foundation
 ///    that started before the agent's audio can't be its echo.
 /// 2. *Level.* The speech (from the onset, or from the end of the grace
 ///    period) is at least ``BargeInConfiguration/minimumSpeechLevel``, and
-///    at least ``BargeInConfiguration/echoMargin`` louder than the median
-///    level of the ``BargeInConfiguration/referenceWindow`` before the onset,
-///    where the microphone hears whatever echo leaks while Grok talks.
+///    at least ``BargeInConfiguration/echoMargin`` louder than the peaks
+///    (90th percentile of 20 ms pieces) of the
+///    ``BargeInConfiguration/referenceWindow`` before the onset, where the
+///    microphone hears whatever echo leaks while Grok talks.
 /// 3. *Speaker.* The ``BargeInSpeakerGate`` (voice ID, #47), when there is
 ///    one, didn't `reject` the speaker. `uncertain` still interrupts.
 ///
@@ -265,7 +266,7 @@ public actor BargeInMonitor {
             if start < onset.startOffset, let reference = microphone.history(in: start..<onset.startOffset),
                 reference.sampleCount >= Self.minimumMeasuredSamples
             {
-                let referenceLevel = Self.medianLevel(of: reference)
+                let referenceLevel = Self.referenceLevel(of: reference)
                 if level - referenceLevel < margin {
                     return suppress(
                         .echo, segment: onset.segmentID,
@@ -283,9 +284,17 @@ public actor BargeInMonitor {
         rms > 0 ? max(-160, 20 * log10(rms)) : -160
     }
 
-    /// The median level of `frame`'s 20 ms pieces, in dBFS: what the
-    /// microphone typically hears there, robust to a few loud syllables.
-    static func medianLevel(of frame: AudioFrame) -> Float {
+    /// The peak level of `frame`'s 20 ms pieces, in dBFS: their 90th
+    /// percentile.
+    ///
+    /// The echo leak is the agent's speech, which spends half its time or
+    /// more in pauses and weak segments, while VAD trips on its loud
+    /// syllables. So the speech is compared with the leak's syllables, not
+    /// its typical level: a median would sit at the pauses (near the noise
+    /// floor) and let a leaked syllable through as "louder than before".
+    /// The 90th percentile rather than the maximum, so one click doesn't
+    /// set it.
+    static func referenceLevel(of frame: AudioFrame) -> Float {
         let piece = max(1, frame.sampleRate / 50)
         var levels: [Float] = []
         levels.reserveCapacity(frame.sampleCount / piece + 1)
@@ -296,7 +305,7 @@ public actor BargeInMonitor {
             start = end
         }
         levels.sort()
-        return levels.isEmpty ? -160 : levels[levels.count / 2]
+        return levels.isEmpty ? -160 : levels[min(levels.count - 1, levels.count * 9 / 10)]
     }
 
     private static func format(_ value: Float) -> String {

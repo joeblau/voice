@@ -112,6 +112,33 @@ struct BargeInMonitorTests {
         }
     }
 
+    /// Regression (PR #123 review): the agent's voice leaking through with
+    /// normal speech pauses. Nobody is talking; VAD trips on a -34 dBFS
+    /// syllable. Its pauses sit at the -65 dBFS noise floor, so a median
+    /// reference was -65 and the leak "speech" cleared the 9 dB margin by
+    /// some 20 dB: the agent interrupted itself.
+    @Test func theAgentsOwnVoiceLeakingWithSpeechPausesDoesNotBargeIn() async throws {
+        let setup = Setup(microphone: MicSignal.leak(syllable: -34, pause: -65, seconds: 3))
+        let outcome = await setup.monitor.handle(.speechStarted(.at(1.8, detected: 2.1)))
+        // Loud enough for the absolute floor: the relative check stops it.
+        #expect(outcome == .suppressed(.echo))
+        #expect(setup.target.triggers.isEmpty)
+        #expect(await setup.monitor.statistics.suppressed == [.echo: 1])
+    }
+
+    /// The user, close to the phone, talking over that pause-heavy leak
+    /// still barges in.
+    @Test func theUserTalkingOverAPauseHeavyLeakStillBargesIn() async throws {
+        let mic = MicSignal.leak(syllable: -34, pause: -65, seconds: 1.8) + MicSignal.tone(-24, seconds: 1.2)
+        let setup = Setup(microphone: mic)
+        let outcome = await setup.monitor.handle(.speechStarted(.at(1.8, detected: 2.1)))
+        #expect(setup.target.triggers.count == 1)
+        guard case .bargedIn = outcome else {
+            Issue.record("Expected a barge-in, got \(String(describing: outcome))")
+            return
+        }
+    }
+
     @Test func speechBelowTheMinimumLevelDoesNotBargeIn() async throws {
         let mic = MicSignal.tone(-80, seconds: 1.5) + MicSignal.tone(-52, seconds: 1.5)
         let setup = Setup(microphone: mic)
@@ -247,8 +274,25 @@ struct BargeInMonitorTests {
         #expect(BargeInMonitor.decibels(0) == -160)
         let echo = AudioFrame(
             samples: MicSignal.tone(-30, seconds: 0.2) + MicSignal.tone(-50, seconds: 0.4), sampleOffset: 0)
-        // Twice as many 20 ms pieces at -50 as at -30: the median is the
-        // soft level, whatever the loud pieces do to the mean.
-        #expect(abs(BargeInMonitor.medianLevel(of: echo) + 50) < 0.5)
+        // Twice as many 20 ms pieces at -50 as at -30: the reference is the
+        // loud level, the leak's syllables, not its typical (median) level.
+        #expect(abs(BargeInMonitor.referenceLevel(of: echo) + 30) < 0.5)
+    }
+
+    @Test func theReferenceIsTheLeaksSyllablesNotItsPauses() {
+        // 500 ms of a leak that is mostly pause: its median is the -65 dBFS
+        // noise floor, but VAD trips on the -34 dBFS syllables.
+        let leak = AudioFrame(samples: MicSignal.leak(syllable: -34, pause: -65, seconds: 0.5), sampleOffset: 0)
+        #expect(abs(BargeInMonitor.referenceLevel(of: leak) + 34) < 1)
+    }
+
+    @Test func oneClickDoesNotSetTheReference() {
+        // A single 20 ms click among 24 quiet pieces: a maximum would jump
+        // to it, the 90th percentile stays at the room's level.
+        let frame = AudioFrame(
+            samples: MicSignal.tone(-50, seconds: 0.24) + MicSignal.tone(-10, seconds: 0.02)
+                + MicSignal.tone(-50, seconds: 0.24),
+            sampleOffset: 0)
+        #expect(abs(BargeInMonitor.referenceLevel(of: frame) + 50) < 0.5)
     }
 }

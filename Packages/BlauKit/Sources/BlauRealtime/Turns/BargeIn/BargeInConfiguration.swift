@@ -20,10 +20,11 @@ public struct BargeInConfiguration: Sendable, Hashable {
     /// the absolute check off.
     public var minimumSpeechLevel: Float?
 
-    /// The speech must be this much louder than the median level of the
-    /// ``referenceWindow`` before it (where the microphone picks up the
-    /// agent's echo leak while it talks). Echo stays near that level; a
-    /// voice close to the phone jumps well above it. `nil` turns the
+    /// The speech must be this much louder than the peak level (90th
+    /// percentile of 20 ms pieces) of the ``referenceWindow`` before it
+    /// (where the microphone picks up the agent's echo leak while it talks).
+    /// Echo, pauses and all, stays at or below its loudest syllables; a
+    /// voice close to the phone jumps well above them. `nil` turns the
     /// relative check off.
     public var echoMargin: Float?
 

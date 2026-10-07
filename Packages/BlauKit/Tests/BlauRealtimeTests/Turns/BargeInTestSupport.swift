@@ -100,6 +100,19 @@ enum MicSignal {
         return Array(samples.prefix(Int(seconds * Double(rate))))
     }
 
+    /// The agent's voice leaking through with normal speech pauses: 120 ms
+    /// syllables at `syllable` dBFS, then 180 ms of pause at `pause` dBFS
+    /// (the noise floor). The typical (median) level is the pause; VAD trips
+    /// on the syllables.
+    static func leak(syllable: Float, pause: Float, seconds: Double) -> [Float] {
+        var samples: [Float] = []
+        while Double(samples.count) < seconds * Double(rate) {
+            samples += tone(syllable, seconds: 0.12)
+            samples += tone(pause, seconds: 0.18)
+        }
+        return Array(samples.prefix(Int(seconds * Double(rate))))
+    }
+
     /// Sample offset of `seconds`.
     static func offset(_ seconds: Double) -> Int64 { Int64((seconds * Double(rate)).rounded()) }
 }

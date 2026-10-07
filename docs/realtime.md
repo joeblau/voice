@@ -690,7 +690,7 @@ canceller converges. `BargeInConfiguration` (defaults below) decides:
 | ----- | ------- | ---- |
 | Grace period | `playbackGracePeriod` 300 ms, `speechAfterGrace` 200 ms | An onset in the first 300 ms of an agent item's audio is held until 200 ms of speech *after* the grace period has been heard; it barges in only if the segment is still open then, and the level checks run on that later audio. Speech that began before the agent's audio can't be its echo and is not held |
 | Absolute level | `minimumSpeechLevel` −45 dBFS | The speech's RMS on the 16 kHz capture must reach it |
-| Relative level | `echoMargin` 9 dB over the median of `referenceWindow` 500 ms | The speech must be that much louder than the typical level (median of 20 ms pieces) of the microphone just before the onset, which is where the agent's echo leak shows while it talks. Echo stays near that level; a voice close to the phone jumps well above it |
+| Relative level | `echoMargin` 9 dB over the peaks of `referenceWindow` 500 ms | The speech must be that much louder than the peak level (90th percentile of 20 ms pieces) of the microphone just before the onset, which is where the agent's echo leak shows while it talks. The leak is speech with pauses, and VAD trips on its loud syllables, so the reference is those syllables: a median would sit at the pauses, near the noise floor, and let the agent's own voice barge in. The 90th percentile rather than the maximum, so one click doesn't set it. A voice close to the phone jumps well above the leak's peaks |
 | Speaker | `BargeInSpeakerGate` | Voice ID's verdict on the onset (#47): only `reject` stops the barge-in, so `uncertain` still interrupts, as the issue asks. Not wired until the verification gate lands; until then any voice the guard lets through interrupts |
 
 Where playback started is read from the player (`AgentPlaybackObserving`,
@@ -732,9 +732,11 @@ transcript view (#42) to mark.
 `swift test --filter BargeIn` runs `BargeInMonitorTests` (the trigger and
 every echo-guard rule against fakes and a `ManualClock`, with synthetic
 microphone signals: speech over a faint echo, the agent's own voice leaking
-through at syllable rate, quiet speech, onsets inside and after the grace
-period, a segment that ends during the hold, a rejected or uncertain
-speaker) and `TurnOrchestratorBargeInTests` (the cut over fake sockets: the
+through at syllable rate, with and without speech pauses at the noise floor
+between syllables (and the user talking over each), the reference level
+being the leak's syllables rather than its pauses or one click, quiet
+speech, onsets inside and after the grace period, a segment that ends
+during the hold, a rejected or uncertain speaker) and `TurnOrchestratorBargeInTests` (the cut over fake sockets: the
 cancel and the truncate at the played milliseconds, a reply nobody heard
 deleted, a reply done but still playing, nothing cut outside
 `agentSpeaking`, the next turn going out after the cancelled response;
