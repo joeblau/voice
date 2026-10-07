@@ -9,8 +9,9 @@
 /// Names are `<stage>.<step>`: a lowercase stage, a dot and a lower camel
 /// case step.
 public enum PipelineInterval: CaseIterable, Sendable {
-    /// One capture callback: converting a hardware buffer to 16 kHz mono and
-    /// fanning it out to consumers.
+    /// One hardware buffer on the capture thread: converting it to 16 kHz
+    /// mono and fanning it out to consumers. (Measured off the real-time
+    /// thread, which only copies into a ring and must not emit signposts.)
     case captureFrame
     /// Voice activity detection over one chunk of audio.
     case vadChunk

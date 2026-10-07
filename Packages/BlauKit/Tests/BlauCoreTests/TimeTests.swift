@@ -145,6 +145,13 @@ struct AudioFrameTests {
         #expect(spike.peak == 0.9)
     }
 
+    @Test func hostTimeIsOptionalAndPartOfEquality() {
+        #expect(AudioFrame(samples: [0], sampleOffset: 0).hostTime == nil)
+        let stamped = AudioFrame(samples: [0], sampleOffset: 0, hostTime: 1_234)
+        #expect(stamped.hostTime == 1_234)
+        #expect(stamped != AudioFrame(samples: [0], sampleOffset: 0))
+    }
+
     @Test func emptyFrameHasZeroLevels() {
         let frame = AudioFrame(samples: [], sampleOffset: 42)
         #expect(frame.isEmpty)

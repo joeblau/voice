@@ -131,5 +131,6 @@ The complete list of declared edges:
 
 ## Subsystem docs
 
-- [audio.md](audio.md): the audio session controller, voice processing and
-  how capture and playback plug into its engine.
+- [audio.md](audio.md): the audio session controller, voice processing,
+  the mic capture engine (real-time ring, 16 kHz conversion, fan-out,
+  history, drop counters) and how playback plugs into the engine.
