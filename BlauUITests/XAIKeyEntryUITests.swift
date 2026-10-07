@@ -1,6 +1,6 @@
 import XCTest
 
-/// The xAI key entry points (onboarding and Settings → xAI account) against
+/// The xAI key entry points (onboarding and Settings → xAI Account) against
 /// the app's DEBUG stub (`BLAU_UI_TEST_XAI`): an in-memory key store and
 /// canned xAI responses, so these tests never use the network or Keychain.
 @MainActor
@@ -72,9 +72,7 @@ final class XAIKeyEntryUITests: XCTestCase {
 
     func testInvalidKeyShowsRecoverableErrorInSettings() {
         let app = launch(stub: "reject")
-        let settings = app.buttons["blau.settings.open"]
-        XCTAssertTrue(settings.waitForExistence(timeout: 10))
-        settings.tap()
+        openSettingsPane(SettingsPaneID.account, in: app)
 
         enterKey(fakeKey, in: app)
 
@@ -84,7 +82,7 @@ final class XAIKeyEntryUITests: XCTestCase {
 
     func testUnfundedKeyIsExplainedInSettings() {
         let app = launch(stub: "unfunded")
-        app.buttons["blau.settings.open"].tap()
+        openSettingsPane(SettingsPaneID.account, in: app)
         enterKey(fakeKey, in: app)
         assertProblem("No xAI credits", in: app)
         XCTAssertFalse(app.buttons["xai.apiKey.saveAnyway"].exists)
@@ -92,7 +90,7 @@ final class XAIKeyEntryUITests: XCTestCase {
 
     func testOfflineKeyCanBeSavedWithoutChecking() {
         let app = launch(stub: "offline")
-        app.buttons["blau.settings.open"].tap()
+        openSettingsPane(SettingsPaneID.account, in: app)
         enterKey(fakeKey, in: app)
         assertProblem("Couldn't reach xAI", in: app)
 
@@ -117,7 +115,12 @@ final class XAIKeyEntryUITests: XCTestCase {
         // Onboarding finishes and the prompt disappears from the main screen.
         XCTAssertTrue(app.buttons["xai.onboarding.open"].waitForNonExistence(timeout: 10))
 
-        app.buttons["blau.settings.open"].tap()
+        // The root row says the account is connected; the pane shows the key.
+        let list = openSettings(in: app)
+        let accountRow = app.buttons[SettingsPaneID.account]
+        scrollTo(accountRow, in: list)
+        XCTAssertTrue(accountRow.label.contains("Connected"), accountRow.label)
+        accountRow.tap()
         XCTAssertTrue(element(containing: "e5f6", in: app).waitForExistence(timeout: 10))
         XCTAssertTrue(element(containing: "UI test key", in: app).exists)
         XCTAssertFalse(app.secureTextFields["xai.apiKey.field"].exists)

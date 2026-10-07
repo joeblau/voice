@@ -2,14 +2,16 @@ import BlauCore
 import SwiftUI
 
 /// One toggle per `FeatureFlag`, with its summary and whether it is
-/// overridden. Used by the DEBUG menu, and meant for Settings → Developer
-/// (#43). When the flags don't allow overrides (release builds), the toggles
-/// show the shipping values and are disabled.
+/// overridden. Used by the DEBUG menu and Settings → Developer (#43). When
+/// the flags don't allow overrides (release builds), the toggles show the
+/// shipping values and are disabled.
 struct FeatureFlagToggles: View {
     let flags: FeatureFlags
+    /// Flags with a control of their own elsewhere on the screen.
+    var excluding: Set<FeatureFlag> = []
 
     var body: some View {
-        ForEach(FeatureFlag.allCases) { flag in
+        ForEach(FeatureFlag.allCases.filter { !excluding.contains($0) }) { flag in
             FeatureFlagRow(flag: flag, flags: flags)
         }
     }

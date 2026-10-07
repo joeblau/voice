@@ -40,6 +40,8 @@ struct MainScreenScaffold: View {
     @State private var record: RecordButtonModel
     @State private var isShowingSettings = false
     @State private var isShowingKeyOnboarding = false
+    /// Settings zooms out of the bottom-left button.
+    @Namespace private var settingsTransition
 
     init(conversation: any ConversationSession) {
         // Evaluated on every init but only kept the first time; building a
@@ -77,6 +79,7 @@ struct MainScreenScaffold: View {
                     ToolbarItem(placement: .bottomBar) {
                         SettingsButton { isShowingSettings = true }
                     }
+                    .matchedTransitionSource(id: SettingsView.transitionSourceID, in: settingsTransition)
                     ToolbarSpacer(.flexible, placement: .bottomBar)
                     ToolbarItem(placement: .bottomBar) {
                         RecordButton(model: record)
@@ -141,8 +144,11 @@ struct MainScreenScaffold: View {
         } message: { message in
             Text(message)
         }
+        // Medium and large detents (SettingsView sets them), zooming out of
+        // the Settings button.
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
+                .navigationTransition(.zoom(sourceID: SettingsView.transitionSourceID, in: settingsTransition))
         }
         .sheet(isPresented: $isShowingKeyOnboarding) {
             XAIKeyOnboardingStep {

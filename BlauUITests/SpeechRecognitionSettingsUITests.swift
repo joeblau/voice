@@ -1,6 +1,6 @@
 import XCTest
 
-/// Settings → Speech Recognition (#31): the toggle that forces Apple's
+/// Settings → Transcription → Speech Recognition (#31): the toggle that forces Apple's
 /// speech engine. Runs with the DEBUG xAI stub, so the choice lives in the
 /// `blau.uitests` defaults suite, never the developer's own.
 @MainActor
@@ -16,9 +16,7 @@ final class SpeechRecognitionSettingsUITests: XCTestCase {
         app.launchEnvironment["BLAU_MODEL_FIXTURES"] = "1"
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
-        let open = app.buttons["blau.settings.open"]
-        XCTAssertTrue(open.waitForExistence(timeout: 10))
-        open.tap()
+        openSettingsPane(SettingsPaneID.transcription, in: app)
         return app
     }
 

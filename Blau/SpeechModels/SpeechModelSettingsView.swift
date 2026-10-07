@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Settings for the on-device speech models: network policy, automatic
 /// download of the extra speech models, per-model status and disk usage, and
-/// delete. Settings links here through ``SpeechModelsSettingsSection``.
+/// delete. Settings → Speech Models opens it.
 struct SpeechModelSettingsView: View {
     @Environment(ModelManager.self) private var models
     @State private var pendingDeletion: ModelID?
@@ -155,23 +155,6 @@ struct SpeechModelSettingsView: View {
                     "Models stay on this iPhone and aren't included in iCloud or device backups. Blau downloads them again when needed."
                 )
             }
-        }
-    }
-}
-
-/// The Settings section that opens ``SpeechModelSettingsView``. It needs
-/// a `NavigationStack` and a `ModelManager` in the environment.
-struct SpeechModelsSettingsSection: View {
-    var body: some View {
-        Section {
-            NavigationLink {
-                SpeechModelSettingsView()
-            } label: {
-                Label("Speech Models", systemImage: "waveform.circle")
-            }
-            .accessibilityIdentifier(SpeechModelSettingsView.Identifier.link)
-        } footer: {
-            Text("On-device models for listening and transcription, and when they download.")
         }
     }
 }

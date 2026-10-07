@@ -574,8 +574,10 @@ generated) and `textInputs` every user text item sent.
 `response.done`'s usage, cancelled responses included (they are billed), is
 summed per conversation in `TurnSnapshot.usage` and logged per response
 (`Log.realtime`, counts only). The SwiftData schema has no usage field, so
-it is not written to the store; adding it is a schema change (v3) for the
-cost view.
+it is not written to the store; adding it is a schema change (v3). The
+usage and cost estimate in Settings → xAI Account
+(`RealtimeUsageEstimator`, [settings.md](settings.md)) works from the stored
+transcript instead: Grok's speaking time and the user's turns.
 
 ### Tests
 

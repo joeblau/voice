@@ -94,6 +94,18 @@ public enum AppleSpeechAssets {
             throw AppleSpeechError.unsupportedDevice
         #endif
     }
+
+    /// The locales Apple's transcriber supports on this device, for
+    /// Settings → Transcription → Language. Empty when the device can't run
+    /// it.
+    public static func supportedLocales() async -> [Locale] {
+        #if canImport(Speech)
+            guard SpeechTranscriber.isAvailable else { return [] }
+            return await SpeechTranscriber.supportedLocales
+        #else
+            return []
+        #endif
+    }
 }
 
 #if canImport(Speech)
