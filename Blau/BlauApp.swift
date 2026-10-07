@@ -9,13 +9,20 @@ import SwiftUI
 /// when a sync-mode switch replaces the container.
 @main
 struct BlauApp: App {
-    @State private var environment = AppEnvironment.make(kind: .current)
+    @State private var environment: AppEnvironment
     @Environment(\.scenePhase) private var scenePhase
     /// MetricKit collection starts here, as early as possible, so payloads
     /// MetricKit delivers right after launch are caught (#72).
     @State private var diagnostics: AppDiagnostics
 
     init() {
+        let environment = AppEnvironment.make(kind: .current)
+        _environment = State(initialValue: environment)
+        // Background task handlers must be registered before launch ends
+        // (#63). Only the real app runs background work.
+        if environment.kind == .live {
+            MemoryIndexBackgroundTask.register(environment.memoryIndexing)
+        }
         let diagnostics = AppDiagnostics.live()
         diagnostics.start()
         _diagnostics = State(initialValue: diagnostics)

@@ -36,7 +36,10 @@ import os
 public final class MemoryIndex: Sendable {
     /// Bump when the schema below changes. An index written with another
     /// version is deleted and recreated empty (`needsRebuild`).
-    public static let schemaVersion = 1
+    ///
+    /// 2 (#63): adds `fact_link`, which records the facts each
+    /// conversation's exchange keys list.
+    public static let schemaVersion = 2
 
     /// The file name inside the derived directory.
     public static let fileName = "MemoryIndex.sqlite"
@@ -135,8 +138,10 @@ public final class MemoryIndex: Sendable {
     /// table over `keyText` kept in sync by triggers (only when the key
     /// text actually changes, so attaching a vector doesn't rewrite the
     /// full-text index), `chunk_vocab` exposes how many chunks hold each
-    /// stem (for `keywordSearch`'s common-word cutoff), and `index_state`
-    /// holds rebuild bookkeeping.
+    /// stem (for `keywordSearch`'s common-word cutoff), `fact_link` records
+    /// which facts each conversation's exchange keys list (so deleting a
+    /// fact re-chunks those conversations, #63), and `index_state` holds
+    /// rebuild and indexer bookkeeping.
     static let schemaSQL = """
         CREATE TABLE chunk (
             rowid INTEGER PRIMARY KEY,
@@ -177,6 +182,12 @@ public final class MemoryIndex: Sendable {
             key TEXT PRIMARY KEY NOT NULL,
             value TEXT
         );
+        CREATE TABLE fact_link (
+            conversationID BLOB NOT NULL,
+            factID BLOB NOT NULL,
+            PRIMARY KEY (conversationID, factID)
+        ) WITHOUT ROWID;
+        CREATE INDEX fact_link_fact ON fact_link(factID);
         """
 
     // MARK: - Writing
@@ -188,11 +199,17 @@ public final class MemoryIndex: Sendable {
         /// Every chunk of the source; chunks it had before and doesn't list
         /// are removed. Empty removes the source.
         public var chunks: [MemoryChunk]
+        /// For a conversation: the facts its exchange keys were built with
+        /// (facts extracted from its utterances), replacing the ones
+        /// recorded before. `nil` leaves them as they are. Removing a
+        /// conversation (no chunks) always forgets its facts.
+        public var linkedFactIDs: Set<UUID>?
 
-        public init(kind: MemorySourceKind, sourceID: UUID, chunks: [MemoryChunk]) {
+        public init(kind: MemorySourceKind, sourceID: UUID, chunks: [MemoryChunk], linkedFactIDs: Set<UUID>? = nil) {
             self.kind = kind
             self.sourceID = sourceID
             self.chunks = chunks
+            self.linkedFactIDs = linkedFactIDs
         }
     }
 
@@ -282,7 +299,7 @@ public final class MemoryIndex: Sendable {
     /// Deletes every chunk and the rebuild bookkeeping.
     public func removeAll() async throws {
         try await write { db, changes in
-            try db.execute(sql: "DELETE FROM chunk; DELETE FROM index_state;")
+            try db.execute(sql: "DELETE FROM chunk; DELETE FROM index_state; DELETE FROM fact_link;")
             changes.append(.removeAll)
         }
     }
@@ -310,6 +327,29 @@ public final class MemoryIndex: Sendable {
     /// Whether the index has never finished a full rebuild.
     public var needsRebuild: Bool {
         get async throws { try await lastRebuild() == nil }
+    }
+
+    /// A bookkeeping value the indexer (#63) keeps with the index, such as
+    /// the checkpoint of a rebuild in progress, or `nil`. It lives and dies
+    /// with the index file: a recreated index starts without any.
+    public func stateValue(forKey key: String) async throws -> String? {
+        try await database.read { db in
+            try String.fetchOne(db, sql: "SELECT value FROM index_state WHERE key = ?", arguments: [key])
+        }
+    }
+
+    /// Stores (or, with `nil`, removes) a bookkeeping value. `rebuiltAt` is
+    /// reserved for `markRebuilt(at:)`.
+    public func setStateValue(_ value: String?, forKey key: String) async throws {
+        precondition(key != "rebuiltAt", "rebuiltAt is written by markRebuilt(at:)")
+        try await database.write { db in
+            if let value {
+                try db.execute(
+                    sql: "INSERT OR REPLACE INTO index_state(key, value) VALUES (?, ?)", arguments: [key, value])
+            } else {
+                try db.execute(sql: "DELETE FROM index_state WHERE key = ?", arguments: [key])
+            }
+        }
     }
 
     // MARK: - Reading
@@ -371,6 +411,21 @@ public final class MemoryIndex: Sendable {
         }
     }
 
+    /// The conversations whose exchange keys list any of these facts, as
+    /// recorded by `SourceChunks.linkedFactIDs`.
+    public func conversations(linkedToFacts factIDs: some Collection<UUID>) async throws -> Set<UUID> {
+        let ids = Array(Set(factIDs))
+        guard !ids.isEmpty else { return [] }
+        return try await database.read { db in
+            let statement = try db.cachedStatement(sql: "SELECT conversationID FROM fact_link WHERE factID = ?")
+            var conversations = Set<UUID>()
+            for id in ids {
+                conversations.formUnion(try UUID.fetchAll(statement, arguments: [id]))
+            }
+            return conversations
+        }
+    }
+
     /// Every source id of `kind` in the index.
     public func sourceIDs(kind: MemorySourceKind) async throws -> Set<UUID> {
         try await database.read { db in
@@ -380,15 +435,20 @@ public final class MemoryIndex: Sendable {
     }
 
     /// Up to `limit` chunks without a vector of `modelVersion` (none, or
-    /// one from another model), oldest row first.
-    public func chunksNeedingEmbedding(modelVersion: String, limit: Int) async throws -> [MemoryChunk] {
-        try await database.read { db in
+    /// one from another model): oldest row first, or with `newestFirst` the
+    /// most recent content (`createdAt`) first, the order the incremental
+    /// indexer (#63) re-embeds in after a model change.
+    public func chunksNeedingEmbedding(modelVersion: String, limit: Int, newestFirst: Bool = false) async throws
+        -> [MemoryChunk]
+    {
+        let order = newestFirst ? "createdAt DESC, rowid DESC" : "rowid"
+        return try await database.read { db in
             try Row.fetchAll(
                 db,
                 sql: """
                     SELECT \(Self.chunkColumns) FROM chunk
                     WHERE modelVersion IS NULL OR modelVersion != ? OR vector IS NULL
-                    ORDER BY rowid LIMIT ?
+                    ORDER BY \(order) LIMIT ?
                     """,
                 arguments: [modelVersion, max(0, limit)]
             ).compactMap(Self.chunk(from:))
@@ -705,6 +765,15 @@ public final class MemoryIndex: Sendable {
         for row in try Row.fetchAll(select, arguments: [source.kind.rawValue, source.sourceID]) {
             guard let id = row[1] as UUID? else { continue }
             existing[id] = (row[0], row[2], row[3])
+        }
+
+        if source.kind == .conversation, source.chunks.isEmpty || source.linkedFactIDs != nil {
+            try db.execute(sql: "DELETE FROM fact_link WHERE conversationID = ?", arguments: [source.sourceID])
+            if !source.chunks.isEmpty, let facts = source.linkedFactIDs {
+                let link = try db.cachedStatement(
+                    sql: "INSERT OR IGNORE INTO fact_link(conversationID, factID) VALUES (?, ?)")
+                for fact in facts { try link.execute(arguments: [source.sourceID, fact]) }
+            }
         }
 
         let keep = Set(source.chunks.map(\.id))

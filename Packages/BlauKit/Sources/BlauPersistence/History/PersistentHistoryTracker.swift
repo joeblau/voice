@@ -178,7 +178,13 @@ public actor PersistentHistoryTracker {
 
     /// The changes since the last call (or since the saved cursor), and moves
     /// the cursor past them.
-    public func fetchNewChanges() async throws -> StoreChangeSet {
+    ///
+    /// - Parameter savingCursor: Save the new position at once (the
+    ///   default). A consumer that must not lose a change if the app is
+    ///   killed while it handles it (the memory indexer, #63) passes
+    ///   `false` and calls `saveCursor()` once the changes are handled; a
+    ///   relaunch before that reports them again.
+    public func fetchNewChanges(savingCursor: Bool = true) async throws -> StoreChangeSet {
         if !didLoadCursor {
             token = try await loadCursor()
             didLoadCursor = true
@@ -202,10 +208,20 @@ public actor PersistentHistoryTracker {
             changes = StoreChangeSet(historyWasReset: true)
         }
 
-        if !changes.isEmpty {
-            try await saveCursor()
+        if savingCursor, !changes.isEmpty {
+            try await persistCursor()
         }
         return changes
+    }
+
+    /// Moves the cursor past every transaction written so far, without
+    /// reporting them, and saves it. For a consumer about to read the whole
+    /// store anyway (the memory indexer starting a full rebuild, #63): only
+    /// changes made after this call are reported from now on.
+    public func skipToLatest() async throws {
+        didLoadCursor = true
+        token = try latestToken()
+        try await persistCursor()
     }
 
     /// Whether `error` means the cursor points at history that was deleted.
@@ -238,12 +254,19 @@ public actor PersistentHistoryTracker {
         case .latest:
             let latest = try latestToken()
             token = latest
-            try await saveCursor()
+            try await persistCursor()
             return latest
         }
     }
 
-    private func saveCursor() async throws {
+    /// Saves the position after the last change fetched. Only needed after
+    /// `fetchNewChanges(savingCursor: false)`.
+    public func saveCursor() async throws {
+        guard didLoadCursor else { return }
+        try await persistCursor()
+    }
+
+    private func persistCursor() async throws {
         let data = try token.map { try JSONEncoder().encode($0) }
         try await cursors.setToken(data, for: consumer, at: clock.now)
     }

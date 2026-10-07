@@ -116,6 +116,13 @@ final class AppEnvironment {
     /// The policy's state for the views (the degraded-mode indicator).
     let performanceStatus: PerformanceStatus
 
+    /// Keeps the on-device memory search index in step with the synced
+    /// store (#63): one incremental indexer per store generation, throttled
+    /// by `performance`, with a background processing task for rebuilds
+    /// (`MemoryIndexBackgroundTask`). Only an on-disk store is indexed, so
+    /// previews and tests (in-memory stores) never build one.
+    let memoryIndexing: MemoryIndexingController
+
     /// Applies the performance level to the inference backends.
     @ObservationIgnored private var performanceFollower: Task<Void, Never>?
 
@@ -181,6 +188,8 @@ final class AppEnvironment {
         self.backgroundInference = backgroundInference
         self.performance = performance
         self.performanceStatus = PerformanceStatus(policy: performance)
+        self.memoryIndexing = MemoryIndexingController(
+            persistence: persistence, embedder: textEmbeddings, performance: performance)
         self.voiceLoop = VoiceLoop(
             realtime: realtime, speechModels: speechModels, audio: conversationAudio,
             backgroundInference: backgroundInference, performance: performance)
@@ -204,6 +213,8 @@ final class AppEnvironment {
     func start() async {
         startBackgroundServices()
         startPerformancePolicy()
+        // #63: indexes the store once `PersistenceGate` has opened it.
+        memoryIndexing.start()
         async let models: Void = speechModels.start()
         await xai.start()
         await models

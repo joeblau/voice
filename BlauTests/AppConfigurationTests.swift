@@ -31,7 +31,7 @@ struct AppConfigurationTests {
 
     @Test func declaresBackgroundModes() throws {
         let modes = try #require(info["UIBackgroundModes"] as? [String])
-        #expect(Set(modes) == ["audio", "remote-notification"])
+        #expect(Set(modes) == ["audio", "remote-notification", "processing"])
     }
 
     @Test func declaresLaunchScreen() {

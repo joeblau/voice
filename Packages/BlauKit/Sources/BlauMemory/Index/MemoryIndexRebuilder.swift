@@ -131,9 +131,11 @@ public struct MemoryIndexRebuilder: Sendable {
 
         let facts = try await sources.facts()
         var factsByUtterance: [UUID: [String]] = [:]
+        var factIDsByUtterance: [UUID: [UUID]] = [:]
         for fact in facts {
             if let utteranceID = fact.sourceUtteranceID {
                 factsByUtterance[utteranceID, default: []].append(fact.statement)
+                factIDsByUtterance[utteranceID, default: []].append(fact.id)
             }
         }
 
@@ -145,7 +147,9 @@ public struct MemoryIndexRebuilder: Sendable {
             offset += batch.count
             for conversation in try await sources.conversations(batch) {
                 let chunks = chunker.chunks(for: conversation, factsByUtterance: factsByUtterance)
-                try await add(.conversation, conversation.id, chunks, to: &state, progress: progress)
+                let linkedFacts = Set(conversation.utterances.flatMap { factIDsByUtterance[$0.id] ?? [] })
+                try await add(
+                    .conversation, conversation.id, chunks, linkedFactIDs: linkedFacts, to: &state, progress: progress)
             }
         }
 
@@ -234,12 +238,13 @@ public struct MemoryIndexRebuilder: Sendable {
     }
 
     private func add(
-        _ kind: MemorySourceKind, _ sourceID: UUID, _ chunks: [MemoryChunk], to state: inout RunState,
-        progress: (@Sendable (Report) -> Void)?
+        _ kind: MemorySourceKind, _ sourceID: UUID, _ chunks: [MemoryChunk], linkedFactIDs: Set<UUID>? = nil,
+        to state: inout RunState, progress: (@Sendable (Report) -> Void)?
     ) async throws {
         state.seen[kind, default: []].insert(sourceID)
         state.report.sources[kind, default: 0] += 1
-        state.pending.append(MemoryIndex.SourceChunks(kind: kind, sourceID: sourceID, chunks: chunks))
+        state.pending.append(
+            MemoryIndex.SourceChunks(kind: kind, sourceID: sourceID, chunks: chunks, linkedFactIDs: linkedFactIDs))
         state.pendingChunks += chunks.count
         if state.pendingChunks >= writeBatchSize { try await flush(&state, progress: progress) }
     }
