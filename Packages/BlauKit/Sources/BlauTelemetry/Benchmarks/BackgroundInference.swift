@@ -135,12 +135,21 @@ public struct BackgroundInferenceAnalysis: Codable, Hashable, Sendable {
     /// Whether every off-screen check found a Neural Engine (`nil` if never
     /// checked).
     public let neuralEngineListedInBackground: Bool?
+    /// Monotonic time the run ended, in seconds, when known. The span from
+    /// the last sample to here counts towards coverage, so a suspension
+    /// that lasts until the end of the run isn't missed.
+    public let runEndedAtUptimeSeconds: Double?
     public let verdict: BackgroundInferenceVerdict
 
+    /// - Parameter runEndedAt: The monotonic time (same clock as
+    ///   `InferenceSample.uptimeSeconds`) the run ended. Pass it whenever
+    ///   it is known: without it, an off-screen sample with no successor
+    ///   is assumed to have been followed on time.
     public init(
         samples: [InferenceSample],
         cpuBaseline: LatencySummary?,
         expectedInterval: Duration,
+        runEndedAt: Duration? = nil,
         thresholds: Thresholds = Thresholds()
     ) {
         let ordered = samples.sorted { $0.uptimeSeconds < $1.uptimeSeconds }
@@ -154,7 +163,9 @@ public struct BackgroundInferenceAnalysis: Codable, Hashable, Sendable {
         self.cpuBaseline = cpuBaseline
         foregroundErrorCount = foregroundSamples.count { $0.error != nil }
         backgroundErrorCount = backgroundSamples.count { $0.error != nil }
-        backgroundCoverage = Self.coverage(of: ordered, expectedInterval: expectedInterval.timeInterval)
+        runEndedAtUptimeSeconds = runEndedAt?.timeInterval
+        backgroundCoverage = Self.coverage(
+            of: ordered, expectedInterval: expectedInterval.timeInterval, runEndedAt: runEndedAtUptimeSeconds)
 
         let checks = backgroundSamples.compactMap(\.neuralEngineAvailable)
         neuralEngineListedInBackground = checks.isEmpty ? nil : checks.allSatisfy { $0 }
@@ -172,15 +183,19 @@ public struct BackgroundInferenceAnalysis: Codable, Hashable, Sendable {
 
     /// Background inferences that ran ÷ the number the cadence called for.
     ///
-    /// Each off-screen sample "owns" the time until the next sample, so a
-    /// suspension shows up as one long gap after the last background sample.
-    static func coverage(of ordered: [InferenceSample], expectedInterval: Double) -> Double? {
+    /// Each off-screen sample "owns" the time until the next sample (or,
+    /// for the last sample, until `runEndedAt`), so a suspension shows up as
+    /// one long gap after the last background sample, even when the app
+    /// only resumed as the run ended and took no further sample.
+    static func coverage(of ordered: [InferenceSample], expectedInterval: Double, runEndedAt: Double?) -> Double? {
         guard expectedInterval > 0 else { return nil }
         var backgroundCount = 0
         var backgroundSpan = 0.0
         for (index, sample) in ordered.enumerated() where sample.phase.isBackground {
             backgroundCount += 1
-            let next = index + 1 < ordered.count ? ordered[index + 1].uptimeSeconds : sample.uptimeSeconds
+            let successor = index + 1 < ordered.count ? ordered[index + 1].uptimeSeconds : nil
+            var next = successor ?? runEndedAt ?? sample.uptimeSeconds
+            if let runEndedAt { next = min(next, runEndedAt) }
             backgroundSpan += max(next - sample.uptimeSeconds, expectedInterval)
         }
         guard backgroundCount > 0, backgroundSpan > 0 else { return nil }

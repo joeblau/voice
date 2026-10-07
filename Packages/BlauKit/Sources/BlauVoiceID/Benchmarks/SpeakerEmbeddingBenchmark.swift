@@ -127,7 +127,7 @@ public struct SpeakerEmbeddingBenchmark: BenchmarkCase {
             let first = try await extractor.embed(fixture.window(seconds: longest, offset: 0))
             let second = try await extractor.embed(fixture.window(seconds: longest, offset: fixture.seconds / 2))
             if let cosine = Self.cosine(first, second) {
-                recorder.record("cosine.sameSpeaker", cosine, unit: .count)
+                recorder.record("cosine.sameSpeaker", cosine, unit: .score)
             }
         }
 
@@ -136,9 +136,12 @@ public struct SpeakerEmbeddingBenchmark: BenchmarkCase {
         recorder.progress(1, "Done")
     }
 
-    /// `1.5s`, `3s`.
+    /// `1.5s`, `3s`, whatever the device's locale (metric keys must line up
+    /// across devices in the comparison table).
     static func label(_ seconds: Double) -> String {
-        seconds.formatted(.number.precision(.fractionLength(0...2)).grouping(.never)) + "s"
+        seconds.formatted(
+            .number.precision(.fractionLength(0...2)).grouping(.never).locale(Locale(identifier: "en_US_POSIX")))
+            + "s"
     }
 
     /// Cosine similarity, or `nil` for mismatched or zero vectors.

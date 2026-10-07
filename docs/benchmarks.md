@@ -178,8 +178,13 @@ an iPhone; they validate the harness and catch gross regressions.
 - **Topic labels** use a new `LanguageModelSession` per request (each
   boundary is independent), temperature 0, and fixture windows of two
   exchanges either side of a boundary. `label.cold` is the first request in
-  the process; `label.prewarmed` calls `prewarm()` before the timed request.
-  Titles are never logged.
+  the process, session creation included. For `label` and `label.prewarmed`
+  the session is created outside the timed region (and, for
+  `label.prewarmed`, `prewarm()` is called on it), then both wait the same
+  lead (`prewarmLead`, 1.5 s by default, about how early the segmenter knows
+  a boundary is coming) and only `respond` is timed. `prewarm()` returns at
+  once and loads in the background, so it needs that lead to have any
+  effect. Titles are never logged.
 - **Device and conditions.** Every report records the model identifier,
   chip, OS build, memory, build configuration, and thermal state at the
   start and end of each case.
@@ -258,10 +263,18 @@ runs end to end against the real models, and the relative costs.
 | CAM++ | `embed.1.5s` p50 / p95 | 1,632 / 3,317 ms |
 | | `embed.3s` p50 / p95 | 916 / 1,322 ms |
 | | `cosine.sameSpeaker` | 0.91 |
-| Foundation Models | `label.cold` | 1,327 ms |
-| | `label` p50 / p95 | 914 / 1,160 ms |
-| | `label.prewarmed` p50 / p95 | 1,194 / 1,686 ms |
+| Foundation Models | `label.cold` | 1,369 ms |
+| | `label` p50 / p95 | 783 / 1,257 ms |
+| | `label.prewarmed` p50 / p95 | 1,044 / 1,252 ms |
 | | `titles.withinWordLimit` | 100% |
+
+The Foundation Models rows were re-measured on 2026-10-07 after the method
+fix above (`BLAU_DEVICE_TESTS=1 swift test -c release --filter
+RealModelTopicLabelBenchmarkTests`, same Mac, load average 100 to 500). A
+second run gave `label` p50 865 ms and `label.prewarmed` p50 1,149 ms. The
+first run's `label.prewarmed` (p50 1,194 ms) is **invalid**: it called
+`prewarm()` inside the timed request with no lead, so the prewarm competed
+with the request instead of preceding it.
 
 What the Mac run already shows, independent of the device:
 
@@ -284,10 +297,13 @@ What the Mac run already shows, independent of the device:
   once the OS had cached it: the copy-to-a-new-path method does force the
   compile. The footprint barely moved (34 MB) while the kernel's neural
   ledger grew 468 MB, which is why both are recorded.
-- **Foundation Models labels take about a second** (p50 914 ms, cold
-  1.3 s). That is fine off the critical path (#53 labels after a boundary
-  is detected), but too slow to run per exchange. Prewarming didn't help in
-  this run; check on a phone.
+- **Foundation Models labels take about a second** (p50 783 to 865 ms,
+  cold 1.4 s). That is fine off the critical path (#53 labels after a
+  boundary is detected), but too slow to run per exchange. With a 1.5 s
+  lead outside the timed region, a prewarmed session was still about
+  300 ms slower than a plain one in both Mac runs, so prewarming showed no
+  benefit on this (loaded) Mac. Don't build #52/#53 around `prewarm()`
+  until the iPhone runs say otherwise.
 - **WeSpeaker costs the same for 1.5 s and 3 s windows.** FluidAudio's
   export takes a fixed 10 s input and repeat-pads shorter audio (verified
   in `EmbeddingExtractor.fillWaveformBuffer`), so the "score at 1.5 s,
@@ -380,6 +396,12 @@ A silent CPU fallback is told apart from ordinary slowdown by comparing
 off-screen latency with the CPU-only baseline of the same model: if it is
 closer (on a log scale) to the CPU baseline than to the foreground latency,
 the work moved to the CPU.
+
+Coverage counts each off-screen window as owning the time until the next
+window, and the last one as owning the time until the run ended. A
+suspension that lasts past the end of the run (the tester unlocks late)
+therefore still reads as `suspended`, even though the window after resuming
+is a warm-up and records no sample.
 
 **Empirical result: pending** (needs an iPhone on iOS 27; see the probe
 procedure above). The probe's JSON report goes next to the device's

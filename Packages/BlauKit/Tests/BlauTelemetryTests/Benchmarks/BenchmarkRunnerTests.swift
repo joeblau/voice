@@ -141,6 +141,9 @@ struct BenchmarkRunnerTests {
         (BenchmarkMetric(key: "k", value: 18.04, unit: .realTimeFactor), "18.0×"),
         (BenchmarkMetric(key: "k", value: 256, unit: .count), "256"),
         (BenchmarkMetric(key: "k", value: 37.5, unit: .percent), "37.5%"),
+        (BenchmarkMetric(key: "k", value: 0.8312, unit: .score), "0.83"),
+        (BenchmarkMetric(key: "k", value: 0.4, unit: .score), "0.40"),
+        (BenchmarkMetric(key: "k", value: -0.05, unit: .score), "-0.05"),
     ])
     func formatsMetrics(metric: BenchmarkMetric, expected: String) {
         #expect(metric.formatted == expected)

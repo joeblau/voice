@@ -103,6 +103,38 @@ struct BackgroundInferenceAnalysisTests {
         #expect(coverage < 0.05)
     }
 
+    @Test func aSuspensionLastingUntilTheEndOfTheRunIsSuspended() {
+        // 30 normal locked samples, then the app is suspended and only
+        // resumes as the run ends, so no later sample closes the gap.
+        let samples =
+            Self.run(.foreground, count: 30, start: 0, latency: 40)
+            + Self.run(.locked, count: 30, start: 9.6, latency: 42)
+        let lastSample = samples.last!.uptimeSeconds
+        let analysis = BackgroundInferenceAnalysis(
+            samples: samples, cpuBaseline: Self.baseline(180), expectedInterval: Self.hop,
+            runEndedAt: .seconds(lastSample + 60))
+        guard case .suspended(let coverage) = analysis.verdict else {
+            Issue.record("Expected suspended, got \(analysis.verdict)")
+            return
+        }
+        #expect(coverage < 0.2)
+        #expect(analysis.runEndedAtUptimeSeconds == lastSample + 60)
+    }
+
+    @Test func aRunEndingOnCadenceKeepsFullCoverage() {
+        let samples =
+            Self.run(.foreground, count: 30, start: 0, latency: 40)
+            + Self.run(.locked, count: 30, start: 9.6, latency: 42)
+        let analysis = BackgroundInferenceAnalysis(
+            samples: samples, cpuBaseline: Self.baseline(180), expectedInterval: Self.hop,
+            runEndedAt: .seconds(samples.last!.uptimeSeconds + 0.32))
+        #expect((analysis.backgroundCoverage ?? 0) > 0.99)
+        guard case .works = analysis.verdict else {
+            Issue.record("Expected works, got \(analysis.verdict)")
+            return
+        }
+    }
+
     @Test func noBackgroundSamplesIsInconclusive() {
         let analysis = BackgroundInferenceAnalysis(
             samples: Self.run(.foreground, count: 50, start: 0, latency: 40), cpuBaseline: nil,
@@ -138,7 +170,8 @@ struct BackgroundInferenceAnalysisTests {
         let samples =
             Self.run(.foreground, count: 30, start: 0, latency: 40)
             + Self.run(.locked, count: 30, start: 9.6, latency: 44)
-        let analysis = BackgroundInferenceAnalysis(samples: samples, cpuBaseline: nil, expectedInterval: Self.hop)
+        let analysis = BackgroundInferenceAnalysis(
+            samples: samples, cpuBaseline: nil, expectedInterval: Self.hop, runEndedAt: .seconds(19.5))
         let decoded = try JSONDecoder().decode(
             BackgroundInferenceAnalysis.self, from: JSONEncoder().encode(analysis))
         #expect(decoded == analysis)

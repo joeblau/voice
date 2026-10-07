@@ -89,6 +89,26 @@ struct BenchmarkReportTests {
         #expect(lines.contains("| memory.embeddinggemma | `outcome` | skipped: no model | – |"))
     }
 
+    @Test func scoresKeepTwoDecimalsInTheSummaryAndTheComparison() {
+        // A cosine similarity of 0.83 used to render as `1`.
+        let report = BenchmarkReport(
+            device: .fixture(identifier: "iPhone17,1"),
+            startedAt: Date(timeIntervalSince1970: 1_791_000_000),
+            results: [
+                Self.result(
+                    "voiceid.wespeaker", title: "WeSpeaker",
+                    metrics: [
+                        BenchmarkMetric(key: "dimensions", value: 256, unit: .count),
+                        BenchmarkMetric(key: "cosine.sameSpeaker", value: 0.8312, unit: .score),
+                    ])
+            ],
+            buildConfiguration: "Release"
+        )
+        #expect(report.markdownSummary.contains("| WeSpeaker | ok | dimensions 256 · cosine.sameSpeaker 0.83 |"))
+        let lines = BenchmarkReport.comparisonTable([report]).split(separator: "\n").map(String.init)
+        #expect(lines.contains("|  | `cosine.sameSpeaker` | 0.83 |"))
+    }
+
     @Test func emptyComparisonIsEmpty() {
         #expect(BenchmarkReport.comparisonTable([]).isEmpty)
     }

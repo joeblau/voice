@@ -14,7 +14,11 @@ public struct BenchmarkMetric: Codable, Hashable, Sendable {
         /// Real-time factor: seconds of audio processed per second of compute.
         case realTimeFactor = "×"
         case percent = "%"
+        /// A whole number (dimensions, counts): no fraction digits.
         case count = ""
+        /// A unitless score or ratio, such as a cosine similarity: always two
+        /// fraction digits, shown without a unit.
+        case score
     }
 
     public let key: String
@@ -27,13 +31,19 @@ public struct BenchmarkMetric: Codable, Hashable, Sendable {
         self.unit = unit
     }
 
-    /// The value rounded for display, with its unit: `142 ms`, `18.4×`.
+    /// The value rounded for display, with its unit: `142 ms`, `18.4×`,
+    /// `0.83`.
     public var formatted: String {
         let magnitude = abs(value)
-        let digits = magnitude >= 100 || unit == .count ? 0 : (magnitude >= 10 ? 1 : 2)
+        let digits =
+            switch unit {
+            case .count: 0
+            case .score: 2
+            default: magnitude >= 100 ? 0 : (magnitude >= 10 ? 1 : 2)
+            }
         let number = value.formatted(.number.precision(.fractionLength(digits)).grouping(.never))
         switch unit {
-        case .count: return number
+        case .count, .score: return number
         case .realTimeFactor, .percent: return "\(number)\(unit.rawValue)"
         default: return "\(number) \(unit.rawValue)"
         }

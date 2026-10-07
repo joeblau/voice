@@ -132,7 +132,9 @@ public struct OfflineAsrBenchmark: BenchmarkCase {
             let (_, elapsed) = try await context.measure { try await engine.transcribe(window) }
             utteranceTimes.append(elapsed)
         }
-        let label = configuration.utteranceSeconds.formatted(.number.precision(.fractionLength(0...1)))
+        // POSIX locale so the key is the same on every device (`5s`, `2.5s`).
+        let label = configuration.utteranceSeconds.formatted(
+            .number.precision(.fractionLength(0...1)).grouping(.never).locale(Locale(identifier: "en_US_POSIX")))
         recorder.recordLatencies("utterance.\(label)s", utteranceTimes)
 
         memory.sample()

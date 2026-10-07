@@ -18,6 +18,34 @@ struct BackgroundInferenceProbeTests {
         }
     }
 
+    /// Foreground until `lockAt`, locked until `suspendAt`. The first check
+    /// at or after `suspendAt` simulates a suspension: the clock jumps by
+    /// `suspension` (as if the process was frozen) and the tester has
+    /// unlocked, so the app is back in the foreground.
+    final class SuspendingPhases: ExecutionPhaseProvider {
+        let clock: VirtualClock
+        let lockAt: Duration
+        let suspendAt: Duration
+        let suspension: Duration
+        let resumed = Mutex(false)
+
+        init(clock: VirtualClock, lockAt: Duration, suspendAt: Duration, suspension: Duration) {
+            self.clock = clock
+            self.lockAt = lockAt
+            self.suspendAt = suspendAt
+            self.suspension = suspension
+        }
+
+        func currentPhase() async -> ExecutionPhase {
+            if clock.uptime < lockAt { return .foreground }
+            if resumed.withLock({ $0 }) { return .foreground }
+            if clock.uptime < suspendAt { return .locked }
+            resumed.withLock { $0 = true }
+            clock.advance(by: suspension)
+            return .foreground
+        }
+    }
+
     struct ANEUnavailable: Error, CustomStringConvertible {
         var description: String { "ANE unavailable" }
     }
@@ -97,6 +125,36 @@ struct BackgroundInferenceProbeTests {
         #expect(report.analysis.verdict == .works(slowdown: 1))
         #expect(report.mitigation == .keepNeuralEngine)
         #expect(report.analysis.cpuBaseline == nil)
+    }
+
+    @Test func aSuspensionUntilTheEndOfTheRunIsNotReadAsWorking() async throws {
+        // Normal latency before and after locking, then the app is suspended
+        // and only resumes after `duration` has passed. The step after
+        // resuming changes phase, so it is a warm-up and records nothing;
+        // the run then ends. Without the run's end time the last locked
+        // sample had no successor and the verdict came out `.works`.
+        let clock = VirtualClock()
+        let probe = BackgroundInferenceProbe(
+            processor: FakeStreamingProcessor(clock: clock),
+            cpuProcessor: nil,
+            phases: SuspendingPhases(
+                clock: clock, lockAt: .seconds(15), suspendAt: .seconds(27), suspension: .seconds(60)),
+            neuralEngineListed: { true },
+            audio: Self.audio,
+            configuration: .init(duration: .seconds(40), cpuBaselineWindows: 30, warmupWindows: 4, utteranceSeconds: 10)
+        )
+        let report = try await Self.run(probe, clock: clock)
+
+        #expect((report.analysis.background?.count ?? 0) >= 20)
+        #expect((report.analysis.foreground?.count ?? 0) >= 20)
+        #expect(report.samples.last?.phase == .locked)
+        guard case .suspended(let coverage) = report.analysis.verdict else {
+            Issue.record("Expected suspended, got \(report.analysis.verdict)")
+            return
+        }
+        #expect(coverage < 0.3)
+        #expect(report.mitigation == .fixBackgroundExecution)
+        #expect((report.analysis.runEndedAtUptimeSeconds ?? 0) > 80)
     }
 
     @Test func reportRoundTripsThroughJSON() async throws {

@@ -27,6 +27,15 @@
                             .font(.footnote)
                         }
                     }
+                    if model.isPreviousRunStopping {
+                        Section {
+                            Label(
+                                "A run from the last time this screen was open is still stopping.",
+                                systemImage: "hourglass"
+                            )
+                            .font(.footnote)
+                        }
+                    }
                     suiteSection
                     if let report = model.report {
                         reportSection(report)
@@ -37,11 +46,19 @@
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
+                        // Cancel or stop first; closing would orphan the run.
                         Button("Done") { dismiss() }
+                            .disabled(isWorking)
                     }
                 }
             }
+            .interactiveDismissDisabled(isWorking)
+            // Backstop for any other way the sheet goes away: the view model
+            // is released with it, so its tasks must not outlive it.
+            .onDisappear { model.cancelAll() }
         }
+
+        private var isWorking: Bool { model.isRunning || model.isProbeRunning }
 
         // MARK: Suite
 
@@ -55,14 +72,14 @@
                     Button("Cancel", role: .cancel) { model.cancel() }
                 } else {
                     Button("Run selected") { model.runSelected() }
-                        .disabled(model.isProbeRunning || !model.entries.contains(where: \.isSelected))
+                        .disabled(model.isBusy || !model.entries.contains(where: \.isSelected))
                 }
             } header: {
                 Text("Models")
             } footer: {
                 Text(
                     "Models download on first run. Keep Blau open and the device cool; the screen stays on while "
-                        + "the suite runs.")
+                        + "the suite runs. Cancel the run to close this screen.")
             }
         }
 
@@ -114,7 +131,7 @@
                     Button("Stop and analyse", role: .destructive) { model.stopProbe() }
                 } else {
                     Button("Start probe") { model.startProbe() }
-                        .disabled(model.isRunning)
+                        .disabled(model.isBusy)
                 }
             } header: {
                 Text("Background Neural Engine probe")

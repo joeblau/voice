@@ -26,10 +26,18 @@ public protocol TopicLabelGenerator: Sendable {
     /// `nil` when the model can run here, otherwise why not (Apple
     /// Intelligence off, device not eligible, model still downloading).
     func unavailableReason() async -> String?
-    /// Labels one candidate boundary in a fresh session. With `prewarm`, the
-    /// session loads the model before the timed request starts (the
-    /// segmenter knows a boundary is coming a moment before it asks).
-    func label(_ window: TopicBoundaryWindow, prewarm: Bool) async throws -> TopicLabelDraft
+    /// A fresh session for one candidate boundary. With `prewarm`, the
+    /// session starts loading the model now and returns without waiting
+    /// (`LanguageModelSession.prewarm()` is fire-and-forget), so the caller
+    /// must leave it time before asking (the segmenter knows a boundary is
+    /// coming a moment before it asks).
+    func makeSession(prewarm: Bool) async -> any TopicLabelSession
+}
+
+/// One session from a `TopicLabelGenerator`.
+public protocol TopicLabelSession: Sendable {
+    /// Confirms and titles one candidate boundary.
+    func label(_ window: TopicBoundaryWindow) async throws -> TopicLabelDraft
 }
 
 /// The text around a candidate boundary: the exchanges before it and the
@@ -45,18 +53,28 @@ public struct TopicBoundaryWindow: Hashable, Sendable {
 }
 
 /// Measures topic-label latency with on-device Foundation Models: the
-/// first request in the process (`label.cold`), later requests in fresh
-/// sessions (`label`), and fresh sessions that were prewarmed
-/// (`label.prewarmed`). Also records how often the title kept to the five
-/// words the prompt asks for.
+/// first request in the process (`label.cold`, session creation included),
+/// later requests in fresh sessions (`label`), and fresh sessions that were
+/// prewarmed (`label.prewarmed`). Also records how often the title kept to
+/// the five words the prompt asks for.
+///
+/// For `label` and `label.prewarmed` the session is created (and, for the
+/// latter, prewarmed) outside the timed region, then both wait
+/// `prewarmLead` before the timed request, so the only difference between
+/// the two is the prewarm call.
 public struct TopicLabelBenchmark: BenchmarkCase {
     public struct Configuration: Hashable, Sendable {
         public var iterations: Int
         public var maximumTitleWords: Int
+        /// Time between creating (and prewarming) a session and the timed
+        /// request: about how early the segmenter knows a boundary is
+        /// coming (#52).
+        public var prewarmLead: Duration
 
-        public init(iterations: Int = 12, maximumTitleWords: Int = 5) {
+        public init(iterations: Int = 12, maximumTitleWords: Int = 5, prewarmLead: Duration = .seconds(1.5)) {
             self.iterations = iterations
             self.maximumTitleWords = maximumTitleWords
+            self.prewarmLead = prewarmLead
         }
     }
 
@@ -94,7 +112,9 @@ public struct TopicLabelBenchmark: BenchmarkCase {
 
         recorder.progress(0, "First request")
         let (firstDraft, cold) = try await context.measure {
-            try await signposter.withInterval(.topicsLabel) { try await generator.label(windows[0], prewarm: false) }
+            try await signposter.withInterval(.topicsLabel) {
+                try await generator.makeSession(prewarm: false).label(windows[0])
+            }
         }
         recorder.record("label.cold", cold)
         memory.sample()
@@ -107,10 +127,10 @@ public struct TopicLabelBenchmark: BenchmarkCase {
             for prewarm in [false, true] {
                 try Task.checkCancellation()
                 let window = windows[(iteration + 1) % windows.count]
+                let session = await generator.makeSession(prewarm: prewarm)
+                try await context.clock.sleep(for: configuration.prewarmLead)
                 let (draft, elapsed) = try await context.measure {
-                    try await signposter.withInterval(.topicsLabel) {
-                        try await generator.label(window, prewarm: prewarm)
-                    }
+                    try await signposter.withInterval(.topicsLabel) { try await session.label(window) }
                 }
                 drafts.append(draft)
                 if prewarm { prewarmed.append(elapsed) } else { plain.append(elapsed) }
@@ -123,7 +143,9 @@ public struct TopicLabelBenchmark: BenchmarkCase {
 
         let compliant = drafts.count { (1...configuration.maximumTitleWords).contains($0.titleWordCount) }
         recorder.record("titles.withinWordLimit", Double(compliant) / Double(drafts.count) * 100, unit: .percent)
-        recorder.note("\(windows.count) fixture boundary windows; titles are not logged")
+        recorder.note(
+            "\(windows.count) fixture boundary windows; \(configuration.prewarmLead) lead before each timed request; "
+                + "titles are not logged")
         memory.sample()
         recorder.recordMemory(memory)
         recorder.progress(1, "Done")

@@ -6,6 +6,22 @@
     import Observation
     import UIKit
 
+    /// Benchmark work in flight, shared by every `BenchmarkViewModel`.
+    ///
+    /// A run started from a sheet that has since closed is cancelled but
+    /// needs a moment to wind down (the current case or model load has to
+    /// return). Tracking it here, rather than in the view model the sheet
+    /// owned, stops a reopened sheet from starting a second suite or a
+    /// second probe (with its own microphone session) on top of it.
+    @MainActor
+    @Observable
+    final class BenchmarkActivity {
+        static let shared = BenchmarkActivity()
+
+        fileprivate(set) var isSuiteActive = false
+        fileprivate(set) var isProbeActive = false
+    }
+
     /// Drives the debug benchmark screen: runs the selected cases one after
     /// another off the main actor, saves the report, and runs the
     /// background Neural Engine probe.
@@ -46,11 +62,16 @@
         var probeMinutes = 10
 
         private let audio: AudioFixtureStore
+        private let activity: BenchmarkActivity
         private var runTask: Task<Void, Never>?
         private var probeTask: Task<Void, Never>?
 
-        init(audio: AudioFixtureStore = BenchmarkCatalog.audioStore()) {
+        init(
+            audio: AudioFixtureStore = BenchmarkCatalog.audioStore(),
+            activity: BenchmarkActivity = .shared
+        ) {
             self.audio = audio
+            self.activity = activity
             entries = BenchmarkCatalog.cases(audio: audio).map { Entry(benchmark: $0) }
         }
 
@@ -60,10 +81,27 @@
             if case .running = probeState { true } else { false }
         }
 
+        /// Whether a suite or a probe is in flight anywhere, including one
+        /// from a closed sheet that is still stopping.
+        var isBusy: Bool { activity.isSuiteActive || activity.isProbeActive || isRunning || isProbeRunning }
+
+        /// Whether work from a previously closed sheet is still stopping.
+        var isPreviousRunStopping: Bool { isBusy && !isRunning && !isProbeRunning }
+
+        /// Cancels this screen's suite and probe. The screen calls it when it
+        /// goes away, so neither keeps running (with the idle timer off, or
+        /// the microphone on) with no UI to stop it. Each task still finishes
+        /// its cleanup: the suite turns the idle timer back on, the probe
+        /// stops its audio session.
+        func cancelAll() {
+            runTask?.cancel()
+            probeTask?.cancel()
+        }
+
         // MARK: Suite
 
         func runSelected() {
-            guard !isRunning, !isProbeRunning else { return }
+            guard !isBusy else { return }
             let selected = entries.filter(\.isSelected).map(\.benchmark)
             guard !selected.isEmpty else { return }
             for index in entries.indices {
@@ -75,8 +113,15 @@
             reportURLs = []
             // A locked screen would background the app mid-run.
             UIApplication.shared.isIdleTimerDisabled = true
+            activity.isSuiteActive = true
+            let activity = activity
 
             runTask = Task { [weak self] in
+                // Runs even if the screen (and `self`) went away mid-run.
+                defer {
+                    activity.isSuiteActive = false
+                    UIApplication.shared.isIdleTimerDisabled = false
+                }
                 let runner = BenchmarkRunner { progress in
                     Task { @MainActor in self?.apply(progress) }
                 }
@@ -123,7 +168,6 @@
             self.report = report
             isRunning = false
             runTask = nil
-            UIApplication.shared.isIdleTimerDisabled = false
             do {
                 let base = (report.suggestedFileName as NSString).deletingPathExtension
                 reportURLs = [
@@ -138,13 +182,17 @@
         // MARK: Background probe
 
         func startProbe() {
-            guard !isRunning, !isProbeRunning else { return }
+            guard !isBusy else { return }
             probeSamples = []
             probeState = .running(status: "Starting")
             let configuration = BackgroundInferenceProbe.Configuration(duration: .seconds(probeMinutes * 60))
             let audio = audio
+            activity.isProbeActive = true
+            let activity = activity
 
             probeTask = Task { [weak self] in
+                // Declared first so it runs last, after the audio stops.
+                defer { activity.isProbeActive = false }
                 let keepAlive = BackgroundAudioKeepAlive()
                 do {
                     try await keepAlive.start()

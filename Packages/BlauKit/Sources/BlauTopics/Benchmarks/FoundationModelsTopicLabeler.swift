@@ -33,17 +33,27 @@ public struct FoundationModelsTopicLabeler: TopicLabelGenerator {
         }
     }
 
-    public func label(_ window: TopicBoundaryWindow, prewarm: Bool) async throws -> TopicLabelDraft {
+    public func makeSession(prewarm: Bool) async -> any TopicLabelSession {
         let session = LanguageModelSession(instructions: Self.instructions)
         if prewarm {
+            // Returns at once; the model loads in the background while the
+            // caller waits for the boundary.
             session.prewarm()
         }
-        let response = try await session.respond(
-            to: Self.prompt(for: window),
-            generating: GeneratedTopicLabel.self,
-            options: GenerationOptions(temperature: 0)
-        )
-        return TopicLabelDraft(isNewTopic: response.content.isNewTopic, title: response.content.title)
+        return Session(session: session)
+    }
+
+    struct Session: TopicLabelSession {
+        let session: LanguageModelSession
+
+        func label(_ window: TopicBoundaryWindow) async throws -> TopicLabelDraft {
+            let response = try await session.respond(
+                to: FoundationModelsTopicLabeler.prompt(for: window),
+                generating: GeneratedTopicLabel.self,
+                options: GenerationOptions(temperature: 0)
+            )
+            return TopicLabelDraft(isNewTopic: response.content.isNewTopic, title: response.content.title)
+        }
     }
 
     static func prompt(for window: TopicBoundaryWindow) -> String {

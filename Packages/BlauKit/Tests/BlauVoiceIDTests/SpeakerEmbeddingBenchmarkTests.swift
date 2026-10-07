@@ -58,7 +58,10 @@ struct SpeakerEmbeddingBenchmarkTests {
         #expect(result.latencies["embed.1.5s"]?.p50 == 4)
         #expect(result.latencies["embed.3s"]?.p50 == 8)
         #expect(result.metric("dimensions")?.value == 3)
-        #expect((result.metric("cosine.sameSpeaker")?.value ?? 0) > 0.99)
+        let cosine = try #require(result.metric("cosine.sameSpeaker"))
+        #expect(cosine.value > 0.99)
+        #expect(cosine.unit == .score)
+        #expect(cosine.formatted != "1" && cosine.formatted.contains("."))
         #expect(result.notes.first == "fixed input")
         let lengths = extractor.windowLengths.withLock { $0 }
         #expect(lengths.prefix(12).allSatisfy { $0 == 24_000 })

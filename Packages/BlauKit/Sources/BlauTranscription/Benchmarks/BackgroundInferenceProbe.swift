@@ -107,10 +107,11 @@ public struct BackgroundInferenceProbe: Sendable {
         try await processor.prepare { _ in }
         try await processor.load()
         onStatus("Running: move Blau to the background and lock the device")
-        let samples = try await liveRun(fixture: fixture, hop: hop, context: context, onSample: onSample)
+        let (samples, endedAt) = try await liveRun(fixture: fixture, hop: hop, context: context, onSample: onSample)
         await processor.unload()
 
-        let analysis = BackgroundInferenceAnalysis(samples: samples, cpuBaseline: cpuBaseline, expectedInterval: hop)
+        let analysis = BackgroundInferenceAnalysis(
+            samples: samples, cpuBaseline: cpuBaseline, expectedInterval: hop, runEndedAt: endedAt)
         onStatus(analysis.verdict.summary)
         return BackgroundProbeReport(
             device: .current,
@@ -150,12 +151,15 @@ public struct BackgroundInferenceProbe: Sendable {
         return LatencySummary(latencies)
     }
 
+    /// The paced run. Returns the samples and the uptime the run ended at,
+    /// which the analysis needs to see a suspension that lasted until the
+    /// end (the step after resuming is a warm-up and records no sample).
     func liveRun(
         fixture: AudioFixture,
         hop: Duration,
         context: BenchmarkContext,
         onSample: @escaping @Sendable (InferenceSample) -> Void
-    ) async throws -> [InferenceSample] {
+    ) async throws -> (samples: [InferenceSample], endedAt: Duration) {
         let hopSamples = processor.hopSamples
         let utteranceSamples = max(hopSamples, Int(configuration.utteranceSeconds * Double(AudioFixture.sampleRate)))
         var counter = WindowCounter(windowSamples: processor.windowSamples, hopSamples: hopSamples)
@@ -222,7 +226,7 @@ public struct BackgroundInferenceProbe: Sendable {
             }
             step += 1
         }
-        return samples
+        return (samples, context.clock.uptime)
     }
 }
 
