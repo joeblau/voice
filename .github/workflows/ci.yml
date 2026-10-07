@@ -332,9 +332,13 @@ jobs:
 
       - name: Record baseline
         if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && inputs.record_baselines }}
+        # The extracted results too, so several runs can be pooled into one
+        # calibrated baseline (docs/performance.md, "Updating baselines").
         run: |
           make perf-baseline
           cp BlauPerfTests/Baselines/ci-simulator.json .build/results/
+          scripts/perf/perf-gate.py extract --xcresult .build/results/perf.xcresult \
+            --output .build/results/perf-results.json
 
       - name: Job summary
         if: ${{ !cancelled() }}

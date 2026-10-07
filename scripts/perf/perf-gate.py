@@ -13,8 +13,15 @@ job. See docs/performance.md, "Performance suite".
                           [--output results.json]
     perf-gate.py check    (--xcresult X.xcresult | --results results.json)
                           --baseline BASELINE.json [--report report.md]
-    perf-gate.py record   (--xcresult X.xcresult | --results results.json)
+    perf-gate.py record   (--xcresult X.xcresult | --results results.json)...
                           --baseline BASELINE.json [--environment NAME] [--note TEXT]
+                          [--calibrate]
+
+`record` takes several runs (repeat --xcresult or --results): it pools their
+iterations into each metric's baseline and reports how far each run's
+statistic strayed from it. With --calibrate it widens a metric's tolerance to
+1.5 times that spread (rounded up to 5%) where the default would be tighter,
+so that a shared CI machine's run-to-run noise doesn't fail the gate.
 
 Exit status: 0 when every baselined metric is within tolerance (check), 1 on
 a regression or a baselined metric that wasn't measured, 2 on bad input.
@@ -34,6 +41,10 @@ import subprocess
 import sys
 
 DEFAULT_TOLERANCE = 10.0
+# --calibrate: a tolerance is this many times the largest spread seen between
+# the recorded runs, rounded up to a multiple of CALIBRATION_STEP percent.
+CALIBRATION_MARGIN = 1.5
+CALIBRATION_STEP = 5
 SMALLER = "prefers smaller"
 LARGER = "prefers larger"
 STATISTICS = {
@@ -100,6 +111,19 @@ def extract(xcresult: str) -> dict:
     except json.JSONDecodeError as error:
         raise GateError(f"xcresulttool printed something that isn't JSON: {error}") from error
     return metrics_from_xcresulttool(document)
+
+
+def load_runs(arguments) -> list:
+    """Every run given to `record` (--results or --xcresult, repeated)."""
+    runs = []
+    for path in arguments.results or []:
+        with open(path, encoding="utf-8") as file:
+            runs.append(json.load(file))
+    for path in arguments.xcresult or []:
+        runs.append(extract(path))
+    if not runs:
+        raise GateError("pass --xcresult or --results")
+    return runs
 
 
 def load_results(arguments) -> dict:
@@ -236,16 +260,76 @@ def report(rows: list, baseline: dict, results: dict) -> str:
 # MARK: - Recording
 
 
-def record(results: dict, baseline_path: str, environment: str | None, note: str | None) -> dict:
-    """A new baseline from `results`, keeping the tolerances, minimum deltas
-    and notes of the metrics already in the file at `baseline_path`."""
+def pool(runs: list) -> dict:
+    """Several runs' results as one: each metric's values from every run,
+    and `runValues`, the values of each run on its own (for the spread)."""
+    tests: dict = {}
+    devices: list = []
+    for results in runs:
+        for device in results.get("devices", []):
+            if device not in devices:
+                devices.append(device)
+        for test_id, metrics in results.get("tests", {}).items():
+            for metric_id, metric in metrics.items():
+                entry = tests.setdefault(test_id, {}).setdefault(
+                    metric_id,
+                    {
+                        "name": metric.get("name", metric_id),
+                        "unit": metric.get("unit", ""),
+                        "polarity": metric.get("polarity", SMALLER),
+                        "values": [],
+                        "runValues": [],
+                    },
+                )
+                entry["values"].extend(metric["values"])
+                entry["runValues"].append(list(metric["values"]))
+    return {"tests": tests, "devices": devices}
+
+
+def spread_percent(baseline: float, run_statistics: list) -> float | None:
+    """How far the furthest run's statistic is from the pooled baseline, in
+    percent of it; None with fewer than two runs or a zero baseline."""
+    if len(run_statistics) < 2 or baseline == 0:
+        return None
+    return max(abs(value - baseline) for value in run_statistics) / abs(baseline) * 100
+
+
+def calibrated_tolerance(spread: float, floor: float) -> float:
+    """CALIBRATION_MARGIN times `spread`, rounded up to CALIBRATION_STEP, and
+    never below `floor`."""
+    wanted = spread * CALIBRATION_MARGIN
+    steps = -(-wanted // CALIBRATION_STEP)  # ceiling division
+    return max(floor, float(steps * CALIBRATION_STEP))
+
+
+def record(
+    results: dict,
+    baseline_path: str,
+    environment: str | None,
+    note: str | None,
+    calibrate: bool = False,
+    runs: int = 1,
+) -> tuple:
+    """A new baseline from `results` (one run, or several pooled by `pool`),
+    keeping the hand-set tolerances, minimum deltas and notes of the metrics
+    already in the file at `baseline_path`.
+
+    With several runs, every metric records each run's statistic (`runs`)
+    and the largest `spreadPercent` between them and the baseline. With
+    `calibrate`, a metric whose spread calls for more than its hand-set (or
+    the default) tolerance gets a calibrated one; metrics gated by a
+    `minimumDelta` keep theirs. Returns the baseline and the calibration
+    rows for the summary.
+    """
     previous = {}
     if os.path.exists(baseline_path):
         previous = load_baseline(baseline_path)
     statistic_name = previous.get("statistic", "median")
     statistic = STATISTICS[statistic_name]
+    default_tolerance = float(previous.get("defaultTolerancePercent", DEFAULT_TOLERANCE))
     tests = {}
     unavailable = []
+    calibration = []
     for test_id, metrics in sorted(results.get("tests", {}).items()):
         for metric_id, metric in sorted(metrics.items()):
             # A counter the machine doesn't provide (CPU instructions and
@@ -255,35 +339,93 @@ def record(results: dict, baseline_path: str, environment: str | None, note: str
                 unavailable.append(f"{test_id} {metric.get('name', metric_id)}")
                 continue
             old = previous.get("tests", {}).get(test_id, {}).get(metric_id, {})
+            value = float(statistic(metric["values"]))
             entry = {
                 "name": metric.get("name", metric_id),
                 "unit": metric.get("unit", ""),
                 "polarity": metric.get("polarity", SMALLER),
-                "baseline": round(float(statistic(metric["values"])), 6),
-                "samples": [round(float(value), 6) for value in metric["values"]],
+                "baseline": round(value, 6),
+                "samples": [round(float(sample), 6) for sample in metric["values"]],
             }
+            run_values = [values for values in metric.get("runValues", []) if values]
+            run_statistics = [float(statistic(values)) for values in run_values]
+            spread = spread_percent(value, run_statistics)
+            if spread is not None:
+                entry["runs"] = [round(item, 6) for item in run_statistics]
+                entry["spreadPercent"] = round(spread, 1)
+
+            # Hand-set overrides survive; a calibrated tolerance is only kept
+            # until the next calibration.
             for kept in ("tolerancePercent", "minimumDelta", "note"):
-                if kept in old:
+                if kept in old and not (old.get("calibrated") and kept != "minimumDelta"):
                     entry[kept] = old[kept]
+            hand_set = float(entry.get("tolerancePercent", default_tolerance))
+            tolerance = hand_set
+            if spread is not None and "minimumDelta" not in entry:
+                suggested = calibrated_tolerance(spread, hand_set)
+                if calibrate and suggested > hand_set:
+                    tolerance = suggested
+                    entry["tolerancePercent"] = suggested
+                    entry["calibrated"] = True
+                    entry.setdefault(
+                        "note",
+                        f"Calibrated: run {statistic_name}s strayed up to {spread:.0f}% from the pooled "
+                        f"baseline across {len(run_statistics)} runs on this machine type, so the tolerance is "
+                        f"{CALIBRATION_MARGIN:g} times that.",
+                    )
+                calibration.append(
+                    {
+                        "test": test_id,
+                        "name": entry["name"],
+                        "unit": entry["unit"],
+                        "runs": run_statistics,
+                        "spread": spread,
+                        "suggested": suggested,
+                        "tolerance": tolerance,
+                    }
+                )
             tests.setdefault(test_id, {})[metric_id] = entry
     commit = os.environ.get("GITHUB_SHA") or git_head()
-    return {
+    baseline = {
         "description": previous.get(
             "description",
             "Baselines for the XCTest performance suite (#73) on one machine type; see docs/performance.md.",
         ),
         "environment": environment or previous.get("environment", "local"),
         "statistic": statistic_name,
-        "defaultTolerancePercent": previous.get("defaultTolerancePercent", DEFAULT_TOLERANCE),
+        "defaultTolerancePercent": default_tolerance,
         "recorded": {
             "date": datetime.date.today().isoformat(),
             "commit": commit,
             "device": ", ".join(results.get("devices", [])) or "unknown",
+            "runs": runs,
             "note": note or previous.get("recorded", {}).get("note", ""),
         },
         "unavailable": unavailable,
         "tests": tests,
     }
+    return baseline, calibration
+
+
+def calibration_report(rows: list, statistic_name: str) -> str:
+    """The spread of each metric between the recorded runs, and the
+    tolerance it calls for."""
+    lines = [
+        f"Run-to-run spread ({statistic_name} of each run against the pooled baseline):",
+        "",
+        "| Test | Metric | Runs | Spread | Calls for | Tolerance |",
+        "| --- | --- | --- | ---: | ---: | ---: |",
+    ]
+    for row in rows:
+        runs = ", ".join(number(value, row["unit"]) for value in row["runs"])
+        flag = " **(too tight)**" if row["tolerance"] < row["suggested"] else ""
+        lines.append(
+            f"| `{row['test']}` | {row['name']} | {runs} | {row['spread']:.1f}% | "
+            f"{row['suggested']:.0f}% | {row['tolerance']:.0f}%{flag} |"
+        )
+    if any(row["tolerance"] < row["suggested"] for row in rows):
+        lines += ["", "Some tolerances are tighter than the spread calls for; `--calibrate` widens them."]
+    return "\n".join(lines) + "\n"
 
 
 def git_head() -> str:
@@ -313,8 +455,12 @@ def main(argv: list) -> int:
     for name, help_text in (("check", "compare with a baseline"), ("record", "write a baseline")):
         command = commands.add_parser(name, help=help_text)
         source = command.add_mutually_exclusive_group(required=True)
-        source.add_argument("--xcresult")
-        source.add_argument("--results", help="output of `extract`")
+        if name == "check":
+            source.add_argument("--xcresult")
+            source.add_argument("--results", help="output of `extract`")
+        else:
+            source.add_argument("--xcresult", action="append", help="a run to record; repeat to pool several")
+            source.add_argument("--results", action="append", help="output of `extract`; repeat to pool several")
         command.add_argument("--baseline", required=True)
         if name == "check":
             command.add_argument("--report", help="also write the Markdown report here")
@@ -322,6 +468,11 @@ def main(argv: list) -> int:
         else:
             command.add_argument("--environment", help="the machine type the baseline is for, e.g. ci-simulator")
             command.add_argument("--note", help="free text stored with the baseline")
+            command.add_argument(
+                "--calibrate",
+                action="store_true",
+                help="widen tolerances to 1.5x the spread between the runs where the default is tighter",
+            )
 
     arguments = parser.parse_args(argv)
     try:
@@ -339,18 +490,33 @@ def main(argv: list) -> int:
                 sys.stdout.write(text)
             return 0
 
-        results = load_results(arguments)
         if arguments.command == "record":
-            if not results.get("tests"):
-                raise GateError("the results hold no metrics; did the perf tests run?")
-            baseline = record(results, arguments.baseline, arguments.environment, arguments.note)
+            runs = load_runs(arguments)
+            for index, run in enumerate(runs, start=1):
+                if not run.get("tests"):
+                    raise GateError(f"run {index} holds no metrics; did the perf tests run?")
+            baseline, calibration = record(
+                pool(runs),
+                arguments.baseline,
+                arguments.environment,
+                arguments.note,
+                calibrate=arguments.calibrate,
+                runs=len(runs),
+            )
             os.makedirs(os.path.dirname(os.path.abspath(arguments.baseline)), exist_ok=True)
             with open(arguments.baseline, "w", encoding="utf-8") as file:
                 json.dump(baseline, file, indent=2, sort_keys=False)
                 file.write("\n")
             count = sum(len(metrics) for metrics in baseline["tests"].values())
-            print(f"perf-gate: recorded {count} metric(s) in {arguments.baseline}")
+            print(f"perf-gate: recorded {count} metric(s) from {len(runs)} run(s) in {arguments.baseline}")
+            if calibration:
+                print()
+                sys.stdout.write(calibration_report(calibration, baseline["statistic"]))
+            elif arguments.calibrate:
+                print("perf-gate: --calibrate needs two or more runs; tolerances unchanged.")
             return 0
+
+        results = load_results(arguments)
 
         baseline = load_baseline(arguments.baseline)
         if arguments.results_output:

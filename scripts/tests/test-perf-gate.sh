@@ -223,6 +223,101 @@ results "$work/tiny-big.json" 0.020 100
 expect "a change above the minimum delta still fails" 1 \
     python3 -I "$gate" check --results "$work/tiny-big.json" --baseline "$work/baseline.json"
 
+# --- record: several runs, calibration ---------------------------------------------
+
+# Two runs of the same code on two CI machines: CPU time 10 s on the fast one,
+# 13 s on the slow one; throughput steady.
+results "$work/run-fast.json" 9.8,10.0,10.2 100
+results "$work/run-slow.json" 12.8,13.0,13.2 100
+expect "record pools several runs" 0 \
+    python3 -I "$gate" record --results "$work/run-fast.json" --results "$work/run-slow.json" \
+    --baseline "$work/pooled.json" --environment ci-simulator
+expect_output "record reports the spread between the runs" "| \`ReplaySessionPerformanceTests/testScriptedSession()\` | CPU Time | 10.0 s, 13.0 s | 13.0% | 20% | 10% **(too tight)** |"
+if python3 -I -c '
+import json, sys
+baseline = json.load(open(sys.argv[1]))
+cpu = baseline["tests"]["ReplaySessionPerformanceTests/testScriptedSession()"]["com.apple.dt.XCTMetric_CPU.time"]
+assert cpu["baseline"] == 11.5, cpu
+assert len(cpu["samples"]) == 6, cpu
+assert cpu["runs"] == [10.0, 13.0], cpu
+assert cpu["spreadPercent"] == 13.0, cpu
+assert "tolerancePercent" not in cpu, cpu
+assert baseline["recorded"]["runs"] == 2, baseline["recorded"]
+' "$work/pooled.json"; then
+    pass "a pooled baseline is the median of every run's iterations, with each run's median"
+else
+    fail "a pooled baseline is the median of every run's iterations, with each run's median"
+fi
+expect "without calibration the slow machine fails a 10% gate" 1 \
+    python3 -I "$gate" check --results "$work/run-slow.json" --baseline "$work/pooled.json"
+
+expect "record --calibrate widens a tolerance the spread calls for" 0 \
+    python3 -I "$gate" record --results "$work/run-fast.json" --results "$work/run-slow.json" \
+    --baseline "$work/pooled.json" --calibrate
+if python3 -I -c '
+import json, sys
+tests = json.load(open(sys.argv[1]))["tests"]["ReplaySessionPerformanceTests/testScriptedSession()"]
+cpu = tests["com.apple.dt.XCTMetric_CPU.time"]
+assert cpu["tolerancePercent"] == 20 and cpu["calibrated"] is True, cpu
+assert cpu["note"].startswith("Calibrated:"), cpu
+# A steady metric keeps the default.
+assert "tolerancePercent" not in tests["throughput"], tests["throughput"]
+' "$work/pooled.json"; then
+    pass "calibration sets 1.5x the spread, rounded up to 5%, only where it is needed"
+else
+    fail "calibration sets 1.5x the spread, rounded up to 5%, only where it is needed"
+fi
+expect "the slow machine passes the calibrated gate" 0 \
+    python3 -I "$gate" check --results "$work/run-slow.json" --baseline "$work/pooled.json"
+results "$work/run-regressed.json" 15.0,15.2,15.4 100
+expect "a regression beyond the calibrated tolerance still fails" 1 \
+    python3 -I "$gate" check --results "$work/run-regressed.json" --baseline "$work/pooled.json"
+
+# Recalibrating on steadier runs tightens a calibrated tolerance again; a
+# hand-set one (or a minimum delta) is never narrowed.
+results "$work/run-steady-a.json" 11.4,11.5,11.6 100
+results "$work/run-steady-b.json" 11.5,11.6,11.7 100
+expect "recalibrating on steady runs" 0 \
+    python3 -I "$gate" record --results "$work/run-steady-a.json" --results "$work/run-steady-b.json" \
+    --baseline "$work/pooled.json" --calibrate
+if python3 -I -c '
+import json, sys
+cpu = json.load(open(sys.argv[1]))["tests"]["ReplaySessionPerformanceTests/testScriptedSession()"]["com.apple.dt.XCTMetric_CPU.time"]
+assert "tolerancePercent" not in cpu and "calibrated" not in cpu and "note" not in cpu, cpu
+' "$work/pooled.json"; then
+    pass "a calibrated tolerance goes back to the default when the spread shrinks"
+else
+    fail "a calibrated tolerance goes back to the default when the spread shrinks"
+fi
+python3 -I -c '
+import json, sys
+path = sys.argv[1]
+baseline = json.load(open(path))
+cpu = baseline["tests"]["ReplaySessionPerformanceTests/testScriptedSession()"]["com.apple.dt.XCTMetric_CPU.time"]
+cpu["tolerancePercent"] = 40
+cpu["note"] = "hand-set"
+json.dump(baseline, open(path, "w"))
+' "$work/pooled.json"
+expect "recalibrating with a hand-set tolerance" 0 \
+    python3 -I "$gate" record --results "$work/run-fast.json" --results "$work/run-slow.json" \
+    --baseline "$work/pooled.json" --calibrate
+if python3 -I -c '
+import json, sys
+cpu = json.load(open(sys.argv[1]))["tests"]["ReplaySessionPerformanceTests/testScriptedSession()"]["com.apple.dt.XCTMetric_CPU.time"]
+assert cpu["tolerancePercent"] == 40 and cpu["note"] == "hand-set" and "calibrated" not in cpu, cpu
+' "$work/pooled.json"; then
+    pass "a hand-set tolerance wider than the spread is kept"
+else
+    fail "a hand-set tolerance wider than the spread is kept"
+fi
+expect "record --calibrate with one run leaves tolerances alone" 0 \
+    python3 -I "$gate" record --results "$work/run-fast.json" --baseline "$work/single.json" --calibrate
+expect_output "calibration says it needs two runs" "needs two or more runs"
+echo '{"devices": [], "tests": {}}' >"$work/empty.json"
+expect "record rejects a run without metrics" 2 \
+    python3 -I "$gate" record --results "$work/run-fast.json" --results "$work/empty.json" \
+    --baseline "$work/never.json"
+
 # --- microbench.sh exit codes -----------------------------------------------------
 
 # A stand-in `swift` that behaves like `swift package benchmark thresholds
