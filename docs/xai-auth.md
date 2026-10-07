@@ -132,6 +132,16 @@ BlauRealtime, so they define their own protocols and the composition root
 passes in implementations built on this client
 ([architecture.md](architecture.md), rule 2).
 
+`XAITextGenerator` (`BlauRealtime/Text/`) is the first of those: it
+implements BlauCore's `TextGenerator` with `POST /v1/chat/completions`
+(model `grok-4.20-0309-non-reasoning`, a system and a user message,
+`max_tokens`, `temperature` and optional `response_format` JSON-schema
+structured output). BlauTopics uses it as the topic-label fallback when
+Apple Intelligence is unavailable ([topics.md](topics.md#fallbacks)); the app
+wires it in `Blau/Topics/TopicLabeling+App.swift`. `isAvailable()` only
+checks that a key is stored, so a device without a key goes straight to
+keyword labels.
+
 ## Testing
 
 All of it is tested without a network or a real key:
