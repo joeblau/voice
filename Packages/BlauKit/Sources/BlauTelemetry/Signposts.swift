@@ -19,6 +19,9 @@ public enum PipelineInterval: CaseIterable, Sendable {
     case asrChunk
     /// From the end of speech to the end-of-utterance decision.
     case asrEndOfUtterance
+    /// Re-transcribing one committed utterance with the second-pass model
+    /// (Parakeet TDT v3), off the turn's critical path.
+    case asrSecondPass
     /// Downloading and verifying one on-device model.
     case modelDownload
     /// Loading one on-device model for the first time on this OS version
@@ -61,6 +64,7 @@ public enum PipelineInterval: CaseIterable, Sendable {
         case .vadChunk: "vad.chunk"
         case .asrChunk: "asr.chunk"
         case .asrEndOfUtterance: "asr.eou"
+        case .asrSecondPass: "asr.secondPass"
         case .modelDownload: "model.download"
         case .modelWarmUp: "model.warmUp"
         case .voiceIDEmbed: "voiceid.embed"
@@ -82,7 +86,7 @@ public enum PipelineInterval: CaseIterable, Sendable {
     public var category: LogCategory {
         switch self {
         case .captureFrame, .playbackFirstBuffer: .audio
-        case .vadChunk, .asrChunk, .asrEndOfUtterance, .modelDownload, .modelWarmUp: .asr
+        case .vadChunk, .asrChunk, .asrEndOfUtterance, .asrSecondPass, .modelDownload, .modelWarmUp: .asr
         case .voiceIDEmbed, .voiceIDVerify: .voiceID
         case .realtimeTurn, .realtimeFirstAudio, .realtimeConnect, .realtimeEvent: .realtime
         case .topicsSegment, .topicsLabel: .topics

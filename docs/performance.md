@@ -130,6 +130,7 @@ case step.
 | `vad.chunk`           | `asr`      | `.vadChunk`           | A chunk is handed to Silero VAD                     | Speech probability and start/end events are out |
 | `asr.chunk`           | `asr`      | `.asrChunk`           | A 320 ms chunk is handed to streaming Parakeet      | The partial transcript for that chunk is out    |
 | `asr.eou`             | `asr`      | `.asrEndOfUtterance`  | VAD reports end of speech                           | The end-of-utterance decision fires (or speech resumes) |
+| `asr.secondPass`      | `asr`      | `.asrSecondPass`      | The second pass starts re-transcribing a committed utterance with Parakeet TDT v3 | The refined text is out (or the pass failed); the end message is the outcome |
 | `model.download`      | `asr`      | `.modelDownload`      | `ModelManager` starts downloading a model           | Every file is on disk and checksum-verified (or the download fails, pauses or is cancelled) |
 | `model.warmUp`        | `asr`      | `.modelWarmUp`        | `ModelManager` loads an installed model for the first time on this OS | Core ML finished loading (and compiling) every bundle |
 | `voiceid.embed`       | `voiceid`  | `.voiceIDEmbed`       | A speech segment is handed to the embedding model   | The 256-d embedding is out                      |
@@ -456,6 +457,9 @@ MetricKit's signpost budget. `playback.firstBuffer` also stays out: it
 starts where `realtime.firstAudio` ends and only times local jitter-buffer
 priming, so the `audio` category stays Instruments-only. `realtime.connect`
 runs once per session, before any turn, and stays Instruments-only for now.
+`asr.secondPass` runs once per utterance off the turn's critical path (it
+never delays a turn), so it stays Instruments-only too; compare
+`realtime.firstAudio` with the second pass on and off instead (docs/asr.md).
 End messages (`realtime.event`'s event type) only reach Instruments:
 `mxSignpost` intervals carry none. Use the shared
 `Signposts` statics (or `Signposts.defaultBackend(for:)`) to get both;

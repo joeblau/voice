@@ -35,6 +35,13 @@ public enum TranscriptEvent: Hashable, Sendable {
     case partial(text: String, range: TimeRange)
     /// A finished utterance (end of utterance detected).
     case final(Utterance)
+    /// A better transcript of an utterance already reported as `final`: the
+    /// same `id`, `timeRange` and speaker, with the text re-transcribed by
+    /// the second pass (punctuation, capitalization, fixed words; #30). It
+    /// can arrive after later events. Replace the stored and displayed text
+    /// (`ConversationStore.commitUtterance` updates the row with that `id`);
+    /// don't send it to Grok again, which already has the streaming text.
+    case refined(Utterance)
 }
 
 /// Streaming speech-to-text over the captured audio (BlauTranscription, #29).
