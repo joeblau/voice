@@ -5,9 +5,10 @@ conversation exchange, knowledge-base document, collection item and fact
 cut into chunks, full-text indexed with **SQLite FTS5 (BM25)** and, once
 embedded by the shared text embedding service ([embeddings.md](embeddings.md)),
 carrying a **256-d int8 vector** that is searched by brute force with
-Accelerate. Hybrid retrieval (#64) fuses the two rankings; the incremental
-indexer (#63, [memory-indexer.md](memory-indexer.md)) keeps the index
-current and is what builds it in the app. The code is in
+Accelerate. Hybrid retrieval (#64, [memory-search.md](memory-search.md))
+fuses the two rankings; the incremental indexer (#63,
+[memory-indexer.md](memory-indexer.md)) keeps the index current and is
+what builds it in the app. The code is in
 `Packages/BlauKit/Sources/BlauMemory/Index/`.
 
 The index is **derived data**: local only, never synced, excluded from
@@ -24,11 +25,14 @@ if try await index.needsRebuild { try await rebuilder.rebuild() }
 // At launch, load every vector of the installed model into the matrix.
 try await index.loadVectors(modelVersion: try await textEmbeddings.currentModelVersion())
 
-// Search (what #64 fuses with RRF).
+// The raw rankings; MemorySearch (#64, memory-search.md) fuses them.
 let query = try await textEmbeddings.embed(["ramen place in Osaka"], as: .query)[0]
 async let vector = index.vectorSearch(query, limit: 50)
 async let keyword = index.keywordSearch("ramen place in Osaka", limit: 50)
 let chunks = try await index.chunks(withIDs: (try await keyword).map(\.chunkID))
+
+// Hybrid search: fusion, time, entity expansion, snippets.
+let results = try await MemorySearch(index: index, embedder: textEmbeddings).search("ramen place in Osaka")
 ```
 
 ## Pieces
@@ -196,7 +200,8 @@ only filtered searches that came up short pay for it. Unfiltered searches
 keep the cutoff, since a rare word in the index always matches something.
 
 Scores: BM25 (negated `bm25()`, higher is better) and cosine. They are only
-comparable within one search; #64 fuses ranks, not scores.
+comparable within one search; `MemorySearch` (#64) fuses ranks, not scores
+([memory-search.md](memory-search.md)).
 
 ## Rebuilding
 
@@ -237,8 +242,8 @@ an A17**. `memory.index.search50k` measures it ([benchmarks.md](benchmarks.md#me
 
 `Log.memory`: opening failures and recreation at `error`, matrix loads and
 rebuild start and end (counts, duration) at `notice`. Text and queries are
-never logged. The fused search will be one `memory.search` interval (#64,
-[performance.md](performance.md)).
+never logged. The fused search (`MemorySearch`, #64) is one
+`memory.search` interval ([performance.md](performance.md)).
 
 ## Testing
 

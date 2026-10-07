@@ -39,6 +39,7 @@
                 TextEmbeddingBenchmark.embeddingGemma(searching: [modelsDirectory, directory]),
                 TextEmbeddingBatchBenchmark.installed(searching: [modelsDirectory, directory]),
                 MemoryIndexSearchBenchmark(),
+                MemorySearchBenchmark(),
                 TopicLabelBenchmark(generator: FoundationModelsLabelBenchmarkGenerator()),
             ]
         }
