@@ -81,6 +81,7 @@
         var topicBoundaries = 0
         var memoryChunks = 0
         var memorySearches = 0
+        var memoryResults = 0
         var verifications = 0
         var accepted = 0
         var saves = 0
@@ -92,7 +93,7 @@
         /// transcribed, answered, segmented, searched and verified.
         var isComplete: Bool {
             lines > 0 && userUtterances == lines && agentReplies == lines && topicUnits == lines
-                && memorySearches == lines && verifications >= lines && saves > 0
+                && memorySearches == lines && memoryResults > 0 && verifications >= lines && saves > 0
         }
 
         var summary: String {
@@ -100,7 +101,7 @@
             \(Int(audioSeconds)) s of audio in \(String(format: "%.1f", wallSeconds)) s; \
             \(lines) lines, \(userUtterances) transcribed, \(agentReplies) replies; \
             \(topicUnits) topic units, \(topicBoundaries) boundaries; \
-            \(memoryChunks) chunks, \(memorySearches) searches; \
+            \(memoryChunks) chunks, \(memorySearches) searches, \(memoryResults) results; \
             \(verifications) verifications (\(accepted) accepted); \(saves) saves; \
             \(recognizer), \(voiceActivity)
             """
@@ -127,9 +128,9 @@
     ///   (`db.save`).
     /// - **Topics and memory**: each exchange is segmented by
     ///   `StreamingTopicSegmenter` (`topics.segment`) and indexed in a
-    ///   temporary `MemoryIndex`; each user line runs a hybrid search, BM25 and
-    ///   int8 vectors fused with RRF (`memory.search`), as the
-    ///   `search_memory` tool will once hybrid retrieval (#64) lands.
+    ///   temporary `MemoryIndex`; each user line runs the hybrid
+    ///   `MemorySearch` behind Grok's `search_memory` tool (#64): BM25 and
+    ///   int8 vectors fused with weighted RRF (`memory.search`).
     ///
     /// Nothing touches the user's data, the network or the microphone; the
     /// temporary stores are deleted when the run ends.
@@ -232,7 +233,7 @@
                 await vad.finish()
             }
             let turns = Task { await orchestrator.run(transcript: transcriber.events) }
-            Log.ui.notice(
+            Log.performance.notice(
                 "Perf replay: \(script.lines.count, privacy: .public) lines, \(Int(report.audioSeconds), privacy: .public) s, \(recognizerName, privacy: .public)"
             )
 
@@ -280,12 +281,13 @@
             report.topicBoundaries = tapReport.topicBoundaries
             report.memoryChunks = tapReport.memoryChunks
             report.memorySearches = tapReport.memorySearches
+            report.memoryResults = tapReport.memoryResults
             report.verifications = counts.verified
             report.accepted = counts.accepted
             report.saves = await store.statistics.saveCount
             report.replyAudioSeconds = Double(output.receivedBytes / 2) / Double(output.sampleRate)
             report.wallSeconds = (clock.now - started).timeInterval
-            Log.ui.notice("Perf replay finished: \(report.summary, privacy: .public)")
+            Log.performance.notice("Perf replay finished: \(report.summary, privacy: .public)")
             guard report.isComplete else { throw Failure.incomplete(report) }
             return report
         }
@@ -365,14 +367,15 @@
             var topicBoundaries = 0
             var memoryChunks = 0
             var memorySearches = 0
+            var memoryResults = 0
         }
 
         private let store: ConversationStore
         private let index: MemoryIndex
         private let segmenter: StreamingTopicSegmenter
         private let conversationID: ConversationID
+        private let memorySearch: MemorySearch
         private let embedder = LexicalTextEmbedder(dimension: 256)
-        private static let modelVersion = "replay-lexical-256"
 
         private var seen: Set<UUID> = []
         private var pendingUser: [Utterance] = []
@@ -385,6 +388,7 @@
         ) {
             self.store = store
             self.index = index
+            memorySearch = MemorySearch(index: index, embedder: ReplayQueryEmbedder())
             self.segmenter = segmenter
             self.conversationID = conversationID
         }
@@ -409,8 +413,12 @@
                 pendingUser.append(utterance)
                 await search(for: utterance.text)
             case .agent:
-                report.agentReplies += 1
+                // Counted once the exchange is segmented and indexed: the
+                // script speaks its next line when the count goes up, so
+                // that line's search always sees this exchange and every
+                // count in the report repeats exactly.
                 await closeExchange(reply: utterance)
+                report.agentReplies += 1
             }
         }
 
@@ -449,7 +457,8 @@
                     _ = try await store.openTopic(at: first.startedAt)
                 }
             } catch {
-                Log.ui.error("Perf replay: topic segmentation failed: \(String(describing: error), privacy: .public)")
+                Log.performance.error(
+                    "Perf replay: topic segmentation failed: \(String(describing: error), privacy: .public)")
             }
 
             let text = userText + "\n" + reply.text
@@ -463,32 +472,43 @@
                     embeddings: [chunk.id: embedding(of: text)])
                 report.memoryChunks = chunks.count
             } catch {
-                Log.ui.error("Perf replay: indexing failed: \(String(describing: error), privacy: .public)")
+                Log.performance.error("Perf replay: indexing failed: \(String(describing: error), privacy: .public)")
             }
         }
 
-        /// A hybrid memory search: BM25 and int8 vectors, fused with RRF.
+        /// The memory search Grok's `search_memory` tool runs (#64): BM25 and
+        /// int8 vectors fused with weighted RRF, then dedupe and snippets,
+        /// inside its own `memory.search` interval.
         private func search(for query: String) async {
-            let embedding = embedding(of: query)
-            let index = index
             do {
-                let fused = try await Signposts.memory.withInterval(.memorySearch) {
-                    let keyword = try await index.keywordSearch(query, limit: 20)
-                    let vector = try await index.vectorSearch(embedding, limit: 20)
-                    return reciprocalRankFusion([
-                        keyword.map(\.chunkID.uuidString), vector.map(\.chunkID.uuidString),
-                    ])
-                }
-                _ = fused
+                let response = try await memorySearch.search(query, limit: 5)
                 report.memorySearches += 1
+                report.memoryResults += response.results.count
             } catch {
-                Log.ui.error("Perf replay: memory search failed: \(String(describing: error), privacy: .public)")
+                Log.performance.error(
+                    "Perf replay: memory search failed: \(String(describing: error), privacy: .public)")
             }
         }
 
         private func embedding(of text: String) -> TextEmbedding {
+            ReplayQueryEmbedder.embedding(of: text, embedder: embedder)
+        }
+    }
+
+    /// Embeds the replay's chunks and queries with the lexical embedder (the
+    /// text-embedding model needs a download), so the vector half of every
+    /// search runs.
+    struct ReplayQueryEmbedder: MemoryQueryEmbedding {
+        static let modelVersion = "replay-lexical-256"
+        private let embedder = LexicalTextEmbedder(dimension: 256)
+
+        func embedQuery(_ text: String) async throws -> TextEmbedding {
+            Self.embedding(of: text, embedder: embedder)
+        }
+
+        static func embedding(of text: String, embedder: LexicalTextEmbedder) -> TextEmbedding {
             TextEmbedding(
-                fullOutput: embedder.vector(for: text), dimensions: 256, modelVersion: Self.modelVersion,
+                fullOutput: embedder.vector(for: text), dimensions: 256, modelVersion: modelVersion,
                 tokenCount: ScriptedConversation.words(in: text).count, truncatedTokens: 0)
         }
     }

@@ -48,6 +48,8 @@ struct PerfReplayTests {
         #expect(first.topicUnits == first.lines)
         #expect(first.memorySearches == first.lines)
         #expect(first.memoryChunks == first.lines)
+        // Every search after the first exchange finds something.
+        #expect(first.memoryResults >= first.lines - 1, "\(first.summary)")
         #expect(first.verifications >= first.lines)
         #expect(first.accepted == first.verifications, "every segment is the enrolled speaker")
         #expect(first.saves > 0)
@@ -60,7 +62,8 @@ struct PerfReplayTests {
         func counts(_ report: PerfReplayReport) -> [Int] {
             [
                 report.lines, report.userUtterances, report.agentReplies, report.topicUnits, report.topicBoundaries,
-                report.memoryChunks, report.memorySearches, report.verifications, report.accepted,
+                report.memoryChunks, report.memorySearches, report.memoryResults, report.verifications,
+                report.accepted,
             ]
         }
         #expect(counts(first) == counts(second))
