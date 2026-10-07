@@ -1,0 +1,41 @@
+name: Feature
+description: A new capability or an improvement, scoped so one PR can close it.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Architecture decisions live in #1. If this changes one of them, say so
+        and link the discussion.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What should exist when this is done, and why it matters.
+    validations:
+      required: true
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Implementation notes
+      description: Approach, the modules it touches (BlauCore, BlauAudio, ...), APIs and research links.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Checkable outcomes. Mark the ones that need a physical device, a developer account or real credentials.
+      value: |
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: depends
+    attributes:
+      label: Depends on
+      description: Issues that must land first, one per line.
+      placeholder: "- [ ] #13"
+  - type: input
+    id: epic
+    attributes:
+      label: Epic and milestone
+      placeholder: "Epic: #3 · Milestone: M1 Voice Loop MVP"

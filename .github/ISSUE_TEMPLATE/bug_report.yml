@@ -1,0 +1,90 @@
+name: Bug report
+description: Something in Blau is broken or behaves unexpectedly.
+title: "Bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please do **not** paste API keys, tokens or
+        private conversation content. Redact them from logs and screenshots.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong, in one or two sentences.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start a conversation
+        2. Lock the screen for 5 minutes
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: Include error messages, and a screen recording if it helps.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Audio (session, capture, playback)
+        - Transcription (ASR)
+        - Voice ID
+        - Grok realtime voice
+        - Topics
+        - Memory and knowledge base
+        - SwiftData / iCloud sync
+        - UI
+        - Performance
+        - Build, CI or tooling
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Blau version and build
+      description: From Settings, or the commit SHA for a local build.
+      placeholder: 0.1.0 (1) or 9aba761
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and iOS version
+      placeholder: iPhone 17 Pro, iOS 26.5 (or Simulator)
+    validations:
+      required: true
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often does it happen?
+      options:
+        - Every time
+        - Often
+        - Sometimes
+        - Once
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or diagnostics
+      description: Console output (subsystem `com.joeblau.blau`) or an exported diagnostics file. Redact secrets.
+      render: text

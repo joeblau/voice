@@ -55,3 +55,24 @@ perf: generate ## Run performance tests (Blau-Perf scheme, Release)
 .PHONY: clean
 clean: ## Remove the generated project, plists and DerivedData
 	rm -rf $(PROJECT) $(DERIVED_DATA) Blau/Supporting
+
+# Formatting and lint. Both run swift-format with the repo-root .swift-format
+# config over every Swift file git tracks or would track (see
+# scripts/swift-format.sh). Override the tool with SWIFT_FORMAT="swift format".
+
+.PHONY: format
+format: ## Format all Swift sources in place with swift-format
+	@scripts/swift-format.sh format
+
+.PHONY: lint
+lint: ## Lint all Swift sources with swift-format (every finding is an error)
+	@scripts/swift-format.sh lint
+
+.PHONY: hooks
+hooks: ## Install the optional pre-commit hook (lints staged Swift files)
+	git config core.hooksPath scripts/git-hooks
+	@echo "Installed. Skip once with 'git commit --no-verify'; remove with 'make unhooks'."
+
+.PHONY: unhooks
+unhooks: ## Remove the pre-commit hook installed by `make hooks`
+	-git config --unset core.hooksPath
