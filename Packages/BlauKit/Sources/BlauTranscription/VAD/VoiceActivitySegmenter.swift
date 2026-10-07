@@ -43,7 +43,9 @@ import Synchronization
 /// segment (`.streamEnded`) and restarts the analysis after it.
 ///
 /// Feed it from one producer: `run(on:)`, or `process(_:)` calls that are
-/// awaited in order.
+/// awaited in order. A frame that arrives while the model runs (actor
+/// re-entrancy) is queued; if it restarts the stream after a long gap, the
+/// chunk the model is working on belongs to the old stream and is dropped.
 public actor VoiceActivitySegmenter: VoiceActivitySource {
     public nonisolated let configuration: VoiceActivityConfiguration
 
@@ -64,6 +66,10 @@ public actor VoiceActivitySegmenter: VoiceActivitySource {
     private var audioDeliveredEnd: Int64 = 0
     private var modelNeedsReset = false
     private var isDraining = false
+    /// Incremented by every (re)start of the stream. An analysis that
+    /// suspended on the model under an older generation is stale: a
+    /// re-entrant `process(_:)` restarted the stream while it waited.
+    private var generation = 0
     private var finishRequested = false
     private var isFinished = false
     private var consecutiveFailures = 0
@@ -188,6 +194,7 @@ public actor VoiceActivitySegmenter: VoiceActivitySource {
     }
 
     private func start(at offset: Int64) {
+        generation += 1
         machine.begin(at: offset)
         pending.removeAll(keepingCapacity: true)
         pendingStart = offset
@@ -228,7 +235,9 @@ public actor VoiceActivitySegmenter: VoiceActivitySource {
 
     /// Analyses every complete chunk. Re-entrant calls (another frame
     /// arriving while the model runs) only queue audio; the running drain
-    /// picks it up.
+    /// picks it up. If one restarts the stream (a long gap), the chunk in
+    /// flight is dropped by `analyze` and the loop carries on from the new
+    /// stream's pending audio, which `start(at:)` reset.
     private func drain() async {
         guard !isDraining else { return }
         isDraining = true
@@ -265,6 +274,7 @@ public actor VoiceActivitySegmenter: VoiceActivitySource {
     }
 
     private func analyze(_ samples: [Float], at offset: Int64) async {
+        let generation = generation
         let levels = Self.subframeLevels(of: samples)
         let chunkLevel = AudioLevelMath.decibels(of: samples[...])
 
@@ -307,6 +317,13 @@ public actor VoiceActivitySegmenter: VoiceActivitySource {
             }
         }
 
+        // A re-entrant frame restarted the stream while the model ran: this
+        // chunk is from before the restart and no longer follows the
+        // machine's position.
+        guard generation == self.generation else {
+            logger.debug("VAD dropped the chunk at \(offset, privacy: .public): the stream restarted during analysis")
+            return
+        }
         let events = machine.process(
             .init(
                 startOffset: offset, sampleCount: samples.count, probability: min(max(probability, 0), 1),

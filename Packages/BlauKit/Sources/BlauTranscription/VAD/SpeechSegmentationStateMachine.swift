@@ -21,7 +21,10 @@ import BlauCore
 /// - the end is the last such subframe of the last speech chunk, extended
 ///   forwards into the following chunks the same way.
 /// When no subframe clears the energy threshold (very quiet speech), the
-/// chunk edges are used.
+/// chunk edges are used. After voiced audio, a single speech chunk with no
+/// energy is taken as the model's smoothing and doesn't move the end; a
+/// second one in a row means the speech carries on too quietly to refine,
+/// so both count.
 ///
 /// **Minimum speech**: a candidate is confirmed (and `speechStarted` sent)
 /// once its voiced span reaches `minimumSpeechDuration`; a candidate that
@@ -79,6 +82,9 @@ struct SpeechSegmentationStateMachine {
         /// Some subframe of the segment cleared the energy threshold, so
         /// energy (not chunk edges) places its end.
         var hasEnergy = false
+        /// Consecutive speech chunks, since the last voiced audio, with no
+        /// subframe above the energy threshold.
+        var silentSpeechChunks = 0
         var probabilitySum: Float = 0
         var probabilityCount = 0
         var peakProbability: Float = 0
@@ -231,16 +237,31 @@ struct SpeechSegmentationStateMachine {
 
         if probability >= configuration.threshold {
             segment.isInSilence = false
-            segment.voicedEnd = voicedEnd(
-                after: segment.voicedEnd, in: chunk, threshold: threshold, isSpeech: true, hasEnergy: hadEnergy)
+            if lastVoiced == nil, hadEnergy {
+                // The model says speech but nothing clears the energy
+                // threshold. One such chunk after the words is the model's
+                // smoothing; a second in a row is speech too quiet to
+                // refine (a distant speaker in a noisy room), so it counts
+                // whole, the first one included.
+                segment.silentSpeechChunks += 1
+                if segment.silentSpeechChunks >= 2 {
+                    segment.voicedEnd = max(segment.voicedEnd, chunk.endOffset)
+                }
+            } else {
+                segment.silentSpeechChunks = 0
+                segment.voicedEnd = voicedEnd(
+                    after: segment.voicedEnd, in: chunk, threshold: threshold, isSpeech: true, hasEnergy: hadEnergy)
+            }
         } else if probability >= configuration.negativeThreshold, lastVoiced != nil, !segment.isInSilence {
             // Between the thresholds with energy: Silero keeps the state;
             // the speech continues.
+            segment.silentSpeechChunks = 0
             segment.voicedEnd = voicedEnd(
                 after: segment.voicedEnd, in: chunk, threshold: threshold, isSpeech: true, hasEnergy: hadEnergy)
         } else {
             // Silence (or an undecided chunk with no energy): only audio
             // contiguous with the speech extends it.
+            segment.silentSpeechChunks = 0
             segment.isInSilence = true
             segment.voicedEnd = voicedEnd(
                 after: segment.voicedEnd, in: chunk, threshold: threshold, isSpeech: false, hasEnergy: hadEnergy)
@@ -279,6 +300,7 @@ struct SpeechSegmentationStateMachine {
                 isContinuation: true,
                 isInSilence: segment.isInSilence,
                 hasEnergy: segment.hasEnergy,
+                silentSpeechChunks: segment.silentSpeechChunks,
                 probabilitySum: 0,
                 probabilityCount: 0,
                 peakProbability: 0
@@ -381,11 +403,12 @@ struct SpeechSegmentationStateMachine {
     /// The end of the voiced audio after `current`, given `chunk`.
     ///
     /// For a speech chunk, any voiced subframe in it counts (the model says
-    /// it is speech). A speech chunk with none counts whole only while the
-    /// segment has shown no energy at all (speech too quiet to refine):
-    /// otherwise it is the model's smoothing carrying on after the words,
-    /// which would put the end a chunk late. For other chunks only
-    /// subframes contiguous with `current` (bridging short gaps) extend it.
+    /// it is speech). A speech chunk with none counts whole while the
+    /// segment has shown no energy at all (speech too quiet to refine);
+    /// after energy, `advance(with:)` decides (one such chunk is the
+    /// model's smoothing, two in a row are quiet speech). For other chunks
+    /// only subframes contiguous with `current` (bridging short gaps)
+    /// extend it.
     private func voicedEnd(
         after current: Int64, in chunk: Chunk, threshold: Float, isSpeech: Bool, hasEnergy: Bool
     ) -> Int64 {

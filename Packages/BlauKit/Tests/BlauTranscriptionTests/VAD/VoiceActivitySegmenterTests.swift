@@ -147,6 +147,77 @@ struct VoiceActivitySegmenterTests {
         #expect(run.segments.last.map { $0.sampleRange.lowerBound >= 7 * 16_000 } == true)
     }
 
+    /// Regression (PR #107 review): a frame that arrives while the model is
+    /// running, after a gap of more than 1 s, restarts the stream under the
+    /// suspended analysis. The chunk in flight belongs to the old stream and
+    /// is dropped, instead of reaching the state machine out of order
+    /// ("Chunks must be contiguous").
+    @Test func aLongGapArrivingWhileTheModelRunsDropsTheChunkInFlight() async {
+        let model = GatedSpeechProbabilityModel(gatedCall: 0)
+        let segmenter = VoiceActivitySegmenter(model: model, signposter: .disabled(.asr))
+        let events = segmenter.events()
+
+        let tone = Self.frames(seconds: 1, speech: [0...1])
+        let first = Task {
+            await segmenter.process(AudioFrame(samples: Array(tone.flatMap(\.samples).prefix(4_096)), sampleOffset: 0))
+        }
+        await model.waitForGatedCall()
+        // Re-entrant, 76 ms of audio 5 s after the first frame.
+        await segmenter.process(AudioFrame(samples: [Float](repeating: 0.1, count: 320), sampleOffset: 80_000))
+        await model.open()
+        await first.value
+        await segmenter.finish()
+
+        var collected: [VoiceActivityEvent] = []
+        for await event in events { collected.append(event) }
+        let segments = collected.compactMap { if case .speechEnded(let segment) = $0 { segment } else { nil } }
+        #expect(segments.count <= 1)
+        #expect(segments.allSatisfy { $0.endReason == .streamEnded })
+        #expect(segmenter.statistics.gaps == 1)
+        // The stale chunk ran through the model but was not analysed.
+        #expect(segmenter.statistics.samplesProcessed == 0)
+    }
+
+    /// The same race with a confirmed segment open and a full chunk after
+    /// the gap: the first segment ends at the gap, the chunk in flight is
+    /// dropped, and the running drain goes on with the audio after the gap.
+    @Test func aLongGapWhileTheModelRunsEndsTheSegmentAndAnalysesWhatFollows() async throws {
+        let model = GatedSpeechProbabilityModel(gatedCall: 2)
+        let segmenter = VoiceActivitySegmenter(model: model, signposter: .disabled(.asr))
+        let events = segmenter.events()
+
+        let speech = Self.frames(seconds: 1, speech: [0...1]).flatMap(\.samples)
+        // Two chunks are analysed and confirm the speech; the model hangs on
+        // the third.
+        let first = Task {
+            await segmenter.process(AudioFrame(samples: Array(speech.prefix(3 * 4_096)), sampleOffset: 0))
+        }
+        await model.waitForGatedCall()
+        #expect(segmenter.isSpeechActive)
+        let resumeAt: Int64 = 10 * 16_000
+        await segmenter.process(AudioFrame(samples: Array(speech.prefix(4_096)), sampleOffset: resumeAt))
+        // The restart closed the open segment.
+        #expect(!segmenter.isSpeechActive)
+        await model.open()
+        await first.value
+        await segmenter.finish()
+
+        var segments: [SpeechSegment] = []
+        for await event in events {
+            if case .speechEnded(let segment) = event { segments.append(segment) }
+        }
+        #expect(segments.count == 2)
+        let before = try #require(segments.first)
+        let after = try #require(segments.last)
+        #expect(before.endReason == .streamEnded)
+        #expect(before.sampleRange.upperBound <= 3 * 4_096)
+        #expect(after.endReason == .streamEnded)
+        #expect(after.sampleRange.lowerBound >= resumeAt)
+        // Two chunks before the gap and the one after it; not the stale one.
+        #expect(segmenter.statistics.samplesProcessed == 3 * 4_096)
+        #expect(await model.calls == 4)
+    }
+
     @Test func overlappingFramesAreIgnored() async {
         let model = ScriptedSpeechProbabilityModel { _ in 0.01 }
         let segmenter = VoiceActivitySegmenter(model: model, signposter: .disabled(.asr))
@@ -268,6 +339,49 @@ struct FrameListSource: CaptureFrameSource {
     }
 
     func history(in range: Range<Int64>) -> AudioFrame? { nil }
+}
+
+/// A speech model (0.95 for every chunk) whose call number `gatedCall`
+/// (from 0) suspends until `open()`, so a test can act while the segmenter
+/// awaits the model, deterministically.
+actor GatedSpeechProbabilityModel: SpeechProbabilityModel {
+    nonisolated let chunkLength = 4_096
+    private let gatedCall: Int
+    private(set) var calls = 0
+    private var isOpen = false
+    private var gate: CheckedContinuation<Void, Never>?
+    private var reachedGate = false
+    private var gateWaiters: [CheckedContinuation<Void, Never>] = []
+
+    init(gatedCall: Int) {
+        self.gatedCall = gatedCall
+    }
+
+    func speechProbability(of samples: [Float], at sampleOffset: Int64) async throws -> Float {
+        let call = calls
+        calls += 1
+        if call == gatedCall, !isOpen {
+            reachedGate = true
+            for waiter in gateWaiters { waiter.resume() }
+            gateWaiters.removeAll()
+            await withCheckedContinuation { gate = $0 }
+        }
+        return 0.95
+    }
+
+    /// Returns once the gated call is suspended in the model.
+    func waitForGatedCall() async {
+        guard !reachedGate else { return }
+        await withCheckedContinuation { gateWaiters.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        gate?.resume()
+        gate = nil
+    }
+
+    func reset() {}
 }
 
 /// A model that advances a manual clock by a fixed time per call.

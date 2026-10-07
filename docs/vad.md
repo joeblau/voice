@@ -90,9 +90,12 @@ signal's energy:
   the chunk before, while the model was still unsure, is included.
 - **End:** the last voiced subframe of the last speech chunk, extended into
   the following chunks only while it is contiguous. Silero's probability
-  stays high for a chunk or so after the words; a high-probability chunk with
-  no energy doesn't move the end, unless the whole segment has had no energy
-  above the floor (speech too quiet to refine), where chunk edges are used.
+  stays high for a chunk or so after the words, so a single high-probability
+  chunk with no energy doesn't move the end. Two or more in a row are speech
+  too quiet to refine (a distant speaker in a noisy room): they count whole,
+  the first one included, and also count towards the minimum speech
+  duration. When the whole segment has had no energy above the floor, chunk
+  edges are used throughout.
 - **Noise floor:** the 20th percentile of the subframes of chunks the model
   calls silence, falling fast and rising at a quarter per chunk. Digital
   silence (filled gaps, muted input) is ignored.
@@ -100,7 +103,10 @@ signal's energy:
 Segments are then sample ranges on the capture stream's own offsets. A gap in
 the input up to 1 s (capture dropped audio) is analysed as silence so offsets
 stay aligned; a longer one closes an open segment with `.streamEnded` and
-restarts after the gap.
+restarts after the gap. When that frame arrives while the model is still
+working on a chunk (actor re-entrancy, for example a host feeding frames
+from un-awaited tasks), the chunk in flight belongs to the stream before the
+gap and is dropped; analysis carries on from the audio after the gap.
 
 ### Why not FluidAudio's streaming state machine
 
@@ -164,7 +170,7 @@ to a chunk).
 | --- | --- | --- |
 | `Tests/BlauTranscriptionTests/VAD/VADFixtureTests.swift` | **The ±100 ms criterion** on four labelled WAV fixtures with Silero's recorded probabilities replayed; the 8 s split (bounded, contiguous, between words); frame size independence; absolute offsets; reading segments back from a real `CaptureHub`; `speechAudio()` contiguity and silence gating; the energy fallback | `swift test` |
 | `Tests/BlauTranscriptionTests/VAD/SpeechSegmentationStateMachineTests.swift` | Every rule on synthetic chunks: refinement, look-back, minimum speech, hangover, hysteresis, model smoothing, quiet speech, splits, stream end, noise floor | `swift test` |
-| `Tests/BlauTranscriptionTests/VAD/VoiceActivitySegmenterTests.swift` | Model skipping and resets, model failures, input gaps, overlapping and wrong-rate frames, `finish`, `run(on:)`, `vad.chunk` signposts, model time, overhead in silence | `swift test` |
+| `Tests/BlauTranscriptionTests/VAD/VoiceActivitySegmenterTests.swift` | Model skipping and resets, model failures, input gaps (also arriving while the model runs), overlapping and wrong-rate frames, `finish`, `run(on:)`, `vad.chunk` signposts, model time, overhead in silence | `swift test` |
 | `Tests/BlauTranscriptionTests/VAD/SileroLiveTests.swift` | The same fixtures through the **live Silero model**, and the CPU cost of a minute of room tone; `BLAU_VAD_RECORD=1` re-records the probabilities | Only with `BLAU_VAD_MODEL_DIR` (see the fixtures README) |
 
 The fixtures, how they are generated and how to re-record them are described

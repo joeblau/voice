@@ -204,6 +204,55 @@ struct SpeechSegmentationStateMachineTests {
         #expect(segments.first?.sampleRange.upperBound == Self.at(6, 3) + Self.pad)
     }
 
+    @Test func modelSpeechWithoutEnergyAfterAClickIsStillSpeech() throws {
+        // A click (one voiced subframe) as the model triggers, then 3.3 s the
+        // model is sure of but too quiet to clear the energy threshold: a
+        // distant speaker in a noisy room. Only the first such chunk is
+        // smoothing; the rest is quiet speech, so the segment is kept.
+        var script = Script()
+        script.silence(4)
+        script.chunk(Self.speech, voiced: 15..<16)
+        for _ in 0..<12 { script.chunk(Self.speech, voiced: 0..<0) }
+        script.silence(4)
+        let (events, machine) = script.run()
+        let segment = try #require(Self.segments(events).first)
+        #expect(Self.segments(events).count == 1)
+        #expect(machine.counters.rejectedCandidates == 0)
+        #expect(segment.sampleRange == (Self.at(4, 15) - Self.pad)..<(Self.at(17) + Self.pad))
+        #expect(segment.endReason == .silence)
+        // Confirmed once the second quiet speech chunk made it speech.
+        #expect(Self.onsets(events).first?.detectedAt == Self.at(7))
+    }
+
+    @Test func quietSpeechAfterVoicedSpeechExtendsTheSegment() throws {
+        // A voiced chunk, then 3.3 s the model still calls speech with no
+        // energy: the segment covers all of it, not just the first chunk.
+        var script = Script()
+        script.silence(4)
+        script.speech(1)
+        for _ in 0..<12 { script.chunk(Self.speech, voiced: 0..<0) }
+        script.silence(4)
+        let segments = Self.segments(script.run().events)
+        #expect(segments.count == 1)
+        let segment = try #require(segments.first)
+        #expect(segment.sampleRange == (Self.at(4) - Self.pad)..<(Self.at(17) + Self.pad))
+        #expect(segment.sampleRange == 15_904..<70_112)
+    }
+
+    @Test func silentSpeechChunksBetweenWordsKeepOneSegment() throws {
+        // Voiced, two silent speech chunks, voiced again: one segment.
+        var script = Script()
+        script.silence(4)
+        script.speech(2)
+        script.chunk(Self.speech, voiced: 0..<0)
+        script.chunk(Self.speech, voiced: 0..<0)
+        script.chunk(Self.speech, voiced: 0..<8)
+        script.silence(4)
+        let segments = Self.segments(script.run().events)
+        #expect(segments.count == 1)
+        #expect(segments.first?.sampleRange == (Self.at(4) - Self.pad)..<(Self.at(8, 8) + Self.pad))
+    }
+
     @Test func speechTooQuietToRefineUsesChunkEdges() {
         var script = Script()
         script.silence(4)
