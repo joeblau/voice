@@ -549,6 +549,16 @@ speakers (`clb`/`slt`). The gate's thresholds are calibrated on a larger,
 cross-session set with simulated rooms and noise in
 [voice-id-eval.md](voice-id-eval.md) (#48).
 
+## Noise suppression (#51)
+
+`NoiseSuppressionBenchmarks` (DeepFilterNet3 on the Neural Engine and on
+the CPU, Apple's `AUSoundIsolation` voice and high-quality models) measure
+load time, compute per 20 ms capture frame, real-time factor and memory.
+DeepFilterNet3 needs its model in `BlauBenchmarks/Assets/DeepFilterNet3`
+(`scripts/fetch-deepfilternet3.sh BlauBenchmarks/Assets/DeepFilterNet3`).
+Mac numbers and the decision are in [noise-suppression.md](noise-suppression.md#cost);
+iPhone numbers are pending.
+
 ## Text embedding model (#59)
 
 Which model embeds text for memory search (#60, #62) and topic

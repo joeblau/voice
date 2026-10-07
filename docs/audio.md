@@ -48,6 +48,11 @@ engine. Voice processing can only be switched while the engine is stopped,
 and the input format it produces is only final once it is on, so the
 components must be installed after it.
 
+Voice processing is Blau's only noise suppression. #51 compared it with an
+extra suppressor (DeepFilterNet3, Apple's `AUSoundIsolation`) on the ASR
+and voice ID harnesses and kept it alone; the data and the decision are in
+[noise-suppression.md](noise-suppression.md).
+
 ## States
 
 ```mermaid

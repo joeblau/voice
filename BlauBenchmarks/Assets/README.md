@@ -14,6 +14,10 @@ Optional, gitignored inputs that `make generate` copies into the
   model, its token table and `tokenizer.json`), directly here or in a
   subfolder, for `testSharedTextEmbeddingBatch32` (#60). Without it that
   test is skipped.
+- `DeepFilterNet3/`: the DeepFilterNet3 Core ML model for the noise
+  suppression benchmarks (#51). Fetch it with
+  `scripts/fetch-deepfilternet3.sh BlauBenchmarks/Assets/DeepFilterNet3`;
+  without it those tests are skipped.
 - `benchmark-speech.wav`: a speech recording (any format and rate
   AVFoundation reads) to use instead of synthesized speech.
 
