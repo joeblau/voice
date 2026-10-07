@@ -492,7 +492,7 @@ which intervals reach MetricKit. Delivery itself needs a device:
 | Simulated payload stored and shown (device, Xcode) | Pending |
 | Real metric payload on a TestFlight build          | Pending |
 | Real diagnostic payload (hang) on a TestFlight build | Pending |
-| `realtime.firstAudio` in `signpostMetrics`         | Pending (needs #36) |
+| `realtime.firstAudio` in `signpostMetrics`         | Pending (needs a device and xAI credentials) |
 | Export opens in Files / AirDrop on device          | Pending |
 
 ## Model benchmarks
@@ -501,6 +501,16 @@ The on-device model benchmark harness (#22) measures each model's latency,
 real-time factor and memory, and probes background Neural Engine behaviour.
 It emits the canonical intervals above around every measured step. Running
 it and the results are in [docs/benchmarks.md](benchmarks.md).
+
+## Turn latency in the HUD
+
+The turn orchestrator (#36) measures each turn as it happens: end of
+utterance → first audio (`realtime.firstAudio`'s span) and end of utterance
+→ `response.done` (`realtime.turn`'s), kept as last / p50 / p95 over the last
+200 turns. With the **Performance HUD** flag on, the main screen shows them
+with the turn state, the connection and token usage
+([realtime.md](realtime.md#latency-and-the-hud)). Device numbers go in the
+pending table there.
 
 ## What comes next
 

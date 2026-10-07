@@ -15,6 +15,7 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `Blau/LiveActivity/` | The recording Live Activity: its attributes and Stop intent (shared with the `BlauWidgets` extension) and the `RecordingIndicator` that starts, updates and ends it ([background.md](background.md)) |
 | `Blau/RootView.swift` | The (still empty) main screen, the xAI Settings and onboarding entry points, and the DEBUG menu button |
 | `Blau/XAI/XAIServices.swift` | The xAI services (#33): `make(config:)` for the app, `hermetic(config:)` for previews and tests |
+| `Blau/VoiceLoop/` | `VoiceLoop` (the spoken conversation: the live audio pipeline feeding the `TurnOrchestrator`, #36), the SwiftData transcript recorder, the HUD rows and the DEBUG Voice Loop screen |
 | `Blau/Debug/` | The DEBUG menu and the reusable feature flag toggles |
 | `BlauCore/Services/` | The service protocols and `UnavailableService` |
 | `BlauCore/Fakes/` | Fakes for previews and tests, `TranscriptScript` |
@@ -33,11 +34,12 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `flags` | `FeatureFlags` | `UserDefaults`, overrides in DEBUG | in memory |
 | `clock` | `any BlauClock` | `SystemClock` | `SystemClock`, or a `ManualClock` from the test |
 | `audio` | `any AudioService` | `AudioSessionKeeper` from `ConversationAudio.live` (#26): capture and playback on the voice-processing engine, kept alive off screen | `FakeAudioService` |
-| `conversationAudio` | `ConversationAudio?` | the controller, capture hub, player and keeper behind `audio` | `nil` |
-| `backgroundInference` | `BackgroundInferenceMonitor` | moves model stages off the Neural Engine off screen ([background.md](background.md)) | same, with no stages |
-| `transcriber` | `any Transcriber` | unavailable until the live audio pipeline (capture hub and VAD) is composed; then `ParakeetStreamingTranscriber` (#29, [asr.md](asr.md)) | `FakeTranscriber` |
+| `conversationAudio` | `ConversationAudio?` | the controller, capture hub, player and keeper behind `audio`; the `TurnOrchestrator` plays replies on its player and `VoiceLoop` starts it | `nil` |
+| `backgroundInference` | `BackgroundInferenceMonitor` | moves model stages off the Neural Engine off screen ([background.md](background.md)); `VoiceLoop` registers its Silero VAD | same, with no stages |
+| `transcriber` | `any Transcriber` | unavailable; `VoiceLoop` builds a `ParakeetStreamingTranscriber` (#29, [asr.md](asr.md)) over the conversation audio's capture hub and its own VAD for each conversation | `FakeTranscriber` |
 | `voiceGate` | `any VoiceGate` | unavailable until #47 | `FakeVoiceGate` |
-| `realtime` | `any RealtimeService` | unavailable until #34 - #36 | `FakeRealtimeService` |
+| `realtime` | `any RealtimeService` | `TurnOrchestrator` (#36, [realtime.md](realtime.md#turn-orchestration)): the xAI client, session configuration, a `StreamingAudioPlayer` and the SwiftData transcript | `FakeRealtimeService` |
+| `voiceLoop` | `VoiceLoop` | Starts the conversation audio (through its keeper), builds the VAD and Parakeet on `start()` and feeds the orchestrator; Debug menu → Voice Loop, and the Live Activity Stop button stops it | unavailable (no orchestrator) |
 | `persistence` | `PersistenceController` | `PersistenceController.live(isDebugBuild:)`: `Application Support/Blau/Blau.store`, mirrored to iCloud when the account allows | `PersistenceController.inMemory()` |
 | `topics` | `any TopicService` | unavailable until #52 - #54 | `FakeTopicService` |
 | `memory` | `any MemoryService` | unavailable until #62 - #68 | `FakeMemoryService` |

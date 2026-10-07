@@ -35,6 +35,7 @@
             NavigationStack {
                 Form {
                     flagsSection
+                    VoiceLoopDebugSection()
                     environmentSection
                     lifecycleSection
                     VoiceIDThresholdsSection(config: .calibrated)

@@ -57,7 +57,9 @@ enum KitModule: String, CaseIterable {
         case .telemetry: [.core]
         case .audio, .persistence: [.core, .telemetry]
         case .transcription, .voiceID: [.core, .telemetry, .audio]
-        case .realtime: [.core, .telemetry, .audio]
+        // Persistence: the turn orchestrator (#36) writes the transcript
+        // through `ConversationStore`.
+        case .realtime: [.core, .telemetry, .audio, .persistence]
         case .topics, .memory: [.core, .telemetry, .persistence]
         }
     }
