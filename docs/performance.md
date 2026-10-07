@@ -540,29 +540,48 @@ make microbench-baseline    # rewrite Thresholds/ from this run
 ```
 
 Each benchmark measures instructions retired, allocations, wall-clock and
-CPU time and throughput. **Only instructions and allocations are gated**
-(p90 within 10% of `Thresholds/<target>.<benchmark>.p90.json`): they come out
-the same on every run of the same build (p0 equals p100 in the tables
-above), while wall-clock and CPU time move by tens of percent on a shared CI
-machine. A real slowdown in this code shows up as more instructions or more
-allocations. package-benchmark exits 4 when a result is *better* than its
-threshold; `microbench.sh` treats that as a pass and suggests tightening the
+CPU time and throughput. **Only allocations and instructions are gated**
+(p90 within 10% of `Thresholds/<target>.<benchmark>.p90.json`):
+
+- **Allocations** (`mallocCountTotal`) are exactly the same on every run and
+  every machine: the CI runner recorded the same counts as an M3 Max. They
+  are the gate in CI.
+- **Instructions retired** come out within a fraction of a percent run to
+  run on an Apple silicon Mac, and are gated wherever they are measured.
+  GitHub's macOS runners are virtual machines without performance counters,
+  so CI doesn't measure them; the committed values come from a Mac (Xcode
+  27.2) and gate local `make microbench-check` runs.
+- **CPU and wall-clock time are reported, not gated.** On Apple silicon a run
+  whose threads land on the efficiency cores takes about a third longer with
+  identical code (measured: `make microbench-compare HEAD` on an unchanged
+  tree reported -34%), and shared CI machines add their own noise.
+
+package-benchmark reports a result *better* than its threshold as an error
+too; `microbench.sh` treats that as a pass and suggests tightening the
 thresholds.
 
-The counts depend on the compiler and the OS libraries, so the committed
-thresholds are recorded on the CI runner (below). On a Mac with another
-Xcode the check may report deviations either way; record your own with
-`make microbench-baseline` to compare branches locally, and don't commit
-them.
+Instruction counts depend on the compiler and the OS libraries, so on a Mac
+with another Xcode the check may report instruction deviations either way.
+To compare a branch with `main` on your own machine instead, use
+`make microbench-compare` (`BASE=<ref>`, default `origin/main`): it runs the
+benchmarks on this tree and on BlauKit's sources at the base, back to back,
+and applies the same 10% gate between the two.
 
 ### Catching a regression in a pull request
 
 `perf-kit` runs on every pull request, so a change that makes the topic
-engine, the fusion or the vector search more than 10% more expensive fails
-its checks before it merges. Changes to the app pipeline (the session) are
-caught by the nightly `perf` job, or before merging by running **Actions >
-CI > Run workflow** on the pull request's branch with **Also run the
-performance suite** ticked.
+engine, the fusion or the vector search allocate more than 10% more fails
+its checks before it merges. This was checked with a throwaway pull request
+(#138, closed) that added one wasted `sorted()` per ranking to
+`reciprocalRankFusion`: `perf-kit` failed with `memory.rrf-1000-queries-2x50-hits`
+allocations 18K to 20K (+11%, tolerance 10%).
+
+A change that only costs CPU in these functions is caught by
+`make microbench-check` or `make microbench-compare` on a Mac (instructions),
+and in the app by the nightly suite's CPU time. Changes to the app pipeline
+(the session) are caught by the nightly `perf` job, or before merging by
+running **Actions > CI > Run workflow** on the pull request's branch with
+**Also run the performance suite** ticked.
 
 ### Updating baselines
 
@@ -571,11 +590,18 @@ Xcode changes:
 
 1. **Actions > CI > Run workflow** on the branch, with **Also run the
    performance suite** and **Record new performance baselines** ticked.
-2. Download `perf-results-<n>` (`ci-simulator.json`) and
-   `perf-kit-results-<n>` (`Thresholds/`), copy them to
-   `BlauPerfTests/Baselines/` and `Packages/BlauKitBenchmarks/Thresholds/`,
-   and commit them with a note in the pull request on why the numbers moved.
-3. A metric that is noisier than 10% on the runner gets a `tolerancePercent`
+2. Download `perf-results-<n>`, copy its `ci-simulator.json` (recorded by
+   `scripts/perf/perf-gate.py record`, which keeps the tolerances and notes
+   already in the file) to `BlauPerfTests/Baselines/`, and commit it with a
+   note in the pull request on why the numbers moved. The same run checks it:
+   `python3 scripts/perf/perf-gate.py check --xcresult <downloaded perf.xcresult>
+   --baseline BlauPerfTests/Baselines/ci-simulator.json` must pass.
+3. For the micro-benchmarks, run `make microbench-baseline` on an Apple
+   silicon Mac and commit `Packages/BlauKitBenchmarks/Thresholds/`: that
+   records the instruction counts as well as the allocations. The
+   `perf-kit-results-<n>` artifact of the same CI run holds the runner's
+   thresholds, allocations only (they match the Mac's exactly).
+4. A metric that is noisier than 10% on the runner gets a `tolerancePercent`
    (or `minimumDelta`) in `ci-simulator.json` with a `note` saying why;
    re-recording keeps both.
 
