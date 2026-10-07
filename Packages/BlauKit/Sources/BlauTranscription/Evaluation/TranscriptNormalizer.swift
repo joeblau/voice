@@ -13,7 +13,8 @@ import Foundation
 /// 1. Case and diacritics are folded (`Café` → `cafe`), curly apostrophes
 ///    straightened.
 /// 2. Numbers are spelled out: cardinals up to the billions (`2,000` →
-///    `two thousand`), decimals (`3.5` → `three point five`), ordinals
+///    `two thousand`; from a trillion up, as with tracking or card numbers,
+///    digit by digit), decimals (`3.5` → `three point five`), ordinals
 ///    (`21st` → `twenty first`), clock times (`3:30` and `3.30` → `three
 ///    thirty`, `3:05` → `three oh five`, `3:00` → `three`) and money (`$20` →
 ///    `twenty dollars`). `%` becomes `percent`, `&` `and`, `+` `plus`,
@@ -138,8 +139,8 @@ public struct TranscriptNormalizer: Sendable {
                 return nil
             }
         }
-        guard !digits.isEmpty, digits.allSatisfy(\.isASCIIDigit), let value = Int(digits) else { return nil }
-        var words = cardinal(value)
+        guard !digits.isEmpty, digits.allSatisfy(\.isASCIIDigit) else { return nil }
+        var words = integer(digits)
         if parts.count == 2 {
             let fraction = parts[1]
             guard !fraction.isEmpty, fraction.allSatisfy(\.isASCIIDigit) else { return nil }
@@ -155,8 +156,8 @@ public struct TranscriptNormalizer: Sendable {
         let suffix = String(token.suffix(2))
         guard ["st", "nd", "rd", "th"].contains(suffix) else { return nil }
         let digits = token.dropLast(2).replacingOccurrences(of: ",", with: "")
-        guard !digits.isEmpty, digits.allSatisfy(\.isASCIIDigit), let value = Int(digits) else { return nil }
-        var words = cardinal(value)
+        guard !digits.isEmpty, digits.allSatisfy(\.isASCIIDigit) else { return nil }
+        var words = integer(digits)
         guard let last = words.popLast() else { return nil }
         words.append(ordinalWord(last))
         return words
@@ -176,8 +177,28 @@ public struct TranscriptNormalizer: Sendable {
         return words
     }
 
+    /// The largest value read as a number; longer digit strings (tracking,
+    /// phone and card numbers) are read digit by digit.
+    static let largestCardinal = 999_999_999_999
+
+    /// A string of ASCII digits as words: a cardinal up to
+    /// `largestCardinal`, digit by digit beyond it (including strings too
+    /// long for `Int`).
+    static func integer(_ digits: String) -> [String] {
+        if let value = Int(digits), value <= largestCardinal { return cardinal(value) }
+        return spelledDigits(digits)
+    }
+
+    /// `0042` → zero zero four two.
+    static func spelledDigits(_ digits: some StringProtocol) -> [String] {
+        digits.compactMap { $0.wholeNumberValue.map { ones[$0] } }
+    }
+
+    /// `value` (not negative) as words, up to `largestCardinal`; larger
+    /// values are read digit by digit.
     static func cardinal(_ value: Int) -> [String] {
         if value == 0 { return ["zero"] }
+        guard (1...largestCardinal).contains(value) else { return spelledDigits(String(value)) }
         var words: [String] = []
         var rest = value
         for (scale, name) in [(1_000_000_000, "billion"), (1_000_000, "million"), (1_000, "thousand")]

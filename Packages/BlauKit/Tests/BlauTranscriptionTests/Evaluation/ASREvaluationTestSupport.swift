@@ -90,24 +90,6 @@ struct LevelSpeechProbabilityModel: SpeechProbabilityModel {
     func reset() {}
 }
 
-/// An offline model that returns scripted text per call and takes no time.
-actor ScriptedUtteranceModel: UtteranceTranscriptionModel {
-    private var responses: [String]
-    private(set) var received: [[Float]] = []
-    private let failure: (any Error)?
-
-    init(_ responses: [String], failure: (any Error)? = nil) {
-        self.responses = responses
-        self.failure = failure
-    }
-
-    func transcribe(_ samples: [Float]) throws -> String {
-        if let failure { throw failure }
-        received.append(samples)
-        return responses.isEmpty ? "" : responses.removeFirst()
-    }
-}
-
 /// An engine that returns prepared transcripts, for testing the evaluator.
 struct PreparedEngine: ASREvaluationEngine {
     let descriptor: ASREngineDescriptor

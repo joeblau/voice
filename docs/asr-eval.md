@@ -36,18 +36,31 @@ Silero VAD, the production streaming path (`ParakeetStreamingTranscriber`,
 
 | Condition | WER | First partial p50 / p95 | End of utterance p50 / p95 | Unended | RTF |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| clean | 4.1% | 941 / 955 ms | 930 / 953 ms | 0 of 8 | 0.042 |
-| cafe | 2.9% | 820 / 1106 ms | 1960 / 4515 ms | 3 of 8 | 0.065 |
-| tv | 27.9% | 501 / 844 ms | – | 7 of 7 | 0.070 |
-| accented | 6.0% | 950 / 1260 ms | 930 / 942 ms | 0 of 9 | 0.038 |
-| **all** | **9.8%** | **840 / 1260 ms** | **930 / 2168 ms** | **10 of 32** | **0.052** |
+| clean | 4.1% | 942 / 970 ms | 930 / 962 ms | 0 of 8 | 0.052 |
+| cafe | 2.9% | 821 / 1106 ms | 1958 / 4518 ms | 3 of 8 | 0.073 |
+| tv | 27.9% | 517 / 884 ms | – | 7 of 7 | 0.125 |
+| accented | 6.0% | 961 / 1275 ms | 930 / 942 ms | 0 of 9 | 0.063 |
+| **all** | **9.8%** | **874 / 1267 ms** | **930 / 2171 ms** | **10 of 32** | **0.076** |
 
 `parakeet-tdt-v3`: Parakeet TDT 0.6B v3 on each utterance, the second pass
-(#30):
+(#30) as it ships (`ParakeetTdtRecognizer` on the audio
+`SecondPassTranscriber` reads: 100 ms before the utterance, 120 ms after).
+Its segments come from the reference labels, so these numbers, TV included,
+are recognition accuracy with perfect boundaries (optimistic), not
+endpointing or TV robustness:
 
 | Condition | WER | End of utterance p50 / p95 | RTF |
 | --- | ---: | ---: | ---: |
-| clean, cafe, tv, accented | 0.0% | 249 / 266 ms (200 ms of it padding) | 0.010 |
+| clean | 0.0% | 180 / 184 ms | 0.012 |
+| cafe | 0.0% | 179 / 187 ms | 0.012 |
+| tv (label-segmented) | 2.9% | 189 / 214 ms | 0.015 |
+| accented | 3.6% | 180 / 186 ms | 0.011 |
+| **all** | **1.7%** | **182 / 197 ms** (120 ms of it padding) | **0.012** |
+
+The host was running other builds during this run, so compute-inclusive
+latency and RTF are higher than on an idle Mac (an earlier run of the same
+commit: streaming RTF 0.051, second pass 176 / 182 ms and RTF 0.011, with
+identical WER).
 
 ### Findings
 
@@ -67,11 +80,17 @@ Silero VAD, the production streaming path (`ParakeetStreamingTranscriber`,
   export, would close most of the gap (#29's on-device check).
 - **End of utterance is 0.93 s when something ends it**: VAD's end of
   speech plus the 0.9 s fallback, as designed in [asr.md](asr.md).
-- **The second pass is much more accurate.** Parakeet TDT v3 makes no errors
-  on these fixtures, given the utterance boundaries, against 9.8% for the
+- **The second pass is much more accurate.** Parakeet TDT v3 gets 1.7%
+  (5 words of 296) given the utterance boundaries, against 9.8% for the
   streaming model (which also has to find the boundaries and decodes in
-  320 ms chunks). Its cost per utterance is about 50 ms on the Neural
+  320 ms chunks). Its cost per utterance is about 60 ms on the Neural
   Engine.
+- **The shipped padding is tight.** With `SecondPassConfiguration`'s 100 ms
+  before and 120 ms after (an earlier version of this harness used 200 ms on
+  both sides and scored 0.0%), two fixtures go wrong: `accented-07` loses
+  the onset ("I need to" → "Inito") and `tv-02` picks up two of the TV's
+  words in the trailing 120 ms ("... wrap that up with the"). Worth
+  re-checking on the owner's recordings before tuning the padding.
 - **Both run far faster than real time** on the Mac (RTF 0.05 and 0.01).
 
 ### Limitations
@@ -124,12 +143,12 @@ expanded. Reference transcripts are written as spoken (no digits).
 | Id | Type | What runs |
 | --- | --- | --- |
 | `parakeet-eou-320ms` | `StreamingASREvaluationEngine` | The fixture through `VoiceActivitySegmenter` (Silero VAD), then 20 ms frames through `ParakeetStreamingTranscriber` with each VAD event delivered at the stream position VAD decided it, as live |
-| `parakeet-tdt-v3` | `OfflineASREvaluationEngine` | Each labelled utterance with 200 ms of padding (never into the next utterance) through FluidAudio's `AsrManager`, a fresh decoder state each time |
+| `parakeet-tdt-v3` | `OfflineASREvaluationEngine` | The second pass as it ships: each labelled utterance cut with `SecondPassConfiguration`'s padding (100 ms before, never back into the previous utterance; 120 ms after), clamped by the same `SecondPassConfiguration.audioRange` that `SecondPassTranscriber` uses, through `ParakeetTdtRecognizer` (a fresh decoder state each time) |
 
 Both conform to `ASREvaluationEngine`. To add an engine (the
 `SpeechTranscriber` fallback, #31, or a 160 ms Parakeet export), build it as
 a `StreamingASREvaluationEngine` over its recognizer, an
-`OfflineASREvaluationEngine` over an `UtteranceTranscriptionModel`, or a
+`OfflineASREvaluationEngine` over a `SecondPassRecognizer`, or a
 new conformance; add a case to `ASREvaluationEngineID` in
 `ASREvaluationRunTests.swift`, and a block to
 [asr-eval/thresholds.json](asr-eval/thresholds.json).
@@ -270,4 +289,6 @@ These need a physical iPhone and are recorded here when run.
 | Date | Fixtures | Engine | WER | First partial p95 | End of utterance p95 | Unended | RTF | Device |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
 | 2026-10-07 | 26 synthetic | `parakeet-eou-320ms` (`40a23f4c`) | 9.8% | 1260 ms | 2168 ms | 10 of 32 | 0.052 | M3 Max, debug |
-| 2026-10-07 | 26 synthetic | `parakeet-tdt-v3` (`7dd20fe6`) | 0.0% | – | 266 ms | – | 0.010 | M3 Max, debug |
+| 2026-10-07 | 26 synthetic | `parakeet-tdt-v3` (`7dd20fe6`), 200 ms padding both sides | 0.0% | – | 266 ms | – | 0.010 | M3 Max, debug |
+| 2026-10-07 | 26 synthetic | `parakeet-eou-320ms` (`40a23f4c`), rebased on #115 | 9.8% | 1267 ms | 2171 ms | 10 of 32 | 0.076 | M3 Max, debug, loaded host |
+| 2026-10-07 | 26 synthetic | `parakeet-tdt-v3` (`7dd20fe6`), the shipped second pass (`ParakeetTdtRecognizer`, 100 / 120 ms padding) | 1.7% | – | 197 ms | – | 0.012 | M3 Max, debug, loaded host |

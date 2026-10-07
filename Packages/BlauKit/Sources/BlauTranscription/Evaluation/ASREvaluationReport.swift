@@ -145,7 +145,7 @@ public struct ASREvaluationReport: Codable, Hashable, Sendable {
     static let legend = """
         WER: corpus word error rate after normalization (sub/del/ins: substituted, deleted, inserted words). \
         First partial: start of speech to the first partial. End of utterance: end of speech to the final \
-        (offline engines: padding + compute after the utterance is handed over). Latencies are audio time \
+        (offline engines: trailing padding + compute after the utterance is handed over). Latencies are audio time \
         plus the compute of the emitting call; "audio" columns leave the compute out. RTF: compute / audio. \
         Missed: utterances with no final; split: utterances cut into several finals; unended: utterances \
         finalized only because the audio ended (nothing detected their end; left out of the end-of-utterance \

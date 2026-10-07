@@ -201,28 +201,85 @@ struct ASREvaluationEngineTests {
     @Test func theOfflineEngineTranscribesEachUtteranceWithPadding() async throws {
         let fixture = syntheticFixture(
             id: "two", seconds: 6, utterances: [("hello there", 0.1, 2), ("bye", 2.1, 3)])
-        let model = ScriptedUtteranceModel(["Hello, there!", "  bye  "])
+        let recognizer = ScriptedSecondPassRecognizer([.text("Hello, there!"), .text("  bye  ")])
         let engine = OfflineASREvaluationEngine(
-            descriptor: ASREngineDescriptor(id: "scripted", title: "Scripted", kind: .offline), model: model)
-        // 200 ms either side, but never into the other utterance's speech.
-        #expect(engine.segments(of: fixture) == [0..<33_600, 32_000..<51_200])
+            descriptor: ASREngineDescriptor(id: "scripted", title: "Scripted", kind: .offline),
+            recognizer: recognizer)
+        // The second pass's padding: 100 ms before, never back into the
+        // previous utterance, and 120 ms after.
+        #expect(engine.segments(of: fixture) == [0..<33_920, 32_000..<49_920])
 
         let transcript = try await engine.transcribe(fixture)
         #expect(transcript.finals.map(\.text) == ["Hello, there!", "bye"])
         #expect(transcript.partials.isEmpty)
         #expect(transcript.finals.map(\.range) == fixture.utterances.map(\.range))
-        #expect(transcript.finals.map(\.audioPosition) == [33_600, 51_200])
-        let received = await model.received
-        #expect(received.map(\.count) == [33_600, 19_200])
+        #expect(transcript.finals.map(\.audioPosition) == [33_920, 49_920])
+        let received = await recognizer.received
+        #expect(received.map(\.count) == [33_920, 17_920])
 
         let result = ASREvaluator(dataset: try ASREvaluationDataset(name: "t", consent: "x", fixtures: [fixture]))
             .score(transcript, for: fixture)
         #expect(result.counts.errors == 0)
-        // The padding after the speech (cut short where the next utterance
-        // starts) plus the model's compute.
-        #expect(result.utterances[0].endOfUtteranceAudioMilliseconds == 100)
-        #expect(result.utterances[1].endOfUtteranceAudioMilliseconds == 200)
+        // The trailing padding plus the model's compute.
+        #expect(result.utterances[0].endOfUtteranceAudioMilliseconds == 120)
+        #expect(result.utterances[1].endOfUtteranceAudioMilliseconds == 120)
         #expect(result.utterances[1].firstPartialMilliseconds == nil)
+    }
+
+    @Test func theOfflineEngineCutsTheAudioTheSecondPassReads() {
+        // 50 ms between the utterances, the second ending 50 ms before the
+        // end of the file.
+        let fixture = syntheticFixture(
+            id: "close", seconds: 2, utterances: [("one", 0.05, 1), ("two", 1.05, 1.95)])
+        let engine = OfflineASREvaluationEngine(
+            descriptor: ASREngineDescriptor(id: "scripted", title: "Scripted", kind: .offline),
+            recognizer: ScriptedSecondPassRecognizer())
+        // As `SecondPassTranscriber` cuts it: the leading padding stops at
+        // the previous utterance's end, the trailing padding doesn't stop at
+        // the next utterance's start, and the audio ends with the file.
+        let configuration = SecondPassConfiguration.standard
+        #expect(
+            configuration.audioRange(start: 16_800, end: 31_200, previousEnd: 16_000) == 16_000..<33_120)
+        #expect(engine.segments(of: fixture) == [0..<17_920, 16_000..<32_000])
+
+        // Other paddings are taken from the configuration.
+        let wide = OfflineASREvaluationEngine(
+            descriptor: ASREngineDescriptor(id: "scripted", title: "Scripted", kind: .offline),
+            recognizer: ScriptedSecondPassRecognizer(),
+            configuration: SecondPassConfiguration(leadingPadding: .milliseconds(500), trailingPadding: .zero))
+        #expect(wide.segments(of: fixture) == [0..<16_000, 16_000..<31_200])
+    }
+
+    @Test func theTDTDescriptorRecordsTheSecondPassPadding() {
+        let descriptor = OfflineASREvaluationEngine.tdtDescriptor(configuration: .standard, revision: "7dd20fe6abcdef")
+        #expect(descriptor.id == "parakeet-tdt-v3")
+        #expect(descriptor.kind == .offline)
+        #expect(descriptor.model == "parakeetTDTv3@7dd20fe6")
+        #expect(descriptor.settings["leadingPadding"] == "100 ms")
+        #expect(descriptor.settings["trailingPadding"] == "120 ms")
+    }
+
+    @Test func theStreamingReplayDropsRefinedEventsAndChecksTheStampCount() throws {
+        let final = utterance("thanks a lot", samples: 16_000..<32_000)
+        let range = final.timeRange
+        var refined = final
+        refined.text = "Thanks a lot."
+        let stamps: [(position: Int64, compute: Duration)] = [(24_000, .milliseconds(5)), (40_000, .milliseconds(9))]
+
+        let events = try StreamingASREvaluationEngine.timedEvents(
+            [.partial(text: "thanks", range: range), .final(final), .refined(refined)], stamps: stamps)
+        #expect(events.map(\.kind) == [.partial, .final])
+        #expect(events.map(\.text) == ["thanks", "thanks a lot"])
+        #expect(events.map(\.audioPosition) == [24_000, 40_000])
+        #expect(events.map(\.computeLag) == [.milliseconds(5), .milliseconds(9)])
+        #expect(events[1].range == 16_000..<32_000)
+
+        // A stamp short (or an event kind the replay doesn't stamp) would
+        // shift every later stamp onto the wrong event: it throws instead.
+        #expect(throws: StreamingReplayError.eventCountMismatch(events: 2, stamps: 1)) {
+            try StreamingASREvaluationEngine.timedEvents(
+                [.partial(text: "thanks", range: range), .final(final)], stamps: Array(stamps.prefix(1)))
+        }
     }
 
     @Test(.enabled(if: ASRFixtures.audioIsAvailable, "The fixture audio is in Git LFS: run git lfs pull"))

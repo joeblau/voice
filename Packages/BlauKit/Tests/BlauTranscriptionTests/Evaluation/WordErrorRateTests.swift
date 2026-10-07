@@ -39,6 +39,30 @@ struct TranscriptNormalizerTests {
         #expect(normalizer.normalize(input) == expected)
     }
 
+    @Test func readsDigitStringsOfATrillionOrMoreDigitByDigit() {
+        // Engine output can hold tracking, phone and card numbers; these
+        // used to index past the end of the number tables and trap.
+        #expect(
+            normalizer.normalize("order 44123456789012 shipped")
+                == "order four four one two three four five six seven eight nine zero one two shipped")
+        #expect(normalizer.words("1000000000000") == ["one"] + Array(repeating: "zero", count: 12))
+        #expect(normalizer.words("1,000,000,000,000") == ["one"] + Array(repeating: "zero", count: 12))
+        // The largest cardinal is still read as one.
+        #expect(
+            normalizer.normalize("999,999,999,999")
+                == "nine hundred ninety nine billion nine hundred ninety nine million "
+                + "nine hundred ninety nine thousand nine hundred ninety nine")
+        // Longer than `Int` holds, with a decimal part, as an ordinal and
+        // run together with letters.
+        #expect(normalizer.words("123456789012345678901234567890").count == 30)
+        #expect(
+            normalizer.normalize("12345678901234.5")
+                == "one two three four five six seven eight nine zero one two three four point five")
+        #expect(normalizer.words("44123456789012th").last == "second")
+        #expect(normalizer.words("ref44123456789012").count == 15)
+        #expect(TranscriptNormalizer.cardinal(Int.max).count == String(Int.max).count)
+    }
+
     @Test func unifiesVariantsAndDropsHesitations() {
         #expect(normalizer.normalize("Um, OK, uh, let's summarise") == "okay let's summarize")
         #expect(normalizer.normalize("Rock & roll + more @ home") == "rock and roll plus more at home")

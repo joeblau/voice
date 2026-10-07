@@ -223,9 +223,8 @@ extension SecondPassTranscriber {
                 skip(utterance, reason)
                 return nil
             }
-            let lower = max(start - configuration.leadingPaddingSamples, min(previousEnd, start), 0)
-            let upper = max(end + configuration.trailingPaddingSamples, lower + 1)
-            guard let frame = audio.history(in: lower..<upper), frame.sampleOffset <= start, !frame.isEmpty else {
+            let range = configuration.audioRange(start: start, end: end, previousEnd: previousEnd)
+            guard let frame = audio.history(in: range), frame.sampleOffset <= start, !frame.isEmpty else {
                 skip(utterance, .audioUnavailable)
                 return nil
             }

@@ -132,23 +132,37 @@ public struct StreamingASREvaluationEngine: ASREvaluationEngine {
         await transcriber.finish()
 
         let collected = await collector.value
+        let events = try Self.timedEvents(collected, stamps: stamps)
+        return ASREngineTranscript(events: events, computeTime: vadTime + asrTime)
+    }
+
+    /// Pairs the transcriber's events with the stream position and compute
+    /// recorded for each. Only partials and finals are stamped (the
+    /// transcriber's statistics count those), so anything else, such as the
+    /// second pass's `.refined`, is dropped first. The counts must then
+    /// match exactly, or every stamp would land on the wrong event.
+    static func timedEvents(
+        _ collected: [TranscriptEvent], stamps: [(position: Int64, compute: Duration)]
+    ) throws(StreamingReplayError) -> [ASRTimedEvent] {
         func samples(_ range: TimeRange) -> Range<Int64> {
             let rate = AudioFrame.captureSampleRate
             return range.start.sampleCount(sampleRate: rate)..<range.end.sampleCount(sampleRate: rate)
         }
-        let events = zip(collected, stamps).map { event, stamp -> ASRTimedEvent in
+        let stamped = collected.compactMap { event -> (kind: ASRTimedEvent.Kind, text: String, range: TimeRange)? in
             switch event {
-            case .partial(let text, let range):
-                ASRTimedEvent(
-                    kind: .partial, text: text, range: samples(range), audioPosition: stamp.position,
-                    computeLag: stamp.compute)
-            case .final(let utterance):
-                ASRTimedEvent(
-                    kind: .final, text: utterance.text, range: samples(utterance.timeRange),
-                    audioPosition: stamp.position, computeLag: stamp.compute)
+            case .partial(let text, let range): (.partial, text, range)
+            case .final(let utterance): (.final, utterance.text, utterance.timeRange)
+            case .refined: nil
             }
         }
-        return ASREngineTranscript(events: events, computeTime: vadTime + asrTime)
+        guard stamped.count == stamps.count else {
+            throw .eventCountMismatch(events: stamped.count, stamps: stamps.count)
+        }
+        return zip(stamped, stamps).map { event, stamp in
+            ASRTimedEvent(
+                kind: event.kind, text: event.text, range: samples(event.range), audioPosition: stamp.position,
+                computeLag: stamp.compute)
+        }
     }
 
     static func frames(of samples: [Float], length: Int) -> [AudioFrame] {
@@ -186,6 +200,20 @@ extension StreamingASREvaluationEngine {
         return StreamingASREvaluationEngine(
             descriptor: descriptor, recognizer: { _ in recognizer }, speechModel: vad,
             transcriberConfiguration: configuration)
+    }
+}
+
+/// The streaming replay couldn't attribute its events.
+public enum StreamingReplayError: Error, Hashable, Sendable, CustomStringConvertible {
+    /// The transcriber emitted a different number of partials and finals
+    /// than its statistics counted while the replay stamped them.
+    case eventCountMismatch(events: Int, stamps: Int)
+
+    public var description: String {
+        switch self {
+        case .eventCountMismatch(let events, let stamps):
+            "The transcriber emitted \(events) partials and finals, but the replay stamped \(stamps)"
+        }
     }
 }
 
