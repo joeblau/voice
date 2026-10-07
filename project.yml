@@ -35,12 +35,29 @@ settings:
     Release:
       SWIFT_COMPILATION_MODE: wholemodule
 
+packages:
+  # Business logic, one library per subsystem. See docs/architecture.md.
+  BlauKit:
+    path: Packages/BlauKit
+
 targets:
   Blau:
     type: application
     platform: iOS
     sources:
       - path: Blau
+    dependencies:
+      - package: BlauKit
+        products:
+          - BlauCore
+          - BlauTelemetry
+          - BlauAudio
+          - BlauPersistence
+          - BlauTranscription
+          - BlauVoiceID
+          - BlauRealtime
+          - BlauTopics
+          - BlauMemory
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.joeblau.blau
