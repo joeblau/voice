@@ -120,6 +120,9 @@ public struct TurnSnapshot: Sendable, Equatable {
     public var latency: TurnLatencyStatistics
     /// Token usage so far in this conversation.
     public var usage: RealtimeUsageTotals
+    /// The realtime session's continuity: live, reconnecting, resuming or
+    /// being renewed, its age, and how often it was renewed (#39).
+    public var session: RealtimeSessionContinuity
 
     public init(
         state: TurnState = .paused,
@@ -130,7 +133,8 @@ public struct TurnSnapshot: Sendable, Equatable {
         queuedUtterances: Int = 0,
         completedTurns: Int = 0,
         latency: TurnLatencyStatistics = TurnLatencyStatistics(),
-        usage: RealtimeUsageTotals = RealtimeUsageTotals()
+        usage: RealtimeUsageTotals = RealtimeUsageTotals(),
+        session: RealtimeSessionContinuity = RealtimeSessionContinuity()
     ) {
         self.state = state
         self.connection = connection
@@ -141,5 +145,6 @@ public struct TurnSnapshot: Sendable, Equatable {
         self.completedTurns = completedTurns
         self.latency = latency
         self.usage = usage
+        self.session = session
     }
 }

@@ -55,9 +55,18 @@ import os
 /// (``RealtimeSessionConfigurator/configure(_:)``) before anything else is
 /// sent, and Settings changes follow the session. Utterances finalized while
 /// the connection is down are written to the transcript at once and queued;
-/// they are sent, in order and with one response, as soon as a connection
-/// is configured. A reply cut off by a drop keeps what already arrived; a
-/// turn whose reply never started is sent again.
+/// they are sent, in order and with one response, as soon as a session is
+/// ready. A reply cut off by a drop keeps what already arrived; a turn whose
+/// reply never started is sent again.
+///
+/// **Long sessions (#39).** A dropped connection is reopened with
+/// `?conversation_id=`, so the server replays the history. Before xAI's
+/// 120-minute limit the session is renewed between turns, with a client
+/// secret minted beforehand. A connection that starts a new server
+/// conversation (a renewal, a resumption the server refused) is reseeded:
+/// the current topic's summary and the last exchanges, after the
+/// `session.update` that carries the instructions and the ProfileBlock. See
+/// ``SessionContinuityConfiguration`` and docs/realtime.md.
 ///
 /// **Telemetry.** `realtime.turn` spans end of utterance to `response.done`
 /// (or the cancel), `realtime.firstAudio` end of utterance to the first
@@ -89,6 +98,8 @@ public actor TurnOrchestrator: RealtimeService {
         /// anyway. Only one `response.create` is outstanding at a time, so an
         /// untagged `response.created` always answers it.
         public var responseCreateHoldLimit: Duration
+        /// Session renewal, resumption and reseeding (#39).
+        public var continuity: SessionContinuityConfiguration
 
         public init(
             mergeWindow: Duration = .milliseconds(400),
@@ -96,7 +107,8 @@ public actor TurnOrchestrator: RealtimeService {
             latencyWindow: Int = 200,
             outputSampleRate: Int = 24_000,
             playbackDrainSlack: Duration = .seconds(2),
-            responseCreateHoldLimit: Duration = .seconds(2)
+            responseCreateHoldLimit: Duration = .seconds(2),
+            continuity: SessionContinuityConfiguration = .standard
         ) {
             self.mergeWindow = mergeWindow
             self.responseTimeout = responseTimeout
@@ -104,6 +116,7 @@ public actor TurnOrchestrator: RealtimeService {
             self.outputSampleRate = outputSampleRate
             self.playbackDrainSlack = playbackDrainSlack
             self.responseCreateHoldLimit = responseCreateHoldLimit
+            self.continuity = continuity
         }
 
         public static let standard = Configuration()
@@ -137,22 +150,27 @@ public actor TurnOrchestrator: RealtimeService {
     public nonisolated let configuration: Configuration
 
     private let transcript: any TurnTranscriptRecording
-    private let clock: any BlauClock
-    private let signposter: Signposter
+    let reseedContext: any RealtimeReseedContextProviding
+    let clock: any BlauClock
+    let signposter: Signposter
     private let broadcaster: SnapshotBroadcaster
-    private let outbox = SerialWorkQueue(priority: .userInitiated)
+    let outbox = SerialWorkQueue(priority: .userInitiated)
     private let recorder = SerialWorkQueue(priority: .utility)
-    private let epoch = SessionEpoch()
+    /// Endpoint changes (`conversation_id`), in the order they were decided.
+    let endpointQueue = SerialWorkQueue(priority: .userInitiated)
+    let epoch = SessionEpoch()
 
     // Conversation
     public private(set) var state: TurnState = .paused
-    private var connection: RealtimeClient.ConnectionState = .disconnected(nil)
-    private var conversationID: ConversationID?
+    var connection: RealtimeClient.ConnectionState = .disconnected(nil)
+    var conversationID: ConversationID?
     private var conversationStart: Duration = .zero
-    private var isSessionReady = false
-    private var userPartial: String?
-    private var current: Turn?
-    private var queued: [QueuedUtterance] = []
+    /// A server session is ready for turns: connected, configured and, when
+    /// it had to, resumed or reseeded.
+    var isSessionReady = false
+    var userPartial: String?
+    var current: Turn?
+    var queued: [QueuedUtterance] = []
     private var nextTurnNumber = 1
     private var latency: TurnLatencyStatistics
     private var usage = RealtimeUsageTotals()
@@ -187,12 +205,51 @@ public actor TurnOrchestrator: RealtimeService {
     /// the transcript that was kept.
     private var truncatedItems: [String: AgentItem] = [:]
 
+    // Continuity (#39): see TurnOrchestrator+Continuity.swift
+    /// The conversation as stored, for reseeding a new server session.
+    var history = ConversationHistory()
+    /// The realtime URL without `conversation_id`.
+    var baseEndpoint: URL?
+    /// The server conversation the session belongs to (`conversation.created`).
+    var serverConversationID: String?
+    /// The `conversation_id` the client's endpoint carries.
+    var endpointConversationID: String?
+    /// Server conversations that hit `max_duration`: never resumed again.
+    var exhaustedConversationIDs: Set<String> = []
+    /// When the current server session started (uptime).
+    var sessionStartedAt: Duration?
+    /// The last server event (uptime), for the resumption idle limit.
+    var lastServerActivity: Duration?
+    /// Whether this conversation has had a server session, so a new one
+    /// needs the history again.
+    var hasHadSession = false
+    /// A connection that reopened a server conversation, until the server
+    /// shows whether it resumed.
+    var pendingResume: PendingResume?
+    /// What the server said since the connection was lost, before the new
+    /// connection's state arrived (events and states are separate streams).
+    var evidenceSinceDrop = ResumeEvidence()
+    /// Connections in a row that dropped before their resumption was
+    /// confirmed.
+    var unconfirmedResumes = 0
+    /// The session is old enough to renew at the next quiet moment.
+    var rolloverDue = false
+    /// A renewal is under way.
+    var rolloverInProgress = false
+    /// The old session is closed and the new one not ready yet.
+    var isRollingOver = false
+    var continuityCounts = RealtimeSessionContinuity()
+    var rolloverTask: Task<Void, Never>?
+    var rolloverDeadlineTask: Task<Void, Never>?
+    var tokenRefreshTask: Task<Void, Never>?
+    var resumeTimeoutTask: Task<Void, Never>?
+
     // Tasks
     private var eventTask: Task<Void, Never>?
     private var stateTask: Task<Void, Never>?
     private var settingsTask: Task<Void, Never>?
     private var drainTask: Task<Void, Never>?
-    private var connectTask: Task<Void, Never>?
+    var connectTask: Task<Void, Never>?
     private var responseTimeoutTask: Task<Void, Never>?
     private var holdTask: Task<Void, Never>?
 
@@ -203,15 +260,18 @@ public actor TurnOrchestrator: RealtimeService {
     ///     Settings changes.
     ///   - audio: Plays the reply.
     ///   - transcript: Stores both roles' utterances.
+    ///   - reseedContext: The current topic, for reseeding a new server
+    ///     session (#39).
     ///   - clock: Measures latency, dates agent utterances, times the drain
-    ///     and response timeouts.
+    ///     and response timeouts and the session's age.
     ///   - signposter: Where `realtime.turn` and `realtime.firstAudio` go.
-    ///   - configuration: Merge window and timeouts.
+    ///   - configuration: Merge window, timeouts and session continuity.
     public init(
         client: RealtimeClient,
         configurator: RealtimeSessionConfigurator,
         audio: any AgentAudioOutput,
         transcript: any TurnTranscriptRecording,
+        reseedContext: any RealtimeReseedContextProviding = NoRealtimeReseedContext(),
         clock: any BlauClock = SystemClock(),
         signposter: Signposter = Signposts.realtime,
         configuration: Configuration = .standard
@@ -220,6 +280,7 @@ public actor TurnOrchestrator: RealtimeService {
         self.configurator = configurator
         self.audio = audio
         self.transcript = transcript
+        self.reseedContext = reseedContext
         self.clock = clock
         self.signposter = signposter
         self.configuration = configuration
@@ -236,6 +297,10 @@ public actor TurnOrchestrator: RealtimeService {
         drainTask?.cancel()
         responseTimeoutTask?.cancel()
         holdTask?.cancel()
+        rolloverTask?.cancel()
+        rolloverDeadlineTask?.cancel()
+        tokenRefreshTask?.cancel()
+        resumeTimeoutTask?.cancel()
         broadcaster.finish()
     }
 
@@ -283,6 +348,16 @@ public actor TurnOrchestrator: RealtimeService {
     public func start(
         conversationID id: ConversationID = ConversationID(), waitsForConnection: Bool = true
     ) async throws(OrchestratorError) -> ConversationID {
+        guard conversationID == nil else { throw .alreadyRunning }
+        // A new conversation never resumes the last one's server session.
+        if baseEndpoint == nil {
+            baseEndpoint = RealtimeEndpoint.url(await client.endpoint, conversationID: nil)
+        }
+        guard conversationID == nil else { throw .alreadyRunning }
+        if let baseEndpoint {
+            await endpointQueue.drain()
+            await client.setEndpoint(baseEndpoint)
+        }
         guard conversationID == nil else { throw .alreadyRunning }
         startConsumingClient()
         resetConversationState()
@@ -348,6 +423,7 @@ public actor TurnOrchestrator: RealtimeService {
         conversationID = nil
         userPartial = nil
         cancelTimers()
+        cancelContinuityTasks()
         settingsTask?.cancel()
         settingsTask = nil
         connectTask?.cancel()
@@ -456,6 +532,7 @@ public actor TurnOrchestrator: RealtimeService {
         if conversationID == nil {
             try await start()
         } else {
+            await forgetStaleServerConversation()
             do {
                 try await client.connect()
             } catch {
@@ -668,7 +745,7 @@ public actor TurnOrchestrator: RealtimeService {
     }
 
     /// Sends the queued utterances, oldest first, as one turn.
-    private func flushQueueIfReady() {
+    func flushQueueIfReady() {
         guard isSessionReady, !queued.isEmpty, conversationID != nil else { return }
         let pending = queued
         queued.removeAll()
@@ -686,7 +763,7 @@ public actor TurnOrchestrator: RealtimeService {
 
     /// Sends `events` in order on the current session; a failure (or a new
     /// session by the time they go out) puts the turn back in the queue.
-    private func send(_ events: [RealtimeClientEvent], turn number: Int?) {
+    func send(_ events: [RealtimeClientEvent], turn number: Int?) {
         let session = epoch.current
         let epoch = epoch
         let client = client
@@ -732,7 +809,7 @@ public actor TurnOrchestrator: RealtimeService {
         // is ready.
         endIntervals(of: turn, message: "requeued")
         current = nil
-        queued.insert(QueuedUtterance(user: turn.user, texts: turn.texts), at: 0)
+        queued.insert(QueuedUtterance(user: turn.user, texts: turn.texts, wasSent: true), at: 0)
         cancelTimers()
         setState(userPartial == nil ? .listening : .userSpeaking)
     }
@@ -749,12 +826,15 @@ public actor TurnOrchestrator: RealtimeService {
         }
         stateTask = Task { [weak self] in
             for await state in client.states {
-                await self?.connectionChanged(state)
+                // Which conversation a connection opened (`conversation_id`)
+                // decides whether it should resume.
+                let url = state == .connected ? await client.connectionURL : nil
+                await self?.connectionChanged(state, url: url)
             }
         }
     }
 
-    private func connectionChanged(_ newState: RealtimeClient.ConnectionState) {
+    private func connectionChanged(_ newState: RealtimeClient.ConnectionState, url: URL?) {
         connection = newState
         guard conversationID != nil else {
             publish()
@@ -763,8 +843,8 @@ public actor TurnOrchestrator: RealtimeService {
         switch newState {
         case .connected:
             let session = epoch.advance()
-            isSessionReady = true
-            // A new server session: nothing sent on the old one will answer.
+            isSessionReady = false
+            // A new connection: nothing sent on the old one will answer.
             awaitingResponse.removeAll()
             activeResponseID = nil
             unknownResponseIsActive = false
@@ -783,7 +863,9 @@ public actor TurnOrchestrator: RealtimeService {
             if case .error(let failure) = state, failure.kind == .connection {
                 setState(.listening)
             }
-            flushQueueIfReady()
+            // Resumes, reseeds or starts the conversation's server session,
+            // then marks it ready and sends what is queued.
+            sessionConnected(session: session, url: url)
         case .connecting, .reconnecting, .disconnected:
             if isSessionReady {
                 isSessionReady = false
@@ -792,7 +874,8 @@ public actor TurnOrchestrator: RealtimeService {
             if let turn = current, !turn.isResponseDone {
                 connectionLost(during: turn)
             }
-            if case .disconnected(let error?) = newState {
+            sessionLost(newState)
+            if case .disconnected(let error?) = newState, !retryFreshAfterRefusedResume(error) {
                 fail(TurnFailure(connectionError: error))
             }
         }
@@ -808,7 +891,7 @@ public actor TurnOrchestrator: RealtimeService {
             awaitingResponse.removeAll { $0.turn == turn.number }
             current = nil
             cancelTimers()
-            queued.insert(QueuedUtterance(user: turn.user, texts: turn.texts), at: 0)
+            queued.insert(QueuedUtterance(user: turn.user, texts: turn.texts, wasSent: true), at: 0)
             setState(userPartial == nil ? .listening : .userSpeaking)
             return
         }
@@ -820,7 +903,14 @@ public actor TurnOrchestrator: RealtimeService {
 
     private func handle(_ event: RealtimeServerEvent) {
         guard conversationID != nil else { return }
+        lastServerActivity = clock.uptime
         switch event {
+        case .conversationCreated(let created):
+            conversationCreated(created.conversation.id)
+        case .conversationItemCreated(let created):
+            itemReplayed(created.item)
+        case .sessionUpdated:
+            sessionUpdated()
         case .responseCreated(let created):
             responseCreated(created.response)
         case .responseOutputItemAdded(let added):
@@ -855,6 +945,9 @@ public actor TurnOrchestrator: RealtimeService {
         case .conversationItemTruncated(let truncated):
             itemTruncated(truncated)
         case .error(let event):
+            if Self.isMaxDuration(event.error) {
+                maximumDurationReached()
+            }
             serverError(event.error)
         default:
             break
@@ -1230,7 +1323,7 @@ public actor TurnOrchestrator: RealtimeService {
         fail(TurnFailure(kind: .response, message: "Grok didn't respond"))
     }
 
-    private func cancelTimers() {
+    func cancelTimers() {
         responseTimeoutTask?.cancel()
         responseTimeoutTask = nil
         holdTask?.cancel()
@@ -1266,6 +1359,7 @@ public actor TurnOrchestrator: RealtimeService {
     }
 
     private func record(_ utterance: Utterance) {
+        history.record(utterance)
         let transcript = transcript
         recorder.enqueue { [weak self] in
             do {
@@ -1296,20 +1390,25 @@ public actor TurnOrchestrator: RealtimeService {
 
     // MARK: State
 
-    private func setState(_ newState: TurnState) {
+    func setState(_ newState: TurnState) {
         if newState != state {
             Log.realtime.debug("Turn state \(self.state.name, privacy: .public) → \(newState.name, privacy: .public)")
             state = newState
         }
         publish()
+        if current == nil {
+            // Between turns: a session renewal waiting for a quiet moment
+            // can go now.
+            rolloverIfQuiet()
+        }
     }
 
-    private func fail(_ failure: TurnFailure) {
+    func fail(_ failure: TurnFailure) {
         guard conversationID != nil else { return }
         setState(.error(failure))
     }
 
-    private func publish() {
+    func publish() {
         broadcaster.publish(makeSnapshot())
     }
 
@@ -1323,7 +1422,8 @@ public actor TurnOrchestrator: RealtimeService {
             queuedUtterances: queued.count,
             completedTurns: completedTurns,
             latency: latency,
-            usage: usage
+            usage: usage,
+            session: continuitySnapshot()
         )
     }
 
@@ -1343,9 +1443,10 @@ public actor TurnOrchestrator: RealtimeService {
         latency = TurnLatencyStatistics(capacity: configuration.latencyWindow)
         isSessionReady = false
         cancelTimers()
+        resetContinuity()
     }
 
-    private func endIntervals(of turn: Turn, message: String) {
+    func endIntervals(of turn: Turn, message: String) {
         turn.turnInterval.end(message: message)
         turn.firstAudioInterval?.end(message: message)
     }
@@ -1466,6 +1567,10 @@ extension TurnOrchestrator {
     struct QueuedUtterance {
         var user: Utterance
         var texts: [String]
+        /// Its items went out before the connection dropped (the turn is
+        /// being sent again), so a resumed conversation may already hold
+        /// them.
+        var wasSent = false
     }
 
     /// A `response.create` waiting for its `response.created` (or for an

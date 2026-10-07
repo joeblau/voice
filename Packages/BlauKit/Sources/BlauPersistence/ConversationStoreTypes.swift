@@ -73,3 +73,20 @@ public enum ConversationStoreError: Error, Hashable, Sendable {
     /// The call needs an active conversation and none is started.
     case noActiveConversation
 }
+
+/// A topic's title and summary, as `ConversationStore.topicDigest(for:)`
+/// reads them.
+public struct TopicDigest: Hashable, Sendable {
+    /// The title, or `nil` while it is still the placeholder.
+    public var title: String?
+    /// Whether the title is a first guess the labeler may still refine.
+    public var titleIsProvisional: Bool
+    /// The bullet summary, once the labeler has written one.
+    public var summary: String?
+
+    public init(title: String?, titleIsProvisional: Bool, summary: String?) {
+        self.title = title
+        self.titleIsProvisional = titleIsProvisional
+        self.summary = summary
+    }
+}

@@ -20,8 +20,10 @@ import os
 ///   from the server) is reopened automatically with exponential backoff
 ///   (``Configuration/reconnect``). The server starts a new session on every
 ///   connection, so watch ``states`` for `.connected` and send your
-///   `session.update` again; resumption of the conversation itself is #39
-///   (``setEndpoint(_:)`` lets it add `conversation_id`).
+///   `session.update` again. Resuming the server conversation is the
+///   owner's job (#39): ``setEndpoint(_:)`` adds `conversation_id` for the
+///   reconnects, ``reconnect(to:)`` renews the session on purpose, and
+///   ``prepareClientSecret()`` mints its secret ahead of time.
 /// - **Binary audio.** With ``Configuration/inputAudioTransport`` `.binary`,
 ///   `input_audio_buffer.append` goes out as a raw binary frame. Binary frames
 ///   from the server (output transport `binary`) arrive as
@@ -109,6 +111,10 @@ public actor RealtimeClient {
     /// The URL the next connection opens.
     public private(set) var endpoint: URL
 
+    /// The URL the open connection was opened with (with its
+    /// `conversation_id`, if it resumed one), or `nil` while none is open.
+    public var connectionURL: URL? { connection?.url }
+
     public nonisolated let configuration: Configuration
 
     private let tokenProvider: any RealtimeTokenProviding
@@ -122,6 +128,7 @@ public actor RealtimeClient {
 
     private struct Connection {
         var id: UInt64
+        var url: URL
         var socket: any RealtimeSocket
         var receiveTask: Task<Void, Never>
         var keepAliveTask: Task<Void, Never>?
@@ -269,6 +276,61 @@ public actor RealtimeClient {
         endpoint = url
     }
 
+    /// Closes the open connection on purpose and opens a new one to `url`
+    /// (or the current ``endpoint``), with the same retries as a reconnect
+    /// after a drop: ``state`` goes `reconnecting(attempt: 1)` →
+    /// `connected`. The turn orchestrator renews a session before xAI's
+    /// 120-minute limit with it (#39).
+    ///
+    /// Call ``prepareClientSecret()`` first, while the old connection still
+    /// works, so the gap is one WebSocket upgrade rather than a mint too.
+    ///
+    /// - Throws: The last attempt's ``RealtimeClientError``.
+    public func reconnect(to url: URL? = nil) async throws(RealtimeClientError) {
+        guard !isShutDown else { throw .cancelled }
+        if let url {
+            endpoint = url
+        }
+        // Like `disconnect()`, an attempt already under way must not install
+        // its socket over this one.
+        lifecycle &+= 1
+        establishing?.cancel()
+        establishing = nil
+        if let connection {
+            tearDown(connection, code: .normalClosure)
+            recorder?.record(.client, .close(code: RealtimeCloseCode.normalClosure.rawValue, reason: nil))
+            Log.realtime.notice("Realtime connection closed by the client to renew the session")
+        }
+        let task = startEstablishing(isReconnect: true)
+        do {
+            try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
+        } catch {
+            throw RealtimeClientError.network(error)
+        }
+    }
+
+    /// Makes sure the token provider holds a client secret, minting one if
+    /// needed, so the next connection doesn't wait for it. Errors aren't
+    /// thrown: the connection reports them when it actually needs the
+    /// secret.
+    ///
+    /// - Returns: Whether a secret is ready.
+    @discardableResult
+    public func prepareClientSecret() async -> Bool {
+        do {
+            _ = try await tokenProvider.clientSecret()
+            return true
+        } catch {
+            Log.realtime.error(
+                "Couldn't prepare a realtime client secret: \(String(describing: error), privacy: .public)")
+            return false
+        }
+    }
+
     // MARK: Establishing a connection
 
     private func startEstablishing(isReconnect: Bool) -> Task<Void, any Error> {
@@ -314,8 +376,9 @@ public actor RealtimeClient {
             state = isReconnect ? .reconnecting(attempt: attempt) : .connecting(attempt: attempt)
 
             let socket: any RealtimeSocket
+            let url: URL
             do {
-                socket = try await openSocket()
+                (socket, url) = try await openSocket()
             } catch {
                 lastError = error
                 guard error.isRetryable, attempt < policy.maximumAttempts else {
@@ -333,7 +396,7 @@ public actor RealtimeClient {
                 lastError = .cancelled
                 throw lastError
             }
-            install(socket)
+            install(socket, url: url)
             if isReconnect {
                 signposter.event("realtime.reconnected")
             }
@@ -348,7 +411,7 @@ public actor RealtimeClient {
     /// One connection attempt: a client secret, then the upgrade, inside a
     /// `realtime.connect` interval. A 401/403 on the upgrade invalidates the
     /// secret and tries once more with a new one.
-    private func openSocket() async throws(RealtimeClientError) -> any RealtimeSocket {
+    private func openSocket() async throws(RealtimeClientError) -> (any RealtimeSocket, URL) {
         let interval = signposter.beginInterval(.realtimeConnect)
         var outcome = "failed"
         defer { interval.end(message: outcome) }
@@ -371,7 +434,7 @@ public actor RealtimeClient {
                     url, subprotocols: [secret.webSocketSubprotocol], connector: connector, clock: clock,
                     timeout: configuration.connectTimeout)
                 outcome = "connected"
-                return socket
+                return (socket, url)
             } catch .handshakeFailed(let status?) where status == 401 || status == 403 {
                 // The secret expired or was revoked early: never reuse it.
                 await tokenProvider.invalidate()
@@ -421,7 +484,7 @@ public actor RealtimeClient {
 
     // MARK: An open connection
 
-    private func install(_ socket: any RealtimeSocket) {
+    private func install(_ socket: any RealtimeSocket, url: URL) {
         connectionCount &+= 1
         let id = connectionCount
         let receiveTask = Task.detached(priority: .userInitiated) {
@@ -439,7 +502,8 @@ public actor RealtimeClient {
                 }
             }
         }
-        connection = Connection(id: id, socket: socket, receiveTask: receiveTask, keepAliveTask: keepAliveTask)
+        connection = Connection(
+            id: id, url: url, socket: socket, receiveTask: receiveTask, keepAliveTask: keepAliveTask)
         state = .connected
     }
 

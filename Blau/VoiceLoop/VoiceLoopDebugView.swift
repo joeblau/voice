@@ -71,7 +71,7 @@
             switch loop.phase {
             case .idle: "Idle"
             case .starting: "Starting…"
-            case .running: "Running"
+            case .running: loop.snapshot.session.isReconnecting ? "Reconnecting…" : "Running"
             case .failed(let reason): "Failed: \(reason)"
             }
         }
