@@ -229,11 +229,23 @@ issue sketched, because `RealtimeTool` is already the wire type of a
 ```swift
 // Composition root: one registry for both halves.
 var registry = RealtimeToolRegistry()
-try registry.register(SearchMemoryTool(index: index))       // #68, behind the memoryTools flag
+try registry.register(contentsOf: MemoryTools.all(backend: memoryToolService))   // #68, behind the memoryTools flag
 let configurator = RealtimeSessionConfigurator(settings: store, memory: memory, tools: registry.definitions)
-let runner = RealtimeToolRunner(registry: registry, sender: client)
+let orchestrator = TurnOrchestrator(
+    client: client, configurator: configurator, audio: player, transcript: store, tools: registry)
+```
 
-// The turn orchestrator (#36), which reads client.events:
+The turn orchestrator owns the runner (`orchestrator.toolRunner`): it
+passes it the response, function-call and error events after handling
+each one itself, cancels everything on barge-in, interruptions and every
+new or lost connection, and carries a turn whose response called tools
+over to the follow-up, which the runner requests through the orchestrator
+so it goes out tagged with the turn (see
+[memory-tools.md](memory-tools.md#inside-a-turn)). Used on its own, the
+runner is fed the same way:
+
+```swift
+let runner = RealtimeToolRunner(registry: registry, sender: client)
 for await event in client.events {
     await runner.handle(event)         // every event, in order; returns at once
     ...
@@ -296,7 +308,13 @@ response.done (completed)                                     │
   is dropped. A new connection is a new server session without those calls.
 
 `runner.activity` reports `started`, `finished(outcome:)`,
-`followUpRequested` and `abandoned`, for a "Searching…" hint in the UI.
+`followUpRequested` and `abandoned` (and, with
+`Configuration.reportsCallDetails`, each call's arguments and output in
+`details`), for the chat's tool chips (#68). A tool can read
+`RealtimeToolCallContext.current` while it runs: the call id, the response
+and the **tool chain**, a number that grows with each response the runner
+didn't request (the user's turns); `forget` uses it to require that the
+user spoke between asking and confirming.
 
 ### Built-in search tools and spoken filler
 
@@ -807,6 +825,7 @@ path from a VAD onset through the real `StreamingAudioPlayer`).
 | Voice change mid-session | Change the voice and speed in Settings during a conversation; the next reply uses them | pending (needs a device and xAI credentials) |
 | Echo tool, live | Register `EchoTool`, ask Grok to "test the echo tool with the words blue harbor" with a real key, record it with `RealtimeTranscriptRecorder`; the session should match `echo-tool.jsonl` in shape (filler, `function_call`, one output, one `response.create`, an answer using the result) | pending (needs xAI credentials) |
 | Parallel calls, live | Ask a question that needs two lookups at once; Console (`category:realtime`) shows two `Running tool` lines and one `requested the follow-up`; no `conversation_already_has_active_response` error | pending (needs xAI credentials and #68 tools) |
+| Memory tools, live | With a company document in the knowledge base and a real key, ask "What does my company do?"; Grok says a filler, calls `search_memory` (Console `category:realtime`: `Running tool search_memory`, then `requested the follow-up`), the chat shows "Searched memory" and the answer uses the document. Then "remember that my sister Maya lives in Lisbon", "where does Maya live?", "forget that" (Grok asks first) | pending (needs a device and xAI credentials; see [memory-tools.md](memory-tools.md)) |
 | Web and X search | Turn on Settings → Search → Web Search, ask about today's news; `session.updated` echoes `{"type": "web_search"}` and the answer is current | pending (needs xAI credentials) |
 | Spoken filler | With a slow tool, Grok says something like "let me check" before the pause | pending (needs xAI credentials and a device) |
 | Spoken conversation end to end | Install the speech models, add an xAI key, open **Debug menu → Voice Loop**, Start, and hold a ten-turn conversation on the speaker and on AirPods; every reply plays and the Voice Loop screen shows both sides | pending (needs a device and xAI credentials) |

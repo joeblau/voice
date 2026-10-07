@@ -18,6 +18,7 @@ in tests of anything built on `RealtimeClient`.
 | `binary-audio.jsonl` | Binary audio frames in both directions |
 | `mcp-tools.jsonl` | Remote MCP discovery and calls, including failures |
 | `echo-tool.jsonl` | The function-calling round trip (#38): `session.tools` with the `echo` tool, a spoken filler, the call, its `function_call_output`, one `response.create` and the answer |
+| `memory-tool.jsonl` | The memory tool round trip (#68): "What does my company do?", a spoken filler, `search_memory` with `kinds: ["company"]`, the knowledge base's answer as the `function_call_output`, one `response.create` and the answer. Replayed through the turn orchestrator and the real memory backend by `MemoryToolIntegrationTests` |
 | `drop-and-resume.jsonl` | A drop without a close frame (1006), then a second connection with `?conversation_id=` replaying history as `conversation.item.created` |
 
 `Snapshots/` holds the `session.update` and instruction snapshots checked by

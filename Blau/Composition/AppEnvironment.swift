@@ -203,7 +203,8 @@ final class AppEnvironment {
         transcriptFeed: TranscriptFeed = TranscriptFeed(),
         markdownExport: MarkdownExportController? = nil,
         networkMonitor: (any NetworkMonitor)? = nil,
-        memoryLearning: MemoryLearning? = nil
+        memoryLearning: MemoryLearning? = nil,
+        memoryIndexing: MemoryIndexingController? = nil
     ) {
         self.kind = kind
         self.config = config
@@ -232,8 +233,9 @@ final class AppEnvironment {
         self.performance = performance
         self.performanceStatus = PerformanceStatus(policy: performance)
         self.markdownExport = markdownExport ?? .local(persistence: persistence)
-        self.memoryIndexing = MemoryIndexingController(
-            persistence: persistence, embedder: textEmbeddings, performance: performance)
+        self.memoryIndexing =
+            memoryIndexing
+            ?? MemoryIndexingController(persistence: persistence, embedder: textEmbeddings, performance: performance)
         let voiceLoop = VoiceLoop(
             realtime: realtime, speechModels: speechModels, audio: conversationAudio,
             backgroundInference: backgroundInference, performance: performance)
@@ -392,16 +394,26 @@ extension AppEnvironment {
         let models = speechModels ?? SpeechModels.makeManager()
         let persistence = persistence ?? .live(isDebugBuild: AppConfig.isDebugBuild)
         let xai = xai ?? XAIServices.make(config: config)
-        let realtimeSession = RealtimeSessionServices.make()
+        let flags = FeatureFlags(
+            storage: UserDefaultsFeatureFlagStorage(defaults: defaults),
+            allowsOverrides: AppConfig.isDebugBuild
+        )
         let textEmbeddings = TextEmbeddings.make(models: models)
+        // The device's thermal state, Low Power Mode and battery (#75).
+        // One policy, shared by the indexer (#63) and fact extraction (#66).
+        let performance = PerformancePolicy()
+        // #63: the incremental memory indexer; #68: the memory tools Grok
+        // calls search its index and write facts to the store.
+        let memoryIndexing = MemoryIndexingController(
+            persistence: persistence, embedder: textEmbeddings, performance: performance)
+        let memory = MemoryTools.service(indexing: memoryIndexing, textEmbeddings: textEmbeddings)
+        let realtimeSession = RealtimeSessionServices.make(
+            tools: MemoryTools.registry(backend: memory, enabled: flags.isEnabled(.memoryTools)))
         // #54: the topic lifecycle writes through the transcript's store.
         let transcript = PersistenceTranscriptRecorder(persistence: persistence)
         let topics = TopicLifecycle.app(
             transcript: transcript, labeling: .app(xai: xai), textEmbeddings: textEmbeddings)
         let transcriptFeed = TranscriptFeed()
-        // The device's thermal state, Low Power Mode and battery (#75).
-        // One policy, shared by the indexer (#63) and fact extraction (#66).
-        let performance = PerformancePolicy()
         // #66: facts and entities extracted from every closed topic.
         let memoryLearning = MemoryLearning.live(
             xai: xai, transcript: transcript, persistence: persistence, textEmbeddings: textEmbeddings,
@@ -409,10 +421,7 @@ extension AppEnvironment {
         return AppEnvironment(
             kind: .live,
             config: config,
-            flags: FeatureFlags(
-                storage: UserDefaultsFeatureFlagStorage(defaults: defaults),
-                allowsOverrides: AppConfig.isDebugBuild
-            ),
+            flags: flags,
             clock: SystemClock(),
             audio: conversationAudio.keeper,
             // ParakeetStreamingTranscriber (#29) reads the capture hub and
@@ -434,7 +443,7 @@ extension AppEnvironment {
             // #52 - #54: topic segmentation, labels and the topic lifecycle.
             topics: topics,
             // #62 - #68: memory and its tools.
-            memory: UnavailableService(subsystem: "memory"),
+            memory: memory,
             xai: xai,
             speechModels: models,
             realtimeSession: realtimeSession,
@@ -442,7 +451,7 @@ extension AppEnvironment {
             transcriptionSettings: TranscriptionSettings.make(),
             conversationAudio: conversationAudio,
             textEmbeddings: textEmbeddings,
-            // Also drives `memoryIndexing`, built from it in `init`.
+            // Also drives `memoryIndexing` and `memoryLearning`.
             performance: performance,
             topicLifecycle: topics,
             transcriptFeed: transcriptFeed,
@@ -450,7 +459,8 @@ extension AppEnvironment {
             markdownExport: .live(persistence: persistence),
             // #80: offline mode follows the network path.
             networkMonitor: SystemNetworkMonitor(),
-            memoryLearning: memoryLearning
+            memoryLearning: memoryLearning,
+            memoryIndexing: memoryIndexing
         )
     }
 

@@ -191,7 +191,11 @@ final class VoiceLoop {
             configurator: realtimeSession.configurator,
             audio: player,
             transcript: FeedingTranscriptRecorder(transcript, feed: feed),
-            reseedContext: reseedContext
+            reseedContext: reseedContext,
+            // #68: the memory tools Grok calls; DEBUG keeps their payloads
+            // for the chat's tool chips.
+            tools: realtimeSession.toolRegistry,
+            configuration: TurnOrchestrator.Configuration(keepsToolPayloads: AppConfig.isDebugBuild)
         )
     }
 }

@@ -157,12 +157,16 @@ validateLayering()
 
 /// Tests that compose sibling modules the way the app's composition root
 /// does, such as the topic segmenter (BlauTopics) running on BlauMemory's
-/// shared text-embedding service (#60). Siblings can't import each other,
-/// so these tests get a target of their own that depends on both. It shares
+/// shared text-embedding service (#60), or Grok's memory tools (BlauRealtime)
+/// over BlauMemory's backend (#68). Siblings can't import each other,
+/// so these tests get a target of their own that depends on them. It shares
 /// BlauTopicsTests' scripted transcripts through a symlink in `Fixtures/`.
 let integrationTests: Target = .testTarget(
     name: "BlauKitIntegrationTests",
-    dependencies: [.target(name: KitModule.topics.rawValue), .target(name: KitModule.memory.rawValue)],
+    dependencies: [
+        .target(name: KitModule.topics.rawValue), .target(name: KitModule.memory.rawValue),
+        .target(name: KitModule.realtime.rawValue),
+    ],
     swiftSettings: [.enableUpcomingFeature("MemberImportVisibility")]
 )
 

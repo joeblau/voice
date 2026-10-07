@@ -63,9 +63,14 @@ public actor RealtimeToolRunner {
 
         /// Tool rounds allowed in a row before further calls are refused.
         public var maximumConsecutiveRounds: Int
+        /// Report each call's arguments and output in ``Activity/details(callID:name:arguments:output:)``
+        /// (DEBUG builds show them under the chat's tool chips, #68). Off by
+        /// default: they are user content.
+        public var reportsCallDetails: Bool
 
-        public init(maximumConsecutiveRounds: Int = 4) {
+        public init(maximumConsecutiveRounds: Int = 4, reportsCallDetails: Bool = false) {
             self.maximumConsecutiveRounds = maximumConsecutiveRounds
+            self.reportsCallDetails = reportsCallDetails
         }
 
         public static let standard = Configuration()
@@ -96,6 +101,9 @@ public actor RealtimeToolRunner {
         case started(callID: String, name: String)
         /// A call's output was decided and is being sent.
         case finished(callID: String, name: String, outcome: Outcome)
+        /// What a call was asked and answered, just before its `finished`.
+        /// Only with ``Configuration/reportsCallDetails``.
+        case details(callID: String, name: String, arguments: String, output: String)
         /// Every output of `responseID` was sent, followed by one
         /// `response.create`.
         case followUpRequested(responseID: String?)
@@ -122,6 +130,8 @@ public actor RealtimeToolRunner {
         var token: UInt64
         /// The name the model used.
         var name: String
+        /// The model's arguments, for ``Activity/details(callID:name:arguments:output:)``.
+        var arguments: String
         var round: RoundKey
         var interval: SignpostInterval
         var work: Task<Void, Never>?
@@ -161,6 +171,11 @@ public actor RealtimeToolRunner {
     private var currentResponseID: String?
     /// Follow-ups requested in a row by the current tool chain.
     private var consecutiveRounds = 0
+    /// Counts the responses the runner didn't ask for (the user's turns):
+    /// each starts a new tool chain. Tools read it through
+    /// ``RealtimeToolCallContext/chain``, e.g. `forget` to know that the user
+    /// spoke between asking for a confirmation and getting it.
+    private var chain = 0
     /// Whether the runner sent a `response.create` whose
     /// `response.created` hasn't arrived yet. The next response is then
     /// the runner's follow-up and continues the chain; any other response
@@ -232,6 +247,7 @@ public actor RealtimeToolRunner {
                 // The user's turn (or anything else the runner didn't ask
                 // for): a new tool chain starts here.
                 consecutiveRounds = 0
+                chain += 1
             }
         case .responseOutputItemAdded(let added):
             if case .functionCall(let call) = added.item, let callID = call.callID, let name = call.name {
@@ -294,7 +310,8 @@ public actor RealtimeToolRunner {
         let token = nextToken
         nextToken &+= 1
         calls[callID] = Call(
-            token: token, name: name, round: key, interval: signposter.beginInterval("realtime.toolCall"))
+            token: token, name: name, arguments: configuration.reportsCallDetails ? arguments : "", round: key,
+            interval: signposter.beginInterval("realtime.toolCall"))
         rounds[key, default: Round()].callIDs.append(callID)
         activityContinuation.yield(.started(callID: callID, name: name))
 
@@ -325,8 +342,11 @@ public actor RealtimeToolRunner {
         // the output, and the other is cancelled. The tool runs off the
         // actor, so a slow tool never delays events or other calls.
         let input = Data(arguments.utf8)
+        let context = RealtimeToolCallContext(callID: callID, responseID: key.responseID, chain: chain)
         let work = Task.detached { [weak self] in
-            let (outcome, output) = await Self.run(tool, arguments: input)
+            let (outcome, output) = await RealtimeToolCallContext.$current.withValue(context) {
+                await Self.run(tool, arguments: input)
+            }
             await self?.complete(callID, token: token, outcome: outcome, output: output)
         }
         let timer = Task.detached { [weak self, clock] in
@@ -384,6 +404,10 @@ public actor RealtimeToolRunner {
             Log.realtime.error(
                 "Tool \(label, privacy: .public) \(outcome.rawValue, privacy: .public) (call \(callID, privacy: .public))"
             )
+        }
+        if configuration.reportsCallDetails {
+            activityContinuation.yield(
+                .details(callID: callID, name: call.name, arguments: call.arguments, output: output))
         }
         activityContinuation.yield(.finished(callID: callID, name: call.name, outcome: outcome))
 

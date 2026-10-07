@@ -8,8 +8,9 @@ extension SchemaV2 {
     /// Facts are **add-only and validity-dated** (the Zep / Graphiti model in
     /// issue #1): when something stops being true, the old fact is
     /// invalidated with `invalidate(at:)` and a new one is added, so the
-    /// memory can still answer "what was true in March". Only the user
-    /// deletes facts (the `forget` tool, #68).
+    /// memory can still answer "what was true in March". Asking Grok to
+    /// forget a fact (the `forget` tool, #68) invalidates it too, after the
+    /// user confirms out loud.
     ///
     /// A fact with no `subject` is about the user.
     @Model
@@ -98,8 +99,17 @@ extension SchemaV2 {
 
         /// The fact as one line, e.g. "Acme raised a $2M seed round", with
         /// `userName` standing in for a fact about the user.
+        ///
+        /// A fact with an empty `predicate` holds a whole sentence in
+        /// `objectText` (what the `remember` tool stores, #68: "The user's
+        /// sister is called Maya"), which is the statement as it is.
         public func statement(userName: String = "User") -> String {
-            [subject?.name ?? userName, predicate, objectText]
+            let predicate = predicate.trimmingCharacters(in: .whitespacesAndNewlines)
+            if predicate.isEmpty {
+                let sentence = objectText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !sentence.isEmpty { return sentence }
+            }
+            return [subject?.name ?? userName, predicate, objectText]
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
                 .joined(separator: " ")

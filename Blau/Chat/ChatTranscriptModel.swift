@@ -17,8 +17,9 @@ typealias ChatPlaybackProgress = @Sendable (PlaybackItemID) -> PlayedItem?
 /// rates, so the long list of finished rows isn't rebuilt for every word of
 /// a reply:
 ///
-/// - `recorded`, `liveAgentIDs` and `interruptedAgentIDs` change at most
-///   once per utterance; the finished rows depend on them.
+/// - `recorded`, `liveAgentIDs`, `interruptedAgentIDs` and
+///   `finishedToolCalls` change at most once per utterance or tool call;
+///   the finished rows depend on them.
 /// - `liveRows` changes with every partial and transcript delta; only the
 ///   rows at the bottom depend on it.
 ///
@@ -40,6 +41,9 @@ final class ChatTranscriptModel {
     /// The user's utterances that were discarded, or still waiting when the
     /// conversation stopped: never sent (#80).
     private(set) var unsentUserIDs: Set<UUID> = []
+    /// The chips of the tools Grok called in finished turns (#68); the
+    /// current turn's are in `liveRows`.
+    private(set) var finishedToolCalls: [ChatToolCall] = []
     /// Grok's reply as it plays, then the user's speech in progress.
     private(set) var liveRows: [ChatRow] = []
 
@@ -165,6 +169,10 @@ final class ChatTranscriptModel {
         }
         if unsentUserIDs != state.unsentUserIDs {
             unsentUserIDs = state.unsentUserIDs
+        }
+        let toolCalls = state.finishedToolCalls
+        if finishedToolCalls != toolCalls {
+            finishedToolCalls = toolCalls
         }
         let rows = state.liveRows(now: clock.now)
         if liveRows != rows {
