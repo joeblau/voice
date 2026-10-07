@@ -122,6 +122,10 @@ instruments-template: ## Regenerate the Blau Instruments template from Tools/Ins
 verify-instruments: ## Record with the Blau template on the Mac and check every interval is captured
 	scripts/verify-instruments-template.sh
 
+.PHONY: verify-hud
+verify-hud: ## Record a HUD workload on the Mac and check the HUD's numbers match Instruments
+	scripts/verify-hud.sh
+
 .PHONY: install-instruments-template
 install-instruments-template: ## Add the Blau template to Instruments' template chooser
 	mkdir -p "$(INSTRUMENTS_TEMPLATES_DIR)"

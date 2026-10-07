@@ -793,6 +793,10 @@ public actor TurnOrchestrator: RealtimeService {
     }
 
     private func sent(_ events: [RealtimeClientEvent], turn number: Int?) {
+        usage.textInputs += events.count { event in
+            guard case .conversationItemCreate(.message(let message), _) = event else { return false }
+            return message.role == .user && message.content.contains { $0.type == .inputText }
+        }
         guard let number, let turn = current, turn.number == number else { return }
         guard events.contains(where: { $0.type == "response.create" }) else { return }
         if state == .committing {
@@ -1070,7 +1074,9 @@ public actor TurnOrchestrator: RealtimeService {
             let index = self.agentItemIndex(itemID, contentIndex: delta.contentIndex ?? 0, in: &turn)
             let item = turn.agentItems[index]
             self.audio.enqueue(pcm16: delta.audio, item: item.playbackID)
-            turn.agentItems[index].receivedFrames += Int64(delta.audio.count / 2)
+            let frames = Int64(delta.audio.count / 2)
+            turn.agentItems[index].receivedFrames += frames
+            self.usage.outputAudio += .samples(frames, sampleRate: self.sampleRate)
             guard turn.firstAudioAt == nil else { return }
             let now = self.clock.uptime
             turn.firstAudioAt = now

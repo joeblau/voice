@@ -523,8 +523,10 @@ merged, interrupted or timed out (they never ended) are not sampled. "End of utt
 is when the final reaches the orchestrator; ASR's own end-of-speech delay
 is `asr.eou`.
 
-With the **Performance HUD** flag on, `VoiceLoopHUD` shows
-`TurnHUDReadout`'s rows over the main screen:
+The debug performance HUD (#71, see
+[performance.md](performance.md#performance-hud)) shows them in its Grok
+section, filled by `TurnSnapshot.fill(_:)`; the voice loop's debug screen
+shows `TurnHUDReadout`'s rows:
 
 ```
 Turn         agentSpeaking
@@ -534,7 +536,11 @@ Turn time    last 3120 · p50 2890 · p95 4410 ms (n=12)
 Tokens       4120 in · 960 out · 12 resp
 ```
 
-The full HUD (#71) adds the other subsystems.
+The HUD adds a cost estimate: reply audio minutes × $0.08 plus text inputs ×
+$0.004 (`RealtimePricing.grokVoice`, xAI's published speech-to-speech rates).
+`TurnSnapshot.usage` counts both: `outputAudio` sums every audio delta
+received (replies cut short by barge-in included, since they were
+generated) and `textInputs` every user text item sent.
 
 ### Usage
 
@@ -797,7 +803,7 @@ path from a VAD onset through the real `StreamingAudioPlayer`).
 | Spoken conversation end to end | Install the speech models, add an xAI key, open **Debug menu → Voice Loop**, Start, and hold a ten-turn conversation on the speaker and on AirPods; every reply plays and the Voice Loop screen shows both sides | pending (needs a device and xAI credentials) |
 | Transcript stored for both roles | After the conversation above, the store holds one user and one agent utterance per turn, in order | pending (needs a device and xAI credentials) |
 | Response matching echoes | Record the conversation above with `RealtimeTranscriptRecorder`, interrupting Grok mid-reply a few times. Note whether `response.created` echoes `metadata.blau_turn`, and whether an `error` names the `response.create`'s `event_id` in `error.event_id`. Without either, matching runs on the order fallback | pending (needs xAI credentials) |
-| EOU → first audio p50 | Turn on **Performance HUD** in the debug menu; after 20 turns, record the HUD's p50 / p95 here and compare them with Instruments' `realtime.firstAudio` | pending (needs a device and xAI credentials) |
+| EOU → first audio p50 | Turn on **Settings → Developer → Performance HUD**; after 20 turns, record the HUD's p50 / p95 here and compare them with Instruments' `realtime.firstAudio` | pending (needs a device and xAI credentials) |
 | Echo | On the loudspeaker, Grok's own voice never produces a user utterance (VPIO echo cancellation; voice ID is #47) | pending (needs a device) |
 | Barge-in → silence | Debug menu → Voice Loop on the loudspeaker; ask for a long answer and say "wait" mid-sentence. The audio stops at once; Console (`category:realtime`) shows `Barge-in on segment …: playback flushed … ms after the onset` and `Flushed playback` (`category:audio`). Record the HUD's **Barge-in** row over 10 barge-ins, and a screen recording's onset → silence | pending (needs a device and xAI credentials) |
 | Next reply heard-only | Ask for a numbered list of five items, barge in during item two and ask "what was the last item you said?". Grok names item one or two, never a later one; the truncate's `audio_end_ms` matches what was heard (audio.md check 11) | pending (needs a device and xAI credentials) |

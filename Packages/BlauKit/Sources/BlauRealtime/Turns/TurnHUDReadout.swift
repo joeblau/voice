@@ -3,8 +3,9 @@ import Foundation
 
 /// The voice loop's lines in the debug performance HUD: turn state,
 /// connection, the session's continuity (#39), end of utterance → first
-/// audio (last / p50 / p95) and token usage. The app's HUD overlay renders the rows as they are; the full HUD
-/// (#71) adds the other subsystems' rows next to them.
+/// audio (last / p50 / p95), token usage and barge-ins, as rows for the
+/// voice loop's debug screen. The performance HUD (#71) shows the same
+/// values through `TurnSnapshot.fill(_:pricing:)`.
 public struct TurnHUDReadout: Sendable, Equatable {
     public struct Row: Sendable, Equatable, Identifiable {
         public var label: String

@@ -60,6 +60,23 @@ struct StreamingTopicSegmenterTests {
         #expect(backend.openIntervals.isEmpty)
     }
 
+    @Test func reportsTheNewestDepthScoreToTheHUD() async throws {
+        let gauges = PerformanceGauges()
+        let segmenter = StreamingTopicSegmenter(
+            embedder: LexicalTextEmbedder(), signposter: .disabled(.topics), gauges: gauges)
+        let units = ScriptedTranscript.threeTopics.units()
+        _ = try await segmenter.append(units[0])
+        #expect(gauges.reading(.topicDepth) == nil, "No gap has a full right window yet")
+
+        for unit in units.dropFirst() {
+            _ = try await segmenter.append(unit)
+        }
+        let depth = try #require(gauges.reading(.topicDepth))
+        let latestGap = units.count - (await segmenter.config.rightWindow)
+        #expect(depth.value == (await segmenter.gapScore(at: latestGap))?.depth)
+        #expect(depth.count == units.count - (await segmenter.config.rightWindow))
+    }
+
     @Test func anEmbedderFailureLeavesTheSegmenterUnchanged() async throws {
         let embedder = FakeEmbedder()
         let segmenter = StreamingTopicSegmenter(embedder: embedder, signposter: .disabled(.topics))

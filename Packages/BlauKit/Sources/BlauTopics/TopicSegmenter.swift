@@ -189,6 +189,12 @@ public struct TopicSegmenter: Sendable {
         )
     }
 
+    /// The scores at the newest gap with a full right window, or `nil`
+    /// before there is one. Its depth can still grow as later units arrive.
+    public var latestGapScore: GapScore? {
+        latestGap.flatMap(gapScore(at:))
+    }
+
     // MARK: Scoring
 
     /// The newest gap with a full right window, or `nil` before there is one.
