@@ -33,11 +33,11 @@ final class AsrBenchmarks: BenchmarkTestCase {
 /// Speaker embeddings for the voice ID gate.
 final class VoiceIDBenchmarks: BenchmarkTestCase {
     func testWeSpeakerResNet34() async throws {
-        try await measure(SpeakerEmbeddingBenchmark.weSpeaker(audio: Self.audio))
+        try await measure(SpeakerEmbeddingBenchmarkCase.weSpeaker(audio: Self.audio))
     }
 
     func testCamPlusPlus() async throws {
-        try await measure(SpeakerEmbeddingBenchmark.camPlusPlus(audio: Self.audio))
+        try await measure(SpeakerEmbeddingBenchmarkCase.camPlusPlus(audio: Self.audio))
     }
 }
 

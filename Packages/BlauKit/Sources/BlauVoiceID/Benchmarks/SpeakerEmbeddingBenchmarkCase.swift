@@ -21,7 +21,7 @@ public protocol SpeakerEmbeddingExtractor: Sendable {
 /// embeddings of two different windows of the benchmark speech (one
 /// speaker). It is a sanity check that the extractor produces meaningful
 /// embeddings on this device, not a calibration (#48 does that).
-public struct SpeakerEmbeddingBenchmark: BenchmarkCase {
+public struct SpeakerEmbeddingBenchmarkCase: BenchmarkCase {
     public struct Configuration: Hashable, Sendable {
         public var windowSeconds: [Double]
         public var iterations: Int
@@ -65,9 +65,9 @@ public struct SpeakerEmbeddingBenchmark: BenchmarkCase {
     /// WeSpeaker ResNet34-LM (FluidAudio `wespeaker_v2`), id
     /// `voiceid.wespeaker`.
     public static func weSpeaker(audio: AudioFixtureStore, configuration: Configuration = Configuration())
-        -> SpeakerEmbeddingBenchmark
+        -> SpeakerEmbeddingBenchmarkCase
     {
-        SpeakerEmbeddingBenchmark(
+        SpeakerEmbeddingBenchmarkCase(
             id: "voiceid.wespeaker", title: "WeSpeaker ResNet34-LM embedding", extractor: WeSpeakerExtractor(),
             audio: audio, configuration: configuration,
             notes: [
@@ -78,9 +78,9 @@ public struct SpeakerEmbeddingBenchmark: BenchmarkCase {
 
     /// CAM++ (FluidAudio, beta), the challenger in #1, id `voiceid.campplus`.
     public static func camPlusPlus(audio: AudioFixtureStore, configuration: Configuration = Configuration())
-        -> SpeakerEmbeddingBenchmark
+        -> SpeakerEmbeddingBenchmarkCase
     {
-        SpeakerEmbeddingBenchmark(
+        SpeakerEmbeddingBenchmarkCase(
             id: "voiceid.campplus", title: "CAM++ embedding (challenger)", extractor: CamPlusPlusExtractor(),
             audio: audio, configuration: configuration,
             notes: [

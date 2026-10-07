@@ -33,8 +33,8 @@
         static func cases(audio: AudioFixtureStore) -> [any BenchmarkCase] {
             ParakeetEouChunkSize.allCases.map { StreamingAsrBenchmark.parakeetEou($0, audio: audio) } + [
                 OfflineAsrBenchmark.parakeetTdtV3(audio: audio),
-                SpeakerEmbeddingBenchmark.weSpeaker(audio: audio),
-                SpeakerEmbeddingBenchmark.camPlusPlus(audio: audio),
+                SpeakerEmbeddingBenchmarkCase.weSpeaker(audio: audio),
+                SpeakerEmbeddingBenchmarkCase.camPlusPlus(audio: audio),
                 TextEmbeddingBenchmark.embeddingGemma(searching: [modelsDirectory, directory]),
                 TopicLabelBenchmark(generator: FoundationModelsLabelBenchmarkGenerator()),
             ]

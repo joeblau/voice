@@ -7,7 +7,7 @@ import Synchronization
 import Testing
 
 @Suite("Speaker embedding benchmark")
-struct SpeakerEmbeddingBenchmarkTests {
+struct SpeakerEmbeddingBenchmarkCaseTests {
     /// Embeds in 2 ms per second of audio; the embedding is the window's
     /// mean and energy, so two windows of the same signal are similar.
     final class FakeExtractor: SpeakerEmbeddingExtractor {
@@ -43,7 +43,7 @@ struct SpeakerEmbeddingBenchmarkTests {
     @Test func measuresEachWindowLength() async throws {
         let clock = ManualClock()
         let extractor = FakeExtractor(clock: clock)
-        let benchmark = SpeakerEmbeddingBenchmark(
+        let benchmark = SpeakerEmbeddingBenchmarkCase(
             id: "voiceid.fake", title: "Fake", extractor: extractor,
             audio: AudioFixtureStore(fixture: .syntheticSignal(duration: .seconds(12))),
             configuration: .init(windowSeconds: [1.5, 3], iterations: 10, warmupIterations: 2),
@@ -70,8 +70,8 @@ struct SpeakerEmbeddingBenchmarkTests {
 
     @Test func casesAreNamed() {
         let audio = AudioFixtureStore(fixture: .syntheticSignal(duration: .seconds(1)))
-        #expect(SpeakerEmbeddingBenchmark.weSpeaker(audio: audio).id == "voiceid.wespeaker")
-        #expect(SpeakerEmbeddingBenchmark.camPlusPlus(audio: audio).id == "voiceid.campplus")
-        #expect(SpeakerEmbeddingBenchmark.weSpeaker(audio: audio).category == .voiceID)
+        #expect(SpeakerEmbeddingBenchmarkCase.weSpeaker(audio: audio).id == "voiceid.wespeaker")
+        #expect(SpeakerEmbeddingBenchmarkCase.camPlusPlus(audio: audio).id == "voiceid.campplus")
+        #expect(SpeakerEmbeddingBenchmarkCase.weSpeaker(audio: audio).category == .voiceID)
     }
 }

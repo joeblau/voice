@@ -18,11 +18,11 @@ struct RealModelSpeakerBenchmarkTests {
         recordingURL: ProcessInfo.processInfo.environment["BLAU_BENCH_AUDIO"].map { URL(filePath: $0) })
 
     @Test func weSpeaker() async throws {
-        try await Self.runAndReport(SpeakerEmbeddingBenchmark.weSpeaker(audio: Self.audio))
+        try await Self.runAndReport(SpeakerEmbeddingBenchmarkCase.weSpeaker(audio: Self.audio))
     }
 
     @Test func camPlusPlus() async throws {
-        try await Self.runAndReport(SpeakerEmbeddingBenchmark.camPlusPlus(audio: Self.audio))
+        try await Self.runAndReport(SpeakerEmbeddingBenchmarkCase.camPlusPlus(audio: Self.audio))
     }
 
     static func runAndReport(_ benchmark: any BenchmarkCase) async throws {
