@@ -2,7 +2,12 @@
 /// choice can be re-run as soon as the missing numbers arrive (the
 /// EmbeddingGemma weights are gated; the iPhone latencies need a device).
 ///
-/// A candidate **qualifies** when, at the stored width (256-d int8):
+/// Only **memory candidates** (`Measurements.Role.memoryCandidate`) take
+/// part. Baselines (Apple's `NLContextualEmbedding`) and the CPU fallback
+/// (potion-retrieval-32M) are measured for comparison but are never
+/// selected and never hold the verdict at `.pending`.
+///
+/// A memory candidate **qualifies** when, at the stored width (256-d int8):
 ///
 /// | Criterion | Budget | Why |
 /// | --- | --- | --- |
@@ -18,10 +23,29 @@
 /// `.pending`, with the provisional choice: the architecture's default
 /// (`TextEmbeddingModelSpec.chosen`) unless a known number already rules it
 /// out.
+///
+/// If **no** memory candidate qualifies, the verdict is `.fallback` to
+/// `fallback` (Qwen3-Embedding-0.6B) as long as its vectors are finite: it
+/// may break the latency or download budget, and those breaches are listed
+/// in the verdict's reasons, because adopting it means the owner raises the
+/// budget (`maximumDownloadBytes`, `maximumDeviceP95Milliseconds`). With a
+/// raised budget it qualifies and the rule returns `.chosen` for it.
 public struct EmbeddingModelSelection: Hashable, Sendable {
     /// What is known about one candidate. `nil` means not measured yet.
     public struct Measurements: Codable, Hashable, Sendable {
+        /// Whether a model takes part in the selection.
+        public enum Role: String, Codable, Hashable, Sendable {
+            /// Can be selected as the memory embedding model.
+            case memoryCandidate
+            /// Measured for comparison only (`NLContextualEmbedding`).
+            case baseline
+            /// A static CPU embedder kept for when the Neural Engine is
+            /// unavailable (potion-retrieval-32M, #26); not a memory model.
+            case cpuFallback
+        }
+
         public var specID: String
+        public var role: Role
         /// Recall@5 on the personal eval set at the stored width, int8.
         public var recallAt5: Double?
         /// Vectors with NaN or infinity from the Core ML model on the Neural
@@ -37,6 +61,7 @@ public struct EmbeddingModelSelection: Hashable, Sendable {
 
         public init(
             specID: String,
+            role: Role = .memoryCandidate,
             recallAt5: Double? = nil,
             nonFiniteOutputs: Int? = nil,
             deviceP95Milliseconds: Double? = nil,
@@ -44,17 +69,43 @@ public struct EmbeddingModelSelection: Hashable, Sendable {
             needsCoreMLModel: Bool = true
         ) {
             self.specID = specID
+            self.role = role
             self.recallAt5 = recallAt5
             self.nonFiniteOutputs = nonFiniteOutputs
             self.deviceP95Milliseconds = deviceP95Milliseconds
             self.downloadBytes = downloadBytes
             self.needsCoreMLModel = needsCoreMLModel
         }
+
+        private enum CodingKeys: String, CodingKey {
+            case specID, role, recallAt5, nonFiniteOutputs, deviceP95Milliseconds, downloadBytes, needsCoreMLModel
+        }
+
+        public init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.init(
+                specID: try container.decode(String.self, forKey: .specID),
+                role: try container.decodeIfPresent(Role.self, forKey: .role) ?? .memoryCandidate,
+                recallAt5: try container.decodeIfPresent(Double.self, forKey: .recallAt5),
+                nonFiniteOutputs: try container.decodeIfPresent(Int.self, forKey: .nonFiniteOutputs),
+                deviceP95Milliseconds: try container.decodeIfPresent(Double.self, forKey: .deviceP95Milliseconds),
+                downloadBytes: try container.decodeIfPresent(Int64.self, forKey: .downloadBytes),
+                needsCoreMLModel: try container.decodeIfPresent(Bool.self, forKey: .needsCoreMLModel) ?? true)
+        }
     }
 
     public enum Verdict: Hashable, Sendable {
+        /// `id` qualifies on every budget and wins on Recall@5 and size.
         case chosen(String, reasons: [String])
+        /// A number the decision depends on is missing.
         case pending(provisional: String?, missing: [String])
+        /// No memory candidate qualifies; `id` is the documented fallback.
+        /// `reasons` lists why each candidate was ruled out, including the
+        /// budgets the fallback itself breaks (the owner has to raise them to
+        /// adopt it); `missing` lists the fallback's numbers still unmeasured.
+        case fallback(String, reasons: [String], missing: [String])
+        /// No memory candidate qualifies and the fallback can't be used
+        /// either (absent, or non-finite vectors).
         case noneQualifies(reasons: [String])
     }
 
@@ -62,6 +113,9 @@ public struct EmbeddingModelSelection: Hashable, Sendable {
     public var maximumDownloadBytes: Int64 = 400_000_000
     public var recallTolerance: Double = 0.03
     public var preferred: String = TextEmbeddingModelSpec.chosen.id
+    /// The model to fall back to when no memory candidate qualifies
+    /// (docs/benchmarks.md, "Text embedding model", decision 2).
+    public var fallback: String? = TextEmbeddingModelSpec.qwen3Embedding06B.id
 
     public init() {}
 
@@ -77,18 +131,29 @@ public struct EmbeddingModelSelection: Hashable, Sendable {
             specID: TextEmbeddingModelSpec.qwen3Embedding06B.id, recallAt5: 0.797, nonFiniteOutputs: 0,
             downloadBytes: 753_000_000),
         Measurements(
-            specID: TextEmbeddingModelSpec.potionRetrieval32M.id, recallAt5: 0.620, downloadBytes: 124_000_000,
-            needsCoreMLModel: false),
+            specID: TextEmbeddingModelSpec.potionRetrieval32M.id, role: .cpuFallback, recallAt5: 0.620,
+            downloadBytes: 124_000_000, needsCoreMLModel: false),
         Measurements(
-            specID: TextEmbeddingModelSpec.nlContextualEmbedding.id, recallAt5: 0.325, needsCoreMLModel: false),
+            specID: TextEmbeddingModelSpec.nlContextualEmbedding.id, role: .baseline, recallAt5: 0.325,
+            needsCoreMLModel: false),
     ]
 
     /// Why `m` fails a budget, or an empty list if it passes every known one.
     public func disqualifications(_ m: Measurements) -> [String] {
-        var reasons: [String] = []
+        unusable(m) + overBudget(m)
+    }
+
+    /// Failures no budget change can fix.
+    private func unusable(_ m: Measurements) -> [String] {
         if let nonFinite = m.nonFiniteOutputs, nonFinite > 0, m.needsCoreMLModel {
-            reasons.append("\(m.specID): \(nonFinite) non-finite vectors on the Neural Engine")
+            return ["\(m.specID): \(nonFinite) non-finite vectors on the Neural Engine"]
         }
+        return []
+    }
+
+    /// Failures the owner can accept by raising a budget.
+    private func overBudget(_ m: Measurements) -> [String] {
+        var reasons: [String] = []
         if let p95 = m.deviceP95Milliseconds, p95 > maximumDeviceP95Milliseconds {
             reasons.append("\(m.specID): iPhone p95 \(p95) ms > \(maximumDeviceP95Milliseconds) ms")
         }
@@ -98,8 +163,10 @@ public struct EmbeddingModelSelection: Hashable, Sendable {
         return reasons
     }
 
-    /// The numbers still missing for `m`.
+    /// The numbers the decision still needs from `m`. Baselines and the CPU
+    /// fallback don't take part in the decision, so they never need any.
     public func missing(_ m: Measurements) -> [String] {
+        guard m.role == .memoryCandidate else { return [] }
         var missing: [String] = []
         if m.recallAt5 == nil { missing.append("\(m.specID): Recall@5") }
         if m.deviceP95Milliseconds == nil { missing.append("\(m.specID): iPhone latency") }
@@ -110,10 +177,11 @@ public struct EmbeddingModelSelection: Hashable, Sendable {
         return missing
     }
 
-    public func evaluate(_ candidates: [Measurements]) -> Verdict {
+    public func evaluate(_ measurements: [Measurements]) -> Verdict {
+        let candidates = measurements.filter { $0.role == .memoryCandidate }
         let ruledOut = candidates.flatMap(disqualifications)
         let viable = candidates.filter { disqualifications($0).isEmpty }
-        guard !viable.isEmpty else { return .noneQualifies(reasons: ruledOut) }
+        guard !viable.isEmpty else { return fallbackVerdict(candidates, ruledOut: ruledOut) }
 
         let missing = viable.flatMap(self.missing)
         if !missing.isEmpty {
@@ -135,5 +203,14 @@ public struct EmbeddingModelSelection: Hashable, Sendable {
         ]
         reasons += ruledOut
         return .chosen(winner.specID, reasons: reasons)
+    }
+
+    /// Every memory candidate is ruled out: fall back to `fallback` if it was
+    /// only ruled out by a budget.
+    private func fallbackVerdict(_ candidates: [Measurements], ruledOut: [String]) -> Verdict {
+        guard let fallback, let model = candidates.first(where: { $0.specID == fallback }),
+            unusable(model).isEmpty
+        else { return .noneQualifies(reasons: ruledOut) }
+        return .fallback(model.specID, reasons: ruledOut, missing: missing(model))
     }
 }

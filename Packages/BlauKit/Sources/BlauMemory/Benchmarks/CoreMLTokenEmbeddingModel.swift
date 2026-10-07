@@ -119,18 +119,27 @@ public actor CoreMLTokenEmbeddingModel: TokenEmbeddingModel {
             compiled = try await MLModel.compileModel(at: url)
             compiledCopy = compiled
         }
-        let configuration = MLModelConfiguration()
-        configuration.computeUnits = computeUnits
-        let model = try await MLModel.load(contentsOf: compiled, configuration: configuration)
-        let layout = try Self.layout(of: model.modelDescription)
-        if case .embeddings(let name, _, let width) = layout.tokens {
-            guard let tableURL = tokenEmbeddingsURL ?? TokenEmbeddingTable.sibling(of: url) else {
-                throw CoreMLEmbeddingError.missingTokenEmbeddings(name)
+        do {
+            let configuration = MLModelConfiguration()
+            configuration.computeUnits = computeUnits
+            let model = try await MLModel.load(contentsOf: compiled, configuration: configuration)
+            let layout = try Self.layout(of: model.modelDescription)
+            if case .embeddings(let name, _, let width) = layout.tokens {
+                guard let tableURL = tokenEmbeddingsURL ?? TokenEmbeddingTable.sibling(of: url) else {
+                    throw CoreMLEmbeddingError.missingTokenEmbeddings(name)
+                }
+                table = try TokenEmbeddingTable(url: tableURL, width: width)
             }
-            table = try TokenEmbeddingTable(url: tableURL, width: width)
+            self.layout = layout
+            self.model = model
+        } catch {
+            // Don't leak the temporary compiled copy when loading fails.
+            if compiled != url {
+                try? FileManager.default.removeItem(at: compiled)
+                if compiledCopy == compiled { compiledCopy = nil }
+            }
+            throw error
         }
-        self.layout = layout
-        self.model = model
     }
 
     public func embed(tokenIDs: [Int32]) async throws -> [Float] {
@@ -297,7 +306,8 @@ public actor CoreMLTokenEmbeddingModel: TokenEmbeddingModel {
     }
 }
 
-enum CoreMLEmbeddingError: Error, CustomStringConvertible {
+/// Why a `CoreMLTokenEmbeddingModel` could not load or embed.
+public enum CoreMLEmbeddingError: Error, Equatable, CustomStringConvertible {
     case notLoaded
     case unsupportedInputs([String])
     case missingOutput(String)
@@ -306,7 +316,7 @@ enum CoreMLEmbeddingError: Error, CustomStringConvertible {
     case missingTokenEmbeddings(String)
     case tableWidthMismatch(table: Int, model: Int)
 
-    var description: String {
+    public var description: String {
         switch self {
         case .notLoaded: "The model is not loaded"
         case .unsupportedInputs(let names): "Could not find a token-ID input among \(names)"

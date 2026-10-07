@@ -564,9 +564,15 @@ finishing is two commands (below). **No model is hosted yet** (see
    `EmbeddingModelSelection` in BlauMemory: a candidate qualifies with **no
    non-finite vectors on the Neural Engine, an iPhone `embed.128tok` p95 ≤
    50 ms and a download ≤ 400 MB**; among qualifying candidates the
-   smallest download within **0.03 Recall@5** of the best wins. Over what
-   was measured (`EmbeddingModelSelection.measured`) it returns
-   `.pending(provisional: "embeddinggemma-300m", ...)`.
+   smallest download within **0.03 Recall@5** of the best wins. Only
+   memory candidates (EmbeddingGemma, Qwen3) take part: each measurement
+   carries a `role`, and `NLContextualEmbedding` (`.baseline`) and
+   potion-retrieval-32M (`.cpuFallback`) are never selected and never hold
+   the verdict at pending. Over what was measured
+   (`EmbeddingModelSelection.measured`) it returns
+   `.pending(provisional: "embeddinggemma-300m", ...)`, missing only
+   EmbeddingGemma's numbers; once they pass, it returns
+   `.chosen("embeddinggemma-300m", ...)`.
 2. **Fallback: Qwen3-Embedding-0.6B**, if EmbeddingGemma fails the rule. It
    is the strongest model measured here (Recall@5 0.809 at 256-d int8),
    converts cleanly to fp16 with no NaN on the Neural Engine, and runs a
@@ -575,15 +581,25 @@ finishing is two commands (below). **No model is hosted yet** (see
    (442 MB, Recall@5 0.797) and an int8 token table (155 MB) it is about
    600 MB, over the 400 MB budget; int4 weights didn't stay on the Neural
    Engine (below). Falling back to it means raising the budget, which is
-   the owner's call. EmbeddingGemma is about 100M transformer parameters
-   plus a 201M-parameter table, roughly 300 MB at int8 for both.
+   the owner's call. The rule makes this explicit
+   (`EmbeddingModelSelection.fallback`): when no memory candidate
+   qualifies, it returns `.fallback("qwen3-embedding-0.6b", reasons:,
+   missing:)` as long as Qwen3's vectors are finite. `reasons` lists the
+   budgets Qwen3 breaks (today `download 753 MB > 400 MB`), `missing` its
+   numbers still to measure (its iPhone latency). With
+   `maximumDownloadBytes` raised past its size, Qwen3 qualifies and the
+   rule returns `.chosen("qwen3-embedding-0.6b", ...)`. It never falls back
+   to potion-retrieval-32M (decision 4). EmbeddingGemma is about 100M
+   transformer parameters plus a 201M-parameter table, roughly 300 MB at
+   int8 for both.
 3. **Not Apple's `NLContextualEmbedding`** for memory: Recall@5 0.325, below
    plain BM25 (0.517). It is not trained for retrieval. (It stays the topic
    segmenter's embedder until #60 lands.)
 4. **potion-retrieval-32M only as a CPU fallback**: 0.620 Recall@5 is far
    behind the transformers, but it needs no Core ML model, costs
    microseconds on the CPU and is an option for #26 if the Neural Engine is
-   unavailable off screen.
+   unavailable off screen. It is not a memory model, so the selection rule
+   never picks it (`role: .cpuFallback`).
 5. **Ship the transformer as a split Core ML model**: `inputs_embeds` plus
    a memory-mapped token table, not token IDs (next section). This is what
    puts the model on the Neural Engine at all, and it applies to
@@ -750,9 +766,14 @@ Then pin `revision` in `candidates.py` to the commit you evaluated, fill
 the EmbeddingGemma rows above, run `make bench` with
 `EmbeddingGemma300M.mlpackage` and its `.token-embeddings.f16` in
 `BlauBenchmarks/Assets/` on two iPhones, and feed the numbers to
-`EmbeddingModelSelection().evaluate(_:)`. If fp16 produces non-finite
-vectors, compare `--precision fp32` (it can't use the Neural Engine) and
-record both; the rule then picks Qwen3.
+`EmbeddingModelSelection().evaluate(_:)` (update the EmbeddingGemma entry of
+`EmbeddingModelSelection.measured`; the baselines need no iPhone latency).
+If fp16 produces non-finite vectors, compare `--precision fp32` (it can't
+use the Neural Engine) and record both; the rule then returns
+`.fallback("qwen3-embedding-0.6b", ...)`, which lists the 400 MB download
+budget Qwen3 breaks. Adopting it means the owner raises
+`maximumDownloadBytes` (and Qwen3's iPhone latency lands), after which the
+rule returns `.chosen("qwen3-embedding-0.6b", ...)`.
 
 ### Hosting the model
 

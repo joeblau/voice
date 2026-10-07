@@ -78,6 +78,9 @@ struct EmbeddingModelSelectionTests {
         }
         #expect(provisional == TextEmbeddingModelSpec.chosen.id)
         #expect(missing.contains("embeddinggemma-300m: Recall@5"))
+        // Only EmbeddingGemma's numbers hold the verdict: baselines don't take
+        // part, and Qwen3 is already out on size.
+        #expect(missing.allSatisfy { $0.hasPrefix("embeddinggemma-300m: ") })
         // Qwen3 is out on size until the budget changes or the table shrinks.
         let qwen = EmbeddingModelSelection.measured.first { $0.specID == "qwen3-embedding-0.6b" }
         #expect(selection.disqualifications(try #require(qwen)).count == 1)
@@ -135,11 +138,114 @@ struct EmbeddingModelSelectionTests {
         let slow = M(
             specID: "qwen3-embedding-0.6b", recallAt5: 0.82, nonFiniteOutputs: 0, deviceP95Milliseconds: 90,
             downloadBytes: 1_200_000_000)
-        guard case .noneQualifies(let reasons) = EmbeddingModelSelection().evaluate([slow]) else {
+        var selection = EmbeddingModelSelection()
+        selection.fallback = nil
+        guard case .noneQualifies(let reasons) = selection.evaluate([slow]) else {
             Issue.record("Expected none to qualify")
             return
         }
         #expect(reasons.count == 2)
+    }
+
+    /// The recorded numbers once EmbeddingGemma's arrive.
+    static func measured(replacingGemmaWith gemma: M) -> [M] {
+        EmbeddingModelSelection.measured.map { $0.specID == gemma.specID ? gemma : $0 }
+    }
+
+    /// docs/benchmarks.md, "Finishing EmbeddingGemma": a passing
+    /// EmbeddingGemma is chosen even though the baselines have no iPhone
+    /// latency and Qwen3 is over the download budget.
+    @Test func fullyMeasuredEmbeddingGemmaIsChosenOverTheRecordedNumbers() {
+        let gemma = M(
+            specID: "embeddinggemma-300m", recallAt5: 0.78, nonFiniteOutputs: 0, deviceP95Milliseconds: 20,
+            downloadBytes: 300_000_000)
+        let verdict = EmbeddingModelSelection().evaluate(Self.measured(replacingGemmaWith: gemma))
+        guard case .chosen(let id, let reasons) = verdict else {
+            Issue.record("Expected a choice, got \(verdict)")
+            return
+        }
+        #expect(id == "embeddinggemma-300m")
+        #expect(reasons.contains { $0.hasPrefix("qwen3-embedding-0.6b: download 753 MB") })
+        #expect(!reasons.contains { $0.contains("potion") || $0.contains("nl-contextual") })
+    }
+
+    /// docs/benchmarks.md, decision 2: if EmbeddingGemma's fp16 vectors
+    /// aren't finite, the rule falls back to Qwen3 (not to potion) and says
+    /// that the download budget has to be raised for it.
+    @Test func nonFiniteEmbeddingGemmaFallsBackToQwen3() {
+        let gemma = M(specID: "embeddinggemma-300m", nonFiniteOutputs: 3)
+        let verdict = EmbeddingModelSelection().evaluate(Self.measured(replacingGemmaWith: gemma))
+        guard case .fallback(let id, let reasons, let missing) = verdict else {
+            Issue.record("Expected the Qwen3 fallback, got \(verdict)")
+            return
+        }
+        #expect(id == "qwen3-embedding-0.6b")
+        #expect(
+            reasons == [
+                "embeddinggemma-300m: 3 non-finite vectors on the Neural Engine",
+                "qwen3-embedding-0.6b: download 753 MB > 400 MB",
+            ])
+        #expect(missing == ["qwen3-embedding-0.6b: iPhone latency"])
+    }
+
+    /// The same failure once the owner raises the budget for Qwen3 and its
+    /// iPhone latency lands: Qwen3 is chosen outright.
+    @Test func raisingTheBudgetMakesTheFallbackTheChoice() {
+        let gemma = M(specID: "embeddinggemma-300m", nonFiniteOutputs: 3)
+        let measured = Self.measured(replacingGemmaWith: gemma).map { m in
+            var m = m
+            if m.specID == "qwen3-embedding-0.6b" { m.deviceP95Milliseconds = 30 }
+            return m
+        }
+        var selection = EmbeddingModelSelection()
+        selection.maximumDownloadBytes = 800_000_000
+        guard case .chosen(let id, _) = selection.evaluate(measured) else {
+            Issue.record("Expected a choice")
+            return
+        }
+        #expect(id == "qwen3-embedding-0.6b")
+    }
+
+    @Test func fallbackWithNonFiniteVectorsLeavesNothing() {
+        let gemma = M(specID: "embeddinggemma-300m", nonFiniteOutputs: 3)
+        let qwen = M(
+            specID: "qwen3-embedding-0.6b", recallAt5: 0.8, nonFiniteOutputs: 1, deviceP95Milliseconds: 20,
+            downloadBytes: 300_000_000)
+        guard case .noneQualifies(let reasons) = EmbeddingModelSelection().evaluate([gemma, qwen]) else {
+            Issue.record("Expected none to qualify")
+            return
+        }
+        #expect(reasons.count == 2)
+    }
+
+    /// Baselines and the CPU fallback are never selected and never hold the
+    /// verdict at `.pending`, however good their numbers.
+    @Test func baselinesNeitherWinNorBlock() {
+        let gemma = M(
+            specID: "embeddinggemma-300m", recallAt5: 0.70, nonFiniteOutputs: 0, deviceP95Milliseconds: 20,
+            downloadBytes: 300_000_000)
+        let potion = M(specID: "potion-retrieval-32m", role: .cpuFallback, recallAt5: 0.95, needsCoreMLModel: false)
+        let apple = M(specID: "nl-contextual-embedding", role: .baseline, needsCoreMLModel: false)
+        let selection = EmbeddingModelSelection()
+        #expect(selection.missing(potion).isEmpty)
+        #expect(selection.missing(apple).isEmpty)
+        guard case .chosen(let id, _) = selection.evaluate([gemma, potion, apple]) else {
+            Issue.record("Expected a choice")
+            return
+        }
+        #expect(id == "embeddinggemma-300m")
+        #expect(
+            EmbeddingModelSelection.measured.filter { $0.role == .memoryCandidate }.map(\.specID) == [
+                "embeddinggemma-300m", "qwen3-embedding-0.6b",
+            ])
+    }
+
+    @Test func measurementsDecodeWithoutARole() throws {
+        let json = Data(#"{"specID": "qwen3-embedding-0.6b", "recallAt5": 0.8}"#.utf8)
+        let decoded = try JSONDecoder().decode(M.self, from: json)
+        #expect(decoded == M(specID: "qwen3-embedding-0.6b", recallAt5: 0.8))
+        let baseline = M(specID: "nl-contextual-embedding", role: .baseline, needsCoreMLModel: false)
+        #expect(try JSONDecoder().decode(M.self, from: JSONEncoder().encode(baseline)) == baseline)
     }
 
     @Test func staticModelsSkipCoreMLCriteria() {

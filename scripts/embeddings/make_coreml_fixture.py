@@ -46,7 +46,15 @@ def main() -> None:
         minimum_deployment_target=ct.target.iOS18,
     )
     model.short_description = "Blau test fixture: masked mean of input embeddings (#59)"
-    model.save(str(OUT / "TinySplitEmbedding.mlpackage"))
+    package = OUT / "TinySplitEmbedding.mlpackage"
+    model.save(str(package))
+    # The model has no weights, so coremltools writes an empty `weights/`
+    # directory that Manifest.json still lists. Git does not track empty
+    # directories, and Core ML refuses a package whose listed item is
+    # missing ("Item does not exist for identifier"), so keep it committable.
+    weights = package / "Data/com.apple.CoreML/weights"
+    weights.mkdir(parents=True, exist_ok=True)
+    (weights / ".gitkeep").touch()
     rows = np.array([[i, i + 0.5, -i, 1] for i in range(VOCABULARY)], dtype="<f2")
     rows.tofile(OUT / "TinySplitEmbedding.token-embeddings.f16")
     print(f"wrote {OUT}")

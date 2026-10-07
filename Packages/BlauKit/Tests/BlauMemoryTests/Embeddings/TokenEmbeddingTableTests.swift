@@ -87,9 +87,30 @@ struct TokenEmbeddingTableTests {
             let package = copy.appendingPathComponent("Lonely.mlpackage")
             try FileManager.default.copyItem(
                 at: directory.appendingPathComponent("TinySplitEmbedding.mlpackage"), to: package)
-            await #expect(throws: (any Error).self) {
+            // The specific error, so a broken package can't pass this vacuously.
+            await #expect(throws: CoreMLEmbeddingError.missingTokenEmbeddings("inputs_embeds")) {
                 try await CoreMLTokenEmbeddingModel(url: package, computeUnits: .cpuOnly).load()
             }
         }
     #endif
+
+    /// Every item `Manifest.json` lists has to be in git, or Core ML refuses
+    /// the package on a clean checkout ("Item does not exist for
+    /// identifier"). A weightless model's `weights/` directory is empty, so
+    /// it needs its `.gitkeep`.
+    @Test func fixturePackageContainsEveryManifestItem() throws {
+        let directory = try #require(Bundle.module.url(forResource: "Fixtures/CoreML", withExtension: nil))
+        let package = directory.appendingPathComponent("TinySplitEmbedding.mlpackage")
+        let manifest = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: package.appendingPathComponent("Manifest.json")))
+        let entries = try #require((manifest as? [String: Any])?["itemInfoEntries"] as? [String: [String: Any]])
+        #expect(!entries.isEmpty)
+        for (identifier, entry) in entries {
+            let path = try #require(entry["path"] as? String, "\(identifier)")
+            let item = package.appendingPathComponent("Data").appendingPathComponent(path)
+            #expect(FileManager.default.fileExists(atPath: item.path), "\(path) is listed but missing")
+        }
+        let weights = package.appendingPathComponent("Data/com.apple.CoreML/weights/.gitkeep")
+        #expect(FileManager.default.fileExists(atPath: weights.path))
+    }
 }
