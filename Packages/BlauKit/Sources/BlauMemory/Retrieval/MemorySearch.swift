@@ -233,7 +233,8 @@ public struct MemorySearch: Sendable {
         response.queryEntities = entityGraph.entities(mentionedIn: text)
         let expansion = try await expand(
             graph: entityGraph, queryEntities: response.queryEntities, head: fused.prefix(configuration.expansionSeeds),
-            chunks: &chunks, kinds: kinds, validity: response.timeFilter ?? response.timeExpression?.range, now: now)
+            chunks: &chunks, kinds: kinds, window: response.timeFilter,
+            validity: response.timeFilter ?? response.timeExpression?.range, now: now)
         response.expandedFacts = expansion.facts.count
         if !expansion.facts.isEmpty { fused = Self.merge(expansion.facts, into: fused) }
 
@@ -344,9 +345,18 @@ public struct MemorySearch: Sendable {
         }
     }
 
+    /// Facts linked to the query's entities and the head's.
+    ///
+    /// - Parameters:
+    ///   - window: The explicit `after` / `before` window, a hard filter:
+    ///     only facts whose chunk is dated inside it (like every other
+    ///     result), not merely ones valid at some point in it.
+    ///   - validity: The range a fact must have been valid in (the window
+    ///     or the query's time expression); `nil` for facts valid `now`.
     private func expand(
         graph: MemoryEntityGraph, queryEntities: [UUID], head: ArraySlice<(id: UUID, score: Double)>,
-        chunks: inout ChunkCache, kinds: Set<MemorySourceKind>?, validity: Range<Date>?, now: Date
+        chunks: inout ChunkCache, kinds: Set<MemorySourceKind>?, window: Range<Date>?, validity: Range<Date>?,
+        now: Date
     ) async throws -> Expansion {
         var expansion = Expansion()
         guard !graph.isEmpty, kinds?.contains(.fact) != false else { return expansion }
@@ -368,7 +378,10 @@ public struct MemorySearch: Sendable {
         var candidates: [(chunkID: UUID, entity: UUID, score: Double)] = []
         for seed in seeds.prefix(configuration.maximumExpandedEntities) {
             let facts = graph.facts(about: seed.entity).filter { fact in
-                validity.map(fact.isValid(during:)) ?? fact.isValid(at: now)
+                // A fact's chunk is dated `validFrom`; skipping ones outside
+                // the window here keeps them from taking the slots below.
+                window.map { $0.contains(fact.validFrom) } != false
+                    && (validity.map(fact.isValid(during:)) ?? fact.isValid(at: now))
             }
             for (position, fact) in facts.prefix(configuration.factsPerEntity).enumerated()
             where expansion.entityByChunk[fact.chunkID] == nil {
@@ -379,9 +392,14 @@ public struct MemorySearch: Sendable {
             if candidates.count >= configuration.maximumExpandedFacts { break }
         }
         candidates = Array(candidates.prefix(configuration.maximumExpandedFacts))
-        // Only facts the index holds (a fact not indexed yet is skipped).
+        // Only facts the index holds (a fact not indexed yet is skipped),
+        // and with an explicit window only those whose chunk is in it: the
+        // index's date is what every other result was filtered on.
         try await chunks.load(candidates.map(\.chunkID))
-        let held = candidates.filter { chunks[$0.chunkID] != nil }
+        let held = candidates.filter { candidate in
+            guard let chunk = chunks[candidate.chunkID] else { return false }
+            return window.map { $0.contains(chunk.createdAt) } != false
+        }
         expansion.facts = held.map { ($0.chunkID, $0.score) }
         expansion.entityByChunk = Dictionary(uniqueKeysWithValues: held.map { ($0.chunkID, $0.entity) })
         return expansion

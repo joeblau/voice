@@ -321,7 +321,7 @@ public struct TemporalQueryParser: Sendable {
         case "last", "previous", "past":
             guard let next = text(1) else { return nil }
             if word == "last", next == "night" {
-                return match(context.day(-1)..<context.today.addingTimeInterval(6 * 3_600), through: 1)
+                return match(context.day(-1)..<context.adding(.hour, 6, to: context.today), through: 1)
             }
             if let unit = Self.calendarUnit(next) {
                 return match(word == "past" ? context.rolling(unit, 1) : context.previousPeriod(unit), through: 1)

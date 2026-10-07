@@ -113,9 +113,15 @@ struct TemporalQueryParserTests {
         #expect(expression.phrase == "yesterday")
     }
 
+    /// Whether the host writes numeric dates month first ("3/14"), which is
+    /// how `NSDataDetector` (it takes no locale) reads them.
+    static let hostIsMonthFirst =
+        DateFormatter.dateFormat(fromTemplate: "Md", options: 0, locale: .current)?.first == "M"
+
     /// `NSDataDetector` catches numeric dates; its result is re-anchored to
     /// `now` and the past, whatever the wall clock says.
-    @Test func numericDatesGoThroughTheDataDetector() throws {
+    @Test(.enabled(if: hostIsMonthFirst, "NSDataDetector reads numeric dates in the host's order"))
+    func numericDatesGoThroughTheDataDetector() throws {
         let expression = try #require(Self.parse("what happened on 3/14"))
         #expect(expression.source == .dataDetector)
         #expect(expression.anchor == .calendar)
@@ -123,7 +129,9 @@ struct TemporalQueryParserTests {
 
         let withYear = try #require(Self.parse("the call on 12/24/2025"))
         #expect(withYear.range == Self.days("2025-12-24", "2025-12-25"))
+    }
 
+    @Test func theDataDetectorCanBeTurnedOff() {
         var parser = Self.parser
         parser.usesDataDetector = false
         #expect(parser.parse("what happened on 3/14", now: Self.now) == nil)

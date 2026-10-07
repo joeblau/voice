@@ -65,7 +65,11 @@ try await search.search("pricing", after: start, before: end, kinds: [.document,
    and then "Alex Moreno designs gardens at a studio in Emeryville", which
    shares no word with the query. Facts about the user (no subject) are
    never expanded; invalidated ones only inside a time range they were
-   valid in.
+   valid in. An explicit `after` / `before` window stays a hard filter
+   here too: a fact is expanded only if its chunk is dated (`validFrom`)
+   inside the window, so a fact that became true before `after` and still
+   held during the window is not added. Like every result, it must be in
+   `timeFilter`.
 5. **Dedupe.** One result per chunk, and one per text: the same note or
    fact created on two devices (case and whitespace ignored) shows once.
 6. **Rerank** (optional). With a `MemoryReranker`, the top 20 are reordered
@@ -255,7 +259,7 @@ logged.
 | --- | --- |
 | Quality (`swift test`) | `HybridRetrievalEvalTests`: #59's eval set through the real index with recorded Qwen3 vectors; the target above, and the BM25-only fallback keeping keyword queries |
 | Weight sweep (opt-in) | `BLAU_RETRIEVAL_TUNING=1 swift test --filter HybridRetrievalEvalTests` |
-| Pipeline (`swift test`) | `MemorySearchTests`: fusion and signals, BM25-only fallback, limits and kinds, hard and soft time filters, calendar dates, multi-hop and query-named expansion, validity in a time filter, graph failures, dedupe, reranker and its failure, snippets, the signpost, `MemorySearchService` |
+| Pipeline (`swift test`) | `MemorySearchTests`: fusion and signals, BM25-only fallback, limits and kinds, hard and soft time filters, calendar dates, multi-hop and query-named expansion, validity in a time filter, expansion kept inside an explicit window, graph failures, dedupe, reranker and its failure, snippets, the signpost, `MemorySearchService` |
 | Pieces (`swift test`) | `RankFusionTests`, `TemporalQueryParserTests` (every row above against a fixed "now", time zones, first weekday, the `NSDataDetector` fallback), `MemoryEntityGraphTests` (matching, validity, duplicates, the cache, reading SwiftData) |
 | Latency on the Mac (opt-in) | `BLAU_INDEX_BENCHMARK=1 swift test -Xswiftc -O --scratch-path .build/optimized --filter MemorySearchBenchmarkTests` |
 | Latency on an iPhone | `make bench` or the debug benchmark screen |

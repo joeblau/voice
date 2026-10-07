@@ -260,6 +260,58 @@ struct MemorySearchTests {
         #expect(!ids.contains(partner.chunkID(partner.jobFact)))
     }
 
+    /// Explicit bounds stay a hard filter for expansion: a fact valid
+    /// during the window but dated (`validFrom`) before it isn't added.
+    @Test func expansionKeepsToTheExplicitWindow() async throws {
+        let harness = try Harness()
+        let partner = Partner()
+        try await partner.populate(harness)
+        let t0 = IndexTestSupport.t0
+        let dinner = try await harness.add(
+            "Alex Moreno called about dinner", kind: .conversation, createdAt: t0.addingTimeInterval(2 * Self.day))
+        let window = t0.addingTimeInterval(Self.day)..<t0.addingTimeInterval(3 * Self.day)
+        // The old job fact (from t0, invalidated at t0 + 5 days) overlaps the
+        // window, but its chunk is dated t0.
+        let oldJob = try #require(partner.graph.facts(about: partner.alex).first { $0.id == partner.oldJobFact })
+        #expect(oldJob.isValid(during: window))
+        #expect(!window.contains(oldJob.validFrom))
+
+        let response = try await harness.search(vectors: false, entities: partner.graph)
+            .search("Alex dinner", after: window.lowerBound, before: window.upperBound)
+        #expect(response.queryEntities == [partner.alex])
+        #expect(response.results.map(\.id) == [dinner.id])
+        #expect(response.results.allSatisfy { window.contains($0.date) })
+        #expect(response.expandedFacts == 0)
+
+        // A fact dated inside the window is still expanded.
+        let later = t0.addingTimeInterval(4 * Self.day)..<t0.addingTimeInterval(6 * Self.day)
+        let inside = try await harness.search(vectors: false, entities: partner.graph)
+            .search("how is Alex doing", after: later.lowerBound, before: later.upperBound)
+        let job = try #require(inside.results.first { $0.id == partner.chunkID(partner.jobFact) })
+        #expect(job.signals.contains(.entity))
+        #expect(inside.results.allSatisfy { later.contains($0.date) })
+    }
+
+    /// The index's date decides, even when the graph disagrees (a fact
+    /// edited since it was indexed).
+    @Test func expansionChecksTheIndexedDateAgainstTheWindow() async throws {
+        let harness = try Harness()
+        let t0 = IndexTestSupport.t0
+        let alex = UUID()
+        let fact = UUID()
+        try await harness.add("Alex Moreno designs parks at Gensler", kind: .fact, createdAt: t0, sourceID: fact)
+        let window = t0.addingTimeInterval(Self.day)..<t0.addingTimeInterval(3 * Self.day)
+        let graph = MemoryEntityGraph(
+            entities: [.init(id: alex, name: "Alex Moreno", aliases: ["Alex"], type: .person)],
+            facts: [.init(id: fact, subjectID: alex, validFrom: t0.addingTimeInterval(2 * Self.day))])
+
+        let response = try await harness.search(vectors: false, entities: graph)
+            .search("how is Alex doing", after: window.lowerBound, before: window.upperBound)
+        #expect(response.queryEntities == [alex])
+        #expect(response.results.isEmpty)
+        #expect(response.expandedFacts == 0)
+    }
+
     @Test func noExpansionWhenFactsAreFilteredOut() async throws {
         let harness = try Harness()
         let partner = Partner()
