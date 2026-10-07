@@ -157,6 +157,10 @@ Keep each commit building and passing `make lint`.
   parallel branches merge cleanly.
 - Before you ask for review, run `make lint`, `make build`, the tests you
   touched, and `swift test` in `Packages/BlauKit` once it exists.
+- CI must be green: the `lint`, `package-tests` and `app-tests` checks run on
+  every push to the PR (see [docs/ci.md](docs/ci.md)). A failing test job
+  uploads its `.xcresult` or test report, and every job reproduces locally
+  with the same `make` target.
 
 ## Issues
 
