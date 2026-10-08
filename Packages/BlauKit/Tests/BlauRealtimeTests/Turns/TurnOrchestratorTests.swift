@@ -131,6 +131,8 @@ struct TurnOrchestratorTests {
 
     // MARK: Filtering
 
+    /// The gate (#47) passes an uncertain utterance on only when its
+    /// uncertain policy allows it, so the orchestrator sends it.
     @Test func blankAndRejectedUtterancesAreNotSent() async throws {
         let harness = TurnHarness()
         let socket = try await harness.start()
@@ -140,8 +142,8 @@ struct TurnOrchestratorTests {
         try await harness.orchestrator.send(harness.utterance("Me", from: 6, to: 7, decision: .accept))
         try await harness.waitForSent("response.create", on: socket)
         await harness.orchestrator.waitUntilSettled()
-        #expect(socket.sentUserTexts == ["Me"])
-        #expect(harness.recording?.stored.map(\.text) == ["Me"])
+        #expect(socket.sentUserTexts == ["Maybe me", "Me"])
+        #expect(harness.recording?.stored.map(\.text) == ["Maybe me", "Me"])
     }
 
     @Test func anIgnoredUtteranceEndsTheUserSpeakingState() async throws {

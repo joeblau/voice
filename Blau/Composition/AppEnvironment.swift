@@ -285,7 +285,9 @@ final class AppEnvironment {
             ?? MemoryIndexingController(persistence: persistence, embedder: textEmbeddings, performance: performance)
         let voiceLoop = VoiceLoop(
             realtime: realtime, speechModels: speechModels, audio: conversationAudio,
-            backgroundInference: backgroundInference, performance: performance)
+            backgroundInference: backgroundInference, performance: performance,
+            // #47: only the enrolled speaker's utterances reach Grok.
+            voiceID: .live(persistence: persistence, models: speechModels, flags: flags, settings: voiceIDSettings))
         self.voiceLoop = voiceLoop
         self.transcriptFeed = transcriptFeed
         self.chat = ChatTranscriptModel(
@@ -507,7 +509,8 @@ extension AppEnvironment {
             // the VAD segmenter, so it is wired in together with the live
             // audio pipeline (see docs/asr.md).
             transcriber: UnavailableService(subsystem: "transcription"),
-            // #47: the voice ID verification gate.
+            // The voice ID verification gate (#47) is built per conversation
+            // by `VoiceLoop`, like the transcriber (see docs/voice-id.md).
             voiceGate: UnavailableService(subsystem: "voice ID"),
             // The Grok realtime session and the turn orchestrator (#34 - #36).
             realtime: VoiceLoop.makeOrchestrator(

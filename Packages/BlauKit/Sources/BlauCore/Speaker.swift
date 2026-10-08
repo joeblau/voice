@@ -9,9 +9,10 @@ public enum Speaker: String, CaseIterable, Codable, Hashable, Sendable {
 /// The voice ID gate's verdict on a segment of speech: is it the enrolled
 /// speaker?
 ///
-/// Only `accept`ed speech is committed as a user utterance and sent to Grok.
+/// `accept`ed speech is committed as a user utterance and sent to Grok.
 /// `uncertain` speech keeps being transcribed speculatively and is re-scored
-/// once more audio arrives; `reject`ed speech is dropped.
+/// once more audio arrives; if it is still uncertain at the end, the gate's
+/// uncertain policy decides (#47). `reject`ed speech is dropped.
 public enum SpeakerDecision: String, CaseIterable, Codable, Hashable, Sendable {
     /// The segment matches the enrolled voiceprint.
     case accept
@@ -20,6 +21,8 @@ public enum SpeakerDecision: String, CaseIterable, Codable, Hashable, Sendable {
     /// Not enough evidence yet either way.
     case uncertain
 
-    /// Whether speech with this verdict may be committed and sent to Grok.
+    /// Whether speech with this verdict may be committed and sent to Grok
+    /// on its own merit. `uncertain` speech is sent only when the voice
+    /// gate's uncertain policy allows it.
     public var allowsCommit: Bool { self == .accept }
 }

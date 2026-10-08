@@ -35,3 +35,25 @@ extension VoiceprintScorer {
         }
     }
 }
+
+extension VoiceprintMatcher {
+    /// Scores `probe` against the whole voiceprint (the best of the centroid
+    /// and every device's set) and decides with `config`'s thresholds for
+    /// its audio length, inside the `voiceid.verify` signpost interval.
+    ///
+    /// This is what the verification gate (#47) runs at every checkpoint of
+    /// a speech segment (``SpeakerVerifier``).
+    ///
+    /// - Precondition: `probe` comes from the voiceprint's model.
+    public func verify(
+        _ probe: SpeakerEmbedding,
+        config: VoiceIDConfig,
+        signposter: Signposter = Signposts.voiceID
+    ) -> VoiceVerification {
+        signposter.withInterval(.voiceIDVerify) {
+            let score = score(probe)
+            return VoiceVerification(
+                score: score, decision: config.decision(score: score, audioDuration: probe.audioDuration))
+        }
+    }
+}

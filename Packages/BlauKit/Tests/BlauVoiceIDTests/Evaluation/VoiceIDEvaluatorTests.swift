@@ -101,6 +101,42 @@ struct VoiceIDEvaluatorTests {
         #expect(report.decisions.contains { $0.condition == "loudspeaker" && $0.trials == .nonTarget })
     }
 
+    /// The gate simulation (#47) decides every probe once per target and
+    /// condition, from its longest score: here the 3 s window, so it agrees
+    /// with the 3 s decision breakdown.
+    @Test func gateOutcomesDecideEveryProbeOnceFromItsLongestScore() async throws {
+        let report = try await evaluator.run(try syntheticDataset(), plan: plan, date: "d")
+        let gate = try #require(report.gate)
+        for trials in [VoiceIDDecisionBreakdown.TrialKind.target, .nonTarget] {
+            let outcome = try #require(gate.first { $0.condition == "all" && $0.trials == trials })
+            let atThreeSeconds = try #require(
+                report.decisions.first {
+                    $0.window == 3 && $0.condition == "all" && $0.group == "all" && $0.trials == trials
+                })
+            #expect(outcome.total == atThreeSeconds.total)
+            #expect(outcome.accepted == atThreeSeconds.accepted)
+            #expect(outcome.uncertain == atThreeSeconds.uncertain)
+            #expect(outcome.rejected == atThreeSeconds.rejected)
+            #expect(outcome.unscored == 0)
+        }
+        // Every condition, owner trials only where they exist.
+        #expect(!gate.contains { $0.condition == "loudspeaker" && $0.trials == .target })
+        #expect(gate.contains { $0.condition == "loudspeaker" && $0.trials == .nonTarget })
+        #expect(report.markdown().contains("## The verification gate"))
+    }
+
+    @Test func gateOutcomeRates() {
+        let owner = VoiceIDGateOutcome(
+            condition: "all", trials: .target, accepted: 90, uncertain: 7, rejected: 2, unscored: 1)
+        #expect(owner.total == 100)
+        #expect(owner.falseRejectRate == 0.02)
+        #expect(owner.falseRejectRateDroppingUncertain == 0.10)
+        let impostor = VoiceIDGateOutcome(
+            condition: "all", trials: .nonTarget, accepted: 1, uncertain: 4, rejected: 195, unscored: 0)
+        #expect(impostor.falseAcceptRate == 0.005)
+        #expect(impostor.falseAcceptRateSendingUncertain == 0.025)
+    }
+
     @Test func withoutACohortSkipsASNormAndTalkerConditions() async throws {
         let dataset = try syntheticDataset(cohort: 0)
         let report = try await evaluator.run(dataset, plan: plan, date: "d")

@@ -159,7 +159,7 @@ requests, then swaps, so a stage never misses a chunk. Stages adopt
 | ----- | ------ | ------ | ------ |
 | Silero VAD (`SileroSpeechProbabilityModel`) | `[neuralEngine, cpu]`, keeps its LSTM state across a switch | 256 ms chunk | Done (#26); the segmenter reports each model call through `inferenceObserver` |
 | Streaming ASR (`TranscriberRouter`: Parakeet EOU, then Apple's `SpeechTranscriber`) | `[neuralEngine, systemSpeech]` (Parakeet on the CPU needs `.cpuOnly` loading in `ParakeetEouRecognizer`) | 320 ms hop | Done (#31): the router is the `"asr"` stage, switches engines at an utterance boundary, and `ParakeetStreamingTranscriber` reports each chunk through `inferenceObserver` ([apple-asr.md](apple-asr.md)); the composition root registers it with the live audio pipeline |
-| Voice ID (WeSpeaker) | `[neuralEngine, cpu]` | per segment | #47 registers the gate's embedder |
+| Voice ID (WeSpeaker) | `[neuralEngine, cpu]` | per segment | Not registered yet: the gate (#47) loads WeSpeaker with `cpuAndNeuralEngine`. A failed embedding leaves the segment uncertain (the uncertain policy decides), so off screen voice ID degrades rather than stalls; moving it to the CPU while locked is a follow-up |
 
 Every model is loaded with `.cpuAndNeuralEngine` or `.cpuOnly`, never with
 the GPU, which iOS refuses in the background (docs/benchmarks.md).

@@ -595,7 +595,9 @@ public actor TurnOrchestrator: RealtimeService {
 
     /// Commits a final, verified user utterance and asks Grok to respond.
     ///
-    /// Blank utterances and ones the voice gate didn't accept are ignored.
+    /// Blank utterances and ones the voice gate rejected are ignored. An
+    /// `uncertain` utterance reaches the orchestrator only when the gate's
+    /// uncertain policy let it through (#47), so it is committed.
     /// The utterance joins the running conversation whatever conversation id
     /// it carries.
     ///
@@ -782,7 +784,7 @@ public actor TurnOrchestrator: RealtimeService {
         let ignored: Bool
         if incoming.isBlank {
             ignored = true
-        } else if let decision = incoming.speakerDecision, !decision.allowsCommit {
+        } else if let decision = incoming.speakerDecision, decision == .reject {
             Log.realtime.info("Ignored a \(decision.rawValue, privacy: .public) utterance")
             ignored = true
         } else {

@@ -1,6 +1,6 @@
 # Voice ID evaluation: LibriSpeech dev-clean (40 speakers) with a test-clean cohort
 
-- Date: 2026-10-07
+- Date: 2026-10-08
 - Model: `wespeaker-resnet34-lm@df2625ac`
 - Consent / licence: LibriSpeech, CC BY 4.0 (public-domain LibriVox audiobooks), https://www.openslr.org/12
 - Target speakers: 40 (160 enrollment clips)
@@ -74,6 +74,26 @@ Scoring `cosine/centroid`, no preprocessing. Conditions without owner trials (lo
 | babble | Four background talkers at 10 dB SNR in a small room (RT60 0.4 s, DRR +3 dB) |
 | loudspeaker | Played through a small speaker (200 Hz-5 kHz, saturated) across a living room (RT60 0.5 s, DRR 0 dB) |
 | overlap | A second talker 6 dB below the probe's talker |
+
+## The verification gate
+
+Each probe as one speech segment, decided as the gate decides it with the proposed thresholds: the longest score it fills (the gate's end-of-segment score). Owner FRR counts rejections; uncertain owner speech is also lost outside an active turn or under 2 s. Impostor FAR counts accepts; uncertain impostor speech is also sent in an active turn when 2 s or longer.
+
+| Condition | Trials | Count | Accept | Uncertain | Reject | FRR / FAR | FRR (uncertain dropped) / FAR (uncertain sent) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| all | owner | 1600 | 1540 | 36 | 24 | 1.50% | 3.75% |
+| all | impostor | 74880 | 529 | 5090 | 69261 | 0.71% | 7.50% |
+| clean | owner | 320 | 312 | 5 | 3 | 0.94% | 2.50% |
+| clean | impostor | 12480 | 99 | 898 | 11483 | 0.79% | 7.99% |
+| room-near | owner | 320 | 311 | 6 | 3 | 0.94% | 2.81% |
+| room-near | impostor | 12480 | 94 | 874 | 11512 | 0.75% | 7.76% |
+| room-far | owner | 320 | 302 | 11 | 7 | 2.19% | 5.62% |
+| room-far | impostor | 12480 | 89 | 799 | 11592 | 0.71% | 7.12% |
+| babble | owner | 320 | 307 | 7 | 6 | 1.88% | 4.06% |
+| babble | impostor | 12480 | 71 | 785 | 11624 | 0.57% | 6.86% |
+| loudspeaker | impostor | 12480 | 78 | 813 | 11589 | 0.62% | 7.14% |
+| overlap | owner | 320 | 308 | 7 | 5 | 1.56% | 3.75% |
+| overlap | impostor | 12480 | 98 | 921 | 11461 | 0.79% | 8.17% |
 
 ## Decisions at the proposed thresholds
 

@@ -3,9 +3,9 @@
 Blau only answers the enrolled speaker. `BlauVoiceID` turns speech into
 speaker embeddings, compares them with the enrolled voiceprint and decides
 accept, reject or uncertain per speech segment (issue #5). This document
-covers the embedding extractor (#45) and [enrollment](#enrollment-46)
-(#46); the verification gate (#47) and threshold calibration (#48,
-[voice-id-eval.md](voice-id-eval.md)) build on them.
+covers the embedding extractor (#45), [enrollment](#enrollment-46) (#46)
+and the [verification gate](#verification-gate-47) (#47); threshold
+calibration (#48) is in [voice-id-eval.md](voice-id-eval.md).
 
 ## Speaker embeddings
 
@@ -229,17 +229,180 @@ that runs them.
 | 1 | On iPhone A, Settings → Voice ID → Enroll Your Voice; time it from Start to "You're enrolled" | Done in under 60 s; the log line `Enrollment (enrollment) finished in … s` agrees | pending |
 | 2 | Say a prompt with a TV on loud nearby | The clip is rejected (Background) | pending |
 | 3 | Have someone else answer prompt 3 | Rejected (Your Voice) | pending |
-| 4 | On device B (same iCloud account), open Settings → Voice ID after sync | "Enrolled", A's model listed under Enrolled Microphones, Add This iPhone's Microphone offered (if B is another model); voice ID verifies the owner on B without enrolling (needs #47) | pending |
+| 4 | On device B (same iCloud account), open Settings → Voice ID after sync | "Enrolled", A's model listed under Enrolled Microphones, Add This iPhone's Microphone offered (if B is another model); voice ID verifies the owner on B without enrolling (the gate, #47: B's log shows `Voice ID gate on`) | pending |
 | 5 | On B, run the top-up | Done in about 20 s; both models listed on A and B | pending |
 | 6 | On A, Delete Voiceprint | "Not enrolled" on A, and on B after sync | pending |
 | 7 | Install a build with a different speaker model identifier | Settings shows "Re-enroll needed"; re-enrolling fixes it | pending |
 | 8 | Enroll with AirPods connected | The capture uses the AirPods microphone (HFP route) and completes | pending |
+
+## Verification gate (#47)
+
+Only the enrolled speaker's utterances reach Grok. `VerificationGate` sits
+between the transcriber and the turn orchestrator, and decides each final
+utterance from VAD's speech segments while the user is still talking, so
+it adds (almost) no latency.
+
+```swift
+import BlauVoiceID
+
+let verifier = try SpeakerVerifier(
+    embedder: try await WeSpeakerEmbedder.load(modelDirectory: directory),
+    voiceprint: voiceprint,                          // VoiceprintStatus.enrolled
+    config: { settings.currentConfig() })            // Settings → Voice ID → Sensitivity
+let gate = VerificationGate(verifier: verifier, history: capture.hub)
+let speech = vad.speechAudio()                       // subscribe before VAD runs
+Task { await gate.run(speech: speech) }
+Task { await orchestrator.run(transcript: gate.filter(transcriber.events)) }
+let bargeIn = BargeInMonitor(target: orchestrator, ..., speakerGate: VoiceIDBargeInGate(gate: gate))
+```
+
+| Type | Role |
+| --- | --- |
+| `VerificationGate` | The gate: follows VAD's speech audio, scores each segment at its checkpoints, decides finals, filters the transcript, answers barge-in |
+| `SpeechVerifying` / `SpeakerVerifier` | Embeds speech and scores it against the voiceprint (`VoiceprintMatcher`, best of the centroid and every device's set) with the current sensitivity's thresholds. Also the `VoiceGate` service |
+| `VerificationGateConfiguration` | Windows, the short-segment and inheritance rules, the uncertain policy, the waits |
+| `UncertainSpeechPolicy` | What happens to uncertain utterances: `.commitDuringActiveTurn(minimumDuration: 2 s)` (default), `.commit`, `.discard` |
+| `ConversationTurnActivity` | Whether the conversation is in an active turn: Grok answering, or within 10 s of Grok's reply or of an utterance sent |
+| `VerificationGateRules` | The decision rules as pure functions (also replayed by the evaluation harness) |
+| `GatedUtterance`, `SegmentVerdict`, `SpeakerScore` | What the gate decided and why: the DEBUG lane, logs, adaptive updates (#49) |
+| `VerificationGateStatistics` | Scores, failures, decisions, committed and dropped utterances, partials held back, barge-in queries, the hold on finals |
+
+### Speculative ASR
+
+The transcriber starts on VAD's speech onset whatever voice ID will say
+(it always did, #29): partials show at once and the words are ready the
+moment the utterance ends. The gate scores the same speech alongside it,
+from VAD's `speechAudio()` stream:
+
+1. **1.5 s** into a segment: the first score.
+2. **3 s**: the re-score, which overrides the first (longer embeddings are
+   more reliable: EER 4.5% at 1.5 s, 3.0% at 3 s).
+3. **End of the segment** (VAD's `speechEnded`), or **end of the
+   utterance** if the transcriber commits first: scored again over all the
+   speech, unless the last score already covers all but 0.5 s of it.
+
+The score that covered the most audio decides, with `VoiceIDConfig`'s
+thresholds for its length (`short` under 3 s, `long` from 3 s, after the
+sensitivity shift): **accept** at or above `T_hi`, **reject** below `T_lo`,
+**uncertain** in between.
+
+**Short segments.** Speech under 1 s isn't scored (18% EER at 1 s). It
+inherits the previous segment's decision when the last *scored* speech
+ended less than 5 s before it, and is uncertain otherwise. Measuring from
+scored speech rather than from the previous segment stops a run of short
+segments (a TV's "Yeah." "Okay." after the owner spoke) from carrying the
+owner's decision on indefinitely.
+
+### Committing and discarding
+
+A final can span several segments (the transcriber keeps an utterance open
+across short pauses, #29). Each segment it covers gives a decision, and
+they combine by speech share (`VerificationGateRules.combine`): accepted
+and no rejected parts accept, rejected and no accepted parts reject; a mix
+goes to the larger share unless the smaller is a third or more, which makes
+it uncertain (the text can't be split by speaker).
+
+| Decision | Disposition | What the orchestrator sees |
+| --- | --- | --- |
+| accept | `accepted` | The final, `speakerDecision: .accept`: committed to Grok |
+| uncertain, in an active turn and ≥ 2 s | `uncertainCommitted` | The final, `speakerDecision: .uncertain`: committed (the orchestrator ignores only `.reject`) |
+| uncertain otherwise | `uncertainDiscarded` | Nothing |
+| reject | `rejected` | Nothing. Never sent |
+
+Partials of a segment already rejected are held back, so a TV's words don't
+show as the user's live text; a refined transcript (#30) follows only a
+final that was sent. Everything the gate didn't send is listed, greyed, in
+the DEBUG **Ignored Speech** lane (Debug menu → Voice Loop) from
+`VerificationGate.verdicts`; it is kept in memory only.
+
+The gate runs when the `voiceIDEnabled` flag is on and a voiceprint is
+enrolled for the current model (`VoiceIDGateLoader` in the app, per
+conversation). Without a voiceprint every utterance goes through, as
+onboarding and Settings explain. If a voiceprint is enrolled but the gate
+can't start (the speaker model isn't installed, the store can't be read),
+the conversation runs unprotected and the failure is logged at `error`:
+better than not hearing the user at all.
+
+### Barge-in
+
+`VerificationGate`, adapted by the app (`VoiceIDBargeInGate`), is the barge-in monitor's `BargeInSpeakerGate` (#37):
+`bargeInDecision(for:)` waits for the segment's first decision (its 1.5 s
+score, or its end for shorter speech) and only `reject` stops the barge-in,
+so **only accepted or uncertain speech interrupts Grok**. If no decision
+comes within 2 s, the speech counts as uncertain. The cost: with voice ID
+on, a barge-in lands about 1.2 s after VAD confirms the onset (at the
+1.5 s score) instead of at once. Speech under 1 s is decided when it ends
+(it inherits), so a quick "wait" right after the owner spoke interrupts as
+soon as it is over.
+
+### Latency
+
+The decision is normally made before the final arrives: the gate only
+holds a final while a score is still being computed, which is at most the
+end-of-speech re-score, one embedding. On this Mac (M3 Max, Core ML
+`cpuAndNeuralEngine`) that hold is 32-64 ms for 2.4 s of speech
+(`RealModelGateScenarioTests`), under the 100 ms target; with a 3 s
+segment the 3 s score already covers it and the hold is under 0.1 ms.
+`VerificationGateStatistics.longestDelay` and the log line per utterance
+(`held … ms`) give the number in the app; the iPhone figure is pending
+(table below).
+
+### Scoring method and AS-norm
+
+The gate scores with whatever `VoiceIDConfig.scoring` says. The shipped
+config is raw cosine against the centroid: the calibration run (#48)
+found AS-norm no better on the public set (EER 4.50% against 4.50% at
+1.5 s, 3.17% against 3.00% at 3 s), so no impostor cohort is bundled yet.
+`SpeakerVerifier(cohort:)` takes one, and the harness compares AS-norm on
+every run; switch when the owner's recordings show a gain
+([voice-id-eval.md](voice-id-eval.md)).
+
+### Results on the public calibration set
+
+The evaluation harness replays the gate's decision on every trial
+([voice-id-eval.md](voice-id-eval.md#the-verification-gate)): each 7 s+
+LibriSpeech probe as one segment, decided by its longest score, 40
+speakers under six clean and simulated conditions (rooms, babble, a TV
+loudspeaker, overlap).
+
+| | Accepted | Uncertain | Rejected |
+| --- | ---: | ---: | ---: |
+| Owner (1,600 trials) | 96.3% | 2.25% | **1.50%** |
+| Impostor (74,880 trials) | **0.71%** | 6.80% | 92.5% |
+
+Owner FRR is 1.50% counting rejections, 3.75% if uncertain speech is never
+sent (outside an active turn or under 2 s). Impostors are accepted 0.71% of
+the time; during an active turn, uncertain impostor speech of 2 s or more
+is also sent (up to 7.5%). That is the price of the issue's default
+uncertain policy; `UncertainSpeechPolicy.discard` closes it at the cost of
+owner recall. These are public-corpus numbers with simulated rooms: the
+owner set decides the thresholds and the policy.
+
+### On-device test plan
+
+| # | Step | Expected | Result |
+| - | ---- | -------- | ------ |
+| 1 | Enrolled; talk to Blau normally for 5 minutes, close and from across the room | Every utterance answered; Debug → Voice Loop → Ignored Speech stays (nearly) empty; log `Utterance accepted … held … ms` under 100 ms | pending |
+| 2 | Play a TV news channel and a podcast near the phone for 5 minutes while idle | Nothing sent to Grok; the lines show in Ignored Speech as rejected | pending |
+| 3 | Same with Grok replying to the owner meanwhile (active turn) | TV lines not answered; count any `uncertainCommitted` TV lines | pending |
+| 4 | Someone else asks Blau a question | Not answered; Ignored Speech shows it rejected | pending |
+| 5 | While Grok speaks, the TV talks; then the owner says "stop" | The TV doesn't interrupt (`otherSpeaker`); the owner does, about 1.5 s into their speech | pending |
+| 6 | Settings → Voice ID → Sensitivity to Strict, repeat 1 | Fewer owner utterances accepted at a distance; none sent from the TV | pending |
+| 7 | Delete the voiceprint, talk | Every utterance answered (no gate) | pending |
+| 8 | Instruments, Blau template: `voiceid.embed` and `voiceid.verify` per segment | One `verify` per checkpoint; embed p95 on the iPhone recorded here | pending |
 
 ## Telemetry
 
 Each `embed` call is one `voiceid.embed` signpost interval (category
 `voiceid`). Failures log at `error` on `Log.voiceID` with the segment count
 and the error; no audio or embedding values are logged.
+
+The gate's every score is a `voiceid.embed` interval followed by a
+`voiceid.verify` interval (scoring and decision, `VoiceprintMatcher.verify`),
+and reports the score and its accept threshold to the performance HUD's
+Voice score row (`PerformanceGauges`). Each final logs its disposition,
+decision, score, segment count and hold time at `notice` (the text itself
+`private`); each segment's decision logs at `debug`.
 
 Enrollment logs each clip's verdict (prompt, talking time, SNR, or the
 issues) and the total duration on `Log.voiceID`, never audio or vectors.
@@ -256,6 +419,11 @@ Voiceprint saves are `db.save` intervals.
 | Enrollment (hermetic) | `EnrollmentQualityTests`, `EnrollmentConsistencyTests`, `VoiceEnrollmentTests`, `VoiceprintStoreTests` and `VoiceprintMatcherTests`: the analysis on synthetic speech and the fixture clips, the recorder's stop rules, the checks, every flow (clean, rejected, someone else, restart, top-up, denied microphone, missing model, cancel, Done), both stores (model version, top-up, duplicates, delete) and max-over-sets scoring. `ScriptedEnrollmentAudio` and `ScriptedSpeakerEmbedder` stand in for the microphone and the model |
 | Enrollment on the real model (opt-in) | `RealModelEnrollmentTests` with `BLAU_SPEAKER_MODEL_DIR`: each fixture speaker enrolls, another speaker's clip is rejected, and the compute time is reported |
 | Enrollment in the app | `VoiceEnrollmentAppTests` (`BlauTests`) and `VoiceEnrollmentUITests` (`BlauUITests`): enrolling from Settings stores the voiceprint Settings reads, cancelling stores nothing, deleting removes it |
+| Gate (hermetic) | `VerificationGateTests`, `VerificationGateRulesTests`, `SpeakerVerifierTests`: checkpoints and re-scores, short-segment inheritance and its limit, the uncertain policy, utterances spanning segments, finals before their segment ends or starts, the capture-history fallback, the transcript filter, barge-in verdicts and timeouts, the hold on finals; `ScriptedVerifier` scores a scripted speaker timeline |
+| Gate scenarios (hermetic) | `VerificationGateScenarioTests`: the owner talking to Blau between a TV, a podcast and another person (synthetic voices through the real `SpeakerVerifier`); only the owner's lines are sent, with the turn idle and active |
+| Gate on the real model (opt-in) | `RealModelGateScenarioTests` with `BLAU_SPEAKER_MODEL_DIR`: the owner (CMU ARCTIC `bdl`) close and in a small room, other speakers through a simulated TV loudspeaker and in the room; only the owner is sent. Also measures the hold on a final |
+| Barge-in with voice ID | `VoiceGateBargeInIntegrationTests` (`BlauKitIntegrationTests`): the real `BargeInMonitor` asking the real gate; accepted and uncertain speech interrupt, rejected doesn't |
+| Gate in the app | `VoiceLoopTests` (`BlauTests`): the Ignored Speech lane and Grok's activity reaching the gate |
 
 ```sh
 cd Packages/BlauKit

@@ -1,5 +1,6 @@
 #if DEBUG
     import BlauRealtime
+    import BlauVoiceID
     import SwiftUI
 
     /// The debug menu's entry to the voice loop, until the record button
@@ -57,6 +58,8 @@
                     LabeledContent("Grok", value: loop.snapshot.agentText.isEmpty ? "–" : loop.snapshot.agentText)
                 }
 
+                IgnoredSpeechSection(ignored: loop.ignoredSpeech)
+
                 Section("Metrics") {
                     ForEach(loop.hudReadout.rows) { row in
                         LabeledContent(row.label, value: row.value)
@@ -69,6 +72,8 @@
             .navigationTitle("Voice Loop")
         }
 
+        static let ignoredSpeechIdentifier = "blau.voiceLoop.ignoredSpeech"
+
         private var phaseDescription: String {
             switch loop.phase {
             case .idle: "Idle"
@@ -76,6 +81,49 @@
             case .running: loop.snapshot.session.isReconnecting ? "Reconnecting…" : "Running"
             case .failed(let reason): "Failed: \(reason)"
             }
+        }
+    }
+
+    /// The "ignored speech" lane (#47): what the voice ID gate kept from Grok
+    /// this conversation, greyed out, newest first, with the decision and
+    /// score. Never sent anywhere; DEBUG builds only.
+    struct IgnoredSpeechSection: View {
+        let ignored: [GatedUtterance]
+
+        var body: some View {
+            Section {
+                if ignored.isEmpty {
+                    Text("Nothing ignored yet.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(ignored.reversed()) { verdict in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(verdict.utterance.text)
+                                .foregroundStyle(.secondary)
+                            Text(Self.detail(verdict))
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+            } header: {
+                Text("Ignored Speech")
+            } footer: {
+                Text("Speech voice ID didn't send to Grok: someone else, or uncertain and dropped by the policy.")
+            }
+            .accessibilityIdentifier(VoiceLoopDebugView.ignoredSpeechIdentifier)
+        }
+
+        static func detail(_ verdict: GatedUtterance) -> String {
+            let score = verdict.representativeScore.map { String(format: "%.2f", $0) } ?? "–"
+            let reason =
+                switch verdict.disposition {
+                case .rejected: "Rejected"
+                case .uncertainDiscarded: "Uncertain, dropped"
+                case .accepted, .uncertainCommitted: "Sent"
+                }
+            return "\(reason) · score \(score) · \(verdict.segments.count) segment(s)"
         }
     }
 #endif

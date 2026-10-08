@@ -4,13 +4,14 @@ import BlauPersistence
 import BlauRealtime
 import BlauTelemetry
 import BlauTranscription
+import BlauVoiceID
 import Foundation
 import Observation
 
 /// Runs a spoken conversation with Grok (#36): the live audio pipeline
-/// (voice-processing capture, Silero VAD, streaming Parakeet ASR) feeding the
-/// `TurnOrchestrator`, whose replies play through the `StreamingAudioPlayer`
-/// on the same audio engine.
+/// (voice-processing capture, Silero VAD, streaming Parakeet ASR, and the
+/// voice ID gate, #47) feeding the `TurnOrchestrator`, whose replies play
+/// through the `StreamingAudioPlayer` on the same audio engine.
 ///
 /// The conversation audio (#26: the voice-processing engine with capture and
 /// playback, kept alive off screen by its `AudioSessionKeeper`) and the
@@ -54,6 +55,11 @@ final class VoiceLoop {
     private(set) var startError: (any Error)?
     /// The orchestrator's latest snapshot.
     private(set) var snapshot = TurnSnapshot()
+    /// What the voice ID gate (#47) kept from Grok this conversation, newest
+    /// last (at most ``ignoredSpeechLimit``): the DEBUG "ignored speech"
+    /// lane. Rejected speech and uncertain speech the policy dropped.
+    private(set) var ignoredSpeech: [GatedUtterance] = []
+    static let ignoredSpeechLimit = 50
 
     /// The realtime half: the `TurnOrchestrator`. `nil` when this
     /// environment can't run a conversation (previews and tests run on a
@@ -72,6 +78,7 @@ final class VoiceLoop {
 
     @ObservationIgnored private var pipeline: (any VoiceLoopPipeline)?
     @ObservationIgnored private var transcriptTask: Task<Void, Never>?
+    @ObservationIgnored private var verdictTask: Task<Void, Never>?
     @ObservationIgnored private var observation: Task<Void, Never>?
     /// Bumped by every `start()` and `stop()`. A start that finds it changed
     /// after an `await` was ended by `stop()` meanwhile, and unwinds.
@@ -89,7 +96,8 @@ final class VoiceLoop {
         speechModels: ModelManager,
         audio: ConversationAudio? = nil,
         backgroundInference: BackgroundInferenceMonitor? = nil,
-        performance: any PerformanceLevelProviding
+        performance: any PerformanceLevelProviding,
+        voiceID: VoiceIDGateLoader? = nil
     ) {
         let orchestrator = realtime as? TurnOrchestrator
         guard let orchestrator, let audio, orchestrator.audio as? StreamingAudioPlayer === audio.player else {
@@ -105,7 +113,7 @@ final class VoiceLoop {
             startPipeline: {
                 try await LiveVoicePipeline.start(
                     audio: audio, models: speechModels, backgroundInference: backgroundInference,
-                    performance: performance, bargeInTarget: orchestrator)
+                    performance: performance, bargeInTarget: orchestrator, voiceID: voiceID)
             },
             releaseAudio: { await keeper.stopCapture() },
             audio: audio,
@@ -131,6 +139,9 @@ final class VoiceLoop {
             observation = Task { [weak self] in
                 for await snapshot in snapshots {
                     self?.snapshot = snapshot
+                    // The gate's uncertain policy needs to know when Grok
+                    // is answering (#47).
+                    self?.pipeline?.agentActivityChanged(snapshot.state.isAgentActive)
                 }
             }
         }
@@ -139,6 +150,7 @@ final class VoiceLoop {
     isolated deinit {
         observation?.cancel()
         transcriptTask?.cancel()
+        verdictTask?.cancel()
     }
 
     /// Whether this environment can run a conversation.
@@ -260,8 +272,23 @@ final class VoiceLoop {
         }
         let events = pipeline.transcript
         transcriptTask = Task { await conversation.run(transcript: events) }
+        ignoredSpeech = []
+        if let verdicts = pipeline.voiceVerdicts {
+            verdictTask = Task { [weak self] in
+                for await verdict in verdicts where !verdict.disposition.isCommitted {
+                    self?.noteIgnored(verdict)
+                }
+            }
+        }
         phase = .running
         Log.ui.notice("Voice loop started")
+    }
+
+    private func noteIgnored(_ verdict: GatedUtterance) {
+        ignoredSpeech.append(verdict)
+        if ignoredSpeech.count > Self.ignoredSpeechLimit {
+            ignoredSpeech.removeFirst(ignoredSpeech.count - Self.ignoredSpeechLimit)
+        }
     }
 
     private func fail(_ error: any Error) {
@@ -282,6 +309,8 @@ final class VoiceLoop {
         await pipeline?.stopListening()
         await transcriptTask?.value
         transcriptTask = nil
+        verdictTask?.cancel()
+        verdictTask = nil
         await conversation?.close()
         await pipeline?.stop()
         pipeline = nil
@@ -356,29 +385,50 @@ protocol VoiceLoopPipeline: AnyObject {
     func stopListening() async
     /// Stops everything, the microphone too.
     func stop() async
+    /// Grok started or stopped answering, for the voice ID gate's uncertain
+    /// policy (#47).
+    func agentActivityChanged(_ isActive: Bool)
+    /// What the voice ID gate decided for each final utterance, when it runs.
+    var voiceVerdicts: AsyncStream<GatedUtterance>? { get }
+}
+
+extension VoiceLoopPipeline {
+    func agentActivityChanged(_ isActive: Bool) {}
+    var voiceVerdicts: AsyncStream<GatedUtterance>? { nil }
 }
 
 /// The on-device half of the voice loop for one conversation: the VAD and
 /// streaming ASR over the conversation audio's capture, with the microphone
 /// started through its `AudioSessionKeeper` (#26) so the conversation keeps
-/// running off screen, and barge-in (#37) watching VAD for the user talking
-/// over Grok.
+/// running off screen, barge-in (#37) watching VAD for the user talking
+/// over Grok, and the voice ID gate (#47) between the transcriber and Grok.
 @MainActor
 final class LiveVoicePipeline: VoiceLoopPipeline {
     let transcriber: ParakeetStreamingTranscriber
     /// The VAD, for the performance HUD.
     let voiceActivity: VoiceActivitySegmenter
+    /// The voice ID gate, when a voiceprint is enrolled and voice ID is on.
+    let voiceGate: VerificationGate?
+    /// What the user says: the transcriber's events through the gate.
+    let transcript: AsyncStream<TranscriptEvent>
     private let stopAudio: @Sendable () async -> Void
     private var vadTask: Task<Void, Never>?
     private var bargeInTask: Task<Void, Never>?
+    private var gateTask: Task<Void, Never>?
 
     private init(
         transcriber: ParakeetStreamingTranscriber, voiceActivity: VoiceActivitySegmenter,
+        voiceGate: VerificationGate?, gateTask: Task<Void, Never>?,
         vadTask: Task<Void, Never>?, bargeInTask: Task<Void, Never>?,
         stopAudio: @escaping @Sendable () async -> Void
     ) {
         self.transcriber = transcriber
         self.voiceActivity = voiceActivity
+        self.voiceGate = voiceGate
+        self.gateTask = gateTask
+        // Every final waits for voice ID's decision; partials of rejected
+        // speech are held back.
+        self.transcript = voiceGate?.filter(transcriber.events) ?? transcriber.events
         self.vadTask = vadTask
         self.bargeInTask = bargeInTask
         self.stopAudio = stopAudio
@@ -393,7 +443,10 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
     /// installed (`ParakeetEouRecognizer.provider(modelManager:)`). A
     /// `BargeInMonitor` cuts `bargeInTarget` off when VAD hears the user over
     /// the agent's audio, its echo guard reading the player and the capture
-    /// history.
+    /// history. With `voiceID`, the verification gate (#47) scores VAD's
+    /// speech against the enrolled voiceprint: only the enrolled speaker's
+    /// finals reach the orchestrator, and only accepted or uncertain speech
+    /// barges in.
     ///
     /// Loading and the audio session are independent, so they overlap: the
     /// record button's tap-to-listening time (#41, `session.start`) is the
@@ -405,7 +458,8 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
         models: ModelManager,
         backgroundInference: BackgroundInferenceMonitor?,
         performance: any PerformanceLevelProviding,
-        bargeInTarget: (any BargeInTarget)? = nil
+        bargeInTarget: (any BargeInTarget)? = nil,
+        voiceID: VoiceIDGateLoader? = nil
     ) async throws -> LiveVoicePipeline {
         #if os(iOS)
             guard let vadDirectory = models.directory(for: .sileroVAD),
@@ -414,11 +468,13 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
 
             let keeper = audio.keeper
             let audioStart = Task { try await keeper.startCapture() }
+            // The voiceprint and the speaker model load alongside.
+            let hub = audio.capture.hub
+            let gateLoad = Task { await voiceID?.load(hub) }
 
             let silero: SileroSpeechProbabilityModel
             let vad: VoiceActivitySegmenter
             let transcriber: ParakeetStreamingTranscriber
-            let hub = audio.capture.hub
             do {
                 silero = try await SileroSpeechProbabilityModel(modelDirectory: vadDirectory)
                 vad = VoiceActivitySegmenter(model: silero, inferenceObserver: backgroundInference)
@@ -429,9 +485,11 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
             } catch {
                 // Let the audio finish coming up, then release it.
                 _ = try? await audioStart.value
+                gateLoad.cancel()
                 await keeper.stopCapture()
                 throw error
             }
+            let gate = await gateLoad.value
 
             // An audio failure (say, microphone permission denied) surfaces
             // here, after the models have loaded: loading isn't cancellable
@@ -465,24 +523,34 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
                 await stopAudio()
                 throw error
             }
-            // Barge-in subscribes to VAD before VAD sees any audio, too.
+            // So do the gate and barge-in.
+            var gateTask: Task<Void, Never>?
+            if let gate {
+                let speech = vad.speechAudio()
+                gateTask = Task { await gate.run(speech: speech) }
+            }
             var bargeInTask: Task<Void, Never>?
             if let bargeInTarget {
-                let monitor = BargeInMonitor(target: bargeInTarget, playback: audio.player, microphone: hub)
+                let monitor = BargeInMonitor(
+                    target: bargeInTarget, playback: audio.player, microphone: hub,
+                    speakerGate: gate.map { VoiceIDBargeInGate(gate: $0) })
                 let onsets = vad.events()
                 bargeInTask = Task { await monitor.run(onsets) }
             }
             let vadTask = Task { await vad.run(on: hub) }
             return LiveVoicePipeline(
-                transcriber: transcriber, voiceActivity: vad, vadTask: vadTask, bargeInTask: bargeInTask,
-                stopAudio: stopAudio)
+                transcriber: transcriber, voiceActivity: vad, voiceGate: gate, gateTask: gateTask, vadTask: vadTask,
+                bargeInTask: bargeInTask, stopAudio: stopAudio)
         #else
             throw VoiceLoop.StartError.unavailable
         #endif
     }
 
-    /// The transcriber's events, until it finishes.
-    var transcript: AsyncStream<TranscriptEvent> { transcriber.events }
+    func agentActivityChanged(_ isActive: Bool) {
+        voiceGate?.turnActivity.agentActivityChanged(isActive)
+    }
+
+    var voiceVerdicts: AsyncStream<GatedUtterance>? { voiceGate?.verdicts }
 
     /// Stops the transcriber, which commits the utterance in progress and
     /// ends `transcript` (so the conversation stops reading it).
@@ -490,13 +558,15 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
         await transcriber.finish()
     }
 
-    /// Stops ASR, VAD, barge-in and the audio session.
+    /// Stops ASR, VAD, barge-in, the voice ID gate and the audio session.
     func stop() async {
         await transcriber.finish()
         vadTask?.cancel()
         vadTask = nil
         bargeInTask?.cancel()
         bargeInTask = nil
+        gateTask?.cancel()
+        gateTask = nil
         await stopAudio()
     }
 }
