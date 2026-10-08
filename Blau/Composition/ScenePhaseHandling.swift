@@ -60,6 +60,15 @@ extension AppEnvironment {
             memoryLearning.resume()
             // #67: a profile consolidation no background task got to.
             if !voiceLoop.phase.isActive { profileMemory.catchUpIfOverdue() }
+            // #44: the microphone permission may have changed in the
+            // Settings app; check once the key has been re-read.
+            onboarding.refreshMicrophone()
+            let keyRefresh = xaiRefresh
+            let onboarding = onboarding
+            Task {
+                await keyRefresh?.value
+                onboarding.didBecomeActive()
+            }
         }
 
         #if canImport(UIKit)

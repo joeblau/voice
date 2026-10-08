@@ -3,8 +3,8 @@ import SwiftUI
 
 /// Shows the required speech models getting ready: download progress, the
 /// one-time preparation (the Neural Engine compile), and what to do when
-/// the download is waiting or failed. Onboarding (#44) embeds this; until
-/// then the root view shows it while the models aren't ready.
+/// the download is waiting or failed. Onboarding's models page (#44) embeds
+/// it, and the main screen shows it while the models aren't ready.
 struct SpeechModelSetupView: View {
     @Environment(ModelManager.self) private var models
 
