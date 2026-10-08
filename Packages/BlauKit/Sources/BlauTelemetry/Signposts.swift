@@ -57,6 +57,9 @@ public enum PipelineInterval: CaseIterable, Sendable {
     /// Extracting facts and entities from one closed topic (#66): the text
     /// model call, entity resolution and the SwiftData write.
     case memoryExtract
+    /// One sleep-time consolidation of the profile block (#67): reading
+    /// memory, the text model call and the writes.
+    case memoryConsolidate
     /// One SwiftData save.
     case dbSave
     /// Tapping Record until the conversation is listening (the microphone
@@ -86,6 +89,7 @@ public enum PipelineInterval: CaseIterable, Sendable {
         case .memoryEmbed: "memory.embed"
         case .memorySearch: "memory.search"
         case .memoryExtract: "memory.extract"
+        case .memoryConsolidate: "memory.consolidate"
         case .dbSave: "db.save"
         case .sessionStart: "session.start"
         }
@@ -99,7 +103,7 @@ public enum PipelineInterval: CaseIterable, Sendable {
         case .voiceIDEmbed, .voiceIDVerify: .voiceID
         case .realtimeTurn, .realtimeFirstAudio, .realtimeConnect, .realtimeEvent: .realtime
         case .topicsSegment, .topicsLabel: .topics
-        case .memoryEmbed, .memorySearch, .memoryExtract: .memory
+        case .memoryEmbed, .memorySearch, .memoryExtract, .memoryConsolidate: .memory
         case .dbSave: .data
         case .sessionStart: .ui
         }
