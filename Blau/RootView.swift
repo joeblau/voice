@@ -51,7 +51,7 @@ struct MainScreenScaffold: View {
 
     var body: some View {
         NavigationStack {
-            MainScreen(onConnectAccount: { isShowingKeyOnboarding = true })
+            MainScreen(isRecording: record.state.isListening, onConnectAccount: { isShowingKeyOnboarding = true })
                 #if DEBUG
                     // Triple-tap anywhere on the main screen to show or hide the
                     // performance HUD (#71).
@@ -158,16 +158,19 @@ struct MainScreenScaffold: View {
     }
 }
 
-/// The main screen's content: the conversation (#42), and later the topic
-/// timeline (#56). It shows the running conversation, or else the most
-/// recent one; before there is any, the brand lockup and, while no usable xAI
-/// key is stored, the onboarding button.
+/// The main screen's content: the topic timeline (#56), opened on the
+/// current topic of the running conversation, or else of the most recent
+/// one, with its transcript (#42) below its bullet. Before there is any
+/// conversation, the brand lockup and, while no usable xAI key is stored,
+/// the onboarding button.
 ///
 /// Either way it is a scroll view that runs under the bottom bar's glass,
 /// anchored to the bottom like a conversation. The empty state is at least as
 /// tall as the area between the bars so it stays centered, and scrolls instead
 /// of clipping when Dynamic Type makes it taller than the screen.
 struct MainScreen: View {
+    /// The current topic's dot pulses while the microphone is live.
+    var isRecording = false
     /// Opens the xAI key onboarding step.
     var onConnectAccount: () -> Void = {}
 
@@ -177,8 +180,9 @@ struct MainScreen: View {
 
     var body: some View {
         if let conversationID = environment.chat.conversationID?.rawValue ?? latestConversation.first?.id {
-            ChatTranscriptView(conversationID: conversationID, onConnectAccount: onConnectAccount)
-                .accessibilityIdentifier(MainScreenAccessibility.content)
+            // Its scroll view carries `MainScreenAccessibility.content`.
+            TopicTimelineView(
+                focusConversationID: conversationID, isRecording: isRecording, onConnectAccount: onConnectAccount)
         } else {
             emptyState
         }

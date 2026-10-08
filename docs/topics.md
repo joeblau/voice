@@ -464,8 +464,10 @@ lifecycle writes titles and summaries to. The recorder opens one store per
 container and makes every caller wait for it, so the transcript and the
 lifecycle never write through two stores after an iCloud account change.
 
-Until the timeline (#56) exists, DEBUG builds show recent conversations'
-topics with the edit menu in **Debug → Topics** (`TopicsDebugView`).
+The timeline ([timeline.md](timeline.md), #56) shows every topic as a
+bullet with this edit menu on a long press. DEBUG builds also list recent
+conversations' topics, with Split Here on each line, in **Debug → Topics**
+(`TopicsDebugView`) until the topic detail (#58) offers it.
 
 ### Not covered yet
 

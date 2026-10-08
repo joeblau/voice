@@ -311,10 +311,13 @@ final class AppEnvironment {
         // Previews and UI tests only: a canned conversation (#42).
         async let fixture: Void = ChatTranscriptFixture.seedIfRequested(in: self)
         startMarkdownExport()
+        // Previews and UI tests only: a canned topic history (#56).
+        async let timelineFixture: Void = TopicTimelineFixture.seedIfRequested(in: self)
         async let models: Void = speechModels.start()
         await xai.start()
         await models
         await fixture
+        await timelineFixture
     }
 
     /// Wires what keeps a conversation going off screen (#26): the Live

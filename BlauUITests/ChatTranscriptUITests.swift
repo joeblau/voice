@@ -8,7 +8,9 @@ import XCTest
 final class ChatTranscriptUITests: XCTestCase {
     private enum Identifier {
         static let content = "blau.root"
-        static let transcript = "blau.chat"
+        /// The topic timeline (#56), which holds the transcript under the
+        /// current topic.
+        static let transcript = "blau.timeline"
         static let user = "blau.chat.user"
         static let agent = "blau.chat.agent"
         static let emptyState = "blau.mainScreen.empty"
