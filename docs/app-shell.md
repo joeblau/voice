@@ -21,6 +21,7 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `Blau/VoiceLoop/` | `VoiceLoop` (the spoken conversation: the live audio pipeline feeding the `TurnOrchestrator`, #36), the SwiftData transcript recorder, the HUD rows and the DEBUG Voice Loop screen |
 | `Blau/Debug/` | The DEBUG menu and the reusable feature flag toggles |
 | `Blau/Issues/` | `IssueCenter` (the current issue of the conversation, the audio and iCloud, fed to the banner; the network path fed to the orchestrator) and `IssueBanner`, the banner above the conversation with the recovery actions ([errors.md](errors.md), #80) |
+| `Blau/Onboarding/` | Onboarding (#44): `OnboardingController` (the services behind `OnboardingFlow`, the microphone prompt), `OnboardingLaunch` (which launches show it, the UI-test stubs), `OnboardingView` and its pages ([onboarding.md](onboarding.md)) |
 | `BlauCore/Services/` | The service protocols and `UnavailableService` |
 | `BlauCore/Fakes/` | Fakes for previews and tests, `TranscriptScript` |
 | `BlauCore/FeatureFlags/` | `FeatureFlag`, `FeatureFlags` and their storage |
@@ -54,6 +55,7 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `markdownExport` | `MarkdownExportController` | Markdown files in iCloud Drive → Blau (#78, [export.md](export.md)); settings in `UserDefaults`, the `blau.uitests` suite in DEBUG UI tests; `start()` runs its automatic export, leaving the foreground flushes it | a temporary folder and in-memory settings (`MarkdownExportController.local`) |
 | `xai` | `XAIServices` | Keychain + network (`XAIServices.make`); the `BLAU_UI_TEST_XAI` stub in DEBUG UI tests | in-memory key store + stub transport (`XAIServices.hermetic`) |
 | `issues` | `IssueCenter` | follows the orchestrator, the conversation audio's keeper and the store's sync state; feeds `NWPathMonitor` (`SystemNetworkMonitor`) to the orchestrator for offline mode | the store's sync state only; `-BlauIssueFixture <code>` shows one catalog entry in UI tests |
+| `onboarding` | `OnboardingController` | setup at first launch, back when the key, the microphone or the models go missing; progress in `UserDefaults`; `SystemMicrophonePermission` ([onboarding.md](onboarding.md)) | off, unless a UI test sets `BLAU_UI_TEST_ONBOARDING`; a granted stub microphone |
 | `lifecycle` | `AppLifecycleCoordinator` | | |
 
 Views read it with `@Environment(AppEnvironment.self)`. The
@@ -241,7 +243,9 @@ NavigationStack {
   still runs under the bars), so it stays centered and scrolls rather than
   clips at large Dynamic Type sizes. Once there is a conversation it shows
   the chat transcript instead ([chat.md](chat.md)).
-- Until onboarding (#44) exists, the speech-model setup card
+- While onboarding is presented ([onboarding.md](onboarding.md), #44),
+  `RootView` shows `OnboardingView` in place of the main screen. Once it is
+  done, the speech-model setup card
   (`SpeechModelSetupView`, `blau.models.setup`) shows while the required
   models aren't ready. It is a `.safeAreaInset(edge: .bottom)` on
   `MainScreen` *inside* the navigation stack, after `.toolbar`, so it sits

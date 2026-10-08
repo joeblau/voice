@@ -195,6 +195,13 @@ final class AppEnvironment {
     /// `FakeConversationSession` over the fake `audio` everywhere else.
     let conversation: any ConversationSession
 
+    /// Onboarding (#44, docs/onboarding.md): the first-run setup and its
+    /// return when the key, the microphone or the speech models go missing.
+    /// `RootView` shows it instead of the main screen while it is presented.
+    /// Only the live app (and UI tests that ask with
+    /// `BLAU_UI_TEST_ONBOARDING`) show it; see `OnboardingLaunch`.
+    let onboarding: OnboardingController
+
     /// The xAI key refresh started by the latest return to `active`, so tests
     /// can wait for it.
     @ObservationIgnored var xaiRefresh: Task<Void, Never>?
@@ -230,7 +237,9 @@ final class AppEnvironment {
         networkMonitor: (any NetworkMonitor)? = nil,
         memoryLearning: MemoryLearning? = nil,
         memoryIndexing: MemoryIndexingController? = nil,
-        profileMemory: ProfileMemory? = nil
+        profileMemory: ProfileMemory? = nil,
+        microphonePermission: any MicrophonePermissionProvider = StubMicrophonePermission(.granted),
+        onboardingProgress: (any OnboardingProgressStore)? = nil
     ) {
         self.kind = kind
         self.config = config
@@ -283,12 +292,16 @@ final class AppEnvironment {
             })
         self.issues = IssueCenter(
             realtime: realtime, keeper: conversationAudio?.keeper, persistence: persistence, network: networkMonitor)
-        self.conversation =
+        let conversation: any ConversationSession =
             if let conversationAudio {
                 VoiceLoopSession(voiceLoop: voiceLoop, audio: conversationAudio)
             } else {
                 FakeConversationSession(audio: audio, startDelay: kind == .preview ? .milliseconds(400) : .zero)
             }
+        self.conversation = conversation
+        self.onboarding = OnboardingController(
+            store: onboardingProgress, permission: microphonePermission, account: xai.account, models: speechModels,
+            persistence: persistence, isConversationRunning: { conversation.status.isRunning })
         self.lifecycle = AppLifecycleCoordinator(
             participants: Self.lifecycleOrder(
                 persistence: persistence, audio: audio, transcriber: transcriber,
@@ -324,6 +337,9 @@ final class AppEnvironment {
         async let models: Void = speechModels.start()
         await xai.start()
         await models
+        // #44: the key and the installed models are known now, so a
+        // requirement that went missing since setup brings onboarding back.
+        onboarding.checkPrerequisites()
         await fixture
         await timelineFixture
     }
@@ -519,7 +535,10 @@ extension AppEnvironment {
             networkMonitor: SystemNetworkMonitor(),
             memoryLearning: memoryLearning,
             memoryIndexing: memoryIndexing,
-            profileMemory: profileMemory
+            profileMemory: profileMemory,
+            // #44: the system prompt, unless a DEBUG UI test picks a stub.
+            microphonePermission: OnboardingLaunch.microphonePermission(live: true),
+            onboardingProgress: OnboardingLaunch.progressStore(kind: .live)
         )
     }
 
@@ -581,7 +600,10 @@ extension AppEnvironment {
             realtimeSession: RealtimeSessionServices(persistence: InMemoryVoiceSettingsPersistence()),
             transcriptionSettings: TranscriptionSettings(
                 store: InMemoryTranscriptionPreferencesStore(), availability: { .installed(locale: "en_US") }),
-            performance: performance
+            performance: performance,
+            // #44: off unless a UI test asks with BLAU_UI_TEST_ONBOARDING.
+            microphonePermission: OnboardingLaunch.microphonePermission(live: false),
+            onboardingProgress: kind == .uiTest ? OnboardingLaunch.progressStore(kind: kind) : nil
         )
     }
 

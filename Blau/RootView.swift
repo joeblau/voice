@@ -19,13 +19,29 @@ import SwiftUI
 /// It also hosts the xAI key entry points (#33): Settings and, while no usable
 /// key is stored (none, or an unreadable one), the onboarding step. UI and
 /// launch tests anchor on the identifiers in `MainScreenAccessibility`.
+///
+/// While onboarding (#44) is presented it replaces the main screen rather
+/// than covering it, so it never competes with the main screen's sheets
+/// (Settings, the key step) for presentation, and the main screen starts
+/// fresh once setup is done.
 struct RootView: View {
     nonisolated static let accessibilityIdentifier = "blau.root"
 
     @Environment(AppEnvironment.self) private var environment
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        MainScreenScaffold(conversation: environment.conversation)
+        let isOnboarding = environment.onboarding.flow.isPresented
+        ZStack {
+            if isOnboarding {
+                OnboardingView()
+                    .transition(.opacity)
+            } else {
+                MainScreenScaffold(conversation: environment.conversation)
+                    .transition(.opacity)
+            }
+        }
+        .animation(reduceMotion ? nil : .default, value: isOnboarding)
     }
 }
 

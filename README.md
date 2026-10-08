@@ -87,7 +87,7 @@ the same `make` targets as above. See [docs/ci.md](docs/ci.md).
 | `Blau/`          | App target sources and resources                                |
 | `BlauWidgets/`   | App extension rendering the recording Live Activity ([docs](docs/background.md)) |
 | `Packages/BlauKit` | Local Swift package with the business logic, one module per subsystem (see [`docs/architecture.md`](docs/architecture.md)) |
-| `docs/`          | Architecture and engineering docs ([app shell, environment and feature flags](docs/app-shell.md), [branding](docs/branding.md), [settings](docs/settings.md), [topic timeline](docs/timeline.md)) |
+| `docs/`          | Architecture and engineering docs ([app shell, environment and feature flags](docs/app-shell.md), [branding](docs/branding.md), [settings](docs/settings.md), [topic timeline](docs/timeline.md), [onboarding](docs/onboarding.md)) |
 | `BlauTests/`     | Unit tests (Swift Testing), hosted in the app                   |
 | `BlauUITests/`   | UI tests (XCTest)                                               |
 | `BlauPerfTests/` | Performance tests (XCTest UI-testing bundle): launch metrics and the scripted five-minute session, with the CI baselines in `Baselines/` ([docs](docs/performance.md#performance-suite)) |

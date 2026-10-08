@@ -8,6 +8,7 @@
         static let openButton = "blau.debugMenu.open"
         static let doneButton = "blau.debugMenu.done"
         static let resetAllButton = "blau.debugMenu.resetFlags"
+        static let showOnboardingButton = "blau.debugMenu.showOnboarding"
     }
 
     /// Opens the debug menu. DEBUG builds only.
@@ -39,6 +40,7 @@
                     topicsSection
                     environmentSection
                     lifecycleSection
+                    onboardingSection
                     PerformanceDebugSection(policy: environment.performance)
                     VoiceIDThresholdsSection(config: .calibrated)
                     longSessionSection
@@ -103,6 +105,28 @@
                 LabeledContent("Scene phase", value: environment.lifecycle.phase?.rawValue ?? "launching")
                 LabeledContent("Phase changes", value: "\(environment.lifecycle.history.count)")
             }
+        }
+
+        /// Onboarding (#44): where it stands, and running setup again.
+        private var onboardingSection: some View {
+            Section {
+                LabeledContent("Setup", value: onboardingDescription)
+                Button("Show Onboarding") {
+                    environment.onboarding.restart()
+                    dismiss()
+                }
+                .accessibilityIdentifier(DebugMenuAccessibility.showOnboardingButton)
+            } header: {
+                Text("Onboarding")
+            } footer: {
+                Text("Starts setup over from the welcome page. Steps already done are passed over.")
+            }
+        }
+
+        private var onboardingDescription: String {
+            let flow = environment.onboarding.flow
+            if let step = flow.step { return "On \(step.rawValue)" }
+            return flow.progress.isFinished ? "Finished" : "Not started"
         }
 
         private var topicsSection: some View {

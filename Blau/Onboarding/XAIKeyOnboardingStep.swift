@@ -2,7 +2,8 @@ import BlauRealtime
 import SwiftUI
 
 /// The onboarding step that connects the user's xAI account. The full
-/// onboarding flow (#44) hosts it between its other steps.
+/// onboarding flow (#44, `OnboardingView`) hosts it between its other steps;
+/// the main screen also opens it on its own as a sheet.
 ///
 /// The user can skip it; features that need xAI stay unavailable until a key
 /// is added here or in Settings.

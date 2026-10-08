@@ -155,7 +155,7 @@ progress of the required models), `diskUsage` and `preferences`.
 
 | UI | Where |
 | --- | --- |
-| Setup card: progress, Wi-Fi wait, cellular override, preparing, retry | `Blau/SpeechModels/SpeechModelSetupView.swift` (shown by `RootView` until onboarding, #44) |
+| Setup card: progress, Wi-Fi wait, cellular override, preparing, retry | `Blau/SpeechModels/SpeechModelSetupView.swift` (onboarding's models page, #44, and the main screen until the models are ready) |
 | Settings: Wi-Fi only, optional model, per-model status and size, delete, total usage | `Blau/SpeechModels/SpeechModelSettingsView.swift` (Settings → Speech Models, from the gear on the main screen) |
 
 ## Loading a model
