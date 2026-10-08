@@ -40,7 +40,7 @@ ToolbarItem(placement: .bottomBar) { SettingsButton { isShowingSettings = true }
 | Knowledge | `KnowledgeSettingsView` | The knowledge base (#65, [knowledge-base.md](knowledge-base.md)): **About Me**, **Company**, **Notes** and **Collections** (paste a list of questions); what Blau learned (people, facts), whether Grok may search it, **Learn From Conversations** and **What Blau Learned** (`MemorySettingsSection`, #66, [memory-extraction.md](memory-extraction.md)), and the on-device **search index** (`MemoryIndexSettingsSection`: status, progress, **Rebuild Index**, see [memory-indexer.md](memory-indexer.md)) | SwiftData, synced; the index is derived per device | Rebuild at once |
 | iCloud | `ICloudSettingsView` | Sync status, account, last sync; **Markdown Export** to iCloud Drive → Blau (`MarkdownExportSettingsSection`, #78, [export.md](export.md)); **Export Conversations** as one Markdown file through the share sheet | Export settings: `UserDefaults` (see export.md) | Export Now at once; automatic export as conversations change |
 | Speech Models | `SpeechModelSettingsView` | Wi-Fi only, extra models, per-model download and delete, disk usage | `UserDefaults` (`blau.models.preferences`) | At once |
-| Privacy & Data | `PrivacySettingsView` | Where data lives; delete conversations, the knowledge base, the voiceprint, or everything | – | At once, and on the user's other devices as iCloud syncs the deletions |
+| Privacy & Data | `PrivacySettingsView` | Where data lives; **What's Sent to xAI**; **Export All Data** (JSON + Markdown, zipped, through the share sheet); delete conversations, learned facts, the knowledge base, the voiceprint, or everything (#79, [privacy.md](privacy.md)) | – | At once, and on the user's other devices as iCloud syncs the deletions |
 | Developer | `DeveloperSettingsView` | Performance HUD (`PerformanceHUDToggle`, #71, every build), feature flags, MetricKit diagnostics, **Export Logs** | HUD: `UserDefaults` (`blau.performanceHUD.*`); flag overrides: `UserDefaults`, DEBUG builds only | At once: the HUD appears over the main screen as soon as it is on |
 
 DEBUG UI-test launches (`BLAU_UI_TEST_XAI`) keep every `UserDefaults`
@@ -121,7 +121,17 @@ record of the chosen models one by one, then saves, so each deletion lands
 in the persistent history and the CloudKit mirror removes it from iCloud
 and the user's other devices (a batch delete would bypass that). Each
 action asks first, with a count. Nothing is deleted while a conversation is
-recording.
+recording. **Delete Learned Facts** removes every fact, the people and
+things they are about and the profile summary, and keeps the user's own
+pages; with the knowledge base it also clears this device's consolidation
+log and notes and the pinned-memory cache (`PrivacyDataEraser`). See
+[privacy.md](privacy.md#deleting).
+
+**Export All Data** (`DataExport`, `DataExporter`, BlauPersistence) zips
+`blau-data.json` (every record), `Conversations.md`, `Knowledge.md` and a
+README, read on a context of its own and written off the main actor. The
+voiceprint is described without its vectors. See
+[privacy.md](privacy.md#exporting-everything).
 
 **Knowledge** opens the knowledge base (#65, [knowledge-base.md](knowledge-base.md)):
 About Me, Company, Notes and Collections. Its rows show the About Me and
@@ -141,14 +151,14 @@ logged as `.private` (what the user said) come back redacted.
 - `swift test` in `Packages/BlauKit`: `XAIAccountConnectionTests`,
   `RealtimeVoicePreviewTests`, `RealtimeUsageEstimateTests`,
   `VoiceIDSensitivityTests`, `TranscriptionOptionsTests`,
-  `DataMaintenanceTests` (erase and export on an in-memory store) and
-  `LogExportTests`. All hermetic: scripted HTTP, in-memory stores.
+  `DataMaintenanceTests` (erase and export on an in-memory store),
+  `DataExportTests` (Export All Data) and `LogExportTests`. All hermetic: scripted HTTP, in-memory stores.
 - `BlauTests/SettingsAppTests.swift`: the panes, the root summaries, the
   wording of the destructive actions, and that the settings the panes edit
   are the ones the pipeline reads.
 - `BlauUITests/SettingsUITests.swift`: the sheet opens from the bottom-left
   button at the medium detent; every pane opens; the performance HUD shows
   and hides as it is toggled; the voice ID sensitivity and the second pass
-  persist across launches; Test Connection; export opens the share sheet;
-  deleting asks first. `XCTestCase+Settings.swift` has
+  persist across launches; Test Connection; both exports open the share
+  sheet; deleting conversations and learned facts asks first. `XCTestCase+Settings.swift` has
   `openSettings(in:)` and `openSettingsPane(_:in:)` for the other UI tests.

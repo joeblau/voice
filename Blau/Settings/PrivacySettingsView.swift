@@ -10,9 +10,14 @@ enum PrivacySettingsIdentifiers {
     static func delete(_ scope: DataEraseScope) -> String { "settings.privacy.delete.\(scope.rawValue)" }
     static let confirm = "settings.privacy.confirm"
     static let result = "settings.privacy.result"
+    static let sentToXAI = "settings.privacy.xai"
+    static let exportPrepare = "settings.privacy.export.prepare"
+    static let exportShare = "settings.privacy.export.share"
+    static let exportAgain = "settings.privacy.export.again"
 }
 
-/// Settings → Privacy & Data: what Blau keeps and where, and deleting it.
+/// Settings → Privacy & Data (#79): what Blau keeps and where, what it sends
+/// to xAI, exporting all of it, and deleting it.
 ///
 /// Deleting goes through `DataEraser`, record by record, so the deletions
 /// sync to iCloud and the user's other devices. Nothing is deleted while a
@@ -34,13 +39,17 @@ struct PrivacySettingsView: View {
                     "Your conversations, knowledge and voiceprint are stored on this iPhone and in your private iCloud.",
                     systemImage: "lock.icloud")
                 Label(
-                    "Speech is transcribed on this iPhone. Only the text of what you say is sent to xAI to get Grok's reply.",
+                    "Speech is transcribed and matched to your voice on this iPhone. Your recordings never leave it.",
                     systemImage: "waveform.badge.mic")
                 Label("Your xAI key stays in your iCloud Keychain. There is no Blau server.", systemImage: "key")
             } header: {
                 Text("Where Your Data Lives")
             }
             .font(.subheadline)
+
+            SentToXAISection()
+
+            DataExportSection()
 
             Section {
                 ForEach(DataEraseScope.allCases, id: \.self) { scope in
@@ -66,7 +75,8 @@ struct PrivacySettingsView: View {
             } footer: {
                 Text(
                     "Deleting removes the data from this iPhone, from iCloud and from your other devices. "
-                        + "It can't be undone. Files you exported or shared aren't affected."
+                        + "It can't be undone. Files you exported or shared, including the Markdown copies in "
+                        + "iCloud Drive → Blau, aren't affected."
                 )
             }
         }
@@ -96,18 +106,14 @@ struct PrivacySettingsView: View {
     private func erase(_ scope: DataEraseScope) async {
         isErasing = true
         defer { isErasing = false }
-        if await environment.audio.isCapturing || environment.voiceLoop.phase.isActive {
-            problem = String(localized: "Stop the conversation first, then delete.")
-            return
-        }
+        let isConversationRunning = await environment.audio.isCapturing || environment.voiceLoop.phase.isActive
         do {
-            let summary = try DataEraser.erase(scope, in: modelContext)
-            if scope.components.contains(.conversations) {
-                // The share sheet's copy holds the full text of every
-                // conversation; it goes with them.
-                ConversationExportFiles.removeAll()
-            }
+            let summary = try await PrivacyDataEraser.erase(
+                scope, in: modelContext, profileMemory: environment.profileMemory,
+                isConversationRunning: isConversationRunning)
             result = Self.resultMessage(scope, summary: summary)
+        } catch PrivacyDataEraser.Refusal.conversationRunning {
+            problem = String(localized: "Stop the conversation first, then delete.")
         } catch {
             problem = String(localized: "Couldn't delete the data. Nothing was changed. Try again.")
         }
@@ -118,6 +124,7 @@ struct PrivacySettingsView: View {
     static func buttonTitle(_ scope: DataEraseScope) -> String {
         switch scope {
         case .conversations: String(localized: "Delete All Conversations…")
+        case .learnedFacts: String(localized: "Delete Learned Facts…")
         case .knowledge: String(localized: "Delete Knowledge Base…")
         case .voiceprint: String(localized: "Delete Voiceprint…")
         case .everything: String(localized: "Delete All Data…")
@@ -127,6 +134,7 @@ struct PrivacySettingsView: View {
     static func confirmationTitle(_ scope: DataEraseScope) -> String {
         switch scope {
         case .conversations: String(localized: "Delete all conversations?")
+        case .learnedFacts: String(localized: "Delete what Blau learned?")
         case .knowledge: String(localized: "Delete the knowledge base?")
         case .voiceprint: String(localized: "Delete your voiceprint?")
         case .everything: String(localized: "Delete all your data?")
@@ -138,11 +146,18 @@ struct PrivacySettingsView: View {
             switch scope {
             case .conversations:
                 count == 1 ? String(localized: "1 conversation") : String(localized: "\(count) conversations")
+            case .learnedFacts:
+                count == 1
+                    ? String(localized: "1 learned fact and the profile summary built from it")
+                    : String(localized: "\(count) learned facts and the profile summary built from them")
             case .knowledge: String(localized: "\(count) items in your knowledge base")
             case .voiceprint: String(localized: "your voiceprint")
             case .everything: String(localized: "every conversation, your knowledge base and your voiceprint")
             }
         var message = String(localized: "This deletes \(what) from this iPhone, iCloud and your other devices.")
+        if scope == .learnedFacts {
+            message += " " + String(localized: "Your About Me, company, notes and collections stay.")
+        }
         if scope == .voiceprint || scope == .everything {
             message += " " + String(localized: "You'll need to enroll again for Voice ID.")
         }
@@ -155,10 +170,249 @@ struct PrivacySettingsView: View {
             summary.conversations == 1
                 ? String(localized: "Deleted 1 conversation.")
                 : String(localized: "Deleted \(summary.conversations) conversations.")
+        case .learnedFacts:
+            summary.facts == 1
+                ? String(localized: "Deleted 1 learned fact.")
+                : String(localized: "Deleted \(summary.facts) learned facts.")
         case .knowledge: String(localized: "Deleted the knowledge base.")
         case .voiceprint: String(localized: "Deleted your voiceprint.")
         case .everything: String(localized: "Deleted all your data.")
         }
+    }
+}
+
+// MARK: - Deleting
+
+/// What Delete does beyond `DataEraser` (which deletes the synced records):
+/// the per-device copies of the same data go too.
+@MainActor
+enum PrivacyDataEraser {
+    enum Refusal: Error, Equatable {
+        /// The pipeline is writing to the same store.
+        case conversationRunning
+    }
+
+    /// Deletes `scope` everywhere (`DataEraser`), then this device's copies:
+    /// the share sheet's exports, and for the learned facts and the
+    /// knowledge base the consolidation log, its notes and the pinned
+    /// memory cache. A consolidation already running finishes first, so it
+    /// can't write a profile from facts that are about to go.
+    static func erase(
+        _ scope: DataEraseScope, in context: ModelContext, profileMemory: ProfileMemory, isConversationRunning: Bool
+    ) async throws -> DataEraseSummary {
+        guard !isConversationRunning else { throw Refusal.conversationRunning }
+        if scope.erasesLearnedFacts {
+            await profileMemory.prepareToErase()
+        }
+        let summary = try DataEraser.erase(scope, in: context)
+        // The share sheet's copies hold what was just deleted; they go with
+        // it.
+        DataExportFiles.removeAll()
+        if scope.components.contains(.conversations) {
+            ConversationExportFiles.removeAll()
+        }
+        if scope.erasesLearnedFacts {
+            await profileMemory.memoryErased()
+        }
+        return summary
+    }
+}
+
+// MARK: - What is sent to xAI
+
+/// What leaves the device for xAI, and what comes back (#79). Blau has no
+/// server: these requests go straight from the iPhone to xAI with the
+/// user's own key (#33).
+struct SentToXAISection: View {
+    /// One kind of data that goes to xAI, or comes back.
+    struct Item: Hashable {
+        var title: String
+        var detail: String
+        var systemImage: String
+    }
+
+    /// Everything Blau sends, in the order a conversation sends it. Kept in
+    /// step with docs/privacy.md.
+    static var items: [Item] {
+        [
+            Item(
+                title: String(localized: "What you say, as text"),
+                detail: String(
+                    localized:
+                        "Only speech Voice ID matched to you, after it is transcribed on this iPhone. Your audio is never sent."
+                ),
+                systemImage: "text.bubble"),
+            Item(
+                title: String(localized: "What Grok needs to answer"),
+                detail: String(
+                    localized:
+                        "Your profile summary and current facts at the start of each conversation, and the results of the memory searches Grok asks for."
+                ),
+                systemImage: "brain"),
+            Item(
+                title: String(localized: "What Blau learns from"),
+                detail: String(
+                    localized:
+                        "With Learn From Conversations on, each finished topic's transcript, to pick out facts and update your profile summary."
+                ),
+                systemImage: "lightbulb"),
+            Item(
+                title: String(localized: "What comes back"),
+                detail: String(
+                    localized:
+                        "Grok's reply as audio and its transcript. Web and X searches, when they are on, run at xAI."),
+                systemImage: "speaker.wave.2"),
+        ]
+    }
+
+    var body: some View {
+        Section {
+            ForEach(Self.items, id: \.self) { item in
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.title)
+                        Text(item.detail)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: item.systemImage)
+                }
+                .accessibilityElement(children: .combine)
+            }
+        } header: {
+            Text("What's Sent to xAI")
+        } footer: {
+            Text(
+                "These go straight from this iPhone to xAI under your own xAI account; no one else, Blau included, "
+                    + "sees them on the way. Your voiceprint and recordings never leave your devices and iCloud."
+            )
+        }
+        .accessibilityIdentifier(PrivacySettingsIdentifiers.sentToXAI)
+    }
+}
+
+// MARK: - Export everything
+
+/// The share sheet's copy of everything: one zip in the app's temporary
+/// directory. It holds all the user's data, so it never outlives what it
+/// copies for long: each export replaces the last, and every delete in
+/// Privacy & Data removes it (`removeAll()`).
+enum DataExportFiles {
+    static var directory: URL {
+        URL.temporaryDirectory.appending(path: "DataExport", directoryHint: .isDirectory)
+    }
+
+    /// Writes `export` as a zip, replacing earlier exports. Runs off the main
+    /// actor: a long history takes a while to format and compress.
+    static func write(_ export: DataExport) throws -> URL {
+        removeAll()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return try DataExporter().writeArchive(export, in: directory)
+    }
+
+    /// Removes every exported file.
+    static func removeAll() {
+        do {
+            try FileManager.default.removeItem(at: directory)
+        } catch CocoaError.fileNoSuchFile {
+            // Nothing was exported.
+        } catch {
+            Log.ui.error("Couldn't remove the data export: \(String(describing: error), privacy: .public)")
+        }
+    }
+}
+
+/// Export All Data: every record as JSON, plus the conversations and the
+/// knowledge base as Markdown, zipped and offered through the share sheet
+/// (`DataExport`, `DataExporter`).
+///
+/// The store is read on a context of its own and the files are written off
+/// the main actor, so a long history doesn't freeze Settings.
+struct DataExportSection: View {
+    @Environment(\.modelContext) private var modelContext
+    @State private var export: Export?
+    @State private var isPreparing = false
+    @State private var failed = false
+
+    struct Export: Equatable {
+        var url: URL
+        var counts: DataExport.Counts
+    }
+
+    var body: some View {
+        Section {
+            if let export {
+                ShareLink(
+                    item: export.url,
+                    preview: SharePreview(export.url.lastPathComponent, image: Image(systemName: "doc.zipper"))
+                ) {
+                    Label("Share Export", systemImage: "square.and.arrow.up")
+                }
+                .accessibilityIdentifier(PrivacySettingsIdentifiers.exportShare)
+                Text(Self.summary(export.counts))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Button {
+                Task { await prepare() }
+            } label: {
+                HStack {
+                    Label(
+                        export == nil ? "Export All Data" : "Export Again",
+                        systemImage: export == nil ? "square.and.arrow.down.on.square" : "arrow.clockwise")
+                    Spacer()
+                    if isPreparing {
+                        ProgressView()
+                    }
+                }
+            }
+            .disabled(isPreparing)
+            .accessibilityIdentifier(
+                export == nil ? PrivacySettingsIdentifiers.exportPrepare : PrivacySettingsIdentifiers.exportAgain)
+            if failed {
+                Text("Couldn't export your data. Try again.")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        } header: {
+            Text("Export")
+        } footer: {
+            Text(
+                "A zip of everything Blau keeps: every record as JSON, and your conversations and knowledge base as "
+                    + "Markdown. Your voiceprint is described, without the voice data itself."
+            )
+        }
+    }
+
+    private func prepare() async {
+        isPreparing = true
+        failed = false
+        defer { isPreparing = false }
+        let container = modelContext.container
+        let app = SettingsSummary.version()
+        do {
+            let (url, counts) = try await Task.detached(priority: .userInitiated) {
+                let snapshot = try DataExport.snapshot(in: ModelContext(container), exportedAt: Date(), app: app)
+                return (try DataExportFiles.write(snapshot), snapshot.counts)
+            }.value
+            export = Export(url: url, counts: counts)
+        } catch {
+            Log.ui.error("Data export failed: \(String(describing: error), privacy: .public)")
+            export = nil
+            failed = true
+        }
+    }
+
+    /// "3 conversations, 5 pages and 12 learned facts".
+    static func summary(_ counts: DataExport.Counts) -> String {
+        let conversations =
+            counts.conversations == 1
+            ? String(localized: "1 conversation") : String(localized: "\(counts.conversations) conversations")
+        let pages = counts.documents == 1 ? String(localized: "1 page") : String(localized: "\(counts.documents) pages")
+        let facts =
+            counts.facts == 1 ? String(localized: "1 learned fact") : String(localized: "\(counts.facts) learned facts")
+        return String(localized: "\(conversations), \(pages) and \(facts)")
     }
 }
 

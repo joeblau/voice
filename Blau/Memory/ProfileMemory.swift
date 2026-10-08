@@ -146,6 +146,25 @@ final class ProfileMemory {
         await removals.factsRemoved(count: count)
     }
 
+    /// Call before Settings → Privacy & Data deletes the learned facts or the
+    /// knowledge base (#79): a consolidation that already read them
+    /// finishes first, so it can't write a profile from them once they are
+    /// gone.
+    func prepareToErase() async {
+        await consolidator.waitUntilIdle()
+    }
+
+    /// Call after Settings → Privacy & Data deleted the learned facts or the
+    /// knowledge base (#79): drops this device's consolidation log and
+    /// notes (they hold profile text) and the pinned cache, so the next
+    /// session's instructions no longer carry what was deleted.
+    func memoryErased() async {
+        await consolidator.eraseLocalHistory()
+        await pinned.invalidate()
+        lastOutcome = nil
+        await reloadLog()
+    }
+
     /// `backend` with each fact the `forget` tool forgets (#68) reported as
     /// a removal, like a deletion in Settings.
     nonisolated func reportingRemovals(of backend: any MemoryToolBackend) -> any MemoryToolBackend {
