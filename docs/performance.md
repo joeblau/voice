@@ -146,6 +146,7 @@ case step.
 | `memory.embed`        | `memory`   | `.memoryEmbed`        | A batch of up to 32 texts is handed to the shared embedding service (#60) | Every text's 256-d int8 vector is out; the end message is the text and token count |
 | `memory.search`       | `memory`   | `.memorySearch`       | A memory search starts (BM25 + vector)              | Fused, ranked results are out                   |
 | `memory.extract`      | `memory`   | `.memoryExtract`      | Fact extraction starts on a closed topic (#66)      | Its facts and entities are written (or it failed); the end message is the outcome |
+| `memory.consolidate`  | `memory`   | `.memoryConsolidate`  | Sleep-time profile consolidation starts (#67)       | The profile block and topic summaries are written (or it failed); the end message is the outcome |
 | `db.save`             | `data`     | `.dbSave`             | `ModelContext.save()` is called                     | It returns                                      |
 | `session.start`       | `ui`       | `.sessionStart`       | The user taps Record                                | The record button shows listening: the microphone is live and VAD and ASR are running (or the start failed; the end message says which) |
 
@@ -465,7 +466,8 @@ like `session.start` (tap Record → listening, #41).
 never delays a turn), so it stays Instruments-only too; compare
 `realtime.firstAudio` with the second pass on and off instead (docs/asr.md).
 `memory.extract` runs once per closed topic in the background and is
-dominated by the xAI request, so it stays Instruments-only as well.
+dominated by the xAI request, so it stays Instruments-only as well, and so
+does `memory.consolidate`, which runs about once a week.
 End messages (`realtime.event`'s event type) only reach Instruments:
 `mxSignpost` intervals carry none. Use the shared
 `Signposts` statics (or `Signposts.defaultBackend(for:)`) to get both;

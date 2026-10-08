@@ -11,7 +11,10 @@ public struct RealtimeInstructions: Sendable, Hashable {
     /// Caps that keep the prompt bounded however much memory grows. The
     /// instructions are resent with every `session.update`.
     public struct Limits: Sendable, Hashable {
-        /// Characters of ProfileBlock kept.
+        /// Characters of the pinned profile kept. BlauMemory already keeps
+        /// it within `ProfileBlock.tokenBudget` (1,500 estimated tokens, at
+        /// most 6,000 UTF-8 bytes, #67), so the default never cuts it; this
+        /// only guards against a provider that doesn't.
         public var maximumProfileCharacters: Int
         /// Facts kept (the first ones, which the provider orders by
         /// importance).
@@ -19,7 +22,7 @@ public struct RealtimeInstructions: Sendable, Hashable {
         /// Characters kept per fact.
         public var maximumFactCharacters: Int
 
-        public init(maximumProfileCharacters: Int = 2_000, maximumFacts: Int = 40, maximumFactCharacters: Int = 280) {
+        public init(maximumProfileCharacters: Int = 6_000, maximumFacts: Int = 40, maximumFactCharacters: Int = 280) {
             self.maximumProfileCharacters = maximumProfileCharacters
             self.maximumFacts = maximumFacts
             self.maximumFactCharacters = maximumFactCharacters

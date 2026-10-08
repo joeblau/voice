@@ -43,16 +43,26 @@ final class RealtimeSessionServices {
         RealtimeToolRunner(registry: toolRegistry, sender: sender)
     }
 
-    /// The app's services, declaring `tools`. Settings live in
-    /// `UserDefaults`; DEBUG UI-test runs use a separate suite so they never
-    /// change the developer's own settings.
-    static func make(tools: RealtimeToolRegistry = RealtimeToolRegistry()) -> RealtimeSessionServices {
+    /// The app's services. Settings live in `UserDefaults`; DEBUG UI-test
+    /// runs use a separate suite so they never change the developer's own
+    /// settings.
+    ///
+    /// - Parameters:
+    ///   - memory: What every session's instructions say about the user:
+    ///     the pinned profile and top facts (#67).
+    ///   - tools: The client-side tools the session declares (#68).
+    static func make(
+        memory: any RealtimeMemoryContextProviding = NoRealtimeMemoryContext(),
+        tools: RealtimeToolRegistry = RealtimeToolRegistry()
+    ) -> RealtimeSessionServices {
         #if DEBUG
             if XAIUITestStub.current != nil {
                 return RealtimeSessionServices(
-                    persistence: UserDefaultsVoiceSettingsPersistence(suiteName: "blau.uitests"), tools: tools)
+                    persistence: UserDefaultsVoiceSettingsPersistence(suiteName: "blau.uitests"),
+                    memory: memory, tools: tools)
             }
         #endif
-        return RealtimeSessionServices(persistence: UserDefaultsVoiceSettingsPersistence(), tools: tools)
+        return RealtimeSessionServices(
+            persistence: UserDefaultsVoiceSettingsPersistence(), memory: memory, tools: tools)
     }
 }

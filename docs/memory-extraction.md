@@ -160,7 +160,8 @@ Each topic is a `memory.extract` signpost interval (Instruments only; the
 end message is the number of facts added and invalidated) and is logged
 under `Log.memory` with counts only. Observers get `events()`: queued,
 started, finished (with the `FactExtractionOutcome`, including the model's
-summary for the profile consolidation, #67), failed, waiting for the text
+summary, which the app keeps as a note for the next profile consolidation,
+[memory-profile.md](memory-profile.md)), failed, waiting for the text
 model, and discarded.
 
 ## Privacy

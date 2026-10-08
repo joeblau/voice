@@ -145,6 +145,17 @@ struct RealtimeInstructionsTests {
         #expect(!render(tools: [EchoTool.definition]).contains("# Memory"))
     }
 
+    /// BlauMemory keeps the pinned profile within 1,500 estimated tokens
+    /// (6,000 UTF-8 bytes, #67); the default limit must never cut one.
+    @Test func defaultLimitKeepsAWholeBudgetedProfile() {
+        let line = "Work: The user runs a twelve person robotics startup."
+        let profile = Array(repeating: line, count: 6_000 / (line.utf8.count + 1)).joined(separator: "\n")
+        #expect(profile.utf8.count <= 6_000)
+        let text = render(memory: RealtimeMemoryContext(profile: profile))
+        #expect(text.contains(profile))
+        #expect(!text.contains("…"))
+    }
+
     @Test func usesTheAssistantName() {
         #expect(render(RealtimeInstructions(assistantName: "Nova")).hasPrefix("You are Nova,"))
     }

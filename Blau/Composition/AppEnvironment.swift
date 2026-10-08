@@ -69,6 +69,13 @@ final class AppEnvironment {
     /// every other kind runs on a text model that is never available.
     let memoryLearning: MemoryLearning
 
+    /// The pinned profile (#67): sleep-time consolidation of the
+    /// `ProfileBlock` from facts and recent topics, what each realtime
+    /// session is told about the user, and Settings → Memory → Profile with
+    /// the diff of every change. Only the live app consolidates (with xAI)
+    /// or schedules the background task.
+    let profileMemory: ProfileMemory
+
     /// xAI access (#33): the key store, the REST client, on-device realtime
     /// token minting and the `XAIAccount` the key entry views bind to. The
     /// live app uses the Keychain and the network; every other kind runs on
@@ -217,7 +224,8 @@ final class AppEnvironment {
         markdownExport: MarkdownExportController? = nil,
         networkMonitor: (any NetworkMonitor)? = nil,
         memoryLearning: MemoryLearning? = nil,
-        memoryIndexing: MemoryIndexingController? = nil
+        memoryIndexing: MemoryIndexingController? = nil,
+        profileMemory: ProfileMemory? = nil
     ) {
         self.kind = kind
         self.config = config
@@ -236,6 +244,7 @@ final class AppEnvironment {
             ?? .offline(transcript: offlineTranscript)
         self.memoryLearning =
             memoryLearning ?? .offline(persistence: persistence, transcript: offlineTranscript)
+        self.profileMemory = profileMemory ?? .offline(persistence: persistence)
         self.xai = xai
         self.speechModels = speechModels
         self.textEmbeddings = textEmbeddings
@@ -297,6 +306,8 @@ final class AppEnvironment {
         // #63: indexes the store once `PersistenceGate` has opened it.
         memoryIndexing.start()
         memoryLearning.start(following: topicLifecycle)
+        // #67: extraction notes and fresh facts for the pinned profile.
+        profileMemory.start(learning: memoryLearning)
         // Previews and UI tests only: a canned conversation (#42).
         async let fixture: Void = ChatTranscriptFixture.seedIfRequested(in: self)
         startMarkdownExport()
@@ -422,6 +433,9 @@ extension AppEnvironment {
             storage: UserDefaultsFeatureFlagStorage(defaults: defaults),
             allowsOverrides: AppConfig.isDebugBuild
         )
+        // #67: the pinned profile and top facts in every session's
+        // instructions.
+        let pinnedMemory = ProfileMemory.pinnedMemory(persistence: persistence)
         let textEmbeddings = TextEmbeddings.make(models: models)
         // The device's thermal state, Low Power Mode and battery (#75).
         // One policy, shared by the indexer (#63) and fact extraction (#66).
@@ -431,17 +445,24 @@ extension AppEnvironment {
         let memoryIndexing = MemoryIndexingController(
             persistence: persistence, embedder: textEmbeddings, performance: performance)
         let memory = MemoryTools.service(indexing: memoryIndexing, textEmbeddings: textEmbeddings)
-        let realtimeSession = RealtimeSessionServices.make(
-            tools: MemoryTools.registry(backend: memory, enabled: flags.isEnabled(.memoryTools)))
         // #54: the topic lifecycle writes through the transcript's store.
         let transcript = PersistenceTranscriptRecorder(persistence: persistence)
-        let topics = TopicLifecycle.app(
-            transcript: transcript, labeling: .app(xai: xai), textEmbeddings: textEmbeddings)
-        let transcriptFeed = TranscriptFeed()
         // #66: facts and entities extracted from every closed topic.
         let memoryLearning = MemoryLearning.live(
             xai: xai, transcript: transcript, persistence: persistence, textEmbeddings: textEmbeddings,
             performance: performance)
+        // #67: sleep-time consolidation of the profile block.
+        let profileMemory = ProfileMemory.live(
+            pinned: pinnedMemory, xai: xai, transcript: transcript, persistence: persistence,
+            learning: memoryLearning, performance: performance)
+        // A fact the `forget` tool forgets leaves the pinned profile too (#67).
+        let realtimeSession = RealtimeSessionServices.make(
+            memory: ProfileMemory.realtimeContext(pinnedMemory),
+            tools: MemoryTools.registry(
+                backend: profileMemory.reportingRemovals(of: memory), enabled: flags.isEnabled(.memoryTools)))
+        let topics = TopicLifecycle.app(
+            transcript: transcript, labeling: .app(xai: xai), textEmbeddings: textEmbeddings)
+        let transcriptFeed = TranscriptFeed()
         return AppEnvironment(
             kind: .live,
             config: config,
@@ -486,7 +507,8 @@ extension AppEnvironment {
             // #80: offline mode follows the network path.
             networkMonitor: SystemNetworkMonitor(),
             memoryLearning: memoryLearning,
-            memoryIndexing: memoryIndexing
+            memoryIndexing: memoryIndexing,
+            profileMemory: profileMemory
         )
     }
 

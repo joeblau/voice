@@ -252,6 +252,9 @@ like every to-one side in v1.
   merge the extras.
 - **Profile budget.** `ProfileBlock.tokenBudget` is 1,500 tokens;
   `approximateTokenCount` (UTF-8 bytes / 4) is a cheap check against it.
+  The block holds only the consolidated summary; the user's own `.profile`
+  pages are pinned next to it verbatim, and both together stay within the
+  budget ([memory-profile.md](memory-profile.md)).
 - **Not encrypted.** The memory fields are not `.allowsCloudEncryption`. They
   hold text derived from the utterances, which are not encrypted either, and
   the choice can't change once deployed. Users with Advanced Data Protection

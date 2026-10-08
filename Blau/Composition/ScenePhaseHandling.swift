@@ -58,6 +58,8 @@ extension AppEnvironment {
             // Topics waiting for fact extraction (#66): the key or the
             // network may be back.
             memoryLearning.resume()
+            // #67: a profile consolidation no background task got to.
+            if !voiceLoop.phase.isActive { profileMemory.catchUpIfOverdue() }
         }
 
         #if canImport(UIKit)
@@ -65,6 +67,11 @@ extension AppEnvironment {
                 // A rebuild or embedding backlog left: finish it in a
                 // background processing task (#63).
                 if kind == .live { MemoryIndexBackgroundTask.scheduleIfNeeded(memoryIndexing) }
+                // The next sleep-time profile consolidation (#67).
+                if kind == .live {
+                    let profile = profileMemory
+                    Task { await ProfileConsolidationBackgroundTask.schedule(profile) }
+                }
                 let assertion = BackgroundTaskAssertion(name: "blau.lifecycle.background")
                 Task {
                     await lifecycle.waitUntilDelivered()
@@ -110,8 +117,8 @@ extension AppEnvironment {
 /// environment: the `AppEnvironment` itself, its `FeatureFlags`, its
 /// `AppLifecycleCoordinator`, its `XAIAccount`, its `PersistenceController`,
 /// its speech `ModelManager`, its `TranscriptionSettings`, its
-/// `VoiceIDSettings`, its `MemoryLearningSettings`, its `PerformanceStatus` and
-/// its `MarkdownExportController`.
+/// `VoiceIDSettings`, its `MemoryLearningSettings`, its `ProfileMemory`, its
+/// `PerformanceStatus` and its `MarkdownExportController`.
 ///
 /// The SwiftData container is not set here: it is replaced when the iCloud
 /// account changes, so `PersistenceGate` (inside this modifier in the app)
@@ -131,6 +138,7 @@ struct AppEnvironmentModifier: ViewModifier {
             .environment(environment.transcriptionSettings)
             .environment(environment.voiceIDSettings)
             .environment(environment.memoryLearning.settings)
+            .environment(environment.profileMemory)
             .environment(environment.performanceStatus)
             .environment(environment.memoryIndexing)
             .environment(environment.markdownExport)

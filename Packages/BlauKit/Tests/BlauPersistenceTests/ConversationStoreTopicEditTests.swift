@@ -412,6 +412,31 @@ struct ConversationStoreTopicEditTests {
         #expect(saved.titleIsProvisional == false)
     }
 
+    // MARK: Summaries rewritten by profile consolidation (#67)
+
+    /// Only a closed topic's summary is replaced, only while it is still
+    /// the one the caller read, and the change is saved at once (no flush).
+    @Test func aSummaryIsReplacedOnlyWhileUnchangedAndOnlyOnceClosed() async throws {
+        let fixture = try StoreFixture()
+        let store = fixture.store
+        let (id, topic, _) = try await conversation(fixture, utterancesAt: [1])
+        #expect(try await store.replaceTopicSummary(topic, expected: nil, with: "Too early.") == false)
+
+        try await store.endConversation(id, at: storeT0 + 60)
+        #expect(try await store.replaceTopicSummary(topic, expected: "Something else", with: "Stale.") == false)
+        #expect(try await store.replaceTopicSummary(topic, expected: nil, with: "  ") == false)
+        #expect(try await store.replaceTopicSummary(topic, expected: nil, with: "  Joe plans the seed round. "))
+        #expect(try fixture.saved(Topic.self).first?.summary == "Joe plans the seed round.")
+        #expect(try await store.replaceTopicSummary(topic, expected: nil, with: "Again.") == false)
+        #expect(
+            try await store.replaceTopicSummary(
+                topic, expected: "Joe plans the seed round.", with: "Joe and Dana plan the seed round."))
+        #expect(try fixture.saved(Topic.self).first?.summary == "Joe and Dana plan the seed round.")
+        await #expect(throws: ConversationStoreError.self) {
+            try await store.replaceTopicSummary(UUID(), expected: nil, with: "Gone.")
+        }
+    }
+
     // MARK: Reading
 
     @Test func topicUtterancesComeBackInOrderOnTheConversationTimeline() async throws {

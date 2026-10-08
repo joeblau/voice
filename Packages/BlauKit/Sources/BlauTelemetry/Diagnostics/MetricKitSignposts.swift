@@ -126,8 +126,8 @@ extension PipelineInterval {
         case .asrEndOfUtterance, .voiceIDVerify, .realtimeTurn, .realtimeFirstAudio, .topicsLabel, .memorySearch:
             true
         case .captureFrame, .playbackFirstBuffer, .vadChunk, .asrChunk, .asrSecondPass, .modelDownload, .modelWarmUp,
-            .voiceIDEmbed, .realtimeConnect, .realtimeEvent, .topicsSegment, .memoryEmbed, .memoryExtract, .dbSave,
-            .sessionStart:
+            .voiceIDEmbed, .realtimeConnect, .realtimeEvent, .topicsSegment, .memoryEmbed, .memoryExtract,
+            .memoryConsolidate, .dbSave, .sessionStart:
             false
         }
     }

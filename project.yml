@@ -87,13 +87,15 @@ targets:
         # audio: an active .playAndRecord session keeps a conversation
         # running with the screen locked (#26, docs/background.md).
         # processing: the memory index rebuild's BGProcessingTask (#63,
-        # docs/memory-indexer.md).
+        # docs/memory-indexer.md) and the profile consolidation's (#67,
+        # docs/memory-profile.md).
         UIBackgroundModes:
           - audio
           - remote-notification
           - processing
         BGTaskSchedulerPermittedIdentifiers:
           - com.joeblau.blau.memory-index
+          - com.joeblau.blau.memory-profile
         # The lock-screen recording indicator (#26).
         NSSupportsLiveActivities: true
         # Branding (#82, docs/branding.md): the brand mark centered on the

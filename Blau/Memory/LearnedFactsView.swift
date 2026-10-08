@@ -28,6 +28,13 @@ struct MemorySettingsSection: View {
                 Label("What Blau Learned", systemImage: "brain")
             }
             .accessibilityIdentifier(MemorySettingsIdentifiers.openLearned)
+            // #67: the pinned profile and the diff of each consolidation.
+            NavigationLink {
+                ProfileView()
+            } label: {
+                Label("Profile", systemImage: "person.text.rectangle")
+            }
+            .accessibilityIdentifier(ProfileIdentifiers.openProfile)
         } header: {
             Text("Memory")
         } footer: {
@@ -94,14 +101,20 @@ struct LearnedFactsView: View {
     private func forget(_ rows: [Row], at offsets: IndexSet) {
         let ids = offsets.map { rows[$0].id }
         let learning = environment.memoryLearning
+        let profile = environment.profileMemory
         Task {
+            var removed = 0
             do {
                 for id in ids {
                     try await learning.forget(id)
+                    removed += 1
                 }
             } catch {
                 failure = error.localizedDescription
             }
+            // #67: take them out of the pinned facts now and out of the
+            // profile summary at the next consolidation.
+            await profile.factsRemoved(count: removed)
         }
     }
 

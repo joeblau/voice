@@ -22,6 +22,7 @@ struct BlauApp: App {
         // (#63). Only the real app runs background work.
         if environment.kind == .live {
             MemoryIndexBackgroundTask.register(environment.memoryIndexing)
+            ProfileConsolidationBackgroundTask.register(environment.profileMemory)
         }
         let diagnostics = AppDiagnostics.live()
         diagnostics.start()

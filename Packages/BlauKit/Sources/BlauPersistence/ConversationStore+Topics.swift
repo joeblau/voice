@@ -398,6 +398,30 @@ extension ConversationStore {
         try save()
     }
 
+    /// Replaces a closed topic's summary, but only while it is still
+    /// `expected` (`nil` for a topic without one): for the profile
+    /// consolidation (#67), which rewrites recent summaries from a snapshot
+    /// read earlier and must never overwrite one that changed meanwhile
+    /// (re-segmentation, a merge, another device). Saved at once, since it
+    /// runs in a background task that can be suspended right after.
+    ///
+    /// - Parameter summary: Trimmed of surrounding whitespace; blank is
+    ///   ignored.
+    /// - Returns: Whether the summary was written.
+    /// - Throws: `ConversationStoreError.topicNotFound`, or the save's error.
+    @discardableResult
+    public func replaceTopicSummary(_ topicID: UUID, expected: String?, with summary: String) throws -> Bool {
+        let topic = try topic(topicID)
+        let summary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !summary.isEmpty, topic.endedAt != nil, topic.summary == expected, topic.summary != summary else {
+            return false
+        }
+        topic.summary = summary
+        noteChanges()
+        try save()
+        return true
+    }
+
     // MARK: Compare-and-swap edits
 
     /// `splitTopic(_:at:title:)`, but only while every topic in `expected`

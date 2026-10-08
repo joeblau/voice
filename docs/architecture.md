@@ -176,6 +176,9 @@ The complete list of declared edges:
   `get_entity`, `remember`, `forget`): the BlauCore contract, the backend,
   the token budget, the spoken confirmation, tool rounds inside a turn and
   the chat's chips.
+- [memory-profile.md](memory-profile.md): the pinned profile and its
+  sleep-time consolidation (token budget, the user's own words kept
+  verbatim, the background task, the diff view, session instructions).
 - [embeddings.md](embeddings.md): the shared text embedding service
   (EmbeddingGemma 256-d int8): tokenizer, token table, batches, model
   versions, and how topics use it.
