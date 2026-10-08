@@ -28,3 +28,9 @@ BlauBenchmarks/Assets/*
 
 # Python bytecode (scripts/embeddings)
 __pycache__/
+
+# package-benchmark baselines (the committed gate is Packages/BlauKitBenchmarks/Thresholds)
+.benchmarkBaselines/
+
+# Personal XCTest perf baselines (make perf-baseline PERF_BASELINE=local-...); only CI ones are committed
+BlauPerfTests/Baselines/local*.json
