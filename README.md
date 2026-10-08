@@ -99,7 +99,7 @@ the same `make` targets as above. See [docs/ci.md](docs/ci.md).
 | `Datasets/voice-id/` | The owner's voice ID evaluation recordings, stored with consent in LFS (see its README and [`docs/voice-id-eval.md`](docs/voice-id-eval.md)) |
 | `Datasets/asr/` | The owner's ASR evaluation recordings, stored with consent in LFS (see its README and [`docs/asr-eval.md`](docs/asr-eval.md)) |
 | `Tools/Instruments/` | `Blau.tracetemplate`, the Instruments template for profiling Blau, and the instrument list and options it is generated from |
-| `docs/`          | Developer documentation, including [on-device models](docs/models.md), [text embeddings](docs/embeddings.md), the [memory search index](docs/memory-index.md), its [incremental indexer](docs/memory-indexer.md), [hybrid memory search](docs/memory-search.md), the [pinned profile](docs/memory-profile.md) and the [memory evaluation](docs/memory-eval.md) |
+| `docs/`          | Developer documentation, including [on-device models](docs/models.md), [text embeddings](docs/embeddings.md), the [memory search index](docs/memory-index.md), its [incremental indexer](docs/memory-indexer.md), [hybrid memory search](docs/memory-search.md), the [pinned profile](docs/memory-profile.md), the [knowledge base screens](docs/knowledge-base.md) and the [memory evaluation](docs/memory-eval.md) |
 | `.github/`       | CI workflow ([docs](docs/ci.md)), pull request and issue templates |
 
 ### Targets and schemes

@@ -37,7 +37,7 @@ ToolbarItem(placement: .bottomBar) { SettingsButton { isShowingSettings = true }
 | Voice | `VoiceSettingsView` | Voice with a spoken **preview**, speaking speed, reasoning effort (Think Before Answering), web and X search | `UserDefaults` (`RealtimeVoiceSettingsStore`) | The next `session.update`, i.e. Grok's next reply |
 | Voice ID | `VoiceIDSettingsView` | Status of the voiceprint, enroll / re-enroll, **sensitivity** | Voiceprint: SwiftData, synced; sensitivity: `UserDefaults` (`blau.voiceID.sensitivity`), per device | The next segment the gate scores (`VoiceIDSettings.currentConfig()`) |
 | Transcription | `TranscriptionSettingsView` | Engine (always Apple's), second pass, language | `UserDefaults` (`blau.transcription.engine`, `blau.transcription.options`), per device | Engine and language at the next utterance boundary (`preferenceChanges()`); second pass per utterance (`isSecondPassEnabled()`) |
-| Knowledge | `KnowledgeSettingsView` | Opens the knowledge base: what Blau knows (profile, documents, people, facts), whether Grok may search it, **Learn From Conversations** and **What Blau Learned** (`MemorySettingsSection`, #66, [memory-extraction.md](memory-extraction.md)), and the on-device **search index** (`MemoryIndexSettingsSection`: status, progress, **Rebuild Index**, see [memory-indexer.md](memory-indexer.md)) | SwiftData, synced; the index is derived per device | Rebuild at once |
+| Knowledge | `KnowledgeSettingsView` | The knowledge base (#65, [knowledge-base.md](knowledge-base.md)): **About Me**, **Company**, **Notes** and **Collections** (paste a list of questions); what Blau learned (people, facts), whether Grok may search it, **Learn From Conversations** and **What Blau Learned** (`MemorySettingsSection`, #66, [memory-extraction.md](memory-extraction.md)), and the on-device **search index** (`MemoryIndexSettingsSection`: status, progress, **Rebuild Index**, see [memory-indexer.md](memory-indexer.md)) | SwiftData, synced; the index is derived per device | Rebuild at once |
 | iCloud | `ICloudSettingsView` | Sync status, account, last sync; **Markdown Export** to iCloud Drive → Blau (`MarkdownExportSettingsSection`, #78, [export.md](export.md)); **Export Conversations** as one Markdown file through the share sheet | Export settings: `UserDefaults` (see export.md) | Export Now at once; automatic export as conversations change |
 | Speech Models | `SpeechModelSettingsView` | Wi-Fi only, extra models, per-model download and delete, disk usage | `UserDefaults` (`blau.models.preferences`) | At once |
 | Privacy & Data | `PrivacySettingsView` | Where data lives; delete conversations, the knowledge base, the voiceprint, or everything | – | At once, and on the user's other devices as iCloud syncs the deletions |
@@ -114,9 +114,13 @@ and the user's other devices (a batch delete would bypass that). Each
 action asks first, with a count. Nothing is deleted while a conversation is
 recording.
 
-**Knowledge** counts documents, people and things, and current facts with
-`ModelContext.fetchCount` when the pane opens, rather than loading every
-record through `@Query` just to count it.
+**Knowledge** opens the knowledge base (#65, [knowledge-base.md](knowledge-base.md)):
+About Me, Company, Notes and Collections. Its rows show the About Me and
+company names and the note and collection counts, and below them the people
+and things and current facts learned from conversations, all counted with
+`ModelContext.fetchCount` when the pane opens and after every
+`ModelContext.didSave`, rather than loading every record through `@Query`
+just to count it.
 
 **Export Logs** (`LogExporter`, BlauTelemetry) reads the last hour of
 Blau's subsystem from the running process's unified log (`OSLogStore`,

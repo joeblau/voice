@@ -220,7 +220,7 @@ setup in [sync.md](sync.md#manual-test-plan-device-a--device-b)):
 | # | Step | Expected | Result |
 | - | ---- | -------- | ------ |
 | 1 | On B, open Settings → Knowledge → Search Index. | "Up to date" (after a first rebuild), a passage count. | pending |
-| 2 | On A, create a note with a distinctive word (until the knowledge base UI #65 exists, a DEBUG build inserting a `Document`). | It syncs (A: "Syncing…" then "On"). | pending |
+| 2 | On A, create a note with a distinctive word (Settings → Knowledge → Notes → New Note, [knowledge-base.md](knowledge-base.md)). | It syncs (A: "Syncing…" then "On"). | pending |
 | 3 | Keep B in the foreground for up to a minute. | B's passage count grows; a keyword search on B (debug tooling or #64's search) finds the word. | pending |
 | 4 | On A, edit one paragraph of the note. | B finds the new text and no longer the old; Console (`category == "memory"`) shows one incremental pass with 1 embedded (when the model is installed). | pending |
 | 5 | Delete the note on A. | B no longer finds it. | pending |
