@@ -118,6 +118,11 @@ final class AppEnvironment {
     /// `UserDefaults`; every other kind keeps it in memory.
     let voiceIDSettings: VoiceIDSettings
 
+    /// What the guided voice enrollment (#46) records and embeds with: the
+    /// conversation's voice-processing capture and the WeSpeaker model in
+    /// the live app, synthetic speech everywhere else.
+    let voiceEnrollment: VoiceEnrollmentServices
+
     /// The Markdown export to iCloud Drive → Blau (#78, docs/export.md).
     /// Settings → iCloud → Markdown Export binds to it; `start()` lets it follow the
     /// store for automatic export, and leaving the foreground flushes it.
@@ -227,6 +232,7 @@ final class AppEnvironment {
         realtimeSession: RealtimeSessionServices,
         transcriptionSettings: TranscriptionSettings,
         voiceIDSettings: VoiceIDSettings = VoiceIDSettings(store: InMemoryVoiceIDSensitivityStore()),
+        voiceEnrollment: VoiceEnrollmentServices? = nil,
         conversationAudio: ConversationAudio? = nil,
         backgroundInference: BackgroundInferenceMonitor = BackgroundInferenceMonitor(),
         textEmbeddings: TextEmbeddingService = TextEmbeddings.unavailable(),
@@ -268,6 +274,7 @@ final class AppEnvironment {
         self.realtimeSession = realtimeSession
         self.transcriptionSettings = transcriptionSettings
         self.voiceIDSettings = voiceIDSettings
+        self.voiceEnrollment = voiceEnrollment ?? .scripted(speed: Self.scriptedEnrollmentSpeed(kind))
         self.conversationAudio = conversationAudio
         self.backgroundInference = backgroundInference
         self.performance = performance
@@ -523,6 +530,8 @@ extension AppEnvironment {
             transcriptionSettings: TranscriptionSettings.make(),
             // Settings → Voice ID → Sensitivity, read by the gate (#47).
             voiceIDSettings: VoiceIDSettings.make(),
+            // #46: enrollment records through the conversation's capture.
+            voiceEnrollment: .live(audio: conversationAudio, models: models),
             conversationAudio: conversationAudio,
             textEmbeddings: textEmbeddings,
             // Also drives `memoryIndexing` and `memoryLearning`.
@@ -605,6 +614,16 @@ extension AppEnvironment {
             microphonePermission: OnboardingLaunch.microphonePermission(live: false),
             onboardingProgress: kind == .uiTest ? OnboardingLaunch.progressStore(kind: kind) : nil
         )
+    }
+
+    /// How fast a non-live environment's synthetic enrollment speech plays:
+    /// real time in previews, 8× in UI tests, unpaced in unit tests.
+    static func scriptedEnrollmentSpeed(_ kind: Kind) -> Double? {
+        switch kind {
+        case .live, .preview: 1
+        case .uiTest: 8
+        case .unitTest: nil
+        }
     }
 
     /// What the preview `FakeMemoryService` knows.

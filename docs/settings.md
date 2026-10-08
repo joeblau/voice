@@ -35,7 +35,7 @@ ToolbarItem(placement: .bottomBar) { SettingsButton { isShowingSettings = true }
 | ---- | ---- | ------------- | --------- | ------------ |
 | xAI Account | `XAIAccountSettingsView` | API key (add, replace, remove), **Test Connection** (`XAIAccount.testConnection()`), this month's usage and cost estimate | Keychain, synced through iCloud Keychain (#33) | At once; cached realtime tokens and voice previews are dropped when the key changes |
 | Voice | `VoiceSettingsView` | Voice with a spoken **preview**, speaking speed, reasoning effort (Think Before Answering), web and X search | `UserDefaults` (`RealtimeVoiceSettingsStore`) | The next `session.update`, i.e. Grok's next reply |
-| Voice ID | `VoiceIDSettingsView` | Status of the voiceprint, enroll / re-enroll, **sensitivity** | Voiceprint: SwiftData, synced; sensitivity: `UserDefaults` (`blau.voiceID.sensitivity`), per device | The next segment the gate scores (`VoiceIDSettings.currentConfig()`) |
+| Voice ID | `VoiceIDSettingsView` | Status of the voiceprint, **enroll / re-enroll** (the guided capture, `VoiceEnrollmentView`), **Add This iPhone's Microphone** (the 15 s top-up), **Delete Voiceprint**, the enrolled microphones, **sensitivity** | Voiceprint: SwiftData, synced; sensitivity: `UserDefaults` (`blau.voiceID.sensitivity`), per device | Enrollment and deletion at once, and on the other devices as iCloud syncs; sensitivity at the next segment the gate scores (`VoiceIDSettings.currentConfig()`) |
 | Transcription | `TranscriptionSettingsView` | Engine (always Apple's), second pass, language | `UserDefaults` (`blau.transcription.engine`, `blau.transcription.options`), per device | Engine and language at the next utterance boundary (`preferenceChanges()`); second pass per utterance (`isSecondPassEnabled()`) |
 | Knowledge | `KnowledgeSettingsView` | The knowledge base (#65, [knowledge-base.md](knowledge-base.md)): **About Me**, **Company**, **Notes** and **Collections** (paste a list of questions); what Blau learned (people, facts), whether Grok may search it, **Learn From Conversations** and **What Blau Learned** (`MemorySettingsSection`, #66, [memory-extraction.md](memory-extraction.md)), and the on-device **search index** (`MemoryIndexSettingsSection`: status, progress, **Rebuild Index**, see [memory-indexer.md](memory-indexer.md)) | SwiftData, synced; the index is derived per device | Rebuild at once |
 | iCloud | `ICloudSettingsView` | Sync status, account, last sync; **Markdown Export** to iCloud Drive → Blau (`MarkdownExportSettingsSection`, #78, [export.md](export.md)); **Export Conversations** as one Markdown file through the share sheet | Export settings: `UserDefaults` (see export.md) | Export Now at once; automatic export as conversations change |
@@ -82,9 +82,18 @@ clears an earlier failure message.
 from Relaxed (0) through Balanced (0.5, the calibrated thresholds) to
 Strict (1), in steps of 0.25. It moves both the accept and the reject
 threshold of both score windows by up to ±0.06
-(`VoiceIDConfig.adjusted(for:)`). Enrollment itself is #44 and #46; until
-it ships the Enroll button is disabled and the footer says enrollment is
-coming.
+(`VoiceIDConfig.adjusted(for:)`).
+
+**Voice enrollment** (#46, [voice-id.md](voice-id.md#enrollment-46)) opens
+full screen: four prompts of about 5 s each, recorded through the
+conversation's voice-processing capture, each clip checked for talking
+time, background noise and consistency with the others. Re-enroll replaces
+the voiceprint on every device once the new one is saved. When the synced
+voiceprint has no set from this device model, **Add This iPhone's
+Microphone** records a 15 s top-up. **Delete Voiceprint** asks first and
+deletes through `DataEraser`, like Privacy & Data. Enrolling and deleting
+are refused while a conversation is running. A voiceprint from another
+embedding model shows "Re-enroll needed".
 
 **Second pass and language** (`TranscriptionOptions`, BlauTranscription).
 Parakeet's realtime model understands English only, so choosing any other

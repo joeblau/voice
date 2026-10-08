@@ -60,6 +60,7 @@ flowchart BT
     Persistence --> Telemetry
     Transcription --> Audio
     VoiceID --> Audio
+    VoiceID --> Persistence
     Realtime --> Audio
     Realtime --> Persistence
     Topics --> Persistence
@@ -78,7 +79,7 @@ The complete list of declared edges:
 | `BlauAudio`         | `BlauCore`, `BlauTelemetry`                 |              |
 | `BlauPersistence`   | `BlauCore`, `BlauTelemetry`                 |              |
 | `BlauTranscription` | `BlauCore`, `BlauTelemetry`, `BlauAudio`    | `FluidAudio` |
-| `BlauVoiceID`       | `BlauCore`, `BlauTelemetry`, `BlauAudio`    | `FluidAudio` |
+| `BlauVoiceID`       | `BlauCore`, `BlauTelemetry`, `BlauAudio`, `BlauPersistence` | `FluidAudio` |
 | `BlauRealtime`      | `BlauCore`, `BlauTelemetry`, `BlauAudio`, `BlauPersistence` |   |
 | `BlauTopics`        | `BlauCore`, `BlauTelemetry`, `BlauPersistence` |           |
 | `BlauMemory`        | `BlauCore`, `BlauTelemetry`, `BlauPersistence` | `GRDB`    |

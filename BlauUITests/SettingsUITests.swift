@@ -130,7 +130,7 @@ final class SettingsUITests: XCTestCase {
         let status = app.descendants(matching: .any)["settings.voiceID.status"]
         XCTAssertTrue(status.waitForExistence(timeout: 5))
         XCTAssertTrue(status.label.contains("Not enrolled"), status.label)
-        XCTAssertFalse(app.buttons["settings.voiceID.enroll"].isEnabled, "Enrollment isn't built yet")
+        XCTAssertTrue(app.buttons["settings.voiceID.enroll"].isEnabled, "Enrolling is available")
 
         let reset = app.buttons["settings.voiceID.sensitivity.reset"]
         if reset.waitForExistence(timeout: 2) {
