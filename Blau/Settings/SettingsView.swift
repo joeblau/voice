@@ -143,7 +143,7 @@ struct SettingsView: View {
 
 /// The root list: one row per `SettingsPane`, grouped.
 private struct SettingsRootList: View {
-    @Query(sort: \VoiceProfile.updatedAt, order: .reverse) private var voiceProfiles: [VoiceProfile]
+    @Query(sort: \VoiceProfile.createdAt, order: .reverse) private var voiceProfiles: [VoiceProfile]
 
     var body: some View {
         let voiceID = VoiceIDStatus(profile: voiceProfiles.first)

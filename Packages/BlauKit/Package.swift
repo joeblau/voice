@@ -56,7 +56,10 @@ enum KitModule: String, CaseIterable {
         case .core: []
         case .telemetry: [.core]
         case .audio, .persistence: [.core, .telemetry]
-        case .transcription, .voiceID: [.core, .telemetry, .audio]
+        case .transcription: [.core, .telemetry, .audio]
+        // Persistence: enrollment (#46) stores the voiceprint in the synced
+        // SwiftData store (`SwiftDataVoiceprintStore`).
+        case .voiceID: [.core, .telemetry, .audio, .persistence]
         // Persistence: the turn orchestrator (#36) writes the transcript
         // through `ConversationStore`.
         case .realtime: [.core, .telemetry, .audio, .persistence]

@@ -3,9 +3,9 @@
 Blau only answers the enrolled speaker. `BlauVoiceID` turns speech into
 speaker embeddings, compares them with the enrolled voiceprint and decides
 accept, reject or uncertain per speech segment (issue #5). This document
-covers the embedding extractor (#45); enrollment (#46), the verification
-gate (#47) and threshold calibration (#48, [voice-id-eval.md](voice-id-eval.md))
-build on it.
+covers the embedding extractor (#45) and [enrollment](#enrollment-46)
+(#46); the verification gate (#47) and threshold calibration (#48,
+[voice-id-eval.md](voice-id-eval.md)) build on them.
 
 ## Speaker embeddings
 
@@ -97,11 +97,153 @@ On the Mac, Core ML still places almost all of this model on the CPU; see
 [benchmarks.md](benchmarks.md) for the latency and the alternative
 conversion measured there.
 
+## Enrollment (#46)
+
+The guided capture records the owner's voice, checks every clip, and
+stores the voiceprint in the synced SwiftData store. Settings → Voice ID
+starts it (Enroll Your Voice / Re-enroll), offers the per-device top-up and
+deletes the voiceprint; onboarding (#44) can host the same
+`VoiceEnrollmentView`.
+
+```swift
+import BlauVoiceID
+
+let enrollment = VoiceEnrollment(
+    plan: .enrollment,                                   // or .topUp
+    audio: ConversationEnrollmentAudio(audio: conversationAudio),
+    loadEmbedder: { try await WeSpeakerEmbedder.load(modelDirectory: directory) },
+    store: SwiftDataVoiceprintStore(modelContainer: container),
+    deviceModel: VoiceprintDevice.currentModel)
+await enrollment.start()            // returns when finished, failed, or a clip is rejected
+if case .rejected = enrollment.phase { await enrollment.retry() }
+```
+
+| Type | Role |
+| --- | --- |
+| `EnrollmentPlan` | The prompts and clip lengths: `.enrollment` (4 × ~5 s) and `.topUp` (3 × ~5 s, about 15 s) |
+| `EnrollmentPrompt` | Read a sentence, answer a question, speak quietly, speak from arm's length. The app supplies the wording (`EnrollmentPromptCopy`) |
+| `EnrollmentClipRecorder` | Collects one clip from capture frames and decides when it is done; drives the live `EnrollmentMeter` |
+| `EnrollmentClipAnalysis` / `EnrollmentLevelAnalyzer` | Talking time, speech and noise level, SNR, clipping and the speech range of a clip |
+| `EnrollmentQualityPolicy` | The bar a clip must clear (below) |
+| `EnrollmentConsistency` | Whether a clip sounds like the others, and which clip is the odd one out |
+| `VoiceEnrollment` | The flow: prompts, recording, checks, embedding, saving (`@MainActor @Observable`) |
+| `EnrollmentAudioSource` | The microphone. `ConversationEnrollmentAudio` in the app; `ScriptedEnrollmentAudio` in tests, previews and UI tests |
+| `VoiceprintStoring` | `SwiftDataVoiceprintStore` (synced) and `InMemoryVoiceprintStore` |
+| `Voiceprint`, `VoiceprintSet`, `VoiceprintStatus` | The stored voiceprint as the gate reads it: `notEnrolled`, `enrolled`, `needsReenrollment(storedModel:)`, `unreadable` |
+| `VoiceprintMatcher` | Scores a probe against the centroid and every device's set, keeping the best (for the gate, #47) |
+
+### The capture
+
+- **Same path as a conversation.** `ConversationEnrollmentAudio` starts the
+  conversation's `AudioSessionKeeper` and reads the `MicrophoneCapture`
+  hub: the same voice-processing (VPIO) engine, with echo cancellation,
+  noise suppression and AGC, resampled to 16 kHz by the same converter
+  ([audio.md](audio.md)). It refuses to start while a conversation holds
+  the microphone (`microphoneBusy`) and unmutes "pause listening" first.
+  Like any capture, it shows the recording Live Activity while it runs.
+- **Hands-free.** The microphone stays on from the first prompt to the
+  last. A clip ends by itself once it holds 5 s of talking time and the
+  user pauses for 0.5 s, or at 12 s; **Done Speaking** ends it early. An
+  accepted clip moves straight on to the next prompt; a rejected one shows
+  why and waits for **Try Again**.
+- **Under a minute.** Four clean clips are about 4 × 7 s of audio (a
+  second of reading, 5–6 s of speech, the pause). The worst case with no
+  retries is 4 × 12 s = 48 s of recording. On the Mac, analysis and the
+  four WeSpeaker embeddings take about 0.4 s in all
+  (`RealModelEnrollmentTests`), and the model loads while the microphone
+  comes up. `VoiceEnrollment.duration` and the log record the real time.
+- **Only speech is embedded.** Each clip is trimmed to its speech range
+  (100 ms of context on each side), so the lead-in and trailing silence
+  don't dilute the voiceprint.
+
+### The quality meter
+
+While a clip records, the meter shows the input level, talking time
+toward the 5 s target, and the running SNR. Each clip is then judged:
+
+| Check | Rule (`EnrollmentQualityPolicy.standard`) | Shown as |
+| --- | --- | --- |
+| Duration | At least 3 s of talking time (speech frames plus pauses up to 160 ms). Below 3 s embeddings degrade sharply | Duration |
+| Level | Mean speech energy ≥ -45 dBFS (≥ -55 dBFS for the quiet and arm's-length prompts) | Background |
+| SNR | Speech over background ≥ 12 dB (≥ 8 dB for the quiet and arm's-length prompts) | Background |
+| Clipping | At most 0.5% of samples at full scale | Background |
+| Consistency | Cosine with the mean of the other clips ≥ 0.40, the calibrated gate's 3 s accept threshold: each clip must itself pass the gate | Your Voice |
+| Top-up match | A top-up clip scores ≥ 0.27 (the 3 s reject threshold) against the synced centroid | Your Voice |
+
+Speech frames are 20 ms frames at least 10 dB above the clip's noise floor
+(its 10th-percentile frame energy) and above -60 dBFS. The level and SNR
+limits are provisional, set for VPIO-processed speech; revisit them with
+the owner's recordings ([voice-id-eval.md](voice-id-eval.md)).
+
+**Which clip is wrong?** The first clip has nothing to compare with, so
+consistency is decided as clips arrive (`EnrollmentConsistency`): a clip
+that doesn't match the accepted ones is rejected; a second mismatch in a
+row checks every clip against the others (leave one out) and drops the
+accepted clips that don't fit (their prompts are asked again), or starts
+over when only one clip was accepted. Before saving, the whole set is
+checked once more, which also covers the first clip.
+
+### The voiceprint
+
+Stored in `VoiceProfile` and `VoiceEnrollmentSet` (schema v1, #19), which
+sync through the private CloudKit database with the rest of the user's
+data; the vectors are CloudKit-encrypted ([data-model.md](data-model.md)).
+
+- **Enroll once, every device.** A second device reads the synced profile
+  and scores against it without enrolling (`VoiceprintStatus.enrolled`).
+- **Per-device sets.** Microphones differ (iPhone, iPad, AirPods), so each
+  device can add its own enrollment set with the optional 15 s top-up
+  (Settings → Voice ID → Add This iPhone's Microphone, offered when the
+  device has no set). Sets are keyed by the hardware model
+  (`VoiceprintDevice.currentModel`, e.g. `iPhone18,1`): two devices of one
+  model share microphones and share a set. A top-up replaces this model's
+  set and recomputes the centroid over every clip.
+- **Scoring** takes the best of the centroid and every set
+  (`VoiceprintMatcher`), so a probe uses whichever reference fits its
+  microphone.
+- **Re-enrolling** replaces the whole voiceprint (every device's set) once
+  the new one is saved; cancelling keeps the old one.
+- **Conflicts: last writer wins.** CloudKit resolves concurrent edits of
+  one record that way. Duplicates it can't merge are resolved on read the
+  same way on every device: the newest profile (`createdAt`, then
+  `updatedAt`, then `id`) and the newest set per device model. Each write
+  deletes the losers. Adaptive updates (#49) should write only the current
+  device's set (`saveDeviceSet`), so devices don't churn each other's data.
+- **Model version.** `VoiceProfile.embeddingModelVersion` stores the
+  embedding model's identifier (`wespeaker-resnet34-lm@df2625ac`). When the
+  app's model differs, the status is `needsReenrollment` and Settings shows
+  "Re-enroll needed" with the Re-enroll button; a top-up is refused
+  (`modelMismatch`). Unreadable vectors (a reset iCloud Keychain loses the
+  encrypted fields) are `unreadable` and also need re-enrollment.
+- **Deleting** (Settings → Voice ID or Privacy & Data) goes through
+  `DataEraser`, record by record, so the deletion syncs and the voiceprint
+  disappears from every device.
+
+### On-device test plan
+
+These need real devices and an iCloud account; record results in the PR
+that runs them.
+
+| # | Step | Expected | Result |
+| - | ---- | -------- | ------ |
+| 1 | On iPhone A, Settings → Voice ID → Enroll Your Voice; time it from Start to "You're enrolled" | Done in under 60 s; the log line `Enrollment (enrollment) finished in … s` agrees | pending |
+| 2 | Say a prompt with a TV on loud nearby | The clip is rejected (Background) | pending |
+| 3 | Have someone else answer prompt 3 | Rejected (Your Voice) | pending |
+| 4 | On device B (same iCloud account), open Settings → Voice ID after sync | "Enrolled", A's model listed under Enrolled Microphones, Add This iPhone's Microphone offered (if B is another model); voice ID verifies the owner on B without enrolling (needs #47) | pending |
+| 5 | On B, run the top-up | Done in about 20 s; both models listed on A and B | pending |
+| 6 | On A, Delete Voiceprint | "Not enrolled" on A, and on B after sync | pending |
+| 7 | Install a build with a different speaker model identifier | Settings shows "Re-enroll needed"; re-enrolling fixes it | pending |
+| 8 | Enroll with AirPods connected | The capture uses the AirPods microphone (HFP route) and completes | pending |
+
 ## Telemetry
 
 Each `embed` call is one `voiceid.embed` signpost interval (category
 `voiceid`). Failures log at `error` on `Log.voiceID` with the segment count
 and the error; no audio or embedding values are logged.
+
+Enrollment logs each clip's verdict (prompt, talking time, SNR, or the
+issues) and the total duration on `Log.voiceID`, never audio or vectors.
+Voiceprint saves are `db.save` intervals.
 
 ## Testing
 
@@ -111,6 +253,9 @@ and the error; no audio or embedding values are logged.
 | Real model on the fixture set (opt-in) | Download the pinned model once, then point `BLAU_SPEAKER_MODEL_DIR` at it (commands below). Checks that every same-speaker pair scores above every different-speaker pair at 1.5 s, 3 s and the whole clip, that a two-clip voiceprint picks its own speaker's held-out clip, parity with FluidAudio's `EmbeddingExtractor`, and that other segments in a call don't change a result |
 | Latency (opt-in) | Add `BLAU_SPEAKER_BENCHMARK=1` to the command above: times every compute-unit setting and prints Markdown tables and the Core ML compute plan |
 | Latency on iPhone (opt-in) | `SpeakerEmbeddingDeviceBenchmarkTests` in `BlauTests` with `BLAU_DEVICE_TESTS=1`, after the app has downloaded its models ([benchmarks.md](benchmarks.md)) |
+| Enrollment (hermetic) | `EnrollmentQualityTests`, `EnrollmentConsistencyTests`, `VoiceEnrollmentTests`, `VoiceprintStoreTests` and `VoiceprintMatcherTests`: the analysis on synthetic speech and the fixture clips, the recorder's stop rules, the checks, every flow (clean, rejected, someone else, restart, top-up, denied microphone, missing model, cancel, Done), both stores (model version, top-up, duplicates, delete) and max-over-sets scoring. `ScriptedEnrollmentAudio` and `ScriptedSpeakerEmbedder` stand in for the microphone and the model |
+| Enrollment on the real model (opt-in) | `RealModelEnrollmentTests` with `BLAU_SPEAKER_MODEL_DIR`: each fixture speaker enrolls, another speaker's clip is rejected, and the compute time is reported |
+| Enrollment in the app | `VoiceEnrollmentAppTests` (`BlauTests`) and `VoiceEnrollmentUITests` (`BlauUITests`): enrolling from Settings stores the voiceprint Settings reads, cancelling stores nothing, deleting removes it |
 
 ```sh
 cd Packages/BlauKit

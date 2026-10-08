@@ -127,7 +127,12 @@ optional and uses `.nullify`.
   CloudKit's end-to-end encrypted fields. Encryption can't be turned on or off
   for a field once the schema is in production, which is why it is decided
   in v1. If the user's iCloud Keychain is reset, the encrypted vectors are
-  unreadable and the user re-enrolls.
+  unreadable and the user re-enrolls. `VoiceEnrollmentSet.deviceModel` is
+  the hardware model identifier and keys the set: one set per device
+  model, newest wins. Duplicate profiles (two devices enrolling before they
+  sync) resolve to the newest; `SwiftDataVoiceprintStore` (BlauVoiceID)
+  reads and writes these models and deletes the losers (see
+  [voice-id.md](voice-id.md#the-voiceprint)).
 - **Timestamps.** Initializers take every date explicitly; callers get them
   from `BlauClock` (see docs/architecture.md, rule 5). The `Date.distantPast`
   declaration defaults exist only to satisfy CloudKit.

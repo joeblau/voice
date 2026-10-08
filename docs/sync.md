@@ -171,7 +171,7 @@ Development environment; never mix a Debug device with a TestFlight device.
 | 4 | Keep B in the foreground and wait up to 1 minute. | The conversation, its topic and utterances appear on B with the same text, order and topic title. | pending |
 | 5 | Background B, edit the topic title on A, then bring B to the foreground. | B shows the new title (silent push or the foreground refresh). | pending |
 | 6 | Delete the conversation on A. | It disappears on B, with its topics and utterances. | pending |
-| 7 | On B, enroll the voiceprint; check A. | A has the `VoiceProfile` (voice ID works without re-enrolling). In the CloudKit Console the voiceprint vector fields are encrypted. | pending |
+| 7 | On B, enroll the voiceprint; check A. | A has the `VoiceProfile` (voice ID works without re-enrolling). In the CloudKit Console the voiceprint vector fields are encrypted. The top-up and delete steps are in [voice-id.md](voice-id.md#on-device-test-plan). | pending |
 | 8 | Airplane mode on A; create a conversation; turn airplane mode off. | A's Settings shows "Paused" (no connection) while offline, then the conversation reaches B. | pending |
 | 9 | On B, sign out of iCloud (Settings → Apple Account → Sign Out, keep a copy of data if asked), reopen Blau. | Blau keeps working; Settings: "Off: You're not signed in to iCloud…" with "Open Settings". New conversations save locally. | pending |
 | 10 | Create a conversation on B while signed out, then sign back in to the same account and reopen Blau. | Settings returns to "On"; the conversation from step 10 reaches A. | pending |
