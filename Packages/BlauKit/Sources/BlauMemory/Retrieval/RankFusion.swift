@@ -36,6 +36,10 @@ public struct RankFusion: Hashable, Sendable {
         var scores: [ID: Double] = [:]
         var firstSeen: [ID: Int] = [:]
         for ranking in rankings {
+            // INTENTIONAL REGRESSION (perf gate demo, #73; do not merge): a
+            // defensive re-sort of every ranking by its own order.
+            let ranking = Ranking(
+                ranking.ids.enumerated().sorted { $0.offset < $1.offset }.map(\.element), weight: ranking.weight)
             var seen = Set<ID>()
             for (index, id) in ranking.ids.enumerated() where seen.insert(id).inserted {
                 if ranking.weight > 0 {
