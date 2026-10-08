@@ -15,6 +15,12 @@ import SwiftData
 /// else that conversation's last topic. A conversation without topics gets
 /// one stand-in bullet (``TimelineTopic/synthetic(for:)``) so its
 /// transcript still has a place.
+///
+/// **Day groups** read oldest to newest, each at most once. The focus
+/// conversation always comes last, so when it started before another
+/// conversation (a running conversation that began before midnight, and one
+/// synced from another device that began after), it joins the latest day's
+/// group instead of going back to its own day.
 public struct TopicTimeline: Equatable, Sendable {
     /// Identifies an item across rebuilds, for the lazy stack and for
     /// `scrollPosition(id:)`.
@@ -27,7 +33,7 @@ public struct TopicTimeline: Equatable, Sendable {
     /// One row of the timeline.
     public enum Item: Identifiable, Equatable, Sendable {
         /// The first conversation of a day starts here. `day` is the start
-        /// of that day.
+        /// of that day; each day appears once, in increasing order.
         case day(day: Date, rail: Bool)
         /// A conversation starts here.
         case conversation(TimelineConversation, rail: Bool)
@@ -103,12 +109,16 @@ public struct TopicTimeline: Equatable, Sendable {
         var items: [Item] = []
         items.reserveCapacity(unique.count + unique.count / 2)
         var previous: TimelineTopic?
+        // The last day heading, so headings only move forward: a day header
+        // that went back in time would repeat an `ItemID`.
+        var lastDay: Date?
         for (index, topic) in unique.enumerated() {
             let rail = previous != nil
             if previous?.conversationID != topic.conversationID {
                 let day = calendar.startOfDay(for: topic.conversationStartedAt)
-                if previous.map({ calendar.startOfDay(for: $0.conversationStartedAt) }) != day {
+                if lastDay.map({ day > $0 }) ?? true {
                     items.append(.day(day: day, rail: rail))
+                    lastDay = day
                 }
                 items.append(
                     .conversation(

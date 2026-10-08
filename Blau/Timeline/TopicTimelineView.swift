@@ -73,7 +73,11 @@ struct TopicTimelineView: View {
         TopicTimelineScrollView(
             timeline: TopicTimeline(topics: storedTopics.compactMap(TimelineTopic.init), focus: focus),
             isRecording: isRecording,
-            onConnectAccount: onConnectAccount)
+            onConnectAccount: onConnectAccount
+        )
+        // A new conversation's stand-in bullet is dated when it became the
+        // focus, not when the screen first opened.
+        .onChange(of: focusConversationID) { openedAt = Date() }
     }
 }
 
@@ -88,7 +92,14 @@ private struct TopicTimelineScrollView: View {
     @Environment(AppEnvironment.self) private var environment
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expansion = TopicExpansion()
+    /// Whether the latest line is in view. Only the scroll geometry writes
+    /// it: `onScrollGeometryChange` reports changes, so a value set by hand
+    /// that the geometry still agrees with would never be corrected.
     @State private var isAtBottom = true
+    /// Taps on a bullet at the latest line whose expansion is still laying
+    /// out. While any is pending, size changes anchor to the top so the
+    /// tapped bullet stays put.
+    @State private var topAnchorHolds = 0
     @State private var position = ScrollPosition(idType: TopicTimeline.ItemID.self)
     @Namespace private var rotor
 
@@ -119,7 +130,7 @@ private struct TopicTimelineScrollView: View {
         .defaultScrollAnchor(.bottom, for: .alignment)
         // At the latest line, growth keeps it in view; reading history, the
         // position holds while the transcript below grows and labels change.
-        .defaultScrollAnchor(isAtBottom ? .bottom : .top, for: .sizeChanges)
+        .defaultScrollAnchor(isAtBottom && topAnchorHolds == 0 ? .bottom : .top, for: .sizeChanges)
         .onScrollGeometryChange(for: Bool.self) { geometry in
             // `visibleRect` spans the whole frame, under the bars too (the
             // container size leaves the insets out), so the last line of
@@ -193,12 +204,21 @@ private struct TopicTimelineScrollView: View {
         // Anchor to the top first, so the tapped bullet stays where it is and
         // its transcript opens below it, even at the latest line. The anchor
         // must be in place before the content grows: in the same update the
-        // bottom anchor would still push the bullet up.
-        isAtBottom = false
+        // bottom anchor would still push the bullet up. It holds until the
+        // animation and the lazy rows' measuring are done, then the geometry
+        // decides again: collapsing at the latest line stays there (and keeps
+        // following new lines), expanding scrolls it out of view.
+        topAnchorHolds += 1
         Task { @MainActor in
             toggleExpansion(of: topic.id)
+            try? await Task.sleep(for: Self.topAnchorHold)
+            topAnchorHolds -= 1
         }
     }
+
+    /// How long a tap at the latest line keeps the top anchor: the
+    /// expansion's animation and a little more.
+    private static let topAnchorHold = Duration.milliseconds(400)
 
     private func toggleExpansion(of id: UUID) {
         withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) {

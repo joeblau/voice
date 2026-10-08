@@ -25,7 +25,7 @@ Today
 | What the user does | What happens |
 | --- | --- |
 | Opens the app | The screen is anchored to the latest line of the **current topic**: the open topic of the running conversation, or else of the most recent one (else that conversation's last topic). Its bullet is a pinned section header, so it stays on screen however long the transcript gets, and older bullets fill the space above it |
-| Swipes down | Scrolls up into the history: compressed bullets on a continuous rail, oldest at the top, grouped by day ("Today", "Yesterday", "Tuesday, October 6") and by conversation |
+| Swipes down | Scrolls up into the history: compressed bullets on a continuous rail, oldest at the top, grouped by day ("Today", "Yesterday", "Tuesday, October 6") and by conversation. Each day heading appears once, in order: the focus conversation always comes last, so a running conversation that began before midnight, after which another device synced one that began after it, sits under the later day's heading |
 | Taps a compressed bullet | Expands it in place: its summary and transcript open below the bullet, which doesn't move. Tapping again compresses it. Several can be open at once (the full detail with its actions is #58) |
 | Swipes back, taps **Now** or taps the current bullet | Returns to the latest line with a spring (a short ease under Reduce Motion). The Now pill shows whenever the latest line is out of view |
 | Long-presses a bullet | Rename and Merge with Previous (#54, `topicEditMenu`) |
@@ -69,8 +69,12 @@ stays open so the text doesn't fold away under them.
   For size changes the anchor is `.bottom` while the latest line is in view
   (new lines and a new topic keep it there) and `.top` once the user is
   reading history, so the transcript growing below, a topic opening, or a
-  label changing never moves what they're reading. Tapping a bullet switches
-  to `.top` first, so it stays where it is while its transcript opens.
+  label changing never moves what they're reading. Tapping a bullet at the
+  latest line holds `.top` for the length of the expansion (a transient
+  hold, separate from the at-bottom flag), so the bullet stays where it is
+  while its transcript opens; after that the scroll geometry alone decides.
+  Collapsing a topic at the latest line therefore stays there, with no Now
+  pill, and keeps following new lines.
 - **No scroll jumps from labels.** Compressed rows have a fixed height, so a
   new title never changes the layout of the history; the current bullet's
   title is at the bottom, where the anchor is.
@@ -81,7 +85,9 @@ stays open so the text doesn't fold away under them.
 - `scrollPosition($position)` drives Now (`scrollTo(edge: .bottom)`) and is
   keyed by `TopicTimeline.ItemID`, ready for #57's paging.
 - The timeline loads the 500 most recent topics
-  (`TopicTimeline.recentTopics()`). Paging older history in as the user
+  (`TopicTimeline.recentTopics()`). When the cap cuts through a
+  conversation, the lines of its unloaded earlier topics are counted in its
+  first loaded topic until #57 pages them in. Paging older history in as the user
   scrolls up, and the iOS 27 prepend regression (FB24968838), are #57.
 
 ## VoiceOver

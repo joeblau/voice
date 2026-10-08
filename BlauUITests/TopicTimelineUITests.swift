@@ -211,6 +211,39 @@ final class TopicTimelineUITests: XCTestCase {
         XCTAssertFalse(firstLine.exists, "The topic's lines stayed")
     }
 
+    /// Collapsing an older topic while at the latest line stays at the
+    /// latest line: no Now pill, and the current topic in view. (The
+    /// at-bottom state comes from the scroll geometry alone, so a collapse
+    /// that leaves the view at the bottom can't leave it stuck as "away".)
+    func testCollapsingAtTheLatestLineDoesntShowNow() {
+        let app = launch()
+        let previous = bullet(Self.previousTitle, in: app)
+        XCTAssertTrue(previous.waitForExistence(timeout: 10))
+        let now = app.buttons[Identifier.now]
+
+        previous.tap()
+        let summary = app.descendants(matching: .any)[Identifier.summary]
+        XCTAssertTrue(summary.waitForExistence(timeout: 5), "The topic didn't expand")
+        // Its transcript pushed the latest line out of view.
+        XCTAssertTrue(now.waitForExistence(timeout: 5), "No Now pill after expanding at the latest line")
+
+        // Back to the latest line, with the expanded topic still on screen.
+        now.tap()
+        XCTAssertTrue(now.waitForNonExistence(timeout: 5), "Now didn't return to the latest line")
+        waitUntilStill(currentBullet(app))
+        XCTAssertTrue(previous.isHittable, "The expanded topic's bullet isn't on screen: \(previous.frame)")
+        let currentBefore = currentBullet(app).frame
+
+        previous.tap()
+        XCTAssertTrue(summary.waitForNonExistence(timeout: 5), "The topic didn't compress")
+        waitUntilStill(currentBullet(app))
+        XCTAssertFalse(now.waitForExistence(timeout: 2), "The Now pill showed at the latest line")
+        XCTAssertTrue(currentBullet(app).isHittable, "The current topic left the screen")
+        XCTAssertGreaterThanOrEqual(
+            currentBullet(app).frame.minY, currentBefore.minY - 1, "The current topic moved up: \(currentBefore)")
+        attachScreenshot(app, "Collapsed at the latest line")
+    }
+
     /// Provisional titles are refined in place while the user reads the
     /// history: the titles change and nothing on screen moves.
     func testRefinedLabelsDontMoveTheHistory() {

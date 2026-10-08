@@ -152,6 +152,43 @@ struct TopicTimelineTests {
         #expect(timeline.current?.title == "New topic")
     }
 
+    @Test func aRunningConversationFromBeforeMidnightJoinsTheLatestDay() {
+        // Monday 13:50, then the conversation running here since Monday
+        // 23:50, and one synced from another device that started Tuesday
+        // 00:10. The focus still comes last, after Tuesday's heading.
+        let lunch = UUID()
+        let running = UUID()
+        let synced = UUID()
+        let lunchStart = Self.monday.addingTimeInterval(4 * 3600 + 50 * 60)
+        let runningStart = Self.monday.addingTimeInterval(14 * 3600 + 50 * 60)
+        let syncedStart = Self.monday.addingTimeInterval(15 * 3600 + 10 * 60)
+        let topics = [
+            Self.topic("Lunch", conversation: lunch, conversationStart: lunchStart, ordinal: 0, minutes: 0),
+            Self.topic(
+                "Late Call", conversation: running, conversationStart: runningStart, ordinal: 0, minutes: 0,
+                length: nil),
+            Self.topic("Synced", conversation: synced, conversationStart: syncedStart, ordinal: 0, minutes: 0),
+        ]
+        let timeline = TopicTimeline(
+            topics: topics, focus: TimelineConversation(id: running, startedAt: runningStart),
+            calendar: Self.calendar)
+
+        let ids = timeline.items.map(\.id)
+        #expect(Set(ids).count == ids.count)
+        #expect(
+            Self.titles(timeline) == [
+                "day 5", "conversation 13", "Lunch", "day 6", "conversation 0", "Synced", "conversation 23",
+                "Late Call",
+            ])
+        // Day headings only move forward.
+        let days = timeline.items.compactMap { item -> Date? in
+            if case .day(let day, _) = item { return day }
+            return nil
+        }
+        #expect(days == days.sorted())
+        #expect(timeline.current?.title == "Late Call")
+    }
+
     @Test func duplicatesAreShownOnce() {
         let history = History()
         let timeline = TopicTimeline(topics: history.topics + history.topics.prefix(2), calendar: Self.calendar)
