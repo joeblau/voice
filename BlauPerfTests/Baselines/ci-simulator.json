@@ -1,0 +1,459 @@
+{
+  "description": "Baselines for the XCTest performance suite (#73) on one machine type; see docs/performance.md.",
+  "environment": "ci-simulator",
+  "statistic": "median",
+  "defaultTolerancePercent": 10.0,
+  "recorded": {
+    "date": "2026-10-08",
+    "commit": "c7f2472",
+    "device": "iPhone 17",
+    "runs": 3,
+    "note": "GitHub Actions xcode-27 runner (Apple silicon VM), iPhone 17 simulator, iOS 27.0, Release with BLAU_PERF; three runs pooled: CI runs 37705297862, 37705304118, 37705309835"
+  },
+  "unavailable": [
+    "PerformanceHUDOverheadTests/testIdleCPUWithTheHUDHidden() CPU Cycles (blau)",
+    "PerformanceHUDOverheadTests/testIdleCPUWithTheHUDHidden() CPU Instructions Retired (blau)",
+    "PerformanceHUDOverheadTests/testIdleCPUWithTheHUDShown() CPU Cycles (blau)",
+    "PerformanceHUDOverheadTests/testIdleCPUWithTheHUDShown() CPU Instructions Retired (blau)",
+    "ReplaySessionPerformanceTests/testScriptedSession() CPU Cycles (blau)",
+    "ReplaySessionPerformanceTests/testScriptedSession() CPU Instructions Retired (blau)"
+  ],
+  "tests": {
+    "ChatTranscriptScrollPerformanceTests/testScrollingAThousandRows()": {
+      "com.apple.dt.XCTMetric_OSSignpost-Scroll_DraggingAndDeceleration.duration": {
+        "name": "Duration (Scroll_DraggingAndDeceleration)",
+        "unit": "s",
+        "polarity": "prefers smaller",
+        "baseline": 2.581705,
+        "samples": [
+          2.583215,
+          2.566615,
+          2.583179,
+          2.566519,
+          2.583913,
+          2.582788,
+          2.581925,
+          2.565311,
+          2.583521,
+          2.581705,
+          2.566618,
+          2.582124,
+          2.567879,
+          2.565578,
+          2.549807
+        ],
+        "runs": [
+          2.583179,
+          2.581925,
+          2.566618
+        ],
+        "spreadPercent": 0.6
+      }
+    },
+    "LaunchPerformanceTests/testColdLaunch()": {
+      "com.apple.dt.XCTMetric_ApplicationLaunch-AppLaunch.duration": {
+        "name": "Duration (AppLaunch)",
+        "unit": "s",
+        "polarity": "prefers smaller",
+        "baseline": 4.668576,
+        "samples": [
+          4.149053,
+          4.036482,
+          5.391026,
+          4.290708,
+          4.668576,
+          5.874134,
+          5.226691,
+          5.23113,
+          5.509846,
+          5.971767,
+          4.095207,
+          4.907197,
+          4.378638,
+          4.166523,
+          4.339209
+        ],
+        "runs": [
+          4.290708,
+          5.509846,
+          4.339209
+        ],
+        "spreadPercent": 18.0,
+        "tolerancePercent": 80,
+        "note": "Hand-set from every CI run so far: launch on the shared VMs is bimodal by host, median 4.3 to 5.5 s on some hosts and 7.3 to 8.4 s on others (runs 37645399395, 37691777269), so only a gross regression (a synchronous load at launch) trips it. The device launch numbers are the baseline that matters (docs/performance.md)."
+      }
+    },
+    "LaunchPerformanceTests/testLaunchUntilResponsive()": {
+      "com.apple.dt.XCTMetric_ApplicationLaunch-ApplicationFirstFramePresentationResponsive.duration": {
+        "name": "Duration (ApplicationFirstFramePresentationResponsive)",
+        "unit": "s",
+        "polarity": "prefers smaller",
+        "baseline": 4.831886,
+        "samples": [
+          4.581588,
+          4.672783,
+          4.727779,
+          4.699452,
+          4.959061,
+          5.146721,
+          4.935993,
+          5.377962,
+          4.981981,
+          5.433306,
+          4.679467,
+          4.570851
+        ],
+        "runs": [
+          4.686118,
+          4.959061,
+          4.981981
+        ],
+        "spreadPercent": 3.1,
+        "tolerancePercent": 80,
+        "note": "Hand-set from every CI run so far: launch on the shared VMs is bimodal by host, median 4.3 to 5.5 s on some hosts and 7.3 to 8.4 s on others (runs 37645399395, 37691777269), so only a gross regression (a synchronous load at launch) trips it. The device launch numbers are the baseline that matters (docs/performance.md)."
+      }
+    },
+    "PerformanceHUDOverheadTests/testIdleCPUWithTheHUDHidden()": {
+      "com.apple.dt.XCTMetric_CPU-com.joeblau.blau.time": {
+        "name": "CPU Time (blau)",
+        "unit": "s",
+        "polarity": "prefers smaller",
+        "baseline": 0.001474,
+        "samples": [
+          0.007223,
+          0.001304,
+          0.000436,
+          2.9e-05,
+          0.0,
+          0.002717,
+          0.034029,
+          0.008093,
+          0.002577,
+          0.000199,
+          0.03179,
+          0.001474,
+          0.002269,
+          3e-05,
+          0.0
+        ],
+        "runs": [
+          0.000436,
+          0.002717,
+          0.001474
+        ],
+        "spreadPercent": 84.4,
+        "note": "The idle app uses about a millisecond of CPU in 10 s, so percentages are meaningless; changes under 20 ms (0.2% of a core) are ignored. The HUD's own budget is checked against the shown run.",
+        "minimumDelta": 0.02
+      }
+    },
+    "PerformanceHUDOverheadTests/testIdleCPUWithTheHUDShown()": {
+      "com.apple.dt.XCTMetric_CPU-com.joeblau.blau.time": {
+        "name": "CPU Time (blau)",
+        "unit": "s",
+        "polarity": "prefers smaller",
+        "baseline": 0.070601,
+        "samples": [
+          0.070601,
+          0.069044,
+          0.07443,
+          0.054105,
+          0.075995,
+          0.079841,
+          0.107261,
+          0.094076,
+          0.108077,
+          0.058499,
+          0.079279,
+          0.069154,
+          0.055702,
+          0.063294,
+          0.065039
+        ],
+        "runs": [
+          0.070601,
+          0.094076,
+          0.065039
+        ],
+        "spreadPercent": 33.3,
+        "tolerancePercent": 50.0,
+        "calibrated": true,
+        "note": "Calibrated: run medians strayed up to 33% from the pooled baseline across 3 runs on this machine type, so the tolerance is 1.5 times that."
+      }
+    },
+    "ReplaySessionPerformanceTests/testScriptedSession()": {
+      "com.apple.dt.XCTMetric_CPU-com.joeblau.blau.time": {
+        "name": "CPU Time (blau)",
+        "unit": "s",
+        "polarity": "prefers smaller",
+        "baseline": 3.19906,
+        "samples": [
+          2.946852,
+          3.31888,
+          3.263205,
+          3.138645,
+          3.097953,
+          3.345956,
+          3.493679,
+          3.855824,
+          4.356545,
+          3.982644,
+          3.030608,
+          3.19906,
+          3.122483,
+          3.173144,
+          3.145564
+        ],
+        "runs": [
+          3.138645,
+          3.855824,
+          3.145564
+        ],
+        "spreadPercent": 20.5,
+        "tolerancePercent": 50,
+        "note": "Hand-set: CPU time of identical code moves with the CI host, by 23% between these three runs and 33% between two earlier ones (3.23 s and 4.31 s, runs 37674414639 and 37691777269). The VM has no instruction counter, so a 10% CPU gate needs a Mac or device baseline; in CI the micro-benchmarks gate CPU-heavy code paths on every pull request."
+      },
+      "com.apple.dt.XCTMetric_Clock.time.monotonic": {
+        "name": "Clock Monotonic Time",
+        "unit": "s",
+        "polarity": "prefers smaller",
+        "baseline": 31.984588,
+        "samples": [
+          32.02058,
+          31.971591,
+          32.057124,
+          32.021741,
+          31.946319,
+          31.975073,
+          31.97175,
+          31.984588,
+          31.977022,
+          32.157261,
+          31.954636,
+          31.963914,
+          31.994975,
+          32.05073,
+          31.986748
+        ],
+        "runs": [
+          32.02058,
+          31.977022,
+          31.986748
+        ],
+        "spreadPercent": 0.1
+      },
+      "com.apple.dt.XCTMetric_Memory-com.joeblau.blau.physical": {
+        "name": "Memory Physical (blau)",
+        "unit": "kB",
+        "polarity": "prefers smaller",
+        "baseline": 0.0,
+        "samples": [
+          7110.656,
+          -278.528,
+          229.376,
+          -262.144,
+          0.0,
+          -16.384,
+          0.0,
+          32.768,
+          262.144,
+          -327.68,
+          3817.472,
+          3424.256,
+          -294.912,
+          -16.384,
+          -65.536
+        ],
+        "minimumDelta": 2048,
+        "note": "The memory a session leaves behind: a few hundred kB either way, so changes under 2 MB are noise."
+      },
+      "com.apple.dt.XCTMetric_Memory-com.joeblau.blau.physical_absolute": {
+        "name": "Absolute Memory Physical (blau)",
+        "unit": "kB",
+        "polarity": "prefers smaller",
+        "baseline": 38017.92,
+        "samples": [
+          38083.392,
+          37804.864,
+          38034.24,
+          37772.096,
+          37772.096,
+          37968.768,
+          37968.768,
+          38001.536,
+          38345.6,
+          38017.92,
+          34970.496,
+          38394.752,
+          38099.84,
+          38083.456,
+          38017.92
+        ],
+        "runs": [
+          37804.864,
+          38001.536,
+          38083.456
+        ],
+        "spreadPercent": 0.6,
+        "note": "Steady within a host (under 1%), but bimodal across runner hosts: about 38 MB on most, 31 MB on some (CI run 37712507805, and the simulator on an M3 Max). The baseline sits on the higher mode, so on a 31 MB host a regression has to pass about 35% before it trips the 10% gate."
+      },
+      "com.apple.dt.XCTMetric_Memory-com.joeblau.blau.physical_peak": {
+        "name": "Memory Peak Physical (blau)",
+        "unit": "kB",
+        "polarity": "prefers smaller",
+        "baseline": 38296.448,
+        "samples": [
+          41671.488,
+          38116.16,
+          38050.624,
+          38067.008,
+          38017.856,
+          38280.064,
+          38296.448,
+          38247.296,
+          42179.456,
+          38706.048,
+          34970.496,
+          42015.616,
+          38427.52,
+          38493.056,
+          38329.216
+        ],
+        "runs": [
+          38067.008,
+          38296.448,
+          38427.52
+        ],
+        "spreadPercent": 0.6,
+        "note": "Steady within a host (under 1%), but bimodal across runner hosts: about 38 MB on most, 31 MB on some (CI run 37712507805, and the simulator on an M3 Max). The baseline sits on the higher mode, so on a 31 MB host a regression has to pass about 35% before it trips the 10% gate."
+      },
+      "com.apple.dt.XCTMetric_OSSignpost-db.save.duration": {
+        "name": "Duration (db.save)",
+        "unit": "s",
+        "polarity": "prefers smaller",
+        "baseline": 0.009797,
+        "samples": [
+          0.012008,
+          0.034479,
+          0.010572,
+          0.004589,
+          0.003302,
+          0.019949,
+          0.009797,
+          0.010656,
+          0.012159,
+          0.008176,
+          0.011525,
+          0.004991,
+          0.007664,
+          0.004514,
+          0.004461
+        ],
+        "runs": [
+          0.010572,
+          0.010656,
+          0.004991
+        ],
+        "spreadPercent": 49.1,
+        "tolerancePercent": 200,
+        "minimumDelta": 0.05,
+        "note": "XCTOSSignpostMetric reports one interval per iteration, not the session's total, so it swings far more than 10% between runs; gated only against gross regressions. The session's CPU and memory metrics carry the 10% gate."
+      },
+      "com.apple.dt.XCTMetric_OSSignpost-memory.search.duration": {
+        "name": "Duration (memory.search)",
+        "unit": "s",
+        "polarity": "prefers smaller",
+        "baseline": 0.001231,
+        "samples": [
+          0.001745,
+          0.001274,
+          0.002022,
+          0.001017,
+          0.002544,
+          0.001231,
+          0.001462,
+          0.001009,
+          0.006122,
+          0.001483,
+          0.001012,
+          0.001129,
+          0.001013,
+          0.001212,
+          0.000926
+        ],
+        "runs": [
+          0.001745,
+          0.001462,
+          0.001013
+        ],
+        "spreadPercent": 41.8,
+        "tolerancePercent": 200,
+        "minimumDelta": 0.02,
+        "note": "XCTOSSignpostMetric reports one interval per iteration, not the session's total, so it swings far more than 10% between runs; gated only against gross regressions. The session's CPU and memory metrics carry the 10% gate."
+      },
+      "com.apple.dt.XCTMetric_OSSignpost-topics.segment.duration": {
+        "name": "Duration (topics.segment)",
+        "unit": "s",
+        "polarity": "prefers smaller",
+        "baseline": 0.000136,
+        "samples": [
+          0.0001,
+          0.004068,
+          9e-05,
+          0.001073,
+          8.8e-05,
+          9.6e-05,
+          0.000284,
+          0.000486,
+          0.00017,
+          0.000544,
+          9.1e-05,
+          0.000136,
+          8.3e-05,
+          0.000519,
+          0.000101
+        ],
+        "runs": [
+          0.0001,
+          0.000284,
+          0.000101
+        ],
+        "spreadPercent": 109.0,
+        "tolerancePercent": 200,
+        "minimumDelta": 0.002,
+        "note": "XCTOSSignpostMetric reports one interval per iteration, not the session's total, so it swings far more than 10% between runs; gated only against gross regressions. The session's CPU and memory metrics carry the 10% gate."
+      },
+      "com.apple.dt.XCTMetric_OSSignpost-voiceid.verify.duration": {
+        "name": "Duration (voiceid.verify)",
+        "unit": "s",
+        "polarity": "prefers smaller",
+        "baseline": 3e-06,
+        "samples": [
+          3e-06,
+          3e-06,
+          6e-06,
+          3e-06,
+          3e-06,
+          1.5e-05,
+          2.7e-05,
+          3e-06,
+          2.6e-05,
+          3e-06,
+          3e-06,
+          3e-06,
+          4e-06,
+          3e-06,
+          3e-06
+        ],
+        "runs": [
+          3e-06,
+          1.5e-05,
+          3e-06
+        ],
+        "spreadPercent": 376.5,
+        "tolerancePercent": 200,
+        "minimumDelta": 0.001,
+        "note": "XCTOSSignpostMetric reports one interval per iteration, not the session's total, so it swings far more than 10% between runs; gated only against gross regressions. The session's CPU and memory metrics carry the 10% gate."
+      }
+    }
+  }
+}

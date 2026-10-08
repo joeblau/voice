@@ -1,6 +1,6 @@
-# CI for Blau: lint, BlauKit package tests and app tests on every pull request
-# and every push to main, plus a nightly performance run, ASR evaluation and
-# memory evaluation.
+# CI for Blau: lint, BlauKit package tests, app tests and the BlauKit
+# micro-benchmark gate on every pull request and every push to main, plus the
+# nightly XCTest performance suite, ASR evaluation and memory evaluation.
 # See docs/ci.md.
 #
 # Secrets: none. Tests are hermetic and never call xAI, and this workflow
@@ -30,6 +30,10 @@ on:
     inputs:
       perf:
         description: Also run the performance suite
+        type: boolean
+        default: false
+      record_baselines:
+        description: Record new performance baselines instead of checking them (artifacts to commit)
         type: boolean
         default: false
       asr_eval:
@@ -196,13 +200,82 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  # Nightly (and on demand) performance run: the Blau-Perf scheme in Release.
-  # Baselines and regression gating are wired up by the perf-suite issue (#73).
+  # BlauKit micro-benchmarks (#73): package-benchmark over the topic engine,
+  # RRF and the int8 vector search on the macOS host, failing when an
+  # instruction or allocation count is more than 10% above the committed
+  # thresholds (Packages/BlauKitBenchmarks/Thresholds). Fast enough for every
+  # pull request, so a regression is caught before it merges. With
+  # record_baselines, uploads new thresholds to commit instead.
+  perf-kit:
+    name: perf-kit
+    runs-on: ${{ vars.BLAU_CI_RUNNER || 'xcode-27' }}
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode
+        id: xcode
+        run: scripts/ci/select-xcode.sh
+
+      # The benchmark package's scratch directory: clones (FluidAudio and
+      # GRDB through BlauKit, package-benchmark) and build products.
+      - name: Cache SwiftPM build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: Packages/BlauKitBenchmarks/.build
+          key: microbench-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/BlauKitBenchmarks/Package.swift', 'Packages/BlauKitBenchmarks/Package.resolved', 'Packages/BlauKit/Package.swift') }}
+          restore-keys: |
+            microbench-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.build }}-
+
+      - name: Regression gate
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.record_baselines) }}
+        env:
+          MICROBENCH_OUTPUT: .build/results/microbench/check.txt
+        run: make microbench-check
+
+      - name: Record thresholds
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.record_baselines }}
+        run: |
+          make microbench-baseline
+          mkdir -p .build/results/microbench
+          cp -R Packages/BlauKitBenchmarks/Thresholds .build/results/microbench/
+
+      - name: Job summary
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -f .build/results/microbench/check.txt ]; then
+            {
+              echo "## BlauKit micro-benchmarks"
+              echo
+              echo '```'
+              grep -v '^\[' .build/results/microbench/check.txt | tail -n 60
+              echo '```'
+            } >>"$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: perf-kit-results-${{ github.run_attempt }}
+          path: .build/results/microbench/
+          if-no-files-found: warn
+          retention-days: 30
+
+  # Nightly (and on demand) XCTest performance suite (#73): the Blau-Perf
+  # scheme in Release with the scripted session compiled in, then the
+  # regression gate against BlauPerfTests/Baselines/ci-simulator.json (fails
+  # on a metric more than its tolerance, 10% by default, worse). The report
+  # goes on the run's summary page; the results are kept 90 days as the
+  # history. With record_baselines, uploads a new baseline to commit instead.
   perf:
     name: perf
     if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.perf) }}
     runs-on: ${{ vars.BLAU_CI_RUNNER || 'xcode-27' }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -233,11 +306,19 @@ jobs:
         id: simulator
         run: scripts/ci/simulator-destination.sh
 
+      # Writes .build/results/perf.xcresult (the Makefile's PERF_RESULT).
+      # One retry: the runner's simulator sometimes crashes the test runner
+      # before any test starts ("never finished bootstrapping"), which would
+      # fail the night with nothing measured. A real failure fails twice.
       - name: Performance tests
         env:
           DESTINATION: ${{ steps.simulator.outputs.destination }}
-          XCODEBUILD_FLAGS: "-resultBundlePath .build/results/perf.xcresult -parallel-testing-enabled NO"
-        run: make perf
+          XCODEBUILD_FLAGS: "-parallel-testing-enabled NO"
+        run: |
+          if ! make perf; then
+            echo "::warning::The performance tests failed; retrying once."
+            make perf
+          fi
 
       - name: Shut down simulator
         if: ${{ always() && steps.simulator.outputs.udid != '' }}
@@ -245,14 +326,39 @@ jobs:
           UDID: ${{ steps.simulator.outputs.udid }}
         run: xcrun simctl shutdown "$UDID" || true
 
-      - name: Upload xcresult
+      - name: Regression gate
+        if: ${{ !cancelled() && !(github.event_name == 'workflow_dispatch' && inputs.record_baselines) }}
+        run: make perf-check
+
+      - name: Record baseline
+        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && inputs.record_baselines }}
+        # The extracted results too, so several runs can be pooled into one
+        # calibrated baseline (docs/performance.md, "Updating baselines").
+        run: |
+          make perf-baseline
+          cp BlauPerfTests/Baselines/ci-simulator.json .build/results/
+          scripts/perf/perf-gate.py extract --xcresult .build/results/perf.xcresult \
+            --output .build/results/perf-results.json
+
+      - name: Job summary
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -f .build/results/perf-report.md ]; then
+            cat .build/results/perf-report.md >>"$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: perf-xcresult-${{ github.run_attempt }}
-          path: .build/results/perf.xcresult
+          name: perf-results-${{ github.run_attempt }}
+          path: |
+            .build/results/perf.xcresult
+            .build/results/perf-report.md
+            .build/results/perf-results.json
+            .build/results/ci-simulator.json
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 90
 
   # Nightly (and on demand) ASR evaluation (#32): WER, first-partial and
   # end-of-utterance latency and RTF of every engine on the ASR fixtures with

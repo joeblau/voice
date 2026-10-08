@@ -39,7 +39,12 @@ configured. See [docs/configuration.md](docs/configuration.md).
 | `make test-unit` | Run only `BlauTests`                                             |
 | `make test-ui`   | Run only `BlauUITests`                                           |
 | `make test-kit`  | Run the `BlauKit` package tests on the macOS host (`swift test`) |
-| `make perf`      | Run `BlauPerfTests` (`Blau-Perf` scheme, Release build)          |
+| `make perf`      | Run `BlauPerfTests` (`Blau-Perf` scheme, Release build with the scripted session, [docs](docs/performance.md#performance-suite)) |
+| `make perf-check` | Compare the last `make perf` with the committed baseline; fails on a >10% regression |
+| `make perf-baseline` | Record the last `make perf` as a baseline (`PERF_BASELINE=<name>`) |
+| `make microbench` | Run the BlauKit micro-benchmarks (topic engine, RRF, int8 search) with package-benchmark on this Mac |
+| `make microbench-check` | Run them and fail on a >10% instruction or allocation regression against the committed thresholds |
+| `make microbench-baseline` | Rewrite the micro-benchmark thresholds from a run on this Mac |
 | `make bench`     | Run the model benchmarks on an iPhone (`DEVICE=<udid>`, [docs](docs/benchmarks.md)) |
 | `make bench-kit` | Run the model benchmarks on this Mac (reference numbers, downloads models) |
 | `make eval-noise` | Compare noise suppressors (DeepFilterNet3, Apple voice isolation) on the ASR fixtures: WER and cost (downloads models, [docs](docs/noise-suppression.md)) |
@@ -68,9 +73,10 @@ Formatting, branch naming, commit and pull request conventions are in
 
 ## Continuous integration
 
-GitHub Actions runs `lint`, `package-tests` and `app-tests` on every pull
-request and push to `main`, and the performance suite, the ASR evaluation and
-the memory evaluation nightly. Each job calls
+GitHub Actions runs `lint`, `package-tests`, `app-tests` and the
+micro-benchmark gate (`perf-kit`) on every pull request and push to `main`,
+and the performance suite, the ASR evaluation and the memory evaluation
+nightly. Each job calls
 the same `make` targets as above. See [docs/ci.md](docs/ci.md).
 
 ## Project layout
@@ -84,11 +90,12 @@ the same `make` targets as above. See [docs/ci.md](docs/ci.md).
 | `docs/`          | Architecture and engineering docs ([app shell, environment and feature flags](docs/app-shell.md), [branding](docs/branding.md), [settings](docs/settings.md), [topic timeline](docs/timeline.md)) |
 | `BlauTests/`     | Unit tests (Swift Testing), hosted in the app                   |
 | `BlauUITests/`   | UI tests (XCTest)                                               |
-| `BlauPerfTests/` | Performance tests (XCTest UI-testing bundle, launch metrics)    |
+| `BlauPerfTests/` | Performance tests (XCTest UI-testing bundle): launch metrics and the scripted five-minute session, with the CI baselines in `Baselines/` ([docs](docs/performance.md#performance-suite)) |
+| `Packages/BlauKitBenchmarks` | package-benchmark micro-benchmarks of BlauKit's pure-Swift hot paths, with the committed regression thresholds in `Thresholds/` |
 | `BlauBenchmarks/` | On-device model benchmarks (XCTest, not hosted in the app; [docs](docs/benchmarks.md)) |
 | `TestPlans/`     | `Blau.xctestplan` (unit + UI, coverage), `BlauPerf.xctestplan` and `BlauBenchmarks.xctestplan` |
 | `Config/`        | xcconfig files; `Secrets.xcconfig` is gitignored ([docs](docs/configuration.md)) |
-| `scripts/`       | `swift-format.sh` (behind `make format` and `make lint`), git hooks, embedded-secrets check, `Secrets.xcconfig` writer, `verify-signposts.sh`, `verify-hud.sh` and the Instruments template scripts (see [`docs/performance.md`](docs/performance.md)), `update-model-manifest.py` (see [`docs/models.md`](docs/models.md)), `make-vad-fixtures.py` (see [`docs/vad.md`](docs/vad.md)), `make-asr-fixtures.py` and `eval-asr.sh` (the ASR evaluation, see [`docs/asr-eval.md`](docs/asr-eval.md)), `eval-memory.sh` (the memory evaluation, see [`docs/memory-eval.md`](docs/memory-eval.md)), `fetch-deepfilternet3.sh` and `eval-noise-suppression.sh` (the noise suppression spike, see [`docs/noise-suppression.md`](docs/noise-suppression.md)), `voice-id-eval-librispeech.py` (the voice ID calibration set, see [`docs/voice-id-eval.md`](docs/voice-id-eval.md)), `embeddings/` (the text-embedding retrieval eval and Core ML conversion, see [`docs/benchmarks.md`](docs/benchmarks.md#text-embedding-model-59); the int8 token table, tokenizer parity and tokenizer fixtures, see [`docs/embeddings.md`](docs/embeddings.md); the memory eval vectors, see [`docs/memory-eval.md`](docs/memory-eval.md#recording-vectors)), and the CI helpers in `scripts/ci/` ([`docs/ci.md`](docs/ci.md)) |
+| `scripts/`       | `swift-format.sh` (behind `make format` and `make lint`), git hooks, embedded-secrets check, `Secrets.xcconfig` writer, `verify-signposts.sh`, `verify-hud.sh` and the Instruments template scripts (see [`docs/performance.md`](docs/performance.md)), `update-model-manifest.py` (see [`docs/models.md`](docs/models.md)), `make-vad-fixtures.py` (see [`docs/vad.md`](docs/vad.md)), `make-asr-fixtures.py` and `eval-asr.sh` (the ASR evaluation, see [`docs/asr-eval.md`](docs/asr-eval.md)), `eval-memory.sh` (the memory evaluation, see [`docs/memory-eval.md`](docs/memory-eval.md)), `fetch-deepfilternet3.sh` and `eval-noise-suppression.sh` (the noise suppression spike, see [`docs/noise-suppression.md`](docs/noise-suppression.md)), `voice-id-eval-librispeech.py` (the voice ID calibration set, see [`docs/voice-id-eval.md`](docs/voice-id-eval.md)), `embeddings/` (the text-embedding retrieval eval and Core ML conversion, see [`docs/benchmarks.md`](docs/benchmarks.md#text-embedding-model-59); the int8 token table, tokenizer parity and tokenizer fixtures, see [`docs/embeddings.md`](docs/embeddings.md); the memory eval vectors, see [`docs/memory-eval.md`](docs/memory-eval.md#recording-vectors)), the CI helpers in `scripts/ci/` ([`docs/ci.md`](docs/ci.md)), and the performance gates in `scripts/perf/` (`perf-gate.py` for the XCTest suite, `microbench.sh` for the micro-benchmarks; see [`docs/performance.md`](docs/performance.md#performance-suite)) |
 | `Datasets/voice-id/` | The owner's voice ID evaluation recordings, stored with consent in LFS (see its README and [`docs/voice-id-eval.md`](docs/voice-id-eval.md)) |
 | `Datasets/asr/` | The owner's ASR evaluation recordings, stored with consent in LFS (see its README and [`docs/asr-eval.md`](docs/asr-eval.md)) |
 | `Tools/Instruments/` | `Blau.tracetemplate`, the Instruments template for profiling Blau, and the instrument list and options it is generated from |
