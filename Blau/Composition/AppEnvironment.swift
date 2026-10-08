@@ -76,6 +76,11 @@ final class AppEnvironment {
     /// or schedules the background task.
     let profileMemory: ProfileMemory
 
+    /// The knowledge base's write path (#65): About Me, Company, Notes and
+    /// Collections save through it, off the main thread, into whichever
+    /// store is open (`KnowledgeBaseStore`, docs/knowledge-base.md).
+    let knowledgeBase: any KnowledgeBaseEditing
+
     /// xAI access (#33): the key store, the REST client, on-device realtime
     /// token minting and the `XAIAccount` the key entry views bind to. The
     /// live app uses the Keychain and the network; every other kind runs on
@@ -245,6 +250,9 @@ final class AppEnvironment {
         self.memoryLearning =
             memoryLearning ?? .offline(persistence: persistence, transcript: offlineTranscript)
         self.profileMemory = profileMemory ?? .offline(persistence: persistence)
+        self.knowledgeBase = DeferredKnowledgeBaseStore(clock: clock) { @MainActor [weak persistence] in
+            persistence?.stack?.container
+        }
         self.xai = xai
         self.speechModels = speechModels
         self.textEmbeddings = textEmbeddings
