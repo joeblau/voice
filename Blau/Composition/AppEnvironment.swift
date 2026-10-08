@@ -6,6 +6,7 @@ import BlauRealtime
 import BlauTelemetry
 import BlauTopics
 import BlauTranscription
+import BlauVoiceID
 import Foundation
 import Observation
 import SwiftData
@@ -63,7 +64,7 @@ final class AppEnvironment {
     let topicLifecycle: TopicLifecycle
 
     /// Learning from conversations (#66): each topic the lifecycle closes is
-    /// sent for fact and entity extraction, and Settings → Memory binds to
+    /// sent for fact and entity extraction, and Settings → Knowledge binds to
     /// its toggle and "What Blau Learned". Only the live app calls xAI;
     /// every other kind runs on a text model that is never available.
     let memoryLearning: MemoryLearning
@@ -99,8 +100,14 @@ final class AppEnvironment {
     /// in memory.
     let transcriptionSettings: TranscriptionSettings
 
+    /// How strictly the voice ID gate matches the voiceprint (Settings →
+    /// Voice ID → Sensitivity). The verification gate (#47) reads
+    /// `currentConfig()` for each segment. Live launches keep it in
+    /// `UserDefaults`; every other kind keeps it in memory.
+    let voiceIDSettings: VoiceIDSettings
+
     /// The Markdown export to iCloud Drive → Blau (#78, docs/export.md).
-    /// Settings → Markdown Export binds to it; `start()` lets it follow the
+    /// Settings → iCloud → Markdown Export binds to it; `start()` lets it follow the
     /// store for automatic export, and leaving the foreground flushes it.
     /// Live launches write to iCloud Drive; every other kind writes to a
     /// temporary folder with in-memory settings.
@@ -200,6 +207,7 @@ final class AppEnvironment {
         speechModels: ModelManager,
         realtimeSession: RealtimeSessionServices,
         transcriptionSettings: TranscriptionSettings,
+        voiceIDSettings: VoiceIDSettings = VoiceIDSettings(store: InMemoryVoiceIDSensitivityStore()),
         conversationAudio: ConversationAudio? = nil,
         backgroundInference: BackgroundInferenceMonitor = BackgroundInferenceMonitor(),
         textEmbeddings: TextEmbeddingService = TextEmbeddings.unavailable(),
@@ -233,6 +241,7 @@ final class AppEnvironment {
         self.textEmbeddings = textEmbeddings
         self.realtimeSession = realtimeSession
         self.transcriptionSettings = transcriptionSettings
+        self.voiceIDSettings = voiceIDSettings
         self.conversationAudio = conversationAudio
         self.backgroundInference = backgroundInference
         self.performance = performance
@@ -464,6 +473,8 @@ extension AppEnvironment {
             realtimeSession: realtimeSession,
             // #31: the Settings toggle that forces Apple's speech engine.
             transcriptionSettings: TranscriptionSettings.make(),
+            // Settings → Voice ID → Sensitivity, read by the gate (#47).
+            voiceIDSettings: VoiceIDSettings.make(),
             conversationAudio: conversationAudio,
             textEmbeddings: textEmbeddings,
             // Also drives `memoryIndexing` and `memoryLearning`.

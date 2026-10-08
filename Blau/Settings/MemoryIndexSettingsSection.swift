@@ -2,7 +2,7 @@ import BlauMemory
 import BlauPersistence
 import SwiftUI
 
-/// Settings → Memory: the on-device search index (#63). Shows whether it is
+/// Settings → Knowledge → Search Index: the on-device search index (#63). Shows whether it is
 /// up to date, the progress of a rebuild or of embedding, how much is
 /// indexed and when it was last rebuilt, and offers a rebuild.
 struct MemoryIndexSettingsSection: View {
@@ -49,7 +49,7 @@ struct MemoryIndexSettingsSection: View {
                     .accessibilityIdentifier(Self.rebuildIdentifier)
             }
         } header: {
-            Text("Memory")
+            Text("Search Index")
         } footer: {
             Text(presentation.detail)
         }

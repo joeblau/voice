@@ -15,7 +15,7 @@ let pipeline = FactExtractionPipeline(
     transcripts: DeferredTopicTranscriptSource { try await transcript.conversationStore() },
     store: DeferredMemoryFactStore { @MainActor in persistence.stack?.container },
     embedder: { try? await textEmbeddings.textEmbedder(for: .document) },
-    isEnabled: { preference.load() },                            // Settings → Memory
+    isEnabled: { preference.load() },                            // Settings → Knowledge
     pending: UserDefaultsPendingFactExtractionStore(),
     gate: IndexingGate(performance: performance))                // thermal and power policy (#75)
 
@@ -165,7 +165,7 @@ model, and discarded.
 
 ## Privacy
 
-- **Settings → Memory → Learn From Conversations** (on by default). Off,
+- **Settings → Knowledge → Learn From Conversations** (on by default). Off,
   closed topics aren't queued, the waiting ones are dropped at once, and
   nothing more is sent; what was learned stays until the user deletes it.
   The preference is per device (`blau.memory.learnsFromConversations`).
@@ -173,7 +173,7 @@ model, and discarded.
   already holds that the transcript mentions, to xAI with the user's own
   key, directly from the device (no backend, #33). The conversation itself
   already went to xAI.
-- **Settings → Memory → What Blau Learned** lists every fact, current ones
+- **Settings → Knowledge → What Blau Learned** lists every fact, current ones
   first and the ones that stopped being true under "No Longer True", with
   swipe to delete (every CloudKit copy). The full knowledge-base screens are
   #65; this list is the minimum the issue's privacy note asks for.

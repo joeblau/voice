@@ -16,6 +16,7 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `Blau/RootView.swift` | The main screen ([below](#main-screen)): navigation stack, bottom bar, content area, the Settings and xAI onboarding sheets, and the DEBUG menu button |
 | `Blau/Branding/` | The brand's color tokens (`BrandColor`, `TopicDotColor`), type scale (`BrandTextStyle`) and the `BrandLockup` the empty main screen shows ([branding.md](branding.md)) |
 | `Blau/MainScreen/` | The bottom bar's `SettingsButton` and `RecordButton` (its face, VoiceOver text and the "You're muted" hint) and their accessibility identifiers; the button's logic is `RecordButtonModel` in `BlauRealtime/Control` ([below](#record)) |
+| `Blau/Settings/` | The settings sheet and its panes ([settings.md](settings.md)) |
 | `Blau/XAI/XAIServices.swift` | The xAI services (#33): `make(config:)` for the app, `hermetic(config:)` for previews and tests |
 | `Blau/VoiceLoop/` | `VoiceLoop` (the spoken conversation: the live audio pipeline feeding the `TurnOrchestrator`, #36), the SwiftData transcript recorder, the HUD rows and the DEBUG Voice Loop screen |
 | `Blau/Debug/` | The DEBUG menu and the reusable feature flag toggles |
@@ -48,7 +49,8 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `topics` | `any TopicService` | `TopicLifecycle` (#54, [topics.md](topics.md#topic-lifecycle)): fed by the orchestrator's transcript (`TopicTrackingTranscript`), writing topics through the transcript's store | `FakeTopicService` |
 | `topicLifecycle` | `TopicLifecycle` | the same lifecycle as `topics`; the timeline's rename, merge and split go through it | keyword titles over the in-memory store (`TopicLifecycle.offline`) |
 | `memory` | `any MemoryService` | `MemoryToolService` (#68, [memory-tools.md](memory-tools.md)): search over the store and index `memoryIndexing` has open; the same service backs Grok's memory tools, which `realtimeSession` declares and the orchestrator runs behind the `memoryTools` flag | `FakeMemoryService` |
-| `transcriptionSettings` | `TranscriptionSettings` | `UserDefaults` (`blau.transcription.engine`); the `blau.uitests` suite in DEBUG UI tests | in memory, Apple's engine reported installed |
+| `transcriptionSettings` | `TranscriptionSettings` | `UserDefaults` (`blau.transcription.engine`, `blau.transcription.options`); the `blau.uitests` suite in DEBUG UI tests | in memory, Apple's engine reported installed |
+| `voiceIDSettings` | `VoiceIDSettings` | `UserDefaults` (`blau.voiceID.sensitivity`); the `blau.uitests` suite in DEBUG UI tests | in memory |
 | `markdownExport` | `MarkdownExportController` | Markdown files in iCloud Drive → Blau (#78, [export.md](export.md)); settings in `UserDefaults`, the `blau.uitests` suite in DEBUG UI tests; `start()` runs its automatic export, leaving the foreground flushes it | a temporary folder and in-memory settings (`MarkdownExportController.local`) |
 | `xai` | `XAIServices` | Keychain + network (`XAIServices.make`); the `BLAU_UI_TEST_XAI` stub in DEBUG UI tests | in-memory key store + stub transport (`XAIServices.hermetic`) |
 | `issues` | `IssueCenter` | follows the orchestrator, the conversation audio's keeper and the store's sync state; feeds `NWPathMonitor` (`SystemNetworkMonitor`) to the orchestrator for offline mode | the store's sync state only; `-BlauIssueFixture <code>` shows one catalog entry in UI tests |
@@ -58,9 +60,10 @@ Views read it with `@Environment(AppEnvironment.self)`. The
 `.appEnvironment(_:)` modifier also injects `FeatureFlags`, the
 `AppLifecycleCoordinator`, the `XAIAccount` (`xai.account`), the
 `PersistenceController` (Settings reads its iCloud status), the
-`TranscriptionSettings` (Settings → Speech Recognition) and the
-`MarkdownExportController` (Settings → Markdown Export), so a view can read
-just the part it needs.
+`TranscriptionSettings` (Settings → Transcription), the `VoiceIDSettings`
+(Settings → Voice ID), the `PerformanceStatus` and the
+`MarkdownExportController` (Settings → iCloud → Markdown Export), so a view
+can read just the part it needs.
 
 The modifier does not set the SwiftData container: the controller opens the
 stores asynchronously and replaces the container when the iCloud account

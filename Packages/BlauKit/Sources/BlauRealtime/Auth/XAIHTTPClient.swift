@@ -61,12 +61,19 @@ public struct XAIHTTPClient: Sendable {
         public var path: String
         public var body: Data?
         public var timeout: Duration
+        /// The `Accept` header: JSON for the REST API, an audio type for
+        /// text to speech (`/v1/tts`), which answers with raw audio bytes.
+        public var accept: String
 
-        public init(method: String, path: String, body: Data? = nil, timeout: Duration = .seconds(20)) {
+        public init(
+            method: String, path: String, body: Data? = nil, timeout: Duration = .seconds(20),
+            accept: String = "application/json"
+        ) {
             self.method = method
             self.path = path
             self.body = body
             self.timeout = timeout
+            self.accept = accept
         }
 
         public static func get(_ path: String) -> Request {
@@ -162,7 +169,7 @@ public struct XAIHTTPClient: Sendable {
         urlRequest.timeoutInterval = request.timeout.timeInterval
         urlRequest.cachePolicy = .reloadIgnoringLocalCacheData
         urlRequest.setValue("Bearer \(apiKey.rawValue)", forHTTPHeaderField: "Authorization")
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
+        urlRequest.setValue(request.accept, forHTTPHeaderField: "Accept")
         if request.body != nil {
             urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }

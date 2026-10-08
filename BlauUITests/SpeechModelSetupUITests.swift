@@ -14,17 +14,9 @@ final class SpeechModelSetupUITests: XCTestCase {
 
     /// Main screen Settings button (bottom bar) → Settings → Speech Models.
     private func openSpeechModelSettings(in app: XCUIApplication) {
-        let settings = app.buttons["blau.settings.open"]
-        XCTAssertTrue(settings.waitForExistence(timeout: 10), "Settings button missing")
-        settings.tap()
-        // The Settings Form is lazy and Speech Models sits below xAI Account,
-        // Voice and iCloud, so the link may only exist once scrolled to.
-        let form = app.collectionViews.firstMatch
-        XCTAssertTrue(form.waitForExistence(timeout: 10), "Settings did not open")
-        let link = app.buttons["blau.models.settingsLink"]
-        scrollTo(link, in: form)
-        XCTAssertTrue(link.exists, "Settings has no Speech Models link")
-        link.tap()
+        // Speech Models is a pane of Settings; its row keeps the link's
+        // identifier.
+        openSettingsPane(SettingsPaneID.models, in: app)
     }
 
     func testFreshInstallShowsProgressThenReady() throws {

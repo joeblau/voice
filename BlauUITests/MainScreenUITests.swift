@@ -188,13 +188,15 @@ final class MainScreenUITests: XCTestCase {
     func testSettingsButtonOpensSettings() {
         let app = launch()
         settingsButton(app).tap()
-        // The xAI account status is in Settings' first section. Rows further
-        // down (iCloud, Speech Models) are below the fold of the lazy Form on
-        // a 667 pt iPhone SE and never reach the accessibility tree.
+        // The settings sheet (#43): its first row is the xAI account, which
+        // opens the key's status. SettingsUITests covers the other panes.
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10), "Settings did not open")
+        let account = app.buttons["settings.pane.account"]
+        XCTAssertTrue(account.waitForExistence(timeout: 10), "Settings has no xAI Account row")
+        account.tap()
         XCTAssertTrue(
             app.descendants(matching: .any)["xai.account.status"].waitForExistence(timeout: 10),
-            "Settings has no xAI account status")
+            "Settings → xAI Account has no key status")
     }
 
     private func waitForValue(

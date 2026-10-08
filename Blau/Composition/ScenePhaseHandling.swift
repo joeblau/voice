@@ -3,6 +3,7 @@ import BlauMemory
 import BlauRealtime
 import BlauTelemetry
 import BlauTranscription
+import BlauVoiceID
 import SwiftData
 import SwiftUI
 import os
@@ -109,8 +110,8 @@ extension AppEnvironment {
 /// environment: the `AppEnvironment` itself, its `FeatureFlags`, its
 /// `AppLifecycleCoordinator`, its `XAIAccount`, its `PersistenceController`,
 /// its speech `ModelManager`, its `TranscriptionSettings`, its
-/// `MemoryLearningSettings`, its `PerformanceStatus` and its
-/// `MarkdownExportController`.
+/// `VoiceIDSettings`, its `MemoryLearningSettings`, its `PerformanceStatus` and
+/// its `MarkdownExportController`.
 ///
 /// The SwiftData container is not set here: it is replaced when the iCloud
 /// account changes, so `PersistenceGate` (inside this modifier in the app)
@@ -128,6 +129,7 @@ struct AppEnvironmentModifier: ViewModifier {
             .environment(environment.persistence)
             .environment(environment.speechModels)
             .environment(environment.transcriptionSettings)
+            .environment(environment.voiceIDSettings)
             .environment(environment.memoryLearning.settings)
             .environment(environment.performanceStatus)
             .environment(environment.memoryIndexing)

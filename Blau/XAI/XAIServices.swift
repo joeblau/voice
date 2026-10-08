@@ -17,6 +17,8 @@ final class XAIServices {
     let client: XAIHTTPClient
     /// Realtime client secrets for the WebSocket (#34).
     let tokenProvider: TokenProvider
+    /// Spoken samples of Grok's voices for Settings → Voice (#43).
+    let voicePreviewer: RealtimeVoicePreviewer
 
     private let store: any APIKeyStore
     private let developmentAPIKey: String?
@@ -32,15 +34,20 @@ final class XAIServices {
     ) {
         let client = XAIHTTPClient(baseURL: config.xaiAPIBaseURL, keyStore: store, transport: transport)
         let tokenProvider = TokenProvider(minter: XAIClientSecretMinter(client: client))
+        let voicePreviewer = RealtimeVoicePreviewer(client: client)
         self.client = client
         self.tokenProvider = tokenProvider
+        self.voicePreviewer = voicePreviewer
         self.store = store
         self.developmentAPIKey = config.developmentAPIKey
         self.seedMarker = seedMarker
         self.account = XAIAccount(
             store: store,
             validator: XAIKeyValidator(client: client),
-            onKeyChange: { await tokenProvider.invalidate() }
+            onKeyChange: {
+                await tokenProvider.invalidate()
+                await voicePreviewer.clearCache()
+            }
         )
     }
 

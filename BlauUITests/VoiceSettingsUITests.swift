@@ -1,6 +1,6 @@
 import XCTest
 
-/// Settings → Voice (#35). Runs with the DEBUG xAI stub, so voice settings
+/// Settings → Voice (#35, a pane of Settings since #43). Runs with the DEBUG xAI stub, so voice settings
 /// live in the `blau.uitests` defaults suite, never the developer's own.
 @MainActor
 final class VoiceSettingsUITests: XCTestCase {
@@ -15,9 +15,7 @@ final class VoiceSettingsUITests: XCTestCase {
         app.launchEnvironment["BLAU_MODEL_FIXTURES"] = "1"
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
-        let open = app.buttons["blau.settings.open"]
-        XCTAssertTrue(open.waitForExistence(timeout: 10))
-        open.tap()
+        openSettingsPane(SettingsPaneID.voice, in: app)
         return app
     }
 

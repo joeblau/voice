@@ -8,7 +8,7 @@ import Foundation
 import os
 
 /// Learning from conversations (#66): the fact and entity extraction
-/// pipeline, fed by the topic lifecycle, and what Settings → Memory binds
+/// pipeline, fed by the topic lifecycle, and what Settings → Knowledge → Memory binds
 /// to (the toggle and "What Blau Learned").
 ///
 /// BlauMemory can't import BlauTopics or BlauRealtime (siblings), so this

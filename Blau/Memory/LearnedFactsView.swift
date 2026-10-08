@@ -4,7 +4,7 @@ import SwiftData
 import SwiftUI
 import os
 
-/// Accessibility identifiers for Settings → Memory, shared with UI tests.
+/// Accessibility identifiers for Settings → Knowledge → Memory, shared with UI tests.
 enum MemorySettingsIdentifiers {
     static let learnToggle = "settings.memory.learn"
     static let openLearned = "settings.memory.learned"
@@ -12,7 +12,7 @@ enum MemorySettingsIdentifiers {
     static let emptyState = "memory.learned.empty"
 }
 
-/// Settings → Memory (#66): whether Blau learns from conversations, and
+/// Settings → Knowledge → Memory (#66): whether Blau learns from conversations, and
 /// what it has learned.
 struct MemorySettingsSection: View {
     @Environment(MemoryLearningSettings.self) private var settings

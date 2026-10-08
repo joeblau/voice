@@ -1,5 +1,6 @@
 import BlauPersistence
 import Foundation
+import SwiftData
 
 extension PersistenceController {
     /// A fresh, empty in-memory controller that never touches iCloud or the
@@ -24,3 +25,17 @@ extension PersistenceController {
         inMemory()
     }
 }
+
+#if DEBUG
+    extension PersistenceController {
+        /// A fresh, empty in-memory `ModelContainer` for previews of views
+        /// that read the store directly (`@Query`, `modelContext`).
+        static func previewContainer() -> ModelContainer {
+            do {
+                return try BlauModelContainer.makeInMemory()
+            } catch {
+                fatalError("Couldn't open an in-memory store for a preview: \(error)")
+            }
+        }
+    }
+#endif

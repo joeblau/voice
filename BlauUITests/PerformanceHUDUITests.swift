@@ -33,18 +33,16 @@ final class PerformanceHUDUITests: XCTestCase {
         let app = launch()
         XCTAssertFalse(hud(app).exists, "The HUD starts hidden")
 
-        app.buttons["blau.settings.open"].tap()
-        let form = app.collectionViews.firstMatch
-        XCTAssertTrue(form.waitForExistence(timeout: 5), "Settings did not open")
+        openSettingsPane(SettingsPaneID.developer, in: app)
         let toggle = app.switches["settings.developer.performanceHUD"]
-        scrollTo(toggle, in: form)
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10), "No HUD toggle in Settings → Developer")
         XCTAssertEqual(toggle.value as? String, "0")
         let control = toggle.switches.firstMatch
         (control.exists ? control : toggle).tap()
         XCTAssertEqual(toggle.value as? String, "1")
 
         XCTAssertTrue(hud(app).waitForExistence(timeout: 5), "The HUD did not appear")
-        app.buttons["Done"].tap()
+        app.buttons["settings.done"].tap()
         XCTAssertTrue(hud(app).waitForExistence(timeout: 5), "The HUD should stay over the main screen")
     }
 

@@ -1,8 +1,9 @@
-import BlauMemory
 import BlauPersistence
 import BlauRealtime
-import BlauTranscription
+import BlauTelemetry
+import SwiftData
 import SwiftUI
+import os
 
 /// Settings → xAI account: shows whether a key is stored, lets the user add,
 /// replace or remove it, and shows key problems (including ones hit during
@@ -86,6 +87,7 @@ struct XAIAccountSettingsSection: View {
             if let problem = account.problem {
                 XAIProblemView(problem: problem)
             }
+            ConnectionTestRows()
             Button("Replace Key…") {
                 account.dismissProblem()
                 isReplacing = true
@@ -100,60 +102,159 @@ struct XAIAccountSettingsSection: View {
     }
 }
 
-/// The settings sheet presented from the main screen. The full settings
-/// screen (#43) adds its sections here.
-struct SettingsView: View {
-    @Environment(\.dismiss) private var dismiss
+/// Accessibility identifiers for Settings → xAI Account beyond the key
+/// entry's (`XAIKeyIdentifiers`), shared with UI tests.
+enum XAIAccountSettingsIdentifiers {
+    static let testConnection = "settings.account.testConnection"
+    static let connectionResult = "settings.account.connectionResult"
+    static let usage = "settings.account.usage"
+    static let cost = "settings.account.cost"
+}
+
+/// Test Connection: checks the stored key with xAI again and says how it
+/// went, without touching the key.
+private struct ConnectionTestRows: View {
+    @Environment(XAIAccount.self) private var account
 
     var body: some View {
-        NavigationStack {
-            Form {
-                XAIAccountSettingsSection()
-                VoiceSettingsSection()
-                SearchToolsSettingsSection()
-                MemorySettingsSection()
-                ICloudSettingsSection()
-                MemoryIndexSettingsSection()
-                MarkdownExportSettingsSection()
-                SpeechModelsSettingsSection()
-                SpeechRecognitionSettingsSection()
-                Section {
-                    PerformanceHUDToggle()
-                    NavigationLink {
-                        DiagnosticsView()
-                    } label: {
-                        Label("Diagnostics", systemImage: "waveform.path.ecg")
-                    }
-                    .accessibilityIdentifier(DiagnosticsView.Identifier.open)
-                } header: {
-                    Text("Developer")
-                } footer: {
-                    PerformanceHUDToggle.footer
+        Button {
+            Task { await account.testConnection() }
+        } label: {
+            HStack {
+                Text("Test Connection")
+                Spacer()
+                if account.connectionCheck == .testing {
+                    ProgressView()
                 }
             }
-            .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+        }
+        .disabled(account.isBusy)
+        .accessibilityIdentifier(XAIAccountSettingsIdentifiers.testConnection)
+
+        switch account.connectionCheck {
+        case .notTested, .testing:
+            EmptyView()
+        case .succeeded(let date, let realtimeVerified):
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(realtimeVerified ? "Connected to xAI" : "Key accepted")
+                    Text(
+                        realtimeVerified
+                            ? "Checked \(date.formatted(.relative(presentation: .named)))."
+                            : "xAI accepted the key, but couldn't confirm voice access. Blau checks again when you start talking."
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 }
+            } icon: {
+                Image(systemName: realtimeVerified ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    .foregroundStyle(realtimeVerified ? .green : .orange)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier(XAIAccountSettingsIdentifiers.connectionResult)
+        case .failed(let problem):
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(problem.title)
+                    Text(problem.message)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } icon: {
+                Image(systemName: "xmark.octagon.fill")
+                    .foregroundStyle(.red)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier(XAIAccountSettingsIdentifiers.connectionResult)
         }
     }
 }
 
+/// Settings → xAI Account → Usage: this month's Grok speaking time and
+/// turns from the stored conversations, and what they likely cost at
+/// xAI's speech-to-speech rates (`RealtimeUsageEstimator`).
+struct UsageEstimateSection: View {
+    @Environment(\.modelContext) private var modelContext
+    @State private var estimate: RealtimeUsageEstimate?
+    @State private var failed = false
+
+    private let pricing = RealtimePricing.grokVoice
+
+    var body: some View {
+        Section {
+            if let estimate {
+                LabeledContent("Grok speaking", value: Self.minutes(estimate.agentMinutes))
+                    .accessibilityIdentifier(XAIAccountSettingsIdentifiers.usage)
+                LabeledContent("Turns", value: estimate.textInputs.formatted())
+                LabeledContent("Conversations", value: estimate.conversations.formatted())
+                LabeledContent("Estimated cost") {
+                    Text(Self.dollars(estimate.cost(at: pricing)))
+                        .monospacedDigit()
+                }
+                .accessibilityIdentifier(XAIAccountSettingsIdentifiers.cost)
+            } else if failed {
+                Text("Couldn't read your conversations.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ProgressView()
+            }
+        } header: {
+            Text("This month")
+        } footer: {
+            Text(
+                "An estimate from your saved conversations at xAI's voice rates "
+                    + "(\(Self.dollars(pricing.audioPerMinuteUSD)) a minute of Grok speaking, "
+                    + "\(Self.dollars(pricing.textInputUSD)) a turn). Searches and voice previews are extra. "
+                    + "Your exact usage is at console.x.ai."
+            )
+        }
+        .task { refresh() }
+    }
+
+    private func refresh() {
+        do {
+            estimate = try RealtimeUsageEstimator.estimate(
+                in: modelContext, period: RealtimeUsageEstimator.month(containing: Date()))
+            failed = false
+        } catch {
+            Log.ui.error("Usage estimate failed: \(String(describing: error), privacy: .public)")
+            failed = true
+        }
+    }
+
+    static func minutes(_ minutes: Double) -> String {
+        Duration.seconds(Int64((minutes * 60).rounded())).formatted(
+            .units(allowed: [.hours, .minutes, .seconds], width: .abbreviated, maximumUnitCount: 2))
+    }
+
+    static func dollars(_ amount: Double) -> String {
+        amount.formatted(.currency(code: "USD").precision(.fractionLength(2...3)))
+    }
+}
+
+/// Settings → xAI Account: the key, Test Connection and the usage estimate.
+struct XAIAccountSettingsView: View {
+    @Environment(XAIAccount.self) private var account
+
+    var body: some View {
+        Form {
+            XAIAccountSettingsSection()
+            if account.hasKey {
+                UsageEstimateSection()
+            }
+        }
+        .navigationTitle("xAI Account")
+    }
+}
+
 #if DEBUG
-    #Preview("No key") {
-        SettingsView()
-            .environment(AppEnvironment.preview())
-            .environment(XAIAccount.preview())
-            .environment(PersistenceController.preview())
-            .environment(AppDiagnostics(store: nil))
-            .environment(SpeechModels.fixtureManager())
-            .environment(RealtimeVoiceSettingsModel.preview())
-            .environment(TranscriptionSettings.preview())
-            .environment(MemoryIndexingController(persistence: .preview(), embedder: nil, performance: nil))
-            .environment(MarkdownExportController.local(persistence: .preview()))
-            .environment(MemoryLearningSettings(store: InMemoryMemoryLearningPreferenceStore()))
+    #Preview("Connected") {
+        NavigationStack {
+            XAIAccountSettingsView()
+        }
+        .environment(
+            XAIAccount.preview(key: try? XAIAPIKey(validating: "xai-" + String(repeating: "Preview0", count: 6)))
+        )
+        .modelContainer(PersistenceController.previewContainer())
     }
 #endif

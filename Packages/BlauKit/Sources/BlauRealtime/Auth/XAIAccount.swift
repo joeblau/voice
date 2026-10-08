@@ -161,6 +161,23 @@ public final class XAIAccount {
         case validating
         case saving
         case removing
+        /// ``testConnection(now:)`` is checking the stored key with xAI.
+        case testing
+    }
+
+    /// The outcome of the last ``testConnection(now:)`` (Settings → xAI
+    /// account → Test Connection).
+    public enum ConnectionCheck: Sendable, Equatable {
+        /// Not tested since launch or since the key last changed.
+        case notTested
+        /// A test is running.
+        case testing
+        /// xAI accepted the stored key at `at`. `realtimeVerified` is
+        /// `false` when the realtime mint step was inconclusive (see
+        /// ``XAIKeyStatus/realtimeVerified``).
+        case succeeded(at: Date, realtimeVerified: Bool)
+        /// The test failed; the problem says why and what to do.
+        case failed(XAIAccountProblem)
     }
 
     public private(set) var status: Status = .unknown
@@ -168,6 +185,9 @@ public final class XAIAccount {
     /// The problem to show, if any. Cleared by the next attempt or
     /// ``dismissProblem()``.
     public private(set) var problem: XAIAccountProblem?
+    /// The last connection test's outcome. Reset whenever the stored key
+    /// changes.
+    public private(set) var connectionCheck: ConnectionCheck = .notTested
 
     public var hasKey: Bool {
         if case .connected = status { true } else { false }
@@ -291,10 +311,71 @@ public final class XAIAccount {
         do {
             try await store.delete()
             status = .noKey
+            connectionCheck = .notTested
             await onKeyChange()
         } catch {
             problem = XAIAccountProblem(error)
         }
+    }
+
+    /// Checks the **stored** key with xAI again, with the same unbilled
+    /// calls ``connect(apiKey:)`` makes (the key's metadata, then a
+    /// throwaway realtime client secret), and records the outcome in
+    /// ``connectionCheck``.
+    ///
+    /// The key stays stored whatever the outcome: a failure says why
+    /// (offline, no credits, key switched off...) and the user decides what
+    /// to do. A success also refreshes the key's name and marks it verified.
+    ///
+    /// - Parameter now: When the test ran, for "Checked just now".
+    /// - Returns: `true` when xAI accepted the key.
+    @discardableResult
+    public func testConnection(now: @autoclosure () -> Date = Date()) async -> Bool {
+        guard activity == .idle else { return false }
+        activity = .testing
+        connectionCheck = .testing
+        defer { activity = .idle }
+
+        let key: XAIAPIKey?
+        do {
+            key = try await store.load()
+        } catch {
+            status = .unavailable(error)
+            connectionCheck = .failed(XAIAccountProblem(error))
+            return false
+        }
+        guard let key else {
+            status = .noKey
+            connectionCheck = .notTested
+            return false
+        }
+
+        let knownName: String? =
+            if case .connected(let current) = status, current.redacted == key.redacted { current.name } else { nil }
+        do {
+            let result = try await validator.validate(key)
+            status = .connected(ConnectedKey(redacted: key.redacted, name: result.name ?? knownName, verified: true))
+            connectionCheck = .succeeded(at: now(), realtimeVerified: result.realtimeVerified)
+            Self.logger.info("xAI connection test passed")
+            return true
+        } catch {
+            Self.logger.notice("xAI connection test failed: \(String(describing: error), privacy: .public)")
+            // Only a problem with the key or the account (invalid, switched
+            // off, no credits) unverifies it. A transient failure (offline,
+            // a timeout, a server error) says nothing about the key, so a
+            // key that was verified stays verified; `connectionCheck` still
+            // reports the failure.
+            if error.requiresUserAction || !Self.isCurrent(status, key) {
+                status = .connected(ConnectedKey(redacted: key.redacted, name: knownName, verified: false))
+            }
+            connectionCheck = .failed(XAIAccountProblem(error))
+            return false
+        }
+    }
+
+    /// Whether `status` already describes `key` as connected.
+    private static func isCurrent(_ status: Status, _ key: XAIAPIKey) -> Bool {
+        if case .connected(let current) = status { current.redacted == key.redacted } else { false }
     }
 
     /// Hides the current problem.
@@ -322,6 +403,7 @@ public final class XAIAccount {
         }
         unverifiedCandidate = nil
         status = .connected(ConnectedKey(redacted: key.redacted, name: name, verified: verified))
+        connectionCheck = .notTested
         await onKeyChange()
         return true
     }
