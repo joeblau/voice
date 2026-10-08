@@ -84,13 +84,15 @@ struct PrivacyAppTests {
     }
 
     /// What the pane says is sent to xAI matches what the pipeline sends:
-    /// text only, the pinned memory and tool results, the learning
+    /// text only, the pinned memory (the About Me page, the profile summary
+    /// and facts) and tool results, the learning
     /// transcripts; audio comes back.
     @Test func theSentToXAIListCoversWhatTheAppSends() {
         let text = SentToXAISection.items.map { "\($0.title) \($0.detail)" }.joined(separator: " ")
         #expect(SentToXAISection.items.count == 4)
         #expect(text.contains("Your audio is never sent"))
         #expect(text.contains("Voice ID"))
+        #expect(text.contains("About Me"))
         #expect(text.contains("memory searches"))
         #expect(text.contains("Learn From Conversations"))
         #expect(text.contains("Grok's reply as audio"))
@@ -151,7 +153,8 @@ struct PrivacyAppTests {
         try Data("export".utf8).write(to: DataExportFiles.directory.appending(path: "Blau Export.zip"))
 
         let summary = try await PrivacyDataEraser.erase(
-            .learnedFacts, in: fixture.context, profileMemory: fixture.profile, isConversationRunning: false)
+            .learnedFacts, in: fixture.context, profileMemory: fixture.profile, exports: DataExportModel(),
+            isConversationRunning: false)
 
         #expect(summary.facts == 1)
         #expect(summary.profileBlocks == 1)
@@ -171,7 +174,8 @@ struct PrivacyAppTests {
     @Test func deletingConversationsLeavesTheLearnedMemory() async throws {
         let fixture = try await makeFixture()
         _ = try await PrivacyDataEraser.erase(
-            .conversations, in: fixture.context, profileMemory: fixture.profile, isConversationRunning: false)
+            .conversations, in: fixture.context, profileMemory: fixture.profile, exports: DataExportModel(),
+            isConversationRunning: false)
         #expect(fixture.log.load().records.count == 1)
         #expect(fixture.notes.load().count == 1)
         #expect(try fixture.context.fetchCount(FetchDescriptor<Fact>()) == 1)
@@ -181,7 +185,8 @@ struct PrivacyAppTests {
         let fixture = try await makeFixture()
         await #expect(throws: PrivacyDataEraser.Refusal.conversationRunning) {
             try await PrivacyDataEraser.erase(
-                .everything, in: fixture.context, profileMemory: fixture.profile, isConversationRunning: true)
+                .everything, in: fixture.context, profileMemory: fixture.profile, exports: DataExportModel(),
+                isConversationRunning: true)
         }
         #expect(try fixture.context.fetchCount(FetchDescriptor<Fact>()) == 1)
         #expect(fixture.log.load().records.count == 1)
@@ -200,6 +205,62 @@ struct PrivacyAppTests {
                 == [second.lastPathComponent])
         DataExportFiles.removeAll()
         #expect(!FileManager.default.fileExists(atPath: DataExportFiles.directory.path(percentEncoded: false)))
+    }
+
+    /// After a delete, Share Export no longer offers the zip the delete
+    /// removed (#149 review).
+    @Test func deletingWithdrawsAnEarlierExport() async throws {
+        let fixture = try await makeFixture()
+        let exports = DataExportModel()
+        await exports.prepare(DataExportModel.writer(for: fixture.context.container, app: "test"))
+        let export = try #require(exports.export)
+        #expect(export.counts.facts == 1)
+        #expect(FileManager.default.fileExists(atPath: export.url.path(percentEncoded: false)))
+
+        _ = try await PrivacyDataEraser.erase(
+            .everything, in: fixture.context, profileMemory: fixture.profile, exports: exports,
+            isConversationRunning: false)
+
+        #expect(exports.export == nil)
+        #expect(!exports.failed)
+        #expect(!FileManager.default.fileExists(atPath: export.url.path(percentEncoded: false)))
+    }
+
+    /// An export still being written when data is deleted holds the deleted
+    /// data: it is thrown away, not offered, and its zip doesn't outlive the
+    /// delete.
+    @Test func anExportFinishingAfterADeleteIsDiscarded() async throws {
+        let fixture = try await makeFixture()
+        let exports = DataExportModel()
+        let (started, didStart) = AsyncStream<Void>.makeStream()
+        let (release, doRelease) = AsyncStream<Void>.makeStream()
+        let container = fixture.context.container
+        let exportedAt = Self.t0
+        let preparing = Task {
+            await exports.prepare {
+                // Read before the delete, written after it.
+                let snapshot = try DataExport.snapshot(in: ModelContext(container), exportedAt: exportedAt)
+                didStart.yield()
+                for await _ in release { break }
+                return (try DataExportFiles.write(snapshot), snapshot.counts)
+            }
+        }
+        for await _ in started { break }
+        #expect(exports.isPreparing)
+
+        _ = try await PrivacyDataEraser.erase(
+            .everything, in: fixture.context, profileMemory: fixture.profile, exports: exports,
+            isConversationRunning: false)
+        doRelease.yield()
+        await preparing.value
+
+        #expect(!exports.isPreparing)
+        #expect(exports.export == nil)
+        #expect(!exports.failed)
+        let files =
+            (try? FileManager.default.contentsOfDirectory(
+                atPath: DataExportFiles.directory.path(percentEncoded: false))) ?? []
+        #expect(files.isEmpty)
     }
 }
 

@@ -73,12 +73,17 @@ Blau Export 2026-10-08.zip
   the user loses nothing they could read or take elsewhere.
 - The zip lives in the app's temporary directory (`DataExportFiles`). On
   iOS the files are written with complete file protection. Each export
-  replaces the last, and every delete in Privacy & Data removes it.
+  replaces the last, and every delete in Privacy & Data removes it and
+  withdraws it from the pane (`DataExportModel.dataErased()`), so Share
+  Export never offers a removed file. The Delete buttons are disabled while
+  an export is being prepared, and an export that still finishes after a
+  delete is discarded with its zip: it would hold the deleted data.
 
 ## Deleting
 
 Each **Delete** button asks first, with a count, and is refused while a
-conversation is recording (the pipeline writes to the same store).
+conversation is recording (the pipeline writes to the same store) or an
+export is being prepared.
 `PrivacyDataEraser.erase` runs:
 
 1. For the learned facts or the knowledge base, waits for a consolidation
@@ -90,7 +95,7 @@ conversation is recording (the pipeline writes to the same store).
    exports it as a CloudKit record deletion, so the records leave iCloud and
    every other device on the account. A batch delete would bypass the
    history and never reach CloudKit.
-3. Removes the share-sheet exports, and for the learned facts or the
+3. Removes the share-sheet exports (and withdraws Share Export), and for the learned facts or the
    knowledge base drops this device's consolidation log, its notes and the
    pinned-memory cache (`ProfileMemory.memoryErased()`), so the next session's
    instructions no longer carry what was deleted.
@@ -185,7 +190,7 @@ stale one left by a killed run is ended at launch.
 | `DataMaintenanceTests` (BlauPersistence) | Every scope, including `learnedFacts` keeping the user's pages; counts; deletions saved to the store |
 | `DataExportTests` (BlauPersistence) | The snapshot holds every record; JSON round trip with millisecond dates; the voiceprint's vectors are left out; deterministic output; both Markdown files; the README; the folder; the zip unzips (with `ditto` on macOS) to the same files |
 | `ProfileConsolidatorTests` (BlauMemory) | `eraseLocalHistory()` drops records and notes and keeps the schedule; `waitUntilIdle()` waits for a running consolidation |
-| `PrivacyAppTests` (BlauTests) | The app's and the extension's manifests are bundled with the declared reasons; the pane's wording; deleting learned facts clears the pinned cache, the log, the notes and the exports; deleting is refused during a conversation; export files are replaced and removed |
+| `PrivacyAppTests` (BlauTests) | The app's and the extension's manifests are bundled with the declared reasons; the pane's wording; deleting learned facts clears the pinned cache, the log, the notes and the exports; a delete withdraws an earlier export, and an export finishing after a delete is discarded; deleting is refused during a conversation; export files are replaced and removed |
 | `SettingsUITests` | Export All Data opens the share sheet; deleting learned facts and conversations asks first |
 | `test-privacy-manifest.sh` | The checker accepts the repository's manifests and rejects bad reasons, categories, data types, missing keys, undeclared APIs and bundles without manifests |
 

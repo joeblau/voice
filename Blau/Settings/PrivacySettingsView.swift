@@ -31,6 +31,9 @@ struct PrivacySettingsView: View {
     @State private var isErasing = false
     @State private var result: String?
     @State private var problem: String?
+    /// The export lives here, not in its section, so a delete can withdraw
+    /// it: the delete removes the zip the share button points at.
+    @State private var exports = DataExportModel()
 
     var body: some View {
         Form {
@@ -49,14 +52,16 @@ struct PrivacySettingsView: View {
 
             SentToXAISection()
 
-            DataExportSection()
+            DataExportSection(model: exports, isErasing: isErasing)
 
             Section {
                 ForEach(DataEraseScope.allCases, id: \.self) { scope in
                     Button(Self.buttonTitle(scope), role: .destructive) {
                         confirm(scope)
                     }
-                    .disabled(isErasing)
+                    // An export still being written would hold what is about
+                    // to be deleted, so the two never overlap.
+                    .disabled(isErasing || exports.isPreparing)
                     .accessibilityIdentifier(PrivacySettingsIdentifiers.delete(scope))
                 }
                 if let result {
@@ -109,7 +114,7 @@ struct PrivacySettingsView: View {
         let isConversationRunning = await environment.audio.isCapturing || environment.voiceLoop.phase.isActive
         do {
             let summary = try await PrivacyDataEraser.erase(
-                scope, in: modelContext, profileMemory: environment.profileMemory,
+                scope, in: modelContext, profileMemory: environment.profileMemory, exports: exports,
                 isConversationRunning: isConversationRunning)
             result = Self.resultMessage(scope, summary: summary)
         } catch PrivacyDataEraser.Refusal.conversationRunning {
@@ -193,12 +198,14 @@ enum PrivacyDataEraser {
     }
 
     /// Deletes `scope` everywhere (`DataEraser`), then this device's copies:
-    /// the share sheet's exports, and for the learned facts and the
+    /// the share sheet's exports (withdrawn from `exports`, so Share Export
+    /// no longer offers the removed zip), and for the learned facts and the
     /// knowledge base the consolidation log, its notes and the pinned
     /// memory cache. A consolidation already running finishes first, so it
     /// can't write a profile from facts that are about to go.
     static func erase(
-        _ scope: DataEraseScope, in context: ModelContext, profileMemory: ProfileMemory, isConversationRunning: Bool
+        _ scope: DataEraseScope, in context: ModelContext, profileMemory: ProfileMemory, exports: DataExportModel,
+        isConversationRunning: Bool
     ) async throws -> DataEraseSummary {
         guard !isConversationRunning else { throw Refusal.conversationRunning }
         if scope.erasesLearnedFacts {
@@ -208,6 +215,7 @@ enum PrivacyDataEraser {
         // The share sheet's copies hold what was just deleted; they go with
         // it.
         DataExportFiles.removeAll()
+        exports.dataErased()
         if scope.components.contains(.conversations) {
             ConversationExportFiles.removeAll()
         }
@@ -246,7 +254,7 @@ struct SentToXAISection: View {
                 title: String(localized: "What Grok needs to answer"),
                 detail: String(
                     localized:
-                        "Your profile summary and current facts at the start of each conversation, and the results of the memory searches Grok asks for."
+                        "Your About Me page, your profile summary and current facts at the start of each conversation, and the results of the memory searches Grok asks for."
                 ),
                 systemImage: "brain"),
             Item(
@@ -323,26 +331,94 @@ enum DataExportFiles {
     }
 }
 
-/// Export All Data: every record as JSON, plus the conversations and the
-/// knowledge base as Markdown, zipped and offered through the share sheet
-/// (`DataExport`, `DataExporter`).
-///
-/// The store is read on a context of its own and the files are written off
-/// the main actor, so a long history doesn't freeze Settings.
-struct DataExportSection: View {
-    @Environment(\.modelContext) private var modelContext
-    @State private var export: Export?
-    @State private var isPreparing = false
-    @State private var failed = false
-
+/// The state of Export All Data, owned by `PrivacySettingsView` so a delete
+/// can withdraw the export it just removed (`dataErased()`).
+@MainActor
+@Observable
+final class DataExportModel {
     struct Export: Equatable {
         var url: URL
         var counts: DataExport.Counts
     }
 
+    /// Writes the zip and returns where it is and what it holds.
+    typealias Writer = @Sendable () async throws -> (URL, DataExport.Counts)
+
+    /// The export the share button offers.
+    private(set) var export: Export?
+    private(set) var isPreparing = false
+    private(set) var failed = false
+    /// Bumped by every delete. An export that started before a delete holds
+    /// deleted data, so it is thrown away when it finishes.
+    private(set) var erasures = 0
+
+    /// Prepares an export with `write`, replacing the last one.
+    func prepare(_ write: Writer) async {
+        guard !isPreparing else { return }
+        isPreparing = true
+        failed = false
+        defer { isPreparing = false }
+        let started = erasures
+        do {
+            let (url, counts) = try await write()
+            guard erasures == started else {
+                // Data was deleted while this was being written: the zip
+                // holds it, so it goes too.
+                Self.remove(url)
+                return
+            }
+            export = Export(url: url, counts: counts)
+        } catch {
+            Log.ui.error("Data export failed: \(String(describing: error), privacy: .public)")
+            guard erasures == started else { return }
+            export = nil
+            failed = true
+        }
+    }
+
+    /// The data the export copied was deleted, and with it the export's
+    /// files (`DataExportFiles.removeAll()`): nothing is left to share.
+    func dataErased() {
+        erasures += 1
+        export = nil
+        failed = false
+    }
+
+    /// Reads the store on a context of its own and writes the zip off the
+    /// main actor, so a long history doesn't freeze Settings.
+    static func writer(for container: ModelContainer, app: String) -> Writer {
+        {
+            try await Task.detached(priority: .userInitiated) {
+                let snapshot = try DataExport.snapshot(in: ModelContext(container), exportedAt: Date(), app: app)
+                return (try DataExportFiles.write(snapshot), snapshot.counts)
+            }.value
+        }
+    }
+
+    private static func remove(_ url: URL) {
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch CocoaError.fileNoSuchFile {
+            // A delete already removed it.
+        } catch {
+            Log.ui.error("Couldn't remove a stale data export: \(String(describing: error), privacy: .public)")
+        }
+    }
+}
+
+/// Export All Data: every record as JSON, plus the conversations and the
+/// knowledge base as Markdown, zipped and offered through the share sheet
+/// (`DataExport`, `DataExporter`). Its state is `DataExportModel`.
+struct DataExportSection: View {
+    @Environment(\.modelContext) private var modelContext
+    let model: DataExportModel
+    /// A delete is running; an export started now would copy what it is
+    /// deleting.
+    let isErasing: Bool
+
     var body: some View {
         Section {
-            if let export {
+            if let export = model.export {
                 ShareLink(
                     item: export.url,
                     preview: SharePreview(export.url.lastPathComponent, image: Image(systemName: "doc.zipper"))
@@ -355,22 +431,24 @@ struct DataExportSection: View {
                     .foregroundStyle(.secondary)
             }
             Button {
-                Task { await prepare() }
+                let write = DataExportModel.writer(for: modelContext.container, app: SettingsSummary.version())
+                Task { await model.prepare(write) }
             } label: {
                 HStack {
                     Label(
-                        export == nil ? "Export All Data" : "Export Again",
-                        systemImage: export == nil ? "square.and.arrow.down.on.square" : "arrow.clockwise")
+                        model.export == nil ? "Export All Data" : "Export Again",
+                        systemImage: model.export == nil ? "square.and.arrow.down.on.square" : "arrow.clockwise")
                     Spacer()
-                    if isPreparing {
+                    if model.isPreparing {
                         ProgressView()
                     }
                 }
             }
-            .disabled(isPreparing)
+            .disabled(model.isPreparing || isErasing)
             .accessibilityIdentifier(
-                export == nil ? PrivacySettingsIdentifiers.exportPrepare : PrivacySettingsIdentifiers.exportAgain)
-            if failed {
+                model.export == nil
+                    ? PrivacySettingsIdentifiers.exportPrepare : PrivacySettingsIdentifiers.exportAgain)
+            if model.failed {
                 Text("Couldn't export your data. Try again.")
                     .font(.footnote)
                     .foregroundStyle(.red)
@@ -382,25 +460,6 @@ struct DataExportSection: View {
                 "A zip of everything Blau keeps: every record as JSON, and your conversations and knowledge base as "
                     + "Markdown. Your voiceprint is described, without the voice data itself."
             )
-        }
-    }
-
-    private func prepare() async {
-        isPreparing = true
-        failed = false
-        defer { isPreparing = false }
-        let container = modelContext.container
-        let app = SettingsSummary.version()
-        do {
-            let (url, counts) = try await Task.detached(priority: .userInitiated) {
-                let snapshot = try DataExport.snapshot(in: ModelContext(container), exportedAt: Date(), app: app)
-                return (try DataExportFiles.write(snapshot), snapshot.counts)
-            }.value
-            export = Export(url: url, counts: counts)
-        } catch {
-            Log.ui.error("Data export failed: \(String(describing: error), privacy: .public)")
-            export = nil
-            failed = true
         }
     }
 
