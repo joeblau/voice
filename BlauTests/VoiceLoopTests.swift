@@ -145,13 +145,14 @@ struct VoiceLoopTests {
         pipeline.verdictFeed.yield(verdict("Hi Blau", .accepted))
         pipeline.verdictFeed.yield(verdict("And now the weather", .rejected))
         pipeline.verdictFeed.yield(verdict("Hm", .uncertainDiscarded))
+        pipeline.verdictFeed.yield(verdict("Y ahora el tiempo", .otherLanguage))
         snapshotFeed.yield(TurnSnapshot(state: .agentSpeaking))
         snapshotFeed.yield(TurnSnapshot(state: .listening))
-        for _ in 0..<100 where loop.ignoredSpeech.count < 2 || pipeline.agentActivity.count < 2 {
+        for _ in 0..<100 where loop.ignoredSpeech.count < 3 || pipeline.agentActivity.count < 2 {
             try? await Task.sleep(for: .milliseconds(10))
         }
 
-        #expect(loop.ignoredSpeech.map(\.utterance.text) == ["And now the weather", "Hm"])
+        #expect(loop.ignoredSpeech.map(\.utterance.text) == ["And now the weather", "Hm", "Y ahora el tiempo"])
         #expect(pipeline.agentActivity == [true, false])
         await loop.stop()
     }

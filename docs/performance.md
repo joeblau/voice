@@ -137,6 +137,7 @@ case step.
 | `voiceid.embed`       | `voiceid`  | `.voiceIDEmbed`       | A speech segment is handed to the embedding model   | The 256-d embedding is out                      |
 | `voiceid.verify`      | `voiceid`  | `.voiceIDVerify`      | Scoring of a segment against the voiceprint starts  | Accept / reject / uncertain is decided          |
 | `voiceid.gate`        | `voiceid`  | `.voiceIDGate`        | A final utterance reaches the verification gate (#47) | The gate passes it on or drops it; the end message is the disposition |
+| `voiceid.language`    | `voiceid`  | `.voiceIDLanguage`    | The first 2 s of a segment go to the language ID model (features included) | The language probabilities are out ([voice-id.md](voice-id.md#language-filter-50)) |
 | `realtime.turn`       | `realtime` | `.realtimeTurn`       | A verified utterance's text is committed to Grok    | `response.done`, or the response is cancelled by barge-in |
 | `realtime.firstAudio` | `realtime` | `.realtimeFirstAudio` | Same commit as `realtime.turn`                      | The first `response.output_audio.delta` arrives |
 | `realtime.connect`    | `realtime` | `.realtimeConnect`    | `RealtimeClient` starts a connection attempt (token, then WebSocket upgrade) | The socket is open, or the attempt failed |
@@ -814,7 +815,7 @@ and the code in sync.
 
 Per-chunk and per-frame intervals (`capture.frame`, `vad.chunk`,
 `asr.chunk`, `realtime.event`) and the frequent `voiceid.embed`,
-`topics.segment`, `memory.embed` and `db.save` stay out: they would swamp
+`voiceid.language`, `topics.segment`, `memory.embed` and `db.save` stay out: they would swamp
 MetricKit's signpost budget. `playback.firstBuffer` also stays out, although
 it is a [latency budget](#latency-budget) hop: it ends on the audio render
 thread, and every `mxSignpost` takes a resource snapshot, which has no place
@@ -1236,7 +1237,7 @@ end of speech ─▶ end of utterance ─▶ commit ─▶ first audio delta ─
 | Hop (`LatencyHop`) | From → to | Target p50 | Instruments interval | HUD row |
 | ------------------ | --------- | ---------- | -------------------- | ------- |
 | `endOfUtterance`   | Last speech sample captured → the end-of-utterance decision (the final is emitted) | 300–800 ms (the debounce) | `asr.eou`, from VAD's end of speech only (see below) | Speech → EOU |
-| `voiceGate`        | End-of-utterance decision → the utterance committed to Grok | ≤ 100 ms | `voiceid.gate` | Voice gate |
+| `voiceGate`        | End-of-utterance decision → the utterance committed to Grok | ≤ 100 ms | `voiceid.gate` (includes `voiceid.language` when a final waits for its language check) | Voice gate |
 | `firstAudio`       | Commit → the first `response.output_audio.delta` (network and model) | ≤ 700 ms | `realtime.firstAudio` | Commit → audio |
 | `firstBuffer`      | First audio delta → its first frame rendered for the output (jitter-buffer preroll) | ≤ 50 ms | `playback.firstBuffer` | First buffer |
 | `total`            | End of speech → the reply's first frame rendered | **≤ 1.5 s** | none (see below) | Speech → audio |
@@ -1248,6 +1249,14 @@ target; p95 is tracked next to it. The hop targets add up to more than
 debounce (Parakeet's 640 ms end-of-utterance debounce, or the transcriber's
 900 ms silence fallback when the model doesn't decide), so a turn that
 needs the full 800 ms there has 700 ms left for everything else.
+
+The [language filter](voice-id.md#language-filter-50) (#50) spends part of
+the `voiceGate` hop: a final whose segment's language check hasn't
+finished waits for it (at most 500 ms), so that wait is inside the
+`voiceid.gate` interval, whose end message is then `otherLanguage` when
+the filter drops the final. Each check is its own `voiceid.language`
+interval (target < 30 ms added; most run before the final arrives, 2 s
+into the segment or at its end). It is not a separate hop.
 
 ### How each moment is measured
 
@@ -1364,7 +1373,8 @@ and real xAI credentials, so the first rows are still pending:
 | `BlauTelemetry/Latency` | `LatencyHop`, `LatencyBudget`, `TurnLatencyTimeline`, `TurnLatencySample`, `AudioHardwareLatency`, `LatencyMarks`, `LatencyBudgetTracker`, `LatencyBudgetReport` |
 | `BlauCore/HostClock.swift` | Host time (`mach_absolute_time`) ages, to place capture timestamps on the uptime timeline |
 | `ParakeetStreamingTranscriber` | The end-of-speech and end-of-utterance marks |
-| `VerificationGate` | The `voiceid.gate` interval |
+| `VerificationGate` | The `voiceid.gate` interval (the language filter's wait included) |
+| `VoxLinguaLanguageIdentifier` | The `voiceid.language` interval |
 | `PlaybackRenderer` | `PlayedItem.firstRenderedAt` |
 | `TurnOrchestrator`, `TurnLatencyStatistics` | The per-turn sample, the HUD windows, the log line |
 | `SystemAudioSession.hardwareLatency()` | `AVAudioSession` input and output latency for the route |

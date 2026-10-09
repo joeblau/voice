@@ -68,6 +68,14 @@ import os
 /// BlauRealtime's `BargeInMonitor`) waits for the speech's first decision,
 /// so only accepted or uncertain speech interrupts Grok.
 ///
+/// **Language filter (#50).** With a ``LanguageFilter``, the first 2 s of
+/// every segment voice ID hasn't rejected are also identified (once that
+/// much has been heard, or at the segment's end when it is shorter but at
+/// least 1 s long), alongside the speaker scores. A final voice ID would
+/// send is dropped as ``GatedUtterance/Disposition/otherLanguage`` when most
+/// of its identified speech is in a language the user hasn't allowed, and
+/// partials of such speech are held back like rejected ones.
+///
 /// **Latency.** The gate holds a final only while a decision is still being
 /// computed: normally the end-of-speech re-score, one embedding (target:
 /// < 100 ms beyond end of utterance, the gate's share of the latency
@@ -88,6 +96,7 @@ public actor VerificationGate {
 
     private nonisolated let verdictContinuation: AsyncStream<GatedUtterance>.Continuation
     private let verifier: any SpeechVerifying
+    private let languageFilter: LanguageFilter?
     private let history: (any CaptureFrameSource)?
     private let onScoredSpeech: (@Sendable (ScoredSpeechSegment) -> Void)?
     private let clock: any BlauClock
@@ -131,6 +140,13 @@ public actor VerificationGate {
         /// what was scored, or, for an inherited decision, that of the
         /// segment it came from. Inheritance is measured from it.
         var evidenceEnd: Int64?
+        /// The language filter's progress on this segment: it runs once.
+        var languageCheck = LanguageCheckState.notStarted
+        /// The language filter's verdict, once it ran (and succeeded).
+        var language: LanguageVerdict?
+        /// Accepted speech for adaptive updates, held until a language
+        /// check still running when the segment was decided finishes.
+        var awaitingLanguage: ScoredSpeechSegment?
 
         var hasEnded: Bool { speechEnd != nil }
         var bufferedEnd: Int64 { start + Int64(samples.count) }
@@ -152,6 +168,12 @@ public actor VerificationGate {
         }
     }
 
+    private enum LanguageCheckState {
+        case notStarted
+        case running
+        case finished
+    }
+
     /// - Parameters:
     ///   - verifier: Embeds and scores speech against the voiceprint
     ///     (``SpeakerVerifier``).
@@ -159,6 +181,8 @@ public actor VerificationGate {
     ///     audio stream hasn't delivered yet when a final needs it. Optional.
     ///   - configuration: Windows, inheritance, the uncertain policy and the
     ///     waits.
+    ///   - languageFilter: Drops speech in languages the user hasn't
+    ///     allowed (#50). Optional.
     ///   - turnActivity: Whether the conversation is in an active turn.
     ///   - clock: Times the waits and the hold on finals.
     ///   - signposter: Where the `voiceid.gate` hold on each final goes.
@@ -170,12 +194,14 @@ public actor VerificationGate {
         verifier: any SpeechVerifying,
         history: (any CaptureFrameSource)? = nil,
         configuration: VerificationGateConfiguration = .standard,
+        languageFilter: LanguageFilter? = nil,
         turnActivity: ConversationTurnActivity? = nil,
         clock: any BlauClock = SystemClock(),
         signposter: Signposter = Signposts.voiceID,
         onScoredSpeech: (@Sendable (ScoredSpeechSegment) -> Void)? = nil
     ) {
         self.verifier = verifier
+        self.languageFilter = languageFilter
         self.history = history
         self.onScoredSpeech = onScoredSpeech
         self.configuration = configuration
@@ -217,6 +243,7 @@ public actor VerificationGate {
             guard let id = openSegmentID else { return }
             append(frame, to: id)
             await scoreDueCheckpoints(of: id)
+            await checkLanguageIfDue(id)
         case .ended(let segment):
             if segments[segment.id] == nil {
                 // Missed the start (subscribed mid-segment): track it anyway.
@@ -320,6 +347,10 @@ public actor VerificationGate {
         notifyWaiters()
 
         let speech = speechEnd - segment.start
+        // The language check of speech shorter than the window, alongside
+        // the end-of-segment score (unless voice ID already rejected it).
+        let early = segment.decision == .reject ? nil : startLanguageCheck(ended.id, speech: speech)
+        async let earlyLanguage: Void = runLanguageCheck(ended.id, early)
         let minimum = configuration.minimumScoredSpeech.sampleCount(sampleRate: segment.sampleRate)
         var verdict: SegmentVerdict
         if speech < minimum {
@@ -337,7 +368,13 @@ public actor VerificationGate {
         }
         let duration = Duration.samples(speech, sampleRate: segment.sampleRate)
         verdict = verdict.covering(duration)
-        guard var settled = segments[ended.id] else { return }
+        // Voice ID only now let the segment through (a later score, or the
+        // decision it inherited): check its language before the audio goes.
+        let late = verdict.decision == .reject ? nil : startLanguageCheck(ended.id, speech: speech)
+        guard var settled = segments[ended.id] else {
+            await earlyLanguage
+            return
+        }
         settled.final = verdict
         if case .scored = verdict.basis { settled.evidenceEnd = speechEnd }
         let accepted = acceptedSpeech(settled, verdict: verdict, speech: speech)
@@ -351,7 +388,27 @@ public actor VerificationGate {
             """
         )
         notifyWaiters()
-        if let accepted { onScoredSpeech?(accepted) }
+        await earlyLanguage
+        await runLanguageCheck(ended.id, late)
+        guard let accepted, let checked = segments[ended.id] else { return }
+        if checked.languageCheck == .running {
+            // A final's check of this segment (``languageVerdict(of:through:)``)
+            // is still in flight: observe once it's done.
+            segments[ended.id]?.awaitingLanguage = accepted
+        } else {
+            observe(accepted, of: checked)
+        }
+    }
+
+    /// Hands accepted speech to adaptive updates, once its language is
+    /// known: they only learn speech the language filter lets through, so
+    /// a foreign voice voice ID accepted (a TV) is never learned.
+    private func observe(_ accepted: ScoredSpeechSegment, of segment: Segment) {
+        guard !isOtherLanguage(segment) else {
+            shared.withLock { $0.otherLanguageAdaptationsSkipped += 1 }
+            return
+        }
+        onScoredSpeech?(accepted)
     }
 
     /// The segment as adaptive updates see it, when it was accepted on its
@@ -424,6 +481,120 @@ public actor VerificationGate {
             Log.voiceID.error(
                 "Scoring segment \(id, privacy: .public) failed: \(String(describing: error), privacy: .public)")
         }
+    }
+
+    // MARK: Language
+
+    /// Identifies segment `id`'s language once its first window has been
+    /// heard, unless voice ID has already rejected it.
+    private func checkLanguageIfDue(_ id: Int) async {
+        guard let filter = languageFilter, let segment = segments[id], !segment.hasEnded,
+            segment.languageCheck == .notStarted, segment.decision != .reject
+        else { return }
+        let window = filter.configuration.window.sampleCount(sampleRate: segment.sampleRate)
+        guard Int64(segment.samples.count) >= window else { return }
+        await runLanguageCheck(id, startLanguageCheck(id, speech: window))
+    }
+
+    /// Claims segment `id`'s language check and returns the audio to check:
+    /// the first `speech` samples, at most the window. `nil` when there is
+    /// no filter, the check has started already, the filter is off or the
+    /// speech is too short.
+    private func startLanguageCheck(_ id: Int, speech: Int64) -> AudioFrame? {
+        guard let filter = languageFilter, let segment = segments[id], segment.languageCheck == .notStarted else {
+            return nil
+        }
+        let rate = segment.sampleRate
+        let window = filter.configuration.window.sampleCount(sampleRate: rate)
+        let count = min(speech, window)
+        guard count >= filter.configuration.minimumSpeech.sampleCount(sampleRate: rate),
+            filter.currentAllowedLanguages() != nil, let audio = audio(of: segment, count: count)
+        else { return nil }
+        segments[id]?.languageCheck = .running
+        return audio
+    }
+
+    /// Runs the language check ``startLanguageCheck(_:speech:)`` claimed.
+    private func runLanguageCheck(_ id: Int, _ audio: AudioFrame?) async {
+        guard let audio, let filter = languageFilter else { return }
+        defer {
+            segments[id]?.languageCheck = .finished
+            if let accepted = segments[id]?.awaitingLanguage, let segment = segments[id] {
+                segments[id]?.awaitingLanguage = nil
+                observe(accepted, of: segment)
+            }
+            notifyWaiters()
+        }
+        guard let allowed = filter.currentAllowedLanguages() else { return }
+        do {
+            let verdict = try await filter.check(audio, allowed: allowed)
+            shared.withLock { $0.languageChecks += 1 }
+            segments[id]?.language = verdict
+            Log.voiceID.debug(
+                """
+                Segment \(id, privacy: .public) language: \(verdict.language.code, privacy: .public) \
+                \(verdict.probability, format: .fixed(precision: 2), privacy: .public), \
+                allowed \(verdict.allowedProbability, format: .fixed(precision: 3), privacy: .public)
+                """
+            )
+        } catch {
+            shared.withLock { $0.languageFailures += 1 }
+            Log.voiceID.error(
+                "Identifying the language of segment \(id, privacy: .public) failed: \(String(describing: error), privacy: .public)"
+            )
+        }
+    }
+
+    /// The language filter's verdict on segment `id` for an utterance that
+    /// ends at `end`: waits for a check in flight, and checks a segment
+    /// still being spoken that hasn't reached its window yet.
+    private func languageVerdict(of id: Int, through end: Int64) async -> LanguageVerdict? {
+        guard let filter = languageFilter, let segment = segments[id] else { return nil }
+        switch segment.languageCheck {
+        case .finished:
+            return segment.language
+        case .running:
+            _ = await waitUntil(filter.configuration.decisionTimeout) {
+                self.segments[id]?.languageCheck != .running
+            }
+            return segments[id]?.language
+        case .notStarted:
+            // An ended segment was checked when it ended, unless it was too
+            // short, rejected, or the filter is off.
+            guard !segment.hasEnded, segment.decision != .reject else { return nil }
+            let audio = startLanguageCheck(id, speech: max(0, end - segment.start))
+            await runLanguageCheck(id, audio)
+            return segments[id]?.language
+        }
+    }
+
+    /// The language filter's decision on an utterance voice ID would send,
+    /// with the threshold for voice ID's decision on it (`speaker`).
+    private func checkLanguage(
+        of verdicts: [SegmentVerdict], range: Range<Int64>, speaker: SpeakerDecision
+    ) async -> UtteranceLanguageCheck? {
+        guard let filter = languageFilter, filter.currentAllowedLanguages() != nil else { return nil }
+        let started = clock.uptime
+        let threshold = filter.configuration.threshold(for: speaker)
+        var parts: [UtteranceLanguageCheck.Part] = []
+        for verdict in verdicts {
+            let language = await languageVerdict(of: verdict.segmentID, through: range.upperBound)
+            parts.append(
+                .init(
+                    segmentID: verdict.segmentID, verdict: language, speech: verdict.speechDuration,
+                    threshold: threshold))
+        }
+        let decision = LanguageFilterRules.combine(
+            parts.map { ($0.decision, $0.speech) }, minimumShare: filter.configuration.minimumOtherLanguageShare)
+        return UtteranceLanguageCheck(
+            decision: decision, parts: parts, threshold: threshold, delay: max(.zero, clock.uptime - started))
+    }
+
+    /// Whether `segment` is, so far, speech in another language.
+    private func isOtherLanguage(_ segment: Segment) -> Bool {
+        guard let filter = languageFilter, let language = segment.language else { return false }
+        let threshold = filter.configuration.threshold(for: segment.decision ?? .uncertain)
+        return language.decision(threshold: threshold) == .otherLanguage
     }
 
     // MARK: Verdicts
@@ -551,7 +722,7 @@ public actor VerificationGate {
         case .partial(_, let range):
             let samples = Self.sampleRange(of: range)
             let latest = order.reversed().lazy.compactMap { self.segments[$0] }.first { $0.contains(samples) }
-            if latest?.decision == .reject {
+            if let latest, latest.decision == .reject || isOtherLanguage(latest) {
                 shared.withLock { $0.suppressedPartials += 1 }
                 return nil
             }
@@ -585,13 +756,18 @@ public actor VerificationGate {
             }
         }
         let decision = VerificationGateRules.combine(verdicts, minorityShare: configuration.mixedSpeechMinorityShare)
-        let disposition = VerificationGateRules.disposition(
+        var disposition = VerificationGateRules.disposition(
             for: decision, duration: utterance.duration, isTurnActive: turnActivity.isActive,
             policy: configuration.uncertainPolicy)
+        // Only speech voice ID would send is worth identifying.
+        let language =
+            disposition.isCommitted ? await checkLanguage(of: verdicts, range: range, speaker: decision) : nil
+        if language?.decision == .otherLanguage { disposition = .otherLanguage }
         let delay = max(.zero, clock.uptime - receivedAt)
         hold.end(message: disposition.rawValue)
         let gated = GatedUtterance(
-            utterance: utterance, decision: decision, disposition: disposition, segments: verdicts, delay: delay)
+            utterance: utterance, decision: decision, disposition: disposition, segments: verdicts, delay: delay,
+            language: language)
 
         if disposition == .accepted {
             // Only the owner's speech (or Grok's reply) keeps a turn active:
@@ -609,12 +785,18 @@ public actor VerificationGate {
             statistics.lastDelay = delay
             statistics.longestDelay = max(statistics.longestDelay, delay)
             statistics.totalDelay += delay
+            if let language {
+                if disposition == .otherLanguage { statistics.otherLanguageUtterances += 1 }
+                statistics.lastLanguageDelay = language.delay
+                statistics.longestLanguageDelay = max(statistics.longestLanguageDelay, language.delay)
+            }
         }
         let score = gated.representativeScore.map { String(format: "%.3f", $0) } ?? "–"
+        let spoken = language?.language.map { " \($0.language.code) \(String(format: "%.2f", $0.probability))" } ?? ""
         Log.voiceID.notice(
             """
             Utterance \(disposition.rawValue, privacy: .public) (\(decision.rawValue, privacy: .public), \
-            score \(score, privacy: .public), \(verdicts.count, privacy: .public) segment(s), \
+            score \(score, privacy: .public)\(spoken, privacy: .public), \(verdicts.count, privacy: .public) segment(s), \
             held \(delay.milliseconds, format: .fixed(precision: 1), privacy: .public) ms): \
             \(utterance.text, privacy: .private)
             """
@@ -644,6 +826,11 @@ public actor VerificationGate {
     /// The decision so far on VAD segment `id`, if it has one.
     public func decision(ofSegment id: Int) -> SpeakerDecision? {
         segments[id]?.decision
+    }
+
+    /// The language filter's verdict on VAD segment `id`, once it has one.
+    public func languageVerdict(ofSegment id: Int) -> LanguageVerdict? {
+        segments[id]?.language
     }
 
     /// Forgets every segment, for a new conversation.

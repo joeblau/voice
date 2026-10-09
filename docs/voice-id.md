@@ -4,9 +4,10 @@ Blau only answers the enrolled speaker. `BlauVoiceID` turns speech into
 speaker embeddings, compares them with the enrolled voiceprint and decides
 accept, reject or uncertain per speech segment (issue #5). This document
 covers the embedding extractor (#45), [enrollment](#enrollment-46) (#46),
-the [verification gate](#verification-gate-47) (#47) and
-[adaptive voiceprint updates](#adaptive-updates-49) (#49); threshold
-calibration (#48) is in [voice-id-eval.md](voice-id-eval.md).
+the [verification gate](#verification-gate-47) (#47),
+[adaptive voiceprint updates](#adaptive-updates-49) (#49) and the
+[language filter](#language-filter-50) (#50) that ignores speech in other
+languages; threshold calibration (#48) is in [voice-id-eval.md](voice-id-eval.md).
 
 ## Speaker embeddings
 
@@ -490,6 +491,13 @@ Segments are handled on the adapter's own actor, after the gate has
 decided them, so adapting adds nothing to the gate's hold on a final. An
 update applies from the next score on.
 
+With the [language filter](#language-filter-50) on, the gate hands a
+segment over only once its language checks have finished, and never one
+the filter found to be another language: a foreign TV voice voice ID
+accepted (0.71% of impostor trials) is not learned into the voiceprint
+(`VerificationGateStatistics.otherLanguageAdaptationsSkipped` counts
+them).
+
 ### The drift cap
 
 The anchor is the **enrollment centroid**: the mean of every enrollment
@@ -634,6 +642,275 @@ prints the tables). Replay the owner's recordings across days through
 | 5 | Settings → Voice ID → Reset Voice Adaptation | The row disappears; the next conversation's start log shows drift 0.0000 | pending |
 | 6 | On device B (same iCloud account) after A adapted | B's gate start log shows A's drift; B's conversations adapt and save in turn | pending |
 
+## Language filter (#50)
+
+Voice ID decides *who* is speaking; the language filter decides whether
+they are speaking a language Blau should answer. A foreign-language TV
+show that gets past the voice gate (accepted, or uncertain during an
+active turn) is still not sent to Grok.
+
+```swift
+import BlauVoiceID
+
+// The model directory comes from ModelManager.directory(for: .languageID).
+let filter = LanguageFilter(
+    identifier: try await VoxLinguaLanguageIdentifier.load(modelDirectory: directory),
+    allowedLanguages: { settings.languageFilter.currentAllowedLanguages() })
+let gate = VerificationGate(
+    verifier: verifier, history: capture.hub, languageFilter: filter,
+    onScoredSpeech: { segment in adapter?.observe(segment) })  // skips other-language segments
+```
+
+| Type | Role |
+| --- | --- |
+| `LanguageFilter` | The identifier, the configuration and the allowed languages (read for every check) |
+| `SpokenLanguageIdentifying` / `VoxLinguaLanguageIdentifier` | Identifies the language of speech: the front end, the model, the `voiceid.language` signpost |
+| `LanguageIDFeatureExtractor` | SpeechBrain's log-mel front end in Swift (Accelerate) |
+| `CoreMLLanguageIDNetwork` | One Core ML run: `mel_features` [1, frames, 60] in, 107 log probabilities out |
+| `SpokenLanguage`, `VoxLingua107` | The model's 107 languages as ISO 639 codes, mapped from device locales (`nb` → `no`, `fil` → `tl`, `he`/`iw`...) |
+| `LanguageFilterConfiguration` | The 2 s window, the 1 s minimum, the two thresholds, the majority rule, the wait |
+| `LanguageVerdict`, `UtteranceLanguageCheck` | What the model heard per segment, and what the filter decided per final (DEBUG lane, logs) |
+| `LanguageFilterSettings` | Settings → Voice ID → Languages: on/off and the allowed languages |
+| `ScriptedLanguageIdentifier` | The fake for tests and previews |
+
+### Why an acoustic model (option A)
+
+The issue offered two designs. Blau uses option A, SpeechBrain's ECAPA-TDNN
+trained on VoxLingua107 (the model issue #1's research names):
+
+- **Option B (English ASR confidence or garbled text) can't tell the
+  cases apart.** Parakeet's realtime model only knows English, so a
+  foreign language comes out as plausible English words, and low
+  confidence looks the same for a foreign language as for the owner far
+  from the phone or in a café. It also says nothing once the user picks
+  another language in Settings → Transcription (Apple's engine).
+- **A pinned Core ML export exists.** The issue suggested speech-swift;
+  its author publishes the export it uses as a standalone Hugging Face
+  repository (`aufklarer/SpeechBrain-ECAPA-VoxLingua107-21M-CoreML`,
+  Apache-2.0, converted from `speechbrain/lang-id-voxlingua107-ecapa`),
+  with its front end, label list and a parity report against SpeechBrain.
+  Blau downloads it through `ModelManager` like every other model
+  (`ModelID.languageID`, pinned commit and SHA-256s, [models.md](models.md))
+  and runs it with Core ML directly, with the front end reimplemented in
+  Swift, instead of adding the speech-swift package and its own model
+  downloader.
+
+| | |
+| --- | --- |
+| Model | ECAPA-TDNN, 21.2 M parameters, Float16, compiled (`SpeechBrainECAPAVoxLingua107.mlmodelc`) |
+| Download | 42.8 MB (`labels.json` included), optional, after the required models |
+| Input | SpeechBrain `Fbank`: 25 ms periodic Hamming windows every 10 ms, 400-point power spectrum, 60 mel filters, `10 log10`, 80 dB floor. The model subtracts the mean over time itself |
+| Output | 107 log probabilities, in `labels.json` order (checked at load) |
+| Compute units | **CPU only**, warm-up included (`CoreMLModelWarmer`) |
+
+The input length is flexible (0.1 to 30 s), which the Neural Engine
+handles badly. On this Mac (M3 Max, 2 s of speech, warm, Core ML):
+
+| Compute units | Load | p50 | p95 |
+| --- | ---: | ---: | ---: |
+| `cpuOnly` | 16 ms | 6.3 ms | 6.7 ms |
+| `cpuAndGPU` | 140 ms | 17.3 ms | 74.7 ms |
+| `cpuAndNeuralEngine` | 1,984 ms | 23.8 ms | 25.7 ms |
+| `all` | 47 ms | 15.1 ms | 17.6 ms |
+
+The CPU is also the right place for it on the iPhone: the Neural Engine
+stays free for ASR and the speaker model, and the CPU keeps working with
+the screen locked when iOS 27 restricts background Neural Engine use (#26).
+
+### When it runs
+
+Alongside the speaker scores (speculative, like ASR), on the first 2 s of
+each VAD segment voice ID hasn't rejected:
+
+1. **2 s into a segment**, while it is still being spoken.
+2. **At the segment's end**, for speech of 1 to 2 s, alongside the
+   end-of-segment speaker score; also when voice ID only lets the segment
+   through at its end.
+3. **When a final arrives** before its segment has reached 2 s or ended
+   (the transcriber can be ahead of VAD): on the speech heard so far.
+
+Speech under 1 s is never identified ("Yes.", "Okay." go through), a
+segment is identified once, and speech voice ID rejects is never
+identified. A failed check (a model error) lets the speech through: like
+voice ID, the filter fails open rather than stop hearing the user.
+
+### Deciding
+
+The model is a closed-set classifier: it always names one of its 107
+languages, and a voice far from the phone or with an accent can sound
+like another language to it. So the filter doesn't act on the top
+language. It adds up the probability of the **allowed languages** (with
+close relatives: Scots for English, the two written Norwegians, Serbian,
+Croatian and Bosnian, Malay and Indonesian) and calls the speech another
+language only when that is below a threshold, which depends on what voice
+ID said about the utterance:
+
+| Voice ID | Other language when P(allowed) < | Why |
+| --- | ---: | --- |
+| accept | 0.01 | Voice ID is sure it is the owner: only clear evidence drops their words |
+| uncertain | 0.1 | Voice ID couldn't place the voice: weaker evidence is enough. A TV that gets past voice ID almost always does so as uncertain (6.8% of impostor trials, against 0.71% accepted) |
+
+A final spanning several segments is another language when that speech
+makes up at least half of its identified speech. It is then dropped with
+the disposition `otherLanguage`: passed on marked `.reject` (the
+orchestrator ignores it, never sends or stores it), listed in the DEBUG
+Ignored Speech lane with the language heard ("Other language · es 0.97"),
+and it doesn't keep the turn active. Partials of a segment already
+identified as another language are held back, like rejected ones, and
+[adaptive updates](#adaptive-updates-49) never see such a segment. The
+`voiceid.gate` hold on a final includes the filter's share and ends with
+`otherLanguage` as its message.
+
+Barge-in is unchanged: it waits for voice ID's first decision at 1.5 s,
+before the language is known, so uncertain speech in another language can
+still interrupt Grok (as before). Using the language there would delay
+every barge-in by another 0.5 s; left for a follow-up if the device tests
+show it matters.
+
+### Settings
+
+Settings → Voice ID → **Languages** (`LanguageFilterSection`):
+
+- **Ignore Other Languages**: on by default. Turning it on applies from
+  the next conversation (the model is loaded per conversation, only when
+  the filter is on); turning it off applies at once.
+- **Languages**: by default the iPhone's languages (Settings → General →
+  Language & Region, every preferred language the model knows) plus the
+  language Blau transcribes: English when Settings → Transcription →
+  Language is Automatic (Parakeet only understands English), or the
+  language chosen there. Picking languages replaces the default until
+  **Use iPhone Languages**; at least one stays selected. Applies from the
+  next segment.
+- While the model is still downloading the section says so, and the
+  filter is simply off for that conversation.
+
+The preferences are per device, in `UserDefaults` (`blau.voiceID.languageFilter`).
+Someone who speaks English with a strong accent should keep their first
+language allowed: the model hears accented English as that language
+(below), and allowing it lets the speech through.
+
+### Results on the fixtures
+
+`RealModelLanguageIDTests` runs the first 2 s of every fixture clip through
+the real model, clean and through the evaluation harness's simulated rooms
+and TV loudspeaker ([voice-id-eval.md](voice-id-eval.md)), with English
+allowed. The fixtures (`Fixtures/LanguageID`, Git LFS, made by
+`scripts/make-language-id-fixtures.py`):
+
+- **66 foreign-language clips in 34 languages**: real read speech in Dutch, French, German,
+  Italian, Polish, Portuguese and Spanish (Multilingual LibriSpeech, four
+  speakers each), and 38 sentences in all 34 languages read by macOS
+  voices (Arabic, Chinese, Hindi, Japanese, Korean, Russian, Thai...).
+- **22 English clips**: the 12 CMU ARCTIC speaker clips (human, US) and
+  10 macOS voices (US, UK, Irish, Australian, Indian, South African).
+- **12 accented English clips**: English read by German, French, Spanish,
+  Italian, Portuguese, Dutch, Russian, Polish, Hindi, Japanese, Chinese
+  and Korean voices.
+
+Speech voice ID **accepted** (P(allowed) < 0.01):
+
+| Condition | Foreign rejected | MLS (human) | macOS voices | English through | ARCTIC (human) | Accented English through |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| clean | **95.5%** | 89.3% | 100% | 95.5% | 100% | 16.7% |
+| room-near | **97.0%** | 92.9% | 100% | 100% | 100% | 8.3% |
+| room-far | **98.5%** | 96.4% | 100% | 77.3% | 91.7% | 8.3% |
+| loudspeaker | **95.5%** | 89.3% | 100% | 100% | 100% | 8.3% |
+
+**Uncertain** speech (P(allowed) < 0.1):
+
+| Condition | Foreign rejected | MLS (human) | macOS voices | English through | ARCTIC (human) | Accented English through |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| clean | **98.5%** | 96.4% | 100% | 90.9% | 100% | 8.3% |
+| room-near | **98.5%** | 96.4% | 100% | 95.5% | 100% | 8.3% |
+| room-far | **100%** | 100% | 100% | 72.7% | 91.7% | 0% |
+| loudspeaker | **98.5%** | 96.4% | 100% | 86.4% | 100% | 8.3% |
+
+The issue's criterion, at least 90% of the foreign clips rejected, holds
+for both thresholds in every condition. What the numbers say:
+
+- **Foreign speech that gets through** is one German reader the model
+  hears as English (P(English) 0.39 to 0.67) and a few clips just above
+  the threshold (German, French and Portuguese readers, P(English) 0.01 to
+  0.09).
+- **The owner close to the phone is safe.** Every real English clip goes
+  through clean, near and through a loudspeaker. The losses are across a
+  reverberant living room (one ARCTIC sentence heard as Slovenian, and
+  four synthetic voices), Indian English heard as Hindi or Thai, and an
+  old formant voice (Kathy) heard as Faroese.
+- **Accented English is mostly filtered out**: the model hears German
+  English as German. Hence the advice above, and the default that keeps
+  the iPhone's languages allowed. The macOS voices read English with
+  their language's phonology, so this is a worst case.
+- These are 2 s of read and synthetic speech with simulated rooms. The
+  owner's recordings and the device tests decide whether the thresholds
+  move.
+
+The full trade-off over all four conditions (`thresholdSweep`):
+
+| Other language when P(allowed) < | Foreign rejected | English through | ARCTIC (human) through | Accented English through |
+| ---: | ---: | ---: | ---: | ---: |
+| 0.001 | 89.8% | 97.7% | 100% | 16.7% |
+| 0.002 | 93.2% | 96.6% | 100% | 16.7% |
+| 0.005 | 96.2% | 95.5% | 97.9% | 14.6% |
+| **0.01** (accepted) | 96.6% | 93.2% | 97.9% | 10.4% |
+| 0.02 | 97.3% | 92.0% | 97.9% | 8.3% |
+| 0.05 | 97.3% | 88.6% | 97.9% | 6.2% |
+| **0.1** (uncertain) | 98.9% | 86.4% | 97.9% | 6.2% |
+| 0.2 | 98.9% | 78.4% | 95.8% | 6.2% |
+| 0.5 | 99.2% | 67.0% | 89.6% | 6.2% |
+
+### Latency
+
+The check normally finishes while the user is still talking (2 s into a
+segment), so a final finds it done and the filter adds nothing. It holds
+a final only when its check is still running: speech of 1 to 2 s whose
+final races the segment's end, or a final that arrives before VAD ends
+the segment. `UtteranceLanguageCheck.delay` (and
+`VerificationGateStatistics.lastLanguageDelay` / `longestLanguageDelay`)
+measure that share of the gate's hold; the hold waits at most 500 ms
+(`decisionTimeout`) and then lets the final through unidentified.
+
+| On this Mac (M3 Max, CPU) | p50 | p95 / max |
+| --- | ---: | ---: |
+| One check of 2 s (features + model) | 7.7 ms | 10.0 ms |
+| of which the front end | 0.4 ms | 0.5 ms |
+| Added hold on a final, worst cases (20 finals) | 5.1 ms | 5.5 ms |
+
+Under 30 ms. These were measured while the Mac was heavily loaded by other
+builds, which spreads the tail (an earlier run on the same machine had a
+p95 of 56 ms for one check); the tests assert the median. The iPhone
+numbers are pending (below).
+
+### On-device test plan
+
+| # | Step | Expected | Result |
+| - | ---- | -------- | ------ |
+| 1 | Enrolled, filter on, iPhone in English: talk to Blau normally for 5 minutes, close and across the room | Every utterance answered; Ignored Speech shows no "Other language" line | pending |
+| 2 | Play a Spanish (then French, German, Japanese) TV channel near the phone while Grok is answering the owner (active turn) | No TV line sent; any that get past voice ID show as "Other language" in Ignored Speech | pending |
+| 3 | Settings → Voice ID → Languages: add Spanish; repeat 2 | Spanish lines are judged by voice ID alone again | pending |
+| 4 | Speak English with a strong accent, filter on, first language not allowed; then allow it | Lines dropped as another language; then answered | pending |
+| 5 | Turn Ignore Other Languages off mid-conversation | The next foreign line is no longer filtered | pending |
+| 6 | Instruments, Blau template: `voiceid.language` per segment | One interval per segment of 1 s or more; p95 on the iPhone recorded here (target < 30 ms) | pending |
+| 7 | Log `Utterance … held … ms` for short (1-2 s) utterances | The language share of the hold under 30 ms on the iPhone | pending |
+| 8 | Lock the screen mid-conversation and play the TV | Still filtered (CPU, no Neural Engine needed) | pending |
+
+### Testing
+
+| What | How |
+| --- | --- |
+| Unit tests (hermetic) | `swift test --filter BlauVoiceIDTests` in `Packages/BlauKit`: `SpokenLanguageTests` (labels, locale mapping, relatives, coding), `LanguageIDFeatureExtractorTests` (the Swift front end against `Fixtures/LanguageIDFrontend.json`, written by `scripts/language-id-frontend-reference.py` with the export's own `frontend.py`), `VoxLinguaLanguageIdentifierTests` (a fake network: softmax, cutting long audio, validation, labels, the signpost), `LanguageFilterRulesTests`, `LanguageFilterSettingsTests` |
+| Gate (hermetic) | `VerificationGateLanguageTests`: when the check runs (2 s, the segment's end, a final first), rejected and short speech never identified, the two thresholds, majority over segments, Settings changes, turning it off, failures letting speech through, partials held back, the hold and its timeout |
+| App (hermetic) | `LanguageFilterAppTests` (`BlauTests`): the default languages, persistence, the wording; `VoiceLoopTests`: other-language finals in the Ignored Speech lane |
+| Real model (opt-in) | `RealModelLanguageIDTests` with `BLAU_LANGUAGE_MODEL_DIR` (commands below; needs `git lfs pull` for the fixtures): the tables above, the compute-unit table, and the added hold. Prints every wrong call |
+
+```sh
+cd Packages/BlauKit
+BLAU_MODEL_DOWNLOAD_SMOKE=1 BLAU_MODEL_DOWNLOAD_SMOKE_MODELS=languageID \
+  BLAU_MODEL_DOWNLOAD_SMOKE_DIR=/tmp/blau-models swift test --filter ModelDownloadSmokeTests
+BLAU_LANGUAGE_MODEL_DIR=/tmp/blau-models/languageID/2aa4d715a79e410d5f9aa32bd7a4fc9225bf9eb0 \
+  swift test --filter RealModelLanguageIDTests
+```
+
 ## Telemetry
 
 Each `embed` call is one `voiceid.embed` signpost interval (category
@@ -646,6 +923,14 @@ and reports the score and its accept threshold to the performance HUD's
 Voice score row (`PerformanceGauges`). Each final logs its disposition,
 decision, score, segment count and hold time at `notice` (the text itself
 `private`); each segment's decision logs at `debug`.
+
+Each language check (#50) is one `voiceid.language` interval (the front
+end and the model). The segment's most likely language, its probability
+and the allowed languages' probability log at `debug`; a final dropped as
+another language logs its disposition (`otherLanguage`) and the language
+heard with the rest of the final's line; failed checks log at `error`.
+The conversation's start logs whether the filter is on and the allowed
+languages (`Language filter on: en, fr`), or why it is off.
 
 Enrollment logs each clip's verdict (prompt, talking time, SNR, or the
 issues) and the total duration on `Log.voiceID`, never audio or vectors.
