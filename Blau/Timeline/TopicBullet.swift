@@ -36,16 +36,41 @@ struct TopicBullet: View {
     let isExpanded: Bool
     /// The current topic's dot pulses while recording.
     let isRecording: Bool
+    /// Rename and merge from the long-press menu.
+    let editor: TopicEditor
+    /// Continue This Topic in the long-press menu (#58); `nil` leaves it
+    /// out.
+    let onContinue: (() -> Void)?
     let action: () -> Void
+
+    @Environment(AppEnvironment.self) private var environment
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .callout) private var rowHeight = TopicTimelineLayout.compressedRowHeight
 
+    /// Long-press: Continue This Topic and Share as Markdown (#58), then
+    /// Rename and Merge with Previous (#54) for a real topic.
     var body: some View {
-        if topic.isSynthetic {
-            button
-        } else {
-            button.topicEditMenu(topicID: topic.id, title: topic.title, canMerge: placement.canMerge)
+        button.contextMenu {
+            if let onContinue {
+                Button("Continue This Topic", systemImage: "arrow.uturn.forward", action: onContinue)
+                    .accessibilityIdentifier(TopicDetailAccessibility.continueTopic)
+            }
+            if let container = environment.modelContainer {
+                ShareLink(
+                    item: TopicMarkdownDocument(topic: topic, container: container),
+                    preview: SharePreview(Text(verbatim: topic.title))
+                ) {
+                    Label("Share as Markdown", systemImage: "square.and.arrow.up")
+                }
+                .accessibilityIdentifier(TopicDetailAccessibility.share)
+            }
+            if !topic.isSynthetic {
+                Section {
+                    TopicEditMenuItems(
+                        topicID: topic.id, title: topic.title, canMerge: placement.canMerge, editor: editor)
+                }
+            }
         }
     }
 

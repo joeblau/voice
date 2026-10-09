@@ -100,9 +100,9 @@ final class VoiceLoopSession: ConversationSession {
         audio.microphoneMute.speechActivity()
     }
 
-    func start() async throws {
+    func start(continuing topic: RealtimeContinuedTopic?) async throws {
         audio.microphoneMute.setMuted(false)
-        await voiceLoop.start()
+        await voiceLoop.start(continuing: topic)
         audioStatus = await audio.keeper.status
         refresh()
         switch voiceLoop.phase {
@@ -116,6 +116,10 @@ final class VoiceLoopSession: ConversationSession {
             // failure, so the record button goes back to idle quietly.
             throw CancellationError()
         }
+    }
+
+    func continueTopic(_ topic: RealtimeContinuedTopic) async throws {
+        try await voiceLoop.continueTopic(topic)
     }
 
     func stop() async {

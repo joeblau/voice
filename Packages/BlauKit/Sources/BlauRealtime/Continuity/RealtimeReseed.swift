@@ -59,14 +59,21 @@ public struct StaticRealtimeReseedContext: RealtimeReseedContextProviding {
 enum RealtimeReseed {
     /// The events to send after `session.update`, or none when there is
     /// nothing to restore.
+    ///
+    /// - Parameter continuing: The earlier topic the conversation picked
+    ///   up (#58), if any: the note names it again with its summary.
     static func events(
         history: [ConversationHistory.Entry],
         topic: RealtimeTopicContext?,
-        limits: SessionContinuityConfiguration.ReseedLimits
+        limits: SessionContinuityConfiguration.ReseedLimits,
+        continuing: RealtimeContinuedTopic? = nil
     ) -> [RealtimeClientEvent] {
         let topic = topic.flatMap { $0.isEmpty ? nil : $0 }
-        guard !history.isEmpty || topic != nil else { return [] }
-        var items: [RealtimeItem] = [.systemText(note(topic: topic, hasExchanges: !history.isEmpty, limits: limits))]
+        let continuing = continuing.flatMap { $0.isEmpty ? nil : $0 }
+        guard !history.isEmpty || topic != nil || continuing != nil else { return [] }
+        var items: [RealtimeItem] = [
+            .systemText(note(topic: topic, hasExchanges: !history.isEmpty, limits: limits, continuing: continuing))
+        ]
         for entry in history {
             switch entry.speaker {
             case .user: items.append(.userText(entry.text))
@@ -78,13 +85,17 @@ enum RealtimeReseed {
 
     /// The system note that opens a reseed.
     static func note(
-        topic: RealtimeTopicContext?, hasExchanges: Bool, limits: SessionContinuityConfiguration.ReseedLimits
+        topic: RealtimeTopicContext?, hasExchanges: Bool, limits: SessionContinuityConfiguration.ReseedLimits,
+        continuing: RealtimeContinuedTopic? = nil
     ) -> String {
         var lines = [
             "# Conversation so far",
             "This conversation has been going on for a while and continues now. Pick up exactly where it left off: "
                 + "don't greet the user again, don't mention a reconnection, and don't repeat your last reply.",
         ]
+        if let continuing {
+            lines += RealtimeContinuation.reseedLines(for: continuing, limits: limits)
+        }
         if let title = topic?.title.map(RealtimeInstructions.cleanedLine), !title.isEmpty {
             lines.append("Current topic: \(RealtimeInstructions.truncated(title, to: 120))")
         }

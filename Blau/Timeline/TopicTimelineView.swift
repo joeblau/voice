@@ -32,7 +32,9 @@ enum TopicTimelineAccessibility {
 ///   however long that gets.
 /// - Older topics are compressed to one fixed-height row (dot, title, time,
 ///   duration) until tapped; tapping expands one inline and tapping again
-///   compresses it (`TopicExpansion`, view state only).
+///   compresses it (`TopicExpansion`, view state only). An expanded topic
+///   shows its detail (#58, `TopicDetailHeader`): summary, span, Continue,
+///   Share and the edit menu, then its transcript.
 /// - Swiping down scrolls up into the history: bullets grouped by day and
 ///   conversation, newest at the bottom. Swiping back, the Now pill or the
 ///   current bullet return to the latest line with a spring.
@@ -91,7 +93,12 @@ private struct TopicTimelineScrollView: View {
 
     @Environment(AppEnvironment.self) private var environment
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.continueTopic) private var continueTopic
     @State private var expansion = TopicExpansion()
+    /// Rename, merge and split from any bullet, detail or line (#54, #58).
+    @State private var editor = TopicEditor()
+    /// Tap-to-expand latency (#58): the `timeline.expand` signpost.
+    @State private var expansionTimer = TopicExpansionTimer()
     /// Whether the latest line is in view. Only the scroll geometry writes
     /// it: `onScrollGeometryChange` reports changes, so a value set by hand
     /// that the geometry still agrees with would never be corrected.
@@ -158,6 +165,13 @@ private struct TopicTimelineScrollView: View {
         }
         .onChange(of: timeline.topics.map(\.id)) { _, ids in
             expansion.retain(only: Set(ids))
+            expansionTimer.retain(only: Set(ids))
+        }
+        .topicEditorAlerts(editor)
+        .overlay(alignment: .topLeading) {
+            if environment.kind == .uiTest {
+                ExpandLatencyProbe(timer: expansionTimer)
+            }
         }
     }
 
@@ -172,16 +186,26 @@ private struct TopicTimelineScrollView: View {
             let isExpanded = expansion.isExpanded(topic.id, current: timeline.currentTopicID)
             Section {
                 if isExpanded {
+                    if !placement.isCurrent {
+                        TopicDetailHeader(
+                            topic: topic, placement: placement, editor: editor,
+                            onContinue: continueAction(for: topic)
+                        ) {
+                            expansionTimer.appeared(topic.id)
+                        }
+                    }
                     TopicTranscriptRows(
                         topic: topic,
                         membership: TopicMembership(topics: timeline.topics(in: topic.conversationID)),
                         rail: placement.railBelow,
-                        isCurrent: placement.isCurrent)
+                        isCurrent: placement.isCurrent,
+                        editor: editor)
                 }
             } header: {
                 TopicBullet(
                     topic: topic, placement: placement, isExpanded: isExpanded,
-                    isRecording: isRecording && placement.isCurrent
+                    isRecording: isRecording && placement.isCurrent, editor: editor,
+                    onContinue: continueAction(for: topic)
                 ) {
                     tap(topic, placement: placement)
                 }
@@ -196,6 +220,14 @@ private struct TopicTimelineScrollView: View {
         guard !placement.isCurrent else {
             returnToNow()
             return
+        }
+        // The measurement starts at the tap, before the state changes, so it
+        // covers the whole update: the transaction, the new rows' fetch and
+        // layout (#58).
+        if expansion.isExpanded(topic.id, current: timeline.currentTopicID) {
+            expansionTimer.cancelled(topic.id)
+        } else {
+            expansionTimer.began(topic.id)
         }
         guard isAtBottom else {
             toggleExpansion(of: topic.id)
@@ -226,11 +258,41 @@ private struct TopicTimelineScrollView: View {
         }
     }
 
+    /// Continue This Topic (#58), where a conversation can be started and
+    /// the topic isn't the one being recorded.
+    private func continueAction(for topic: TimelineTopic) -> (() -> Void)? {
+        guard let continueTopic else { return nil }
+        if topic.isOpen, topic.conversationID == environment.chat.conversationID?.rawValue { return nil }
+        return {
+            Task { @MainActor in
+                await continueTopic(topic)
+                returnToNow()
+            }
+        }
+    }
+
     /// Back to the current topic's latest line, with a spring.
     private func returnToNow() {
         withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.45, dampingFraction: 0.86)) {
             position.scrollTo(edge: .bottom)
         }
+    }
+}
+
+/// UI tests only: the latest tap-to-expand latency, in milliseconds, as an
+/// element's value (`TopicDetailAccessibility.expandLatency`), so a test can
+/// check the 100 ms target (#58) on what the app itself measured.
+private struct ExpandLatencyProbe: View {
+    let timer: TopicExpansionTimer
+
+    var body: some View {
+        Color.clear
+            .frame(width: 1, height: 1)
+            .accessibilityElement()
+            .accessibilityLabel("Expand latency")
+            .accessibilityValue(timer.last.map { String(format: "%.1f", $0.latency / .milliseconds(1)) } ?? "")
+            .accessibilityIdentifier(TopicDetailAccessibility.expandLatency)
+            .allowsHitTesting(false)
     }
 }
 

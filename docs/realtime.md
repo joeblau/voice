@@ -344,6 +344,7 @@ user spoke between asking and confirming.
 | `realtime.resumed` | event | A connection resumed the server conversation |
 | `realtime.resumeRefused` | event | A connection meant to resume started a new conversation (or the upgrade was refused) |
 | `realtime.reseed` | event | A new server conversation is being given the history again |
+| `realtime.continueTopic` | event | A conversation is being told about an earlier topic the user continued (#58) |
 | `realtime.bargeIn` | event | The user barged in: playback was flushed and the reply cut (`realtime.turn` ends with `bargedIn`) |
 | `realtime.bargeInSuppressed` | event | A speech onset over Grok was judged echo, too quiet, too early or another speaker |
 
@@ -670,10 +671,42 @@ debug screen shows "Reconnecting…" while `isReconnecting`.
   refused with 404; an idle conversation; a new conversation never resuming
   the last one; the reseed through the real `ConversationStore`.
 
+### Continuing an earlier topic
+
+The timeline's **Continue This Topic** (#58, [timeline.md](timeline.md#topic-detail))
+picks an earlier topic up again. The app reads the topic from the store
+(`RealtimeContinuedTopic(topicID:of:)`, from the same
+`ConversationExportSnapshot` the Markdown export uses) and either starts a
+conversation with it, `TurnOrchestrator.start(conversationID:waitsForConnection:continuing:)`,
+or hands it to the running one, `continueTopic(_:)`.
+
+What Grok gets (`RealtimeContinuation`), right after the connection's
+`session.update` and before anything the user says (queued utterances
+included):
+
+1. A system note: "Continuing an earlier topic", the topic's date and title,
+   "carry on from where it left off; don't recap unless asked", then its
+   summary marked as information, not instructions (cut to 1,500
+   characters, headings stripped so it can't add sections).
+2. The topic's last exchanges as user and assistant messages, with the
+   reseed's budget: at most 8 exchanges and 6,000 characters, newest kept.
+
+No `response.create` follows: Grok waits for the user. Nothing from the
+earlier topic is written into the new conversation's transcript. The topic
+is kept for the whole conversation: when a later connection starts a new
+server conversation, the reseed note names it again with its summary (not
+its exchanges; the budget goes to this conversation's own). A topic
+continued while the connection is down is sent once it is back, whether the
+server conversation resumed or started over. A new conversation never
+inherits the previous one's topic.
+
+Tests: `swift test --filter "ContinuedTopicTests|TurnOrchestratorContinueTopicTests|RecordButtonContinueTopicTests"`.
+
 ### Manual verification
 
 | Check | How | Result |
 | ----- | --- | ------ |
+| Continue This Topic | With a real key, expand an older topic and tap Continue, then ask "where were we?": Grok answers from the topic's summary and last exchanges without recapping unprompted. Console (`category:realtime`) shows `Telling the realtime session about topic …` | pending (needs a device and xAI credentials) |
 | Resumption shape | With a real key, record a session (`RealtimeTranscriptRecorder`), toggle Airplane Mode for 5 s. Note whether `conversation.created` arrives before or after the `session.update`, whether the resumed connection sends `conversation.created` with the same id, the replay (`conversation.item.created`) and `session.updated` after it. Console (`category:realtime`) shows `Resumed conversation … (n item(s) replayed)` | pending (needs a device and xAI credentials) |
 | Expired conversation | Resume a `conversation_id` idle for over 30 minutes (or a made-up one): note whether the upgrade is refused (HTTP status) or a new `conversation.created` arrives; either way Console shows a reseed | pending (needs xAI credentials) |
 | 120-minute limit | Run a session past 120 minutes with `continuity.rolloverAfter = nil`: note the `max_duration` error and whether resuming its `conversation_id` is ended at once. If resuming resets the clock, `resumesAtRollover` can be turned on | pending (needs xAI credentials and two hours) |

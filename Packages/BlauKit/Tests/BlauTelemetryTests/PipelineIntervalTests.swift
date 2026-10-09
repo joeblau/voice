@@ -13,7 +13,7 @@ struct PipelineIntervalTests {
                 "model.warmUp", "voiceid.embed", "voiceid.verify", "realtime.turn", "realtime.firstAudio",
                 "realtime.connect", "realtime.event", "playback.firstBuffer", "topics.segment", "topics.label",
                 "memory.embed", "memory.search", "memory.extract", "memory.consolidate", "db.save",
-                "session.start",
+                "session.start", "timeline.expand",
             ]
         )
     }
@@ -58,6 +58,7 @@ struct PipelineIntervalTests {
         #expect(categories["memory.consolidate"] == .memory)
         #expect(categories["db.save"] == .data)
         #expect(categories["session.start"] == .ui)
+        #expect(categories["timeline.expand"] == .ui)
     }
 
     /// docs/performance.md is the reference people read; it must list exactly

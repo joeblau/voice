@@ -45,6 +45,9 @@ struct ChatRowView: View {
     let row: ChatRow
     /// Reveals a streaming reply in step with its audio.
     var progress: ChatPlaybackProgress?
+    /// "Split Topic Here" in the long-press menu (#58), on the timeline's
+    /// topic transcripts; `nil` leaves it out.
+    var onSplit: (() -> Void)?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -70,7 +73,12 @@ struct ChatRowView: View {
         .accessibilityLabel(speakerLabel)
         .accessibilityValue(accessibilityValue)
         .accessibilityIdentifier(accessibilityIdentifier)
-        .modifier(ChatRowMenu(row: row))
+        .accessibilityActions {
+            if let onSplit, row.kind == .final {
+                Button("Split Topic Here", action: onSplit)
+            }
+        }
+        .modifier(ChatRowMenu(row: row, onSplit: onSplit))
         .containerRelativeFrame(.horizontal, alignment: frameAlignment) { length, _ in
             row.role == .system ? length : length * ChatTranscriptLayout.maxWidthFraction
         }
@@ -308,9 +316,11 @@ struct ChatToolChip: View {
     }
 #endif
 
-/// Long-press menu of a finished row: when it was said, Copy and Share.
+/// Long-press menu of a finished row: when it was said, Copy and Share,
+/// and on the timeline "Split Topic Here".
 private struct ChatRowMenu: ViewModifier {
     let row: ChatRow
+    let onSplit: (() -> Void)?
 
     func body(content: Content) -> some View {
         if row.kind == .final {
@@ -322,6 +332,10 @@ private struct ChatRowMenu: ViewModifier {
                     ShareLink(item: row.text)
                 } header: {
                     Text(row.startedAt, format: .dateTime.weekday(.abbreviated).month().day().hour().minute())
+                }
+                if let onSplit {
+                    Button("Split Topic Here", systemImage: "scissors", action: onSplit)
+                        .accessibilityIdentifier(TopicEditAccessibility.split)
                 }
             }
         } else {

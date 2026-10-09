@@ -149,6 +149,7 @@ case step.
 | `memory.consolidate`  | `memory`   | `.memoryConsolidate`  | Sleep-time profile consolidation starts (#67)       | The profile block and topic summaries are written (or it failed); the end message is the outcome |
 | `db.save`             | `data`     | `.dbSave`             | `ModelContext.save()` is called                     | It returns                                      |
 | `session.start`       | `ui`       | `.sessionStart`       | The user taps Record                                | The record button shows listening: the microphone is live and VAD and ASR are running (or the start failed; the end message says which) |
+| `timeline.expand`     | `ui`       | `.timelineExpand`     | The user taps a compressed bullet on the topic timeline | Its detail (summary, duration, actions) is laid out under the bullet, in the frame that shows it (or it is compressed again first; the end message says which). Target under 100 ms (#58) |
 
 ### Adding an interval
 

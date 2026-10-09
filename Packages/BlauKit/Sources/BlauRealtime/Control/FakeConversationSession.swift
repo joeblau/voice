@@ -16,9 +16,12 @@ import Foundation
 public final class FakeConversationSession: ConversationSession {
     /// A call the session received.
     public enum Call: Sendable, Hashable {
+        /// `start()`, or `start(continuing:)` with a topic (#58).
         case start
         case stop
         case setListeningPaused(Bool)
+        /// `continueTopic(_:)` while a conversation runs.
+        case continueTopic(UUID)
     }
 
     public private(set) var status: ConversationStatus = .idle {
@@ -35,6 +38,9 @@ public final class FakeConversationSession: ConversationSession {
 
     /// When set, the next `start()` throws it (once).
     public var startError: (any Error)?
+    /// The earlier topics conversations were started with or told to
+    /// continue (#58), oldest first.
+    public private(set) var continuedTopics: [RealtimeContinuedTopic] = []
     /// The status `start()` reports once it returns.
     public var statusAfterStart: ConversationStatus = .listening
 
@@ -141,8 +147,11 @@ public final class FakeConversationSession: ConversationSession {
         return stream
     }
 
-    public func start() async throws {
+    public func start(continuing topic: RealtimeContinuedTopic?) async throws {
         calls.append(.start)
+        if let topic {
+            continuedTopics.append(topic)
+        }
         if let error = startError {
             startError = nil
             throw error
@@ -178,6 +187,14 @@ public final class FakeConversationSession: ConversationSession {
         guard status.isRunning else { return }
         await audio.stopCapture()
         status = .idle
+    }
+
+    /// Records the topic; throws `TurnOrchestrator.OrchestratorError.notRunning`
+    /// when no conversation is running, as the live session does.
+    public func continueTopic(_ topic: RealtimeContinuedTopic) async throws {
+        calls.append(.continueTopic(topic.topicID))
+        guard status.isRunning else { throw TurnOrchestrator.OrchestratorError.notRunning }
+        continuedTopics.append(topic)
     }
 
     public func setListeningPaused(_ paused: Bool) async {

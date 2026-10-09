@@ -74,11 +74,21 @@ public protocol ConversationSession: AnyObject {
     /// connection to Grok may still be opening (what the user says meanwhile
     /// is queued).
     ///
+    /// - Parameter topic: An earlier topic the conversation picks up (#58,
+    ///   "Continue This Topic"), told to Grok before anything the user says;
+    ///   `nil` for a fresh conversation.
     /// - Throws: `CancellationError` when `stop()` (the Live Activity's
     ///   Stop) ended the conversation before it was listening. Otherwise
     ///   why it couldn't start, with a `localizedDescription` fit for the
     ///   user. Nothing is left running either way.
-    func start() async throws
+    func start(continuing topic: RealtimeContinuedTopic?) async throws
+
+    /// Picks up an earlier topic in the running conversation (#58): Grok is
+    /// told about it before the user's next words.
+    ///
+    /// - Throws: Why it couldn't, for example because no conversation is
+    ///   running any more.
+    func continueTopic(_ topic: RealtimeContinuedTopic) async throws
 
     /// Ends the conversation: commits what is being said, closes the
     /// session and releases the microphone. Called while `start()` is in
@@ -89,4 +99,11 @@ public protocol ConversationSession: AnyObject {
     /// Mutes (`true`) or unmutes the microphone without ending the
     /// conversation. Does nothing when stopped.
     func setListeningPaused(_ paused: Bool) async
+}
+
+extension ConversationSession {
+    /// Starts a fresh conversation (see ``start(continuing:)``).
+    public func start() async throws {
+        try await start(continuing: nil)
+    }
 }

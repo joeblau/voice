@@ -1,6 +1,8 @@
 import BlauCore
 import BlauPersistence
 import BlauRealtime
+import BlauTelemetry
+import BlauTopics
 import BlauTranscription
 import SwiftData
 import SwiftUI
@@ -56,6 +58,8 @@ struct MainScreenScaffold: View {
     @State private var record: RecordButtonModel
     @State private var isShowingSettings = false
     @State private var isShowingKeyOnboarding = false
+    /// Why Continue This Topic (#58) couldn't read the topic.
+    @State private var continueFailure: String?
     /// Settings zooms out of the bottom-left button.
     @Namespace private var settingsTransition
 
@@ -133,6 +137,19 @@ struct MainScreenScaffold: View {
                 }
                 .animation(.default, value: models.isReady)
         }
+        // The timeline's Continue This Topic (#58) starts or seeds the
+        // conversation through the record button's model, so the button,
+        // its haptics and its failure alert behave as for a tap.
+        .environment(\.continueTopic, TopicContinuationAction { topic in await continueTopic(topic) })
+        .alert(
+            "Couldn't Continue the Topic",
+            isPresented: Binding(get: { continueFailure != nil }, set: { if !$0 { continueFailure = nil } }),
+            presenting: continueFailure
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { message in
+            Text(message)
+        }
         // Over the whole stack, bars included, so it can be dragged anywhere.
         .performanceHUD()
         // Follows the conversation (including what ends or starts it
@@ -169,6 +186,42 @@ struct MainScreenScaffold: View {
         .sheet(isPresented: $isShowingKeyOnboarding) {
             XAIKeyOnboardingStep {
                 isShowingKeyOnboarding = false
+            }
+        }
+    }
+}
+
+extension MainScreenScaffold {
+    /// Continue This Topic (#58): reads the topic off the main actor, then
+    /// starts a conversation seeded with it (its summary and last
+    /// exchanges), or hands it to the running conversation.
+    fileprivate func continueTopic(_ topic: TimelineTopic) async {
+        guard let container = environment.modelContainer else {
+            continueFailure = String(localized: "Your conversations aren't available yet. Try again in a moment.")
+            return
+        }
+        let seed: RealtimeContinuedTopic?
+        do {
+            seed = try await TopicSource.continuedTopic(topic, in: container)
+        } catch {
+            Log.ui.error("Couldn't read the topic to continue: \(String(describing: error), privacy: .public)")
+            continueFailure = String(localized: "The topic couldn't be read. Try again.")
+            return
+        }
+        guard let seed else {
+            continueFailure = String(localized: "This topic has nothing to continue from yet.")
+            return
+        }
+        switch await record.continueTopic(seed) {
+        case .started, .continued:
+            AccessibilityNotification.Announcement(String(localized: "Continuing \(topic.title)")).post()
+        case .ignored:
+            // Mid start or stop: the user tapped Record at the same moment.
+            break
+        case .failed:
+            // A failed start shows the record button's own alert.
+            if record.startFailureMessage == nil {
+                continueFailure = String(localized: "The conversation couldn't pick up the topic. Try again.")
             }
         }
     }
