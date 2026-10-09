@@ -399,6 +399,68 @@ struct TranscriberRouterTests {
         await router.finish()
     }
 
+    // MARK: The conversation's router, as the app composes it
+
+    @Test func theConversationRouterFollowsTheToggleMemoryPressureAndTheMonitor() async throws {
+        let engines = FakeEngines()
+        let settings = await TranscriptionSettings(
+            store: InMemoryTranscriptionPreferencesStore(), availability: { .installed(locale: "en_US") })
+        let (pressure, pressureLevels) = AsyncStream.makeStream(of: MemoryPressureLevel.self)
+        let monitor = BackgroundInferenceMonitor(
+            configuration: .init(mitigation: .switchToSystemTranscriber), clock: ManualClock(),
+            signposter: .disabled(.asr))
+        let router = await TranscriberRouter.conversation(
+            parakeet: engines.provider(.parakeet), apple: engines.provider(.apple), settings: settings,
+            memoryPressure: pressure, backgroundInference: monitor, clock: ManualClock(),
+            signposter: .disabled(.asr))
+        // The "asr" stage of the background monitor.
+        #expect(await monitor.snapshot.stages.map(\.stage) == [TranscriberRouter.inferenceStage])
+        try await router.start()
+        #expect(router.status.engine == .parakeet)
+
+        // The Settings toggle.
+        await MainActor.run { settings.forcesAppleEngine = true }
+        try await waitForEngine(.apple, on: router)
+        #expect(router.status.reason == .userPreference)
+        await MainActor.run { settings.forcesAppleEngine = false }
+        try await waitForEngine(.parakeet, on: router)
+
+        // Memory pressure.
+        pressureLevels.yield(.critical)
+        try await waitForEngine(.apple, on: router)
+        #expect(router.status.reason == .memoryPressure)
+        pressureLevels.yield(.normal)
+        try await waitForEngine(.parakeet, on: router)
+
+        // Off screen.
+        await monitor.appPhaseDidChange(AppPhaseTransition(from: .inactive, to: .background))
+        await monitor.waitUntilIdle()
+        #expect(router.status.engine == .apple)
+        #expect(router.status.reason == .background)
+        await monitor.appPhaseDidChange(AppPhaseTransition(from: .background, to: .active))
+        await monitor.waitUntilIdle()
+        #expect(router.status.engine == .parakeet)
+
+        await router.finish()
+        await monitor.unregister(stage: TranscriberRouter.inferenceStage)
+        #expect(await engines.running().isEmpty)
+    }
+
+    @Test func theConversationRouterStartsOnTheEngineTheSettingsAskFor() async throws {
+        let engines = FakeEngines()
+        let settings = await TranscriptionSettings(
+            store: InMemoryTranscriptionPreferencesStore(.apple), availability: { .installed(locale: "en_US") })
+        let router = await TranscriberRouter.conversation(
+            parakeet: engines.provider(.parakeet), apple: engines.provider(.apple), settings: settings,
+            memoryPressure: AsyncStream { _ in }, backgroundInference: nil, clock: ManualClock(),
+            signposter: .disabled(.asr))
+        try await router.start()
+        #expect(router.status.engine == .apple)
+        #expect(router.status.reason == .userPreference)
+        #expect(engines.built(.parakeet).isEmpty)
+        await router.finish()
+    }
+
     // MARK: Inputs that change while an engine is being built
 
     @Test func aPreferenceChangeWhileTheFirstEngineLoadsStartsOnlyOneEngine() async throws {
@@ -504,6 +566,46 @@ struct TranscriberRouterTests {
         try await waitForEngine(.parakeet, on: router)
         #expect(router.status.reason == .fallback)
         #expect(await engines.running().map(\.engine) == [.parakeet])
+    }
+
+    @Test func stopThenStartDuringASwitchsFallbackRunsOneEngineAndFinishReleasesIt() async throws {
+        let engines = FakeEngines()
+        engines.setStartError(.apple, FakeEngineError.cannotStart)
+        let router = makeRouter(engines)
+        try await router.start()
+
+        // Apple's engine fails to start; the fallback rebuilds Parakeet,
+        // which takes a while.
+        let gate = Gate()
+        engines.setMakeGate(.parakeet, gate)
+        await router.setPreference(.apple)
+        try await waitUntil { engines.blockedMakes(.parakeet) == 1 }
+
+        // The conversation is stopped and started again meanwhile.
+        let stopped = Task { await router.stop() }
+        try await waitUntil { router.status.isRunning == false }
+        let started = Task { try await router.start() }
+        try await Task.sleep(for: .milliseconds(20))
+        // Nothing else is built while the switch is still building one.
+        #expect(engines.blockedMakes(.parakeet) == 1)
+
+        engines.setMakeGate(.parakeet, nil)
+        gate.open()
+        await stopped.value
+        try await started.value
+        await router.waitForSwitch()
+        try await waitUntil { router.status.engine == .parakeet && router.status.pendingEngine == nil }
+
+        // Exactly one engine runs: the start reuses the fallback's Parakeet.
+        #expect(router.status.isRunning)
+        #expect(await engines.running().map(\.engine) == [.parakeet])
+        #expect(engines.built(.parakeet).count == 2)
+
+        await router.finish()
+        #expect(await engines.running().isEmpty)
+        for parakeet in engines.built(.parakeet) {
+            #expect(await parakeet.finishes == 1)
+        }
     }
 
     @Test func stoppingWhileTheFirstEngineLoadsLeavesNothingRunning() async throws {

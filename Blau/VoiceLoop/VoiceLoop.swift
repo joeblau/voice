@@ -7,6 +7,7 @@ import BlauTranscription
 import BlauVoiceID
 import Foundation
 import Observation
+import Synchronization
 
 /// Runs a spoken conversation with Grok (#36): the live audio pipeline
 /// (voice-processing capture, Silero VAD, streaming Parakeet ASR, and the
@@ -102,7 +103,8 @@ final class VoiceLoop {
         audio: ConversationAudio? = nil,
         backgroundInference: BackgroundInferenceMonitor? = nil,
         performance: any PerformanceLevelProviding,
-        voiceID: VoiceIDGateLoader? = nil
+        voiceID: VoiceIDGateLoader? = nil,
+        transcriptionSettings: TranscriptionSettings? = nil
     ) {
         let orchestrator = realtime as? TurnOrchestrator
         guard let orchestrator, let audio, orchestrator.audio as? StreamingAudioPlayer === audio.player else {
@@ -112,13 +114,17 @@ final class VoiceLoop {
             return
         }
         let keeper = audio.keeper
+        // #31: which engine the conversation's `TranscriberRouter` runs.
+        let transcriptionSettings =
+            transcriptionSettings ?? TranscriptionSettings(store: InMemoryTranscriptionPreferencesStore())
         self.init(
             conversation: orchestrator,
             snapshots: orchestrator.updates(),
             startPipeline: {
                 try await LiveVoicePipeline.start(
                     audio: audio, models: speechModels, backgroundInference: backgroundInference,
-                    performance: performance, bargeInTarget: orchestrator, voiceID: voiceID)
+                    performance: performance, transcriptionSettings: transcriptionSettings,
+                    bargeInTarget: orchestrator, voiceID: voiceID)
             },
             releaseAudio: { await keeper.stopCapture() },
             audio: audio,
@@ -182,10 +188,12 @@ final class VoiceLoop {
             readings.voiceActivity = .init(
                 isSpeech: pipeline.voiceActivity.isSpeechActive, modelLoad: vad.modelLoad,
                 skippedFraction: vad.skippedFraction)
-            let asr = pipeline.transcriber.statistics
-            readings.transcriber = .init(
-                chunks: asr.chunksProcessed, meanChunkMilliseconds: asr.meanChunkTime.milliseconds,
-                slowestChunkMilliseconds: asr.slowestChunk.milliseconds)
+            // Parakeet's chunk counters, while it is the engine running.
+            if let asr = pipeline.parakeetStatistics {
+                readings.transcriber = .init(
+                    chunks: asr.chunksProcessed, meanChunkMilliseconds: asr.meanChunkTime.milliseconds,
+                    slowestChunkMilliseconds: asr.slowestChunk.milliseconds)
+            }
         }
         return readings
     }
@@ -441,7 +449,9 @@ extension VoiceLoopPipeline {
 /// over Grok, and the voice ID gate (#47) between the transcriber and Grok.
 @MainActor
 final class LiveVoicePipeline: VoiceLoopPipeline {
-    let transcriber: ParakeetStreamingTranscriber
+    /// Parakeet or Apple's engine (#31), whichever the Settings toggle,
+    /// memory pressure and the background inference monitor call for.
+    let transcriber: TranscriberRouter
     /// The VAD, for the performance HUD.
     let voiceActivity: VoiceActivitySegmenter
     /// The voice ID gate, when a voiceprint is enrolled and voice ID is on.
@@ -452,18 +462,21 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
     let transcript: AsyncStream<TranscriptEvent>
     /// Adaptive voiceprint updates (#49), saved when the pipeline stops.
     private let voiceprintAdapter: VoiceprintAdapter?
+    /// The Parakeet transcriber built last, for the HUD's chunk counters.
+    private let parakeets: ParakeetHandoff
     private let stopAudio: @Sendable () async -> Void
     private var vadTask: Task<Void, Never>?
     private var bargeInTask: Task<Void, Never>?
     private var gateTask: Task<Void, Never>?
 
     private init(
-        transcriber: ParakeetStreamingTranscriber, voiceActivity: VoiceActivitySegmenter,
+        transcriber: TranscriberRouter, parakeets: ParakeetHandoff, voiceActivity: VoiceActivitySegmenter,
         voiceGate: VerificationGate?, voiceIDStatus: VoiceIDGateStatus, voiceprintAdapter: VoiceprintAdapter?,
         gateTask: Task<Void, Never>?, vadTask: Task<Void, Never>?, bargeInTask: Task<Void, Never>?,
         stopAudio: @escaping @Sendable () async -> Void
     ) {
         self.transcriber = transcriber
+        self.parakeets = parakeets
         self.voiceActivity = voiceActivity
         self.voiceGate = voiceGate
         self.voiceIDStatus = voiceIDStatus
@@ -480,7 +493,16 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
     /// Loads the models while the conversation audio (capture and playback
     /// on its engine) comes up, then starts the transcriber and VAD. The
     /// Silero stage is registered with `backgroundInference`, which moves it
-    /// off the Neural Engine while Blau is off screen. The transcriber follows
+    /// off the Neural Engine while Blau is off screen.
+    ///
+    /// The transcriber is a `TranscriberRouter` (#31) over Parakeet and
+    /// Apple's `SpeechTranscriber`: it starts on the engine
+    /// `transcriptionSettings` asks for (Parakeet unless "Use Apple Speech
+    /// Recognition" is on, the language needs Apple's engine, or Parakeet's
+    /// model isn't installed), follows the toggle and memory pressure, and
+    /// is the `"asr"` stage of `backgroundInference`; each switches engines
+    /// at the next utterance boundary. Parakeet is loaded alongside the
+    /// audio when it is the engine to start on. Parakeet follows
     /// `performance` (#75): between utterances it switches to the 1280 ms
     /// export below `normal` and back to 320 ms, while that export is
     /// installed (`ParakeetEouRecognizer.provider(modelManager:)`). A
@@ -501,30 +523,44 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
         models: ModelManager,
         backgroundInference: BackgroundInferenceMonitor?,
         performance: any PerformanceLevelProviding,
+        transcriptionSettings: TranscriptionSettings,
         bargeInTarget: (any BargeInTarget)? = nil,
         voiceID: VoiceIDGateLoader? = nil
     ) async throws -> LiveVoicePipeline {
         #if os(iOS)
-            guard let vadDirectory = models.directory(for: .sileroVAD),
-                let asrDirectory = models.directory(for: .parakeetRealtimeEOU)
-            else { throw VoiceLoop.StartError.modelsNotInstalled }
+            // Silero is needed whichever engine transcribes: barge-in and
+            // the voice ID gate run on its segments. A missing Parakeet
+            // model is the router's to handle (Apple's engine stands in).
+            guard let vadDirectory = models.directory(for: .sileroVAD) else {
+                throw VoiceLoop.StartError.modelsNotInstalled
+            }
 
             let keeper = audio.keeper
             let audioStart = Task { try await keeper.startCapture() }
             // The voiceprint and the speaker model load alongside.
             let hub = audio.capture.hub
             let gateLoad = Task { await voiceID?.load(hub) }
+            let parakeets = ParakeetHandoff()
 
             let silero: SileroSpeechProbabilityModel
             let vad: VoiceActivitySegmenter
-            let transcriber: ParakeetStreamingTranscriber
+            let parakeet: TranscriberRouter.EngineProvider
             do {
                 silero = try await SileroSpeechProbabilityModel(modelDirectory: vadDirectory)
                 vad = VoiceActivitySegmenter(model: silero, inferenceObserver: backgroundInference)
-                transcriber = try await ParakeetStreamingTranscriber.load(
-                    modelDirectory: asrDirectory, audio: hub, voiceActivity: vad,
+                parakeet = .parakeet(
+                    models: models, audio: hub, voiceActivity: vad, inferenceObserver: backgroundInference,
                     chunkSizePolicy: PerformanceASRChunkSizePolicy(performance),
-                    recognizerProvider: ParakeetEouRecognizer.provider(modelManager: models))
+                    recognizerProvider: ParakeetEouRecognizer.provider(modelManager: models),
+                    built: { parakeets.built($0) })
+                // Parakeet is the likely first engine: load it while the
+                // audio comes up, for the router's first build to take. If
+                // it can't load, the router finds out and falls back.
+                if transcriptionSettings.effectiveEnginePreference == .automatic,
+                    models.directory(for: .parakeetRealtimeEOU) != nil
+                {
+                    parakeets.preload(try? await parakeet.make() as? ParakeetStreamingTranscriber)
+                }
             } catch {
                 // Let the audio finish coming up, then release it.
                 _ = try? await audioStart.value
@@ -539,25 +575,39 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
             // An audio failure (say, microphone permission denied) surfaces
             // here, after the models have loaded: loading isn't cancellable
             // part way, so racing it wouldn't release anything sooner. The
-            // loaded transcriber hasn't started (nothing subscribed to VAD or
-            // the hub yet); finishing it ends its event stream, and the
+            // preloaded transcriber hasn't started (nothing subscribed to VAD
+            // or the hub yet); finishing it ends its event stream, and the
             // models are released with it.
             do {
                 try await audioStart.value
             } catch {
-                await transcriber.finish()
+                await parakeets.releasePreloaded()
                 throw VoiceLoop.StartError.audio(String(describing: error))
             }
             // `stopCapture()` (the Live Activity's Stop) while the audio came
             // up or the models loaded: `startCapture()` returns without
             // throwing then, but the conversation was ended before it began.
             guard await keeper.status != .inactive else {
-                await transcriber.finish()
+                await parakeets.releasePreloaded()
                 throw CancellationError()
             }
             let stage = silero.inferenceStage
             await backgroundInference?.register(silero, budget: .milliseconds(256))
+            // Follows the Settings toggle and memory pressure, and is the
+            // background monitor's "asr" stage, from here on.
+            let transcriber = await TranscriberRouter.conversation(
+                parakeet: .init(
+                    isAvailable: parakeet.isAvailable,
+                    make: {
+                        if let preloaded = parakeets.takePreloaded() { return preloaded }
+                        return try await parakeet.make()
+                    }),
+                apple: .apple(
+                    audio: hub, voiceActivity: vad, locale: transcriptionSettings.options.language.locale),
+                settings: transcriptionSettings, memoryPressure: MemoryPressureMonitor.levels(),
+                backgroundInference: backgroundInference)
             let stopAudio: @Sendable () async -> Void = {
+                await backgroundInference?.unregister(stage: TranscriberRouter.inferenceStage)
                 await backgroundInference?.unregister(stage: stage)
                 await keeper.stopCapture()
             }
@@ -565,9 +615,18 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
                 // The transcriber subscribes to VAD before VAD sees any audio.
                 try await transcriber.start()
             } catch {
+                await transcriber.finish()
+                await parakeets.releasePreloaded()
                 await stopAudio()
+                // Neither engine can run: no Parakeet model, and Apple's
+                // engine doesn't support this device or language.
+                if case TranscriberRouterError.noEngineAvailable = error {
+                    throw VoiceLoop.StartError.modelsNotInstalled
+                }
                 throw error
             }
+            // The router chose another engine than the one preloaded.
+            await parakeets.releasePreloaded()
             // So do the gate and barge-in.
             var gateTask: Task<Void, Never>?
             if let gate {
@@ -584,9 +643,9 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
             }
             let vadTask = Task { await vad.run(on: hub) }
             return LiveVoicePipeline(
-                transcriber: transcriber, voiceActivity: vad, voiceGate: gate, voiceIDStatus: voiceIDStatus,
-                voiceprintAdapter: gateLoaded?.adapter, gateTask: gateTask, vadTask: vadTask,
-                bargeInTask: bargeInTask, stopAudio: stopAudio)
+                transcriber: transcriber, parakeets: parakeets, voiceActivity: vad, voiceGate: gate,
+                voiceIDStatus: voiceIDStatus, voiceprintAdapter: gateLoaded?.adapter, gateTask: gateTask,
+                vadTask: vadTask, bargeInTask: bargeInTask, stopAudio: stopAudio)
         #else
             throw VoiceLoop.StartError.unavailable
         #endif
@@ -616,5 +675,47 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
         await stopAudio()
         // The conversation is over: save what the voiceprint learned.
         await voiceprintAdapter?.finish()
+    }
+
+    /// Parakeet's chunk counters while it is the engine running; `nil`
+    /// while Apple's engine runs.
+    var parakeetStatistics: StreamingTranscriberStatistics? {
+        guard transcriber.activeEngine == .parakeet else { return nil }
+        return parakeets.latest?.statistics
+    }
+}
+
+/// Hands a Parakeet transcriber loaded alongside the audio to the router's
+/// first build, and remembers the one built last for the HUD.
+final class ParakeetHandoff: Sendable {
+    private struct State {
+        var preloaded: ParakeetStreamingTranscriber?
+        var latest: ParakeetStreamingTranscriber?
+    }
+
+    private let state = Mutex(State())
+
+    /// The Parakeet transcriber built last.
+    var latest: ParakeetStreamingTranscriber? { state.withLock { $0.latest } }
+
+    func built(_ transcriber: ParakeetStreamingTranscriber) {
+        state.withLock { $0.latest = transcriber }
+    }
+
+    func preload(_ transcriber: ParakeetStreamingTranscriber?) {
+        state.withLock { $0.preloaded = transcriber }
+    }
+
+    /// The preloaded transcriber, once.
+    func takePreloaded() -> ParakeetStreamingTranscriber? {
+        state.withLock { state in
+            defer { state.preloaded = nil }
+            return state.preloaded
+        }
+    }
+
+    /// Finishes a preloaded transcriber nobody took, releasing its model.
+    func releasePreloaded() async {
+        await takePreloaded()?.finish()
     }
 }

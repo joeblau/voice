@@ -111,8 +111,8 @@ final class AppEnvironment {
     let realtimeSession: RealtimeSessionServices
 
     /// Which speech-to-text engine to run (#31): Settings → Speech
-    /// Recognition binds to it, and the `TranscriberRouter` follows its
-    /// `preferenceChanges()` once the live audio pipeline is composed. Live
+    /// Recognition binds to it, and each conversation's `TranscriberRouter`
+    /// (built by `LiveVoicePipeline`) follows its `preferenceChanges()`. Live
     /// launches keep the choice in `UserDefaults`; every other kind keeps it
     /// in memory.
     let transcriptionSettings: TranscriptionSettings
@@ -292,7 +292,10 @@ final class AppEnvironment {
             realtime: realtime, speechModels: speechModels, audio: conversationAudio,
             backgroundInference: backgroundInference, performance: performance,
             // #47: only the enrolled speaker's utterances reach Grok.
-            voiceID: .live(persistence: persistence, models: speechModels, flags: flags, settings: voiceIDSettings))
+            voiceID: .live(persistence: persistence, models: speechModels, flags: flags, settings: voiceIDSettings),
+            // #31: the conversation's `TranscriberRouter` follows Settings →
+            // Speech Recognition.
+            transcriptionSettings: transcriptionSettings)
         self.voiceLoop = voiceLoop
         self.transcriptFeed = transcriptFeed
         self.chat = ChatTranscriptModel(
@@ -520,9 +523,10 @@ extension AppEnvironment {
             flags: flags,
             clock: SystemClock(),
             audio: conversationAudio.keeper,
-            // ParakeetStreamingTranscriber (#29) reads the capture hub and
-            // the VAD segmenter, so it is wired in together with the live
-            // audio pipeline (see docs/asr.md).
+            // The transcriber (#29, #31: a `TranscriberRouter` over Parakeet
+            // and Apple's engine) reads the capture hub and the VAD
+            // segmenter, so `VoiceLoop` builds it per conversation with the
+            // live audio pipeline (see docs/apple-asr.md).
             transcriber: UnavailableService(subsystem: "transcription"),
             // The voice ID verification gate (#47) is built per conversation
             // by `VoiceLoop`, like the transcriber (see docs/voice-id.md).

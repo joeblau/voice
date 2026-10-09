@@ -34,14 +34,22 @@ try await transcriber.start()
 for await event in transcriber.events { ... }   // .partial / .final / .refined, whichever engine runs
 ```
 
-The live app doesn't compose the router yet: like `ParakeetStreamingTranscriber`
-it needs the capture hub and the VAD segmenter, which are wired into
-`AppEnvironment.live()` with the live audio pipeline. The Settings toggle and
-`AppEnvironment.transcriptionSettings` are already live, and so is the
-background inference monitor, so the router only has to follow them. The
-router is an `AppLifecycleParticipant`; put it (or the second pass wrapping
-it) in the transcriber slot so the running engine hears scene phase
-changes.
+In the app, `LiveVoicePipeline.start` (`Blau/VoiceLoop/VoiceLoop.swift`)
+builds the router for each conversation with
+`TranscriberRouter.conversation(parakeet:apple:settings:memoryPressure:backgroundInference:)`,
+which does the three steps above: it starts on
+`transcriptionSettings.effectiveEnginePreference`, follows
+`preferenceChanges()` and `MemoryPressureMonitor.levels()`, and registers the
+router as the monitor's `"asr"` stage (unregistered when the conversation
+stops). So turning "Use Apple Speech Recognition" on mid-conversation
+switches engines at the next utterance boundary. Parakeet is preloaded
+alongside the audio when it is the engine to start on, and a missing
+Parakeet model no longer blocks a conversation: Apple's engine stands in
+(only Silero is required, for barge-in and voice ID). Not wired yet: the
+second pass around the router, memory's vocabulary for Apple's engine, and
+scene phase changes reaching the running engine (the router is an
+`AppLifecycleParticipant`, but the transcriber slot is still
+`UnavailableService`).
 
 ## Verified against the SDK
 
