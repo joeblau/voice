@@ -159,6 +159,12 @@ time zone and biased to the past, and `NSDataDetector` is the fallback for
 what the grammar doesn't know (numeric dates such as "3/14" or
 "12/24/2025"): only its calendar day is kept, plus the year when the query
 wrote one, and the day is resolved against `now` like the grammar's.
+The detector also reads clock times and time ranges ("5.30pm", "from 9-10
+tomorrow") as today or tomorrow, so its match only counts when it writes
+the detected month and day out in a date's order: a month name, `/` for
+two numbers ("3/14", "14/3"), or three numbers ("2026-03-14",
+"14.03.2026"); never when a time follows ("3/4pm", "9/10 o'clock") or the
+match says today, tonight, tomorrow or yesterday.
 
 | Query says | Range | Anchor |
 | --- | --- | --- |

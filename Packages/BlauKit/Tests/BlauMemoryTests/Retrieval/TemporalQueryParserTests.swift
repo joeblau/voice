@@ -143,7 +143,8 @@ struct TemporalQueryParserTests {
     @Test(arguments: [
         "the call at 5pm", "meeting at 10:30", "what do I need to do in 2 weeks", "in 2 days", "at 17:00",
         "pick up at 5.30pm", "the dinner by 5pm tomorrow", "what is Alex planning in 2 weeks", "on the 3rd at 5pm",
-        "at 5 o'clock",
+        "at 5 o'clock", "the meeting from 9-10 tomorrow", "dinner at 8.10pm", "the call 3-4pm", "the call at 10.10",
+        "standup 10:30-11:30", "the meeting 10-10 tomorrow",
     ])
     func clockTimesAndFutureOffsetsAreNotDates(query: String) {
         #expect(Self.parse(query) == nil)
@@ -157,7 +158,19 @@ struct TemporalQueryParserTests {
         ("March", 3, 1, true), ("5pm", 10, 8, false), ("10:30", 10, 8, false), ("5.30pm", 10, 8, false),
         ("17:00", 10, 8, false), ("in 2 weeks", 10, 22, false), ("in 2 days", 10, 10, false),
         ("the 3rd at 5pm", 10, 3, false), ("5pm tomorrow", 10, 9, false), ("3/14", 4, 14, false),
-        ("Mar 3", 4, 3, false),
+        ("Mar 3", 4, 3, false), ("14/3", 3, 14, true), ("24/12/2025", 12, 24, true), ("3/14/26", 3, 14, true),
+        ("on 3/14.", 3, 14, true),
+        // Clock times and time ranges whose digits happen to be the
+        // detected month and day (the detector reads them as today or
+        // tomorrow, so on some days they would match).
+        ("5.30pm", 5, 30, false), ("5.30pm", 5, 5, false), ("8.10pm", 10, 8, false), ("8.10", 10, 8, false),
+        ("3-4pm", 4, 3, false), ("3-4 pm", 4, 3, false), ("3/4pm", 3, 4, false), ("3/4 p.m.", 3, 4, false),
+        ("9-10 o'clock", 10, 9, false), ("9/10 o’clock", 10, 9, false), ("9/10h", 10, 9, false),
+        ("10:30-11:30", 11, 30, false), ("9/10:30", 9, 10, false), ("from 9-10 tomorrow", 10, 9, false),
+        ("from 9-10 tomorrow", 10, 10, false), ("9/10 tomorrow", 9, 10, false), ("Mar 3 tomorrow", 3, 3, false),
+        ("9-10 on Friday", 10, 9, false), ("3-14", 3, 14, false),
+        // The numbers must be the month and the day, in a date's order.
+        ("2026-03-14", 3, 3, false), ("12/24/2025", 12, 20, false), ("3/3", 3, 14, false),
     ])
     func detectorMatchesMustSpellOutTheDate(phrase: String, month: Int, day: Int, spellsOut: Bool) {
         #expect(TemporalQueryParser.spellsOutDate(phrase, month: month, day: day) == spellsOut)

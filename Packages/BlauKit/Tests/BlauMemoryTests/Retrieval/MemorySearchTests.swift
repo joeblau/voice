@@ -248,7 +248,10 @@ struct MemorySearchTests {
     /// A clock time or a future offset in the query isn't a date, so it
     /// doesn't narrow expansion to some other day: the current facts about
     /// Alex are still expanded.
-    @Test(arguments: ["how is Alex doing", "what is Alex planning in 2 weeks", "Alex call at 5pm", "Alex at 10:30"])
+    @Test(arguments: [
+        "how is Alex doing", "what is Alex planning in 2 weeks", "Alex call at 5pm", "Alex at 10:30",
+        "Alex meeting from 9-10 tomorrow", "Alex dinner at 8.10pm",
+    ])
     func clockTimesDontNarrowExpansion(query: String) async throws {
         let harness = try Harness()
         let partner = Partner()
