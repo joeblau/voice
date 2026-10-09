@@ -18,10 +18,14 @@ import Foundation
 ///
 /// **Trigger.** A confirmed VAD onset (`VoiceActivityEvent.speechStarted`,
 /// #28) on the echo-cancelled microphone while the orchestrator is
-/// `agentSpeaking`. Speech while Grok is still thinking is left to the
-/// final utterance, which interrupts the same way (#36). A continuation
-/// onset (VAD splitting a segment over its maximum duration) is the same
-/// speech carrying on, not a new onset, and never barges in.
+/// `agentSpeaking`. Speech that is already under way when Grok starts
+/// speaking (its onset came while Grok was listening or thinking, and its
+/// segment is still open) is judged when Grok starts
+/// (``BargeInTarget/agentSpeakingChanges()``), as speech that began in the
+/// grace period; speech that ends before then is left to the final
+/// utterance, which interrupts the same way (#36). A continuation onset
+/// (VAD splitting a segment over its maximum duration) is the same speech
+/// carrying on, not a new onset, and never barges in by itself.
 ///
 /// **Echo guard.** Voice processing removes most of the agent's voice from
 /// the microphone, but not all of it, and least while its echo canceller
@@ -31,13 +35,20 @@ import Foundation
 ///    ``BargeInConfiguration/playbackGracePeriod`` of the agent's audio, or,
 ///    if it did, ``BargeInConfiguration/speechAfterGrace`` more speech is
 ///    heard after the grace period while the segment is still open. Speech
-///    that started before the agent's audio can't be its echo.
+///    that started before the agent's audio can't be its echo. The grace
+///    period runs from when the agent's audio last started after silence,
+///    not from each item.
 /// 2. *Level.* The speech (from the onset, or from the end of the grace
 ///    period) is at least ``BargeInConfiguration/minimumSpeechLevel``, and
 ///    at least ``BargeInConfiguration/echoMargin`` louder than the peaks
 ///    (90th percentile of 20 ms pieces) of the
 ///    ``BargeInConfiguration/referenceWindow`` before the onset, where the
-///    microphone hears whatever echo leaks while Grok talks.
+///    microphone hears whatever echo leaks while Grok talks. The window
+///    doesn't reach back before the agent's audio started: there is no leak
+///    before it, only the user's own earlier speech. Speech already under
+///    way when Grok started must instead stay within the margin of the
+///    user's own level before Grok spoke, so a leak holding the segment
+///    open after the user stopped doesn't barge in.
 /// 3. *Speaker.* The ``BargeInSpeakerGate`` (voice ID, #47), when there is
 ///    one, didn't `reject` the speaker. `uncertain` still interrupts.
 ///
@@ -60,9 +71,16 @@ public actor BargeInMonitor {
     private var openSegments: Set<Int> = []
     /// Speech held back by the grace period.
     private var pending: Pending?
+    private var nextHoldID: UInt64 = 0
+    /// The latest onset that came while Grok wasn't speaking, until its
+    /// segment ends: judged if Grok starts speaking over it.
+    private var unjudged: (onset: SpeechOnset, receivedAt: Duration)?
+    /// The last ``agentSpeakingChanged(_:)`` value.
+    private var agentSpeaking = false
     public private(set) var statistics = BargeInStatistics()
 
     private struct Pending {
+        let id: UInt64
         let segmentID: Int
         let task: Task<Void, Never>
     }
@@ -70,14 +88,25 @@ public actor BargeInMonitor {
     /// One onset being judged.
     private struct Candidate {
         let onset: SpeechOnset
-        /// When the onset reached the monitor.
+        /// When the onset reached the monitor (with `onset.detectedAt`, it
+        /// places the clock on the capture timeline).
         let receivedAt: Duration
         /// Where the speech that counts starts (capture samples): the onset,
         /// or the end of the grace period for speech that began inside it.
-        let countsFrom: Int64
+        var countsFrom: Int64
         /// The speech began inside the grace period.
         let isSuspect: Bool
+        /// Where the agent's audio started (capture samples), when known.
+        var playbackStart: Int64?
+        /// For speech already under way when Grok started speaking: where
+        /// (capture samples) Grok started.
+        var carriedOverAt: Int64?
     }
+
+    /// Whether speech is held back by the grace period. For tests.
+    var hasPendingHold: Bool { pending != nil }
+    /// The segment of speech waiting for Grok to start speaking. For tests.
+    var unjudgedSegment: Int? { unjudged?.onset.segmentID }
 
     /// - Parameters:
     ///   - target: What to interrupt: the turn orchestrator.
@@ -112,14 +141,24 @@ public actor BargeInMonitor {
         pending?.task.cancel()
     }
 
-    /// Handles VAD's events until the stream finishes or the task is
-    /// cancelled. Subscribe (`vad.events()`) before VAD sees audio.
+    /// Handles VAD's events, and the target's
+    /// ``BargeInTarget/agentSpeakingChanges()``, until the VAD stream
+    /// finishes or the task is cancelled. Subscribe (`vad.events()`) before
+    /// VAD sees audio.
     public func run(_ events: AsyncStream<VoiceActivityEvent>) async {
+        let changes = target.agentSpeakingChanges()
+        let watcher = Task { [weak self] in
+            for await isSpeaking in changes {
+                await self?.agentSpeakingChanged(isSpeaking)
+            }
+        }
         for await event in events {
             await handle(event)
         }
+        watcher.cancel()
         pending?.task.cancel()
         pending = nil
+        unjudged = nil
         openSegments.removeAll()
     }
 
@@ -133,6 +172,9 @@ public actor BargeInMonitor {
             return await speechStarted(onset)
         case .speechEnded(let segment):
             openSegments.remove(segment.id)
+            if unjudged?.onset.segmentID == segment.id {
+                unjudged = nil
+            }
             if let pending, pending.segmentID == segment.id {
                 // Over before enough of it was heard after the grace period.
                 pending.task.cancel()
@@ -151,38 +193,100 @@ public actor BargeInMonitor {
         // came before Grok spoke). Judging it again would give the agent's
         // own leak, holding a segment open through a long reply, a fresh
         // chance to barge in at every split, with a measured span that can
-        // be empty. Its ID is still tracked as open (`handle`).
-        if onset.isContinuation { return .continuation }
+        // be empty. Its ID is still tracked as open (`handle`). While Grok
+        // isn't speaking it stands for the speech carrying on, in case Grok
+        // starts over it.
         let receivedAt = clock.uptime
+        if onset.isContinuation {
+            if !(await target.isAgentSpeaking) {
+                unjudged = (onset, receivedAt)
+            }
+            return .continuation
+        }
         pending?.task.cancel()
         pending = nil
-        guard await target.isAgentSpeaking else { return .agentNotSpeaking }
+        unjudged = nil
+        guard await target.isAgentSpeaking else {
+            unjudged = (onset, receivedAt)
+            return .agentNotSpeaking
+        }
         statistics.onsetsWhileSpeaking += 1
 
         var countsFrom = onset.startOffset
         var isSuspect = false
-        if let audible = playback?.audibleDuration, configuration.playbackGracePeriod > .zero {
+        var playbackStart: Int64?
+        if let audible = playback?.audibleDuration {
             // VAD decided at `detectedAt`, which is (near enough) now on the
             // capture timeline, so playback began `audible` before it.
-            let playbackStart = onset.detectedAt - audible.sampleCount(sampleRate: onset.sampleRate)
-            let graceEnd = playbackStart + configuration.playbackGracePeriod.sampleCount(sampleRate: onset.sampleRate)
-            if onset.startOffset >= playbackStart, onset.startOffset < graceEnd {
+            let start = onset.detectedAt - audible.sampleCount(sampleRate: onset.sampleRate)
+            let graceEnd = start + configuration.playbackGracePeriod.sampleCount(sampleRate: onset.sampleRate)
+            playbackStart = start
+            if onset.startOffset >= start, onset.startOffset < graceEnd {
                 countsFrom = graceEnd
                 isSuspect = true
             }
         }
         return await evaluate(
-            Candidate(onset: onset, receivedAt: receivedAt, countsFrom: countsFrom, isSuspect: isSuspect),
+            Candidate(
+                onset: onset, receivedAt: receivedAt, countsFrom: countsFrom, isSuspect: isSuspect,
+                playbackStart: playbackStart),
             startedAt: receivedAt)
+    }
+
+    /// Tells the monitor whether Grok is speaking; ``run(_:)`` calls it for
+    /// each of the target's ``BargeInTarget/agentSpeakingChanges()``.
+    ///
+    /// When Grok starts speaking while the segment of an onset that came
+    /// before is still open (the user carried on talking through Grok's
+    /// thinking), that speech is judged as if it began in the grace period:
+    /// it barges in once ``BargeInConfiguration/speechAfterGrace`` of it has
+    /// been heard after the grace period with the segment still open, it is
+    /// loud enough, and it is within ``BargeInConfiguration/echoMargin`` of
+    /// the user's own level before Grok spoke.
+    ///
+    /// - Returns: What became of that speech, or `nil` when there was none.
+    @discardableResult
+    public func agentSpeakingChanged(_ isSpeaking: Bool) async -> BargeInOutcome? {
+        let started = isSpeaking && !agentSpeaking
+        agentSpeaking = isSpeaking
+        guard started, let carried = unjudged, openSegments.contains(carried.onset.segmentID) else { return nil }
+        unjudged = nil
+        let now = clock.uptime
+        let onset = carried.onset
+        guard await target.isAgentSpeaking else { return .agentNotSpeaking }
+        statistics.onsetsWhileSpeaking += 1
+        // Where the capture is now: Grok's audio starts here at the
+        // earliest (it is still filling the jitter buffer).
+        let startedAt =
+            onset.detectedAt + max(.zero, now - carried.receivedAt).sampleCount(sampleRate: onset.sampleRate)
+        let grace = configuration.playbackGracePeriod.sampleCount(sampleRate: onset.sampleRate)
+        Log.realtime.info(
+            "Grok started speaking over segment \(onset.segmentID, privacy: .public), already under way; judging it")
+        return await evaluate(
+            Candidate(
+                onset: onset, receivedAt: carried.receivedAt, countsFrom: startedAt + grace, isSuspect: true,
+                playbackStart: startedAt, carriedOverAt: startedAt),
+            startedAt: now)
     }
 
     /// Runs the checks on `candidate`, deferring speech from the grace
     /// period until enough of it after the grace period has been heard.
     private func evaluate(_ candidate: Candidate, startedAt: Duration) async -> BargeInOutcome {
+        var candidate = candidate
         let onset = candidate.onset
         var speechEnd = onset.detectedAt
         if candidate.isSuspect {
             let position = capturePosition(of: candidate)
+            if candidate.carriedOverAt != nil, let audible = playback?.audibleDuration {
+                // Grok's audio has started by now: the grace period runs
+                // from where it actually did.
+                let start = max(
+                    candidate.playbackStart ?? 0, position - audible.sampleCount(sampleRate: onset.sampleRate))
+                candidate.playbackStart = start
+                candidate.countsFrom = max(
+                    candidate.countsFrom,
+                    start + configuration.playbackGracePeriod.sampleCount(sampleRate: onset.sampleRate))
+            }
             let needed =
                 candidate.countsFrom + configuration.speechAfterGrace.sampleCount(sampleRate: onset.sampleRate)
             if position < needed {
@@ -221,23 +325,26 @@ public actor BargeInMonitor {
     }
 
     private func hold(_ candidate: Candidate, for delay: Duration) {
+        pending?.task.cancel()
         let clock = clock
+        let id = nextHoldID
+        nextHoldID += 1
         let task = Task { [weak self] in
             do {
                 try await clock.sleep(for: delay)
             } catch {
                 return
             }
-            await self?.graceEnded(candidate)
+            await self?.graceEnded(candidate, hold: id)
         }
-        pending = Pending(segmentID: candidate.onset.segmentID, task: task)
+        pending = Pending(id: id, segmentID: candidate.onset.segmentID, task: task)
         Log.realtime.info(
             "Speech on segment \(candidate.onset.segmentID, privacy: .public) began in the playback grace period; holding it"
         )
     }
 
-    private func graceEnded(_ candidate: Candidate) async {
-        guard let pending, pending.segmentID == candidate.onset.segmentID else { return }
+    private func graceEnded(_ candidate: Candidate, hold id: UInt64) async {
+        guard let pending, pending.id == id else { return }
         self.pending = nil
         guard await target.isAgentSpeaking else { return }
         _ = await evaluate(candidate, startedAt: clock.uptime)
@@ -276,20 +383,43 @@ public actor BargeInMonitor {
                 .tooQuiet, segment: onset.segmentID,
                 detail: "speech at \(Self.format(level)) dBFS, below \(Self.format(minimum))")
         }
-        if let margin = configuration.echoMargin {
-            let window = configuration.referenceWindow.sampleCount(sampleRate: onset.sampleRate)
-            let start = max(0, onset.startOffset - window)
-            if start < onset.startOffset, let reference = microphone.history(in: start..<onset.startOffset),
-                reference.sampleCount >= Self.minimumMeasuredSamples
-            {
-                let referenceLevel = Self.referenceLevel(of: reference)
-                if level - referenceLevel < margin {
-                    return suppress(
-                        .echo, segment: onset.segmentID,
-                        detail:
-                            "speech at \(Self.format(level)) dBFS, only \(Self.format(level - referenceLevel)) dB over the \(Self.format(referenceLevel)) dBFS before it"
-                    )
-                }
+        guard let margin = configuration.echoMargin else { return nil }
+        let window = configuration.referenceWindow.sampleCount(sampleRate: onset.sampleRate)
+        if let carriedOverAt = candidate.carriedOverAt {
+            // The speech was under way before Grok spoke, so it isn't
+            // Grok's echo; the question is whether the user is still
+            // talking, or only the leak holds the segment open. The user's
+            // own level before Grok spoke tells: the leak sits well under it.
+            let start = max(onset.startOffset, carriedOverAt - window)
+            guard start < carriedOverAt, let user = microphone.history(in: start..<carriedOverAt),
+                user.sampleCount >= Self.minimumMeasuredSamples
+            else {
+                return suppress(
+                    .echo, segment: onset.segmentID, detail: "none of the speech before Grok spoke to compare with")
+            }
+            let userLevel = Self.referenceLevel(of: user)
+            if level < userLevel - margin {
+                return suppress(
+                    .echo, segment: onset.segmentID,
+                    detail:
+                        "speech at \(Self.format(level)) dBFS, more than \(Self.format(margin)) dB under the user's \(Self.format(userLevel)) dBFS before Grok spoke"
+                )
+            }
+            return nil
+        }
+        // No leak before the agent's audio started: earlier sound is the
+        // user's own (their last utterance, an "uh"), not a reference.
+        let start = max(0, onset.startOffset - window, candidate.playbackStart ?? 0)
+        if start < onset.startOffset, let reference = microphone.history(in: start..<onset.startOffset),
+            reference.sampleCount >= Self.minimumMeasuredSamples
+        {
+            let referenceLevel = Self.referenceLevel(of: reference)
+            if level - referenceLevel < margin {
+                return suppress(
+                    .echo, segment: onset.segmentID,
+                    detail:
+                        "speech at \(Self.format(level)) dBFS, only \(Self.format(level - referenceLevel)) dB over the \(Self.format(referenceLevel)) dBFS before it"
+                )
             }
         }
         return nil

@@ -16,12 +16,22 @@ final class FakeBargeInTarget: BargeInTarget {
     }
 
     private let state = Mutex(State())
+    private let changes = AsyncStream.makeStream(of: Bool.self)
 
     var triggers: [BargeInTrigger] { state.withLock { $0.triggers } }
 
     func setSpeaking(_ speaking: Bool) {
         state.withLock { $0.speaking = speaking }
     }
+
+    /// Sets whether Grok is speaking and tells `agentSpeakingChanges()`,
+    /// as the orchestrator's state change would.
+    func announceSpeaking(_ speaking: Bool) {
+        setSpeaking(speaking)
+        changes.continuation.yield(speaking)
+    }
+
+    func agentSpeakingChanges() -> AsyncStream<Bool> { changes.stream }
 
     var isAgentSpeaking: Bool {
         get async { state.withLock { $0.speaking } }
@@ -42,6 +52,10 @@ final class FakePlayback: AgentPlaybackObserving {
     private let audible = Mutex<Duration?>(nil)
 
     init(audible: Duration?) {
+        self.audible.withLock { $0 = audible }
+    }
+
+    func set(audible: Duration?) {
         self.audible.withLock { $0 = audible }
     }
 
@@ -113,6 +127,10 @@ enum MicSignal {
         return Array(samples.prefix(Int(seconds * Double(rate))))
     }
 
+    /// `seconds` of the room's noise floor (fully cancelled echo, nobody
+    /// talking).
+    static func floor(seconds: Double) -> [Float] { tone(-65, seconds: seconds) }
+
     /// Sample offset of `seconds`.
     static func offset(_ seconds: Double) -> Int64 { Int64((seconds * Double(rate)).rounded()) }
 }
@@ -123,5 +141,15 @@ extension SpeechOnset {
         SpeechOnset(
             segmentID: segment, startOffset: MicSignal.offset(start), sampleRate: MicSignal.rate,
             isContinuation: false, detectedAt: MicSignal.offset(detected))
+    }
+}
+
+extension SpeechSegment {
+    /// Segment `id`, from `start` to `end` seconds, ended by silence.
+    static func ended(_ id: Int, from start: Double, to end: Double) -> SpeechSegment {
+        SpeechSegment(
+            id: id, sampleRange: MicSignal.offset(start)..<MicSignal.offset(end), sampleRate: MicSignal.rate,
+            endReason: .silence, detectedAt: MicSignal.offset(end + 0.3), peakProbability: 0.9,
+            meanProbability: 0.8)
     }
 }

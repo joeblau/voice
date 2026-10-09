@@ -1237,6 +1237,7 @@ public actor TurnOrchestrator: RealtimeService {
                     let index = turn.agentItems.firstIndex(where: { $0.itemID == itemID })
                 else { return }
                 self.audio.finish(turn.agentItems[index].playbackID)
+                turn.agentItems[index].isAudioDone = true
             }
         case .responseDone(let done):
             responseDone(done.response)
@@ -1820,9 +1821,11 @@ public actor TurnOrchestrator: RealtimeService {
             } else if !item.isPersisted {
                 persistAgent(item, text: item.transcript, duration: .milliseconds(played))
             }
-            // Cut short: less was heard than arrived, or more was coming
-            // (not for what was said before a tool round: it was complete).
-            if played < received || (cancelsResponse && !item.isSettled) {
+            // Cut short: less was heard than arrived, or more of it was
+            // still coming. Not an item heard in full whose audio was
+            // complete (an earlier item of a reply still being generated,
+            // or what was said before a tool round).
+            if played < received || (cancelsResponse && !item.isSettled && !item.isAudioDone) {
                 interruptedAgentUtterances.insert(item.utteranceID)
                 cut.append(
                     .init(
@@ -1847,6 +1850,27 @@ public actor TurnOrchestrator: RealtimeService {
 
     /// Whether Grok's reply is playing: the state is `agentSpeaking`.
     public var isAgentSpeaking: Bool { state == .agentSpeaking }
+
+    /// ``isAgentSpeaking`` now, then each time it changes, for
+    /// ``BargeInMonitor`` to judge speech already under way when Grok
+    /// starts speaking. Cancel the iterating task to stop.
+    public nonisolated func agentSpeakingChanges() -> AsyncStream<Bool> {
+        let snapshots = updates(bufferingPolicy: .unbounded)
+        let (stream, continuation) = AsyncStream.makeStream(of: Bool.self)
+        let task = Task {
+            var last: Bool?
+            for await snapshot in snapshots {
+                let speaking = snapshot.state == .agentSpeaking
+                if speaking != last {
+                    continuation.yield(speaking)
+                    last = speaking
+                }
+            }
+            continuation.finish()
+        }
+        continuation.onTermination = { _ in task.cancel() }
+        return stream
+    }
 
     /// Cuts Grok off because the user started talking over it (#37), usually
     /// called by ``BargeInMonitor`` on a VAD speech onset.
@@ -2219,6 +2243,10 @@ extension TurnOrchestrator {
         /// Said in full before a tool round (#68): its response is done, so
         /// cancelling the follow-up doesn't cut it.
         var isSettled = false
+        /// All of its audio has arrived (`response.output_audio.done`), so
+        /// cancelling the rest of the response doesn't cut it once it has
+        /// played in full.
+        var isAudioDone = false
 
         init(itemID: String, contentIndex: Int, startedAt: Date?, startOffset: Duration?) {
             self.itemID = itemID

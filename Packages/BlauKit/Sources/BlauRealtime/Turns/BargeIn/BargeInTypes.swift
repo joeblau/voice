@@ -85,23 +85,37 @@ public protocol BargeInTarget: Sendable {
     /// Stops the reply at once and cuts Grok's memory of it to what was
     /// heard. Returns `nil` when nothing was playing any more.
     func bargeIn(_ trigger: BargeInTrigger) async -> BargeInRecord?
+
+    /// ``isAgentSpeaking`` each time it changes, so ``BargeInMonitor`` can
+    /// judge speech that was already under way when Grok started speaking
+    /// (its onset came too early to). The default never yields.
+    func agentSpeakingChanges() -> AsyncStream<Bool>
+}
+
+extension BargeInTarget {
+    public func agentSpeakingChanges() -> AsyncStream<Bool> {
+        AsyncStream { $0.finish() }
+    }
 }
 
 /// How long the agent's audio has been coming out of the speaker, for the
-/// echo guard's grace period.
+/// echo guard's grace period and reference window.
 public protocol AgentPlaybackObserving: Sendable {
-    /// How long the item now playing has been audible, or `nil` when
-    /// nothing is audible (idle, or still filling the jitter buffer).
+    /// How long the agent's audio has been playing without a break (since
+    /// the player last left idle, across items and responses that play
+    /// straight on), or `nil` when nothing is audible (idle, or still
+    /// filling the jitter buffer).
+    ///
+    /// The echo canceller converges once, when the agent's voice starts
+    /// after silence; it doesn't start over at the next item of a reply.
     var audibleDuration: Duration? { get }
 }
 
 extension StreamingAudioPlayer: AgentPlaybackObserving {
     public var audibleDuration: Duration? {
         let snapshot = snapshot
-        guard snapshot.state != .idle, let item = snapshot.currentItem, let played = playedItem(for: item),
-            played.playedFrames > 0
-        else { return nil }
-        return played.playedDuration
+        guard snapshot.state != .idle, snapshot.playedSinceIdleFrames > 0 else { return nil }
+        return .samples(snapshot.playedSinceIdleFrames, sampleRate: configuration.sampleRate)
     }
 }
 
