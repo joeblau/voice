@@ -80,7 +80,9 @@ public struct VerificationGateConfiguration: Hashable, Sendable {
     /// When an utterance spans segments that were accepted and segments that
     /// were rejected, the larger share of speech decides, unless the smaller
     /// one is at least this share of the decided speech: then the utterance
-    /// is `uncertain`.
+    /// is `uncertain`. It is also `uncertain` when neither accepted nor
+    /// rejected speech makes up at least `1 - mixedSpeechMinorityShare` of
+    /// all its speech, uncertain speech included.
     public var mixedSpeechMinorityShare: Double
 
     /// The most audio buffered for one segment. VAD splits segments at 8 s.

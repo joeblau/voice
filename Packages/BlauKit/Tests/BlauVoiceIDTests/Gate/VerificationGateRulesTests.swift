@@ -31,14 +31,35 @@ struct VerificationGateRulesTests {
     }
 
     @Test(arguments: [
-        ([SpeakerDecision](), SpeakerDecision.uncertain),
-        ([.uncertain, .uncertain], .uncertain),
-        ([.accept, .uncertain], .accept),
-        ([.reject, .uncertain], .reject),
+        ([(SpeakerDecision, Double)](), SpeakerDecision.uncertain),
+        ([(.uncertain, 2), (.uncertain, 2)], .uncertain),
+        ([(.accept, 2), (.uncertain, 0.5)], .accept),
+        ([(.reject, 2), (.uncertain, 0.5)], .reject),
     ])
-    func combiningWithoutAConflict(decisions: [SpeakerDecision], expected: SpeakerDecision) {
-        let verdicts = decisions.map { Self.verdict($0, seconds: 2) }
+    func combiningWithoutAConflict(parts: [(SpeakerDecision, Double)], expected: SpeakerDecision) {
+        let verdicts = parts.map { Self.verdict($0.0, seconds: $0.1) }
         #expect(VerificationGateRules.combine(verdicts, minorityShare: 1.0 / 3) == expected)
+    }
+
+    /// Uncertain speech counts in the total: a few accepted (or rejected)
+    /// words don't carry a long stretch voice ID couldn't attribute, which
+    /// goes through the uncertain policy instead.
+    @Test func mostlyUncertainSpeechIsUncertain() {
+        let combine = { (parts: [(SpeakerDecision, Double)]) in
+            VerificationGateRules.combine(parts.map { Self.verdict($0.0, seconds: $0.1) }, minorityShare: 1.0 / 3)
+        }
+        // The owner's 1.4 s, then 6 s of a voice voice ID can't place: 19%.
+        #expect(combine([(.accept, 1.4), (.uncertain, 6)]) == .uncertain)
+        #expect(combine([(.reject, 1.4), (.uncertain, 6)]) == .uncertain)
+        #expect(combine([(.accept, 2), (.uncertain, 2)]) == .uncertain)
+        // Accepted speech that dominates still accepts (80%, 75%).
+        #expect(combine([(.accept, 2), (.uncertain, 0.5)]) == .accept)
+        #expect(combine([(.uncertain, 1), (.accept, 3)]) == .accept)
+        #expect(combine([(.reject, 3), (.uncertain, 1)]) == .reject)
+        // A dominant majority over a conflict and some uncertainty (69%).
+        #expect(combine([(.accept, 7), (.reject, 3), (.uncertain, 0.2)]) == .accept)
+        // A close conflict with a little uncertainty stays uncertain.
+        #expect(combine([(.accept, 3), (.reject, 2), (.uncertain, 0.2)]) == .uncertain)
     }
 
     @Test func aConflictGoesToTheMajorityUnlessItIsClose() {

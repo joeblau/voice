@@ -15,11 +15,18 @@ public enum VerificationGateRules {
         return best
     }
 
-    /// The decision of an utterance spanning `segments`.
+    /// The decision of an utterance spanning `segments`, by share of
+    /// speech (uncertain speech counts in the total).
     ///
     /// - Only uncertain parts (or none): `uncertain`.
-    /// - Accepted parts and no rejected ones: `accept`; rejected and no
-    ///   accepted ones: `reject`. Uncertain parts don't count against either.
+    /// - Neither accepted nor rejected speech makes up at least
+    ///   `1 - minorityShare` of all of it: `uncertain`, so speech voice ID
+    ///   couldn't attribute goes through the uncertain policy rather than
+    ///   riding along with a few accepted (or rejected) words. The owner's
+    ///   2 s with a 0.5 s uncertain tail still accepts (80%); 1.4 s
+    ///   accepted then 6 s of an unattributed voice doesn't (19%).
+    /// - Otherwise, accepted parts and no rejected ones: `accept`; rejected
+    ///   and no accepted ones: `reject`.
     /// - Both: the larger share of speech decides, unless the smaller share
     ///   is at least `minorityShare` of the decided speech, which makes it
     ///   `uncertain`: the transcript can't be split by speaker, so a real
@@ -27,30 +34,26 @@ public enum VerificationGateRules {
     public static func combine(_ segments: [SegmentVerdict], minorityShare: Double) -> SpeakerDecision {
         var accepted: Duration = .zero
         var rejected: Duration = .zero
-        var acceptedCount = 0
-        var rejectedCount = 0
+        var uncertain: Duration = .zero
         for segment in segments {
             // A sliver of overlap still counts for something.
             let weight = max(segment.speechDuration, .milliseconds(1))
             switch segment.decision {
-            case .accept:
-                accepted += weight
-                acceptedCount += 1
-            case .reject:
-                rejected += weight
-                rejectedCount += 1
-            case .uncertain:
-                break
+            case .accept: accepted += weight
+            case .reject: rejected += weight
+            case .uncertain: uncertain += weight
             }
         }
-        switch (acceptedCount > 0, rejectedCount > 0) {
-        case (false, false): return .uncertain
+        guard accepted > .zero || rejected > .zero else { return .uncertain }
+        let total = (accepted + rejected + uncertain).timeInterval
+        if max(accepted, rejected).timeInterval / total < 1 - minorityShare { return .uncertain }
+        switch (accepted > .zero, rejected > .zero) {
         case (true, false): return .accept
         case (false, true): return .reject
-        case (true, true):
-            let total = (accepted + rejected).timeInterval
+        default:
+            let decided = (accepted + rejected).timeInterval
             let minority = min(accepted, rejected).timeInterval
-            if minority / total >= minorityShare { return .uncertain }
+            if minority / decided >= minorityShare { return .uncertain }
             return accepted > rejected ? .accept : .reject
         }
     }

@@ -313,10 +313,17 @@ owner's decision on indefinitely.
 
 A final can span several segments (the transcriber keeps an utterance open
 across short pauses, #29). Each segment it covers gives a decision, and
-they combine by speech share (`VerificationGateRules.combine`): accepted
-and no rejected parts accept, rejected and no accepted parts reject; a mix
-goes to the larger share unless the smaller is a third or more, which makes
-it uncertain (the text can't be split by speaker).
+they combine by speech share (`VerificationGateRules.combine`), with
+uncertain speech counted in the total. Unless accepted or rejected speech
+makes up at least two thirds of it all, the utterance is uncertain and goes
+through the uncertain policy: the owner's few words followed by 6 s of a
+voice voice ID can't place (the transcriber keeps one utterance open across
+the pause) is uncertain, not accepted, so it is neither sent outside an
+active turn nor counted as the owner's speech that keeps a turn active.
+The owner's 2 s with a 0.5 s uncertain tail (80%) still accepts. Past that,
+accepted and no rejected parts accept, rejected and no accepted parts
+reject; a mix goes to the larger share unless the smaller is a third or
+more, which makes it uncertain (the text can't be split by speaker).
 
 | Decision | Disposition | What the orchestrator sees |
 | --- | --- | --- |

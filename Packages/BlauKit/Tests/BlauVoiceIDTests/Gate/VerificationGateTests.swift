@@ -191,6 +191,37 @@ struct VerificationGateTests {
         #expect(mostlyTV.decision == .reject)
     }
 
+    /// The owner's few words and then a voice voice ID can't place, in one
+    /// utterance (the transcriber keeps it open across the pause): the
+    /// uncertain speech counts, so the utterance is uncertain and follows
+    /// the uncertain policy instead of riding on the accepted words. It
+    /// isn't accepted, so it doesn't make the turn active either.
+    @Test func aFewAcceptedWordsDontCarryLongUncertainSpeech() async throws {
+        let clock = ManualClock()
+        let activity = ConversationTurnActivity(window: .seconds(10), clock: clock)
+        let verifier = ScriptedVerifier(SpeakerTimeline([(0, 1.8, .owner), (1.8, 20, .borderline)]))
+        let gate = VerificationGate(verifier: verifier, turnActivity: activity, clock: clock)
+        await gate.feed(SpeechScript.segment(0, from: 0, to: 1.4))
+        await gate.feed(SpeechScript.segment(1, from: 2, to: 8))
+        #expect(!activity.isActive)
+
+        let gated = await gate.decide(finalUtterance("Hey so… and in other news tonight", from: 0, to: 8))
+
+        #expect(gated.segments.map(\.decision) == [.accept, .uncertain])
+        #expect(gated.decision == .uncertain)
+        #expect(gated.disposition == .uncertainDiscarded)
+        #expect(!gated.disposition.isCommitted)
+        #expect(!activity.isActive)
+
+        // So the same voice's next uncertain stretch of 2 s or more isn't
+        // let through either.
+        await gate.feed(SpeechScript.segment(2, from: 8.5, to: 11))
+        let next = await gate.decide(finalUtterance("…the weather", from: 8.5, to: 11))
+        #expect(next.decision == .uncertain)
+        #expect(next.disposition == .uncertainDiscarded)
+        #expect(!activity.isActive)
+    }
+
     /// The model can end an utterance before VAD ends the segment: the gate
     /// scores what it has instead of waiting.
     @Test func aFinalBeforeTheSegmentEndsIsScoredAtOnce() async throws {
