@@ -26,9 +26,10 @@ Today
 | --- | --- |
 | Opens the app | The screen is anchored to the latest line of the **current topic**: the open topic of the running conversation, or else of the most recent one (else that conversation's last topic). Its bullet is a pinned section header, so it stays on screen however long the transcript gets, and older bullets fill the space above it |
 | Swipes down | Scrolls up into the history: compressed bullets on a continuous rail, oldest at the top, grouped by day ("Today", "Yesterday", "Tuesday, October 6") and by conversation. Each day heading appears once, in order: the focus conversation always comes last, so a running conversation that began before midnight, after which another device synced one that began after it, sits under the later day's heading |
-| Taps a compressed bullet | Expands it in place: its summary and transcript open below the bullet, which doesn't move. Tapping again compresses it. Several can be open at once (the full detail with its actions is #58) |
+| Taps a compressed bullet | Expands it in place, in under 100 ms: its detail (summary, span, actions, [below](#topic-detail)) and transcript open below the bullet, which doesn't move. Tapping again compresses it. Several can be open at once |
 | Swipes back, taps **Now** or taps the current bullet | Returns to the latest line with a spring (a short ease under Reduce Motion). The Now pill shows whenever the latest line is out of view |
-| Long-presses a bullet | Rename and Merge with Previous (#54, `topicEditMenu`) |
+| Long-presses a bullet | Continue This Topic and Share as Markdown (#58), Rename and Merge with Previous (#54) |
+| Long-presses a line of a topic | Copy, Share and "Split Topic Here" (#54), except on the topic's first line |
 
 Expansion is view state (`TopicExpansion` in BlauKit), never persisted:
 on launch only the current topic is expanded. When a new topic opens, the
@@ -57,6 +58,54 @@ stays open so the text doesn't fold away under them.
   Motion).
 - At the accessibility text sizes an older bullet puts its time under the
   title and grows instead of truncating.
+
+## Topic detail
+
+An expanded older topic (#58) shows, under its bullet and above its
+transcript:
+
+```
+  ● Launch Checklist          6:00 PM · 8 min ⌄
+    Went through the launch checklist and agreed on next steps.   ← summary
+    6:00 PM – 6:08 PM · 8 min                                     ← span
+    [↻ Continue] [⇪ Share] [⋯]                                    ← actions
+                    Remind me what we decided…                    ← transcript
+    You picked the second week of November…
+```
+
+- **Summary**: the labeler's summary (#53), if the topic has one.
+- **Span**: when it ran and for how long ("6:00 PM – 6:08 PM · 8 min";
+  VoiceOver: "From 6:00 PM to 6:08 PM, 8 minutes").
+- **Continue** starts a conversation that picks the topic up: Grok is told
+  its title, summary and last exchanges before the user says anything
+  ([realtime.md](realtime.md#continuing-an-earlier-topic)). It goes through
+  the record button's model (`RecordButtonModel.continueTopic(_:)`), so the
+  button, its haptic and its failure alert behave as for a tap; while a
+  conversation is running, that conversation takes the topic instead. The
+  timeline then returns to the latest line. Not offered on the topic being
+  recorded.
+- **Share** shares the topic as a Markdown file (`TopicMarkdownDocument`,
+  rendered by BlauKit's `TopicMarkdownRenderer` only once a destination is
+  picked), in the export's format ([export.md](export.md#format)) with its
+  own front matter (`topic:`, `generator: Blau topic 1`) so a shared topic
+  saved into iCloud Drive → Blau is never mistaken for an export file.
+  Apps that take text get the same Markdown as plain text.
+- **More** (⋯): Rename… and Merge with Previous (#54). **Split** is on each
+  line: long-press it, "Split Topic Here" (also a VoiceOver action).
+
+One `TopicEditor` per timeline runs every rename, merge and split and
+presents the rename prompt and failure alert once. The current topic keeps
+its live transcript without the detail; its long-press menu has Continue
+(for a conversation that has ended) and Share.
+
+**Tap → expanded under 100 ms.** `TopicExpansionTimer` (BlauKit) measures
+every expansion from the tap to the detail's `onAppear`, which SwiftUI
+calls in the transaction that lays it out: the `timeline.expand` signpost
+([performance.md](performance.md#canonical-intervals)), a log line when it
+is over 100 ms, and the latest value for UI tests (`ui-test` launches only,
+as the value of `blau.timeline.expandLatency`). Expanding builds only the
+detail and the rows on screen (the lazy stack), and the transcript query
+fetches that one conversation's utterances.
 
 ## Scrolling
 
@@ -107,10 +156,15 @@ stays open so the text doesn't fold away under them.
 | --- | --- |
 | Order, groups, current topic, rail, fetch (`TopicTimeline`, `TimelineTopic`) | `Packages/BlauKit/Sources/BlauTopics/Timeline/` |
 | Which lines belong to a topic (`TopicMembership`): the store's link, else by time | same |
-| Expansion rules (`TopicExpansion`), times and durations (`TopicTimelineFormat`) | same |
+| Expansion rules (`TopicExpansion`), times and durations (`TopicTimelineFormat`), the expand timer (`TopicExpansionTimer`) | same |
 | The scroll view, Now pill, rotor (`TopicTimelineView`) | `Blau/Timeline/TopicTimelineView.swift` |
 | Bullets, rail, dot, headings, VoiceOver text (`TopicBullet`, `TopicBulletDescription`) | `Blau/Timeline/TopicBullet.swift` |
 | A topic's transcript rows (`TopicTranscriptRows`) | `Blau/Timeline/TopicTranscriptRows.swift` |
+| The detail: summary, span, actions (`TopicDetailHeader`, `TopicDetailDescription`) | `Blau/Timeline/TopicDetail.swift` |
+| Rename, merge and split (`TopicEditor`, `TopicEditMenuItems`) | `Blau/Topics/TopicEditMenu.swift` |
+| Share as Markdown (`TopicMarkdownDocument`), reading a topic for Continue (`TopicSource`) | `Blau/Topics/TopicShare.swift` |
+| The shared file's format (`TopicMarkdownRenderer`) | `Packages/BlauKit/Sources/BlauPersistence/Export/` |
+| What Grok is told on Continue (`RealtimeContinuedTopic`, `RealtimeContinuation`) | `Packages/BlauKit/Sources/BlauRealtime/Continuity/` |
 | The canned history (`TopicTimelineFixture`) | `Blau/Timeline/TopicTimelineFixture.swift` |
 
 A topic's transcript queries its conversation's utterances and keeps the
@@ -127,6 +181,9 @@ its whole transcript, titled with the conversation's title.
 | --- | --- |
 | `TopicTimelineTests`, `TopicMembershipTests`, `TopicExpansionTests`, `TopicTimelineFormatTests` (BlauKit, `make test-kit`) | order and grouping, the current topic, stand-in bullets, the rail, duplicates, the fetch; line membership; expansion; times, durations and day headings |
 | `TopicTimelineViewTests` (BlauTests) | what each bullet tells VoiceOver, the fixture |
+| `TopicExpansionTimerTests`, `TopicMarkdownRendererTests`, `ContinuedTopicTests`, `TurnOrchestratorContinueTopicTests`, `RecordButtonContinueTopicTests` (BlauKit) | the expand timer and its signpost; the shared Markdown; what Grok is told, before the first turn, in a running conversation and again after a renewal; Continue through the record button |
+| `TopicDetailTests`, `VoiceLoopTests` (BlauTests) | the detail's span text; Continue and Share reading the store; the voice loop opening a conversation with the topic |
+| `TopicDetailUITests` | the detail under the bullet (summary, span, Continue, Share, More, then the lines) and its accessibility audit; tap → expanded under 100 ms over five expansions, as the app measured it; Continue starting a conversation; Share opening the share sheet; Rename from More; Split Topic Here on a line |
 | `TopicTimelineUITests` | opening on the current topic with bullets above the fold, only it expanded, compressed rows of one height; swiping into history and back by Now, swiping and tapping the current bullet; tapping to expand and compress in place; refined titles not moving the history; the VoiceOver labels and an accessibility audit of the timeline's elements; the largest text size |
 
 UI tests seed a canned history with `-BlauTimelineFixture <topics>` on a
@@ -136,6 +193,8 @@ yesterday and today, the last topic open; every third title starts as
 provisional title from a separate `ModelContext` that long after seeding,
 the way the topic lifecycle's store does. Previews use the same fixture.
 
-Still to check by hand on a device: the pulse and the spring feel, and
+Still to check by hand on a device: the pulse and the spring feel,
 VoiceOver navigation with the rotor (the UI tests check the labels, values
-and traits, not the spoken output).
+and traits, not the spoken output), the expand latency on an iPhone
+(Instruments, `timeline.expand`), and Continue against Grok with a real
+key ([realtime.md](realtime.md#manual-verification)).

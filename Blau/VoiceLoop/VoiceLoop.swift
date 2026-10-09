@@ -200,7 +200,10 @@ final class VoiceLoop {
     /// open the realtime session: it releases what it built and leaves
     /// `phase` `.idle`. A new start waits for one that is still unwinding,
     /// so its release can't turn off the new conversation's microphone.
-    func start() async {
+    ///
+    /// - Parameter topic: An earlier topic the conversation picks up (#58),
+    ///   told to Grok before anything the user says.
+    func start(continuing topic: RealtimeContinuedTopic? = nil) async {
         guard !phase.isActive else { return }
         while let unwinding = startInFlight {
             await unwinding.task.value
@@ -216,7 +219,8 @@ final class VoiceLoop {
         let generation = startGeneration
         phase = .starting
         let task = Task {
-            await self.performStart(generation: generation, conversation: conversation, startPipeline: startPipeline)
+            await self.performStart(
+                generation: generation, conversation: conversation, startPipeline: startPipeline, continuing: topic)
         }
         startInFlight = (generation, task)
         await withTaskCancellationHandler {
@@ -233,7 +237,8 @@ final class VoiceLoop {
     }
 
     private func performStart(
-        generation: UInt64, conversation: any VoiceLoopConversation, startPipeline: PipelineStarter
+        generation: UInt64, conversation: any VoiceLoopConversation, startPipeline: PipelineStarter,
+        continuing topic: RealtimeContinuedTopic?
     ) async {
         defer {
             if startInFlight?.generation == generation { startInFlight = nil }
@@ -258,7 +263,7 @@ final class VoiceLoop {
         }
         self.pipeline = pipeline
         do {
-            try await conversation.open()
+            try await conversation.open(continuing: topic)
         } catch {
             // Stopped meanwhile: `stop()` released the pipeline.
             guard isCurrent(generation) else { return }
@@ -309,6 +314,16 @@ final class VoiceLoop {
         Log.ui.error("Voice loop failed to start: \(String(describing: error), privacy: .public)")
         startError = error
         phase = .failed(String(describing: error))
+    }
+
+    /// Picks up an earlier topic in the running conversation (#58): Grok is
+    /// told about it before the user's next words.
+    ///
+    /// - Throws: `TurnOrchestrator.OrchestratorError.notRunning` unless a
+    ///   conversation is running.
+    func continueTopic(_ topic: RealtimeContinuedTopic) async throws {
+        guard phase == .running, let conversation else { throw TurnOrchestrator.OrchestratorError.notRunning }
+        try await conversation.continueTopic(topic)
     }
 
     /// Commits what is being said, ends the conversation and releases the
@@ -373,7 +388,11 @@ final class VoiceLoop {
 protocol VoiceLoopConversation: AnyObject, Sendable {
     /// Opens a conversation; the realtime session connects in the
     /// background.
-    func open() async throws
+    ///
+    /// - Parameter topic: An earlier topic the conversation picks up (#58).
+    func open(continuing topic: RealtimeContinuedTopic?) async throws
+    /// Picks up an earlier topic in the open conversation (#58).
+    func continueTopic(_ topic: RealtimeContinuedTopic) async throws
     /// Ends the conversation. Does nothing when none is open.
     func close() async
     /// Takes the transcriber's events until they end.
@@ -381,8 +400,8 @@ protocol VoiceLoopConversation: AnyObject, Sendable {
 }
 
 extension TurnOrchestrator: VoiceLoopConversation {
-    func open() async throws {
-        try await start(waitsForConnection: false)
+    func open(continuing topic: RealtimeContinuedTopic?) async throws {
+        try await start(waitsForConnection: false, continuing: topic)
     }
 
     func close() async {

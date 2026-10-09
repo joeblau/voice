@@ -42,6 +42,15 @@ struct ConversationHistory: Sendable {
         positions = Dictionary(uniqueKeysWithValues: entries.enumerated().map { ($0.element.id, $0.offset) })
     }
 
+    /// Adds an utterance that has no identity of its own (a line of an
+    /// earlier topic, #58).
+    mutating func append(speaker: Speaker, text: String) {
+        record(
+            Utterance(
+                conversationID: ConversationID(), speaker: speaker, text: text, timeRange: .instant(.zero),
+                startedAt: Date(timeIntervalSinceReferenceDate: 0)))
+    }
+
     mutating func removeAll() {
         entries.removeAll()
         positions.removeAll()

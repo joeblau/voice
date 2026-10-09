@@ -180,6 +180,48 @@ public final class RecordButtonModel {
         }
     }
 
+    /// What ``continueTopic(_:)`` did.
+    public enum ContinueOutcome: String, Sendable {
+        /// No conversation was running: one started, picking up the topic.
+        case started
+        /// The running conversation picks up the topic.
+        case continued
+        /// A start or stop was in flight, or the conversation was stopped
+        /// while it started, so nothing happened.
+        case ignored
+        /// The conversation couldn't start or take the topic. A failed start
+        /// shows like a failed tap (``startFailureMessage``).
+        case failed
+    }
+
+    /// "Continue This Topic" on the timeline (#58): picks up an earlier
+    /// topic. When idle it starts a conversation seeded with it, exactly as
+    /// a tap would (haptics, `session.start`, the failure alert); while a
+    /// conversation runs, that conversation takes the topic. Ignored while a
+    /// start or stop is in flight.
+    @discardableResult
+    public func continueTopic(_ topic: RealtimeContinuedTopic) async -> ContinueOutcome {
+        switch phase {
+        case .idle:
+            await start(continuing: topic)
+            if phase == .running { return .started }
+            // Stopped while it started (the Live Activity's Stop) isn't a
+            // failure.
+            return failure == nil ? .ignored : .failed
+        case .running:
+            do {
+                try await session.continueTopic(topic)
+                logger.notice("The running conversation continues an earlier topic")
+                return .continued
+            } catch {
+                logger.error("Couldn't continue the topic: \(String(describing: error), privacy: .public)")
+                return .failed
+            }
+        case .starting, .stopping:
+            return .ignored
+        }
+    }
+
     /// Mutes the microphone without ending the conversation. Does nothing
     /// unless a conversation is running and listening.
     public func pauseListening() async {
@@ -278,7 +320,7 @@ public final class RecordButtonModel {
 
     // MARK: Starting and stopping
 
-    private func start() async {
+    private func start(continuing topic: RealtimeContinuedTopic? = nil) async {
         phase = .starting
         failure = nil
         startFailureMessage = nil
@@ -286,7 +328,7 @@ public final class RecordButtonModel {
         pendingStart = (signposter.beginInterval(.sessionStart), clock.uptime)
         logger.notice("Starting a conversation from the record button")
         do {
-            try await session.start()
+            try await session.start(continuing: topic)
             phase = .running
             apply(session.status)
         } catch is CancellationError {

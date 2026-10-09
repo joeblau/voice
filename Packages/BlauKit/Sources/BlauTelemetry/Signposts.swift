@@ -66,6 +66,10 @@ public enum PipelineInterval: CaseIterable, Sendable {
     /// is live and the speech pipeline is running): the start latency the
     /// user feels (#41).
     case sessionStart
+    /// Tapping a compressed bullet on the topic timeline until its detail
+    /// (summary, duration, actions and transcript) is laid out: the expand
+    /// latency the user feels (#58, target under 100 ms).
+    case timelineExpand
 
     /// The signpost name Instruments shows.
     public var name: StaticString {
@@ -92,6 +96,7 @@ public enum PipelineInterval: CaseIterable, Sendable {
         case .memoryConsolidate: "memory.consolidate"
         case .dbSave: "db.save"
         case .sessionStart: "session.start"
+        case .timelineExpand: "timeline.expand"
         }
     }
 
@@ -105,7 +110,7 @@ public enum PipelineInterval: CaseIterable, Sendable {
         case .topicsSegment, .topicsLabel: .topics
         case .memoryEmbed, .memorySearch, .memoryExtract, .memoryConsolidate: .memory
         case .dbSave: .data
-        case .sessionStart: .ui
+        case .sessionStart, .timelineExpand: .ui
         }
     }
 }

@@ -292,6 +292,12 @@ public actor TurnOrchestrator: RealtimeService {
     /// The old session is closed and the new one not ready yet.
     var isRollingOver = false
     var continuityCounts = RealtimeSessionContinuity()
+    /// The earlier topic this conversation continues (#58): told to the
+    /// server conversation once, and named again in every reseed.
+    var continuedTopic: RealtimeContinuedTopic?
+    /// Whether the current server conversation has been told about
+    /// ``continuedTopic``.
+    var continuedTopicDelivered = false
     var rolloverTask: Task<Void, Never>?
     var rolloverDeadlineTask: Task<Void, Never>?
     var tokenRefreshTask: Task<Void, Never>?
@@ -417,6 +423,10 @@ public actor TurnOrchestrator: RealtimeService {
     ///     and connects in the background, reporting a failure through
     ///     ``state``. Either way, utterances committed before the session is
     ///     ready are queued, not lost.
+    ///   - continuing: An earlier topic the conversation picks up (#58,
+    ///     "Continue This Topic"). Its summary and last exchanges go to the
+    ///     first server session before any utterance, and every later
+    ///     session is reminded of it (see ``continueTopic(_:)``).
     /// - Returns: The conversation's identifier.
     /// - Throws: ``OrchestratorError/alreadyRunning``, or
     ///   ``OrchestratorError/connection(_:)`` when the connection can't be
@@ -424,7 +434,8 @@ public actor TurnOrchestrator: RealtimeService {
     ///   written and queued, and ``connect()`` tries again.
     @discardableResult
     public func start(
-        conversationID id: ConversationID = ConversationID(), waitsForConnection: Bool = true
+        conversationID id: ConversationID = ConversationID(), waitsForConnection: Bool = true,
+        continuing topic: RealtimeContinuedTopic? = nil
     ) async throws(OrchestratorError) -> ConversationID {
         guard conversationID == nil else { throw .alreadyRunning }
         // A new conversation never resumes the last one's server session.
@@ -441,6 +452,11 @@ public actor TurnOrchestrator: RealtimeService {
         resetConversationState()
         conversationID = id
         conversationStart = clock.uptime
+        if let topic, !topic.isEmpty {
+            continuedTopic = topic
+            Log.realtime.notice(
+                "Conversation \(id, privacy: .public) continues topic \(topic.topicID, privacy: .public)")
+        }
         let now = clock.now
         let transcript = transcript
         recorder.enqueue {

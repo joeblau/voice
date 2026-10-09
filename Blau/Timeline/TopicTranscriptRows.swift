@@ -7,10 +7,13 @@ import SwiftUI
 
 /// The transcript under an expanded bullet on the timeline (#56): the
 /// topic's finished rows in chat styling (#42), and for the current topic of
-/// the running conversation, the live rows below them.
+/// the running conversation, the live rows below them. An older topic's
+/// summary, span and actions come first (`TopicDetailHeader`, #58).
 ///
 /// Each row is a child of the timeline's lazy stack, so only the rows on
-/// screen are built, however long the topic is.
+/// screen are built, however long the topic is. Long-pressing a line of a
+/// real topic (not a conversation's stand-in) offers "Split Topic Here"
+/// (#54), except on its first line.
 struct TopicTranscriptRows: View {
     let topic: TimelineTopic
     /// The topics of the same conversation, to place lines the store hasn't
@@ -20,24 +23,20 @@ struct TopicTranscriptRows: View {
     let rail: Bool
     /// The current topic shows the live rows of the running conversation.
     let isCurrent: Bool
+    /// Splits the topic at a line.
+    let editor: TopicEditor
 
     @Environment(AppEnvironment.self) private var environment
 
     var body: some View {
-        if let summary = topic.summary, !isCurrent, !summary.isEmpty {
-            Text(verbatim: summary)
-                .brandTextStyle(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, TopicTimelineLayout.textInset)
-                .padding(.trailing)
-                .padding(.vertical, 4)
-                .accessibilityIdentifier(TopicTimelineAccessibility.summary)
-                .timelineRail(rail)
-        }
         TopicFinishedRows(
             conversationID: topic.conversationID, topicID: topic.isSynthetic ? nil : topic.id,
-            membership: membership, model: environment.chat, rail: rail)
+            membership: membership, model: environment.chat, rail: rail,
+            split: topic.isSynthetic
+                ? nil
+                : { [lifecycle = environment.topicLifecycle, topicID = topic.id] utteranceID in
+                    editor.split(topicID, atUtterance: utteranceID, using: lifecycle)
+                })
         if isCurrent, environment.chat.conversationID?.rawValue == topic.conversationID {
             TopicLiveRows(model: environment.chat, rail: rail)
         }
@@ -54,26 +53,39 @@ private struct TopicFinishedRows: View {
     let membership: TopicMembership
     let model: ChatTranscriptModel
     let rail: Bool
+    /// Starts a new topic at an utterance; `nil` offers no split.
+    let split: ((UUID) -> Void)?
     @Query private var utterances: [StoredUtterance]
 
     init(
-        conversationID: UUID, topicID: UUID?, membership: TopicMembership, model: ChatTranscriptModel, rail: Bool
+        conversationID: UUID, topicID: UUID?, membership: TopicMembership, model: ChatTranscriptModel, rail: Bool,
+        split: ((UUID) -> Void)?
     ) {
         self.conversationID = conversationID
         self.topicID = topicID
         self.membership = membership
         self.model = model
         self.rail = rail
+        self.split = split
         // The whole conversation: whether a reply was cut off depends on the
         // line after it, which can be in the next topic.
         _utterances = Query(ChatTranscript.utterances(in: conversationID))
     }
 
     var body: some View {
+        let rows = rows
+        let firstID = rows.first?.id
         ForEach(rows) { row in
-            ChatRowView(row: row)
+            ChatRowView(row: row, onSplit: splitAction(for: row, isFirst: row.id == firstID))
                 .timelineTranscriptRow(rail: rail)
         }
+    }
+
+    /// "Split Topic Here" for a stored line that isn't the topic's first.
+    private func splitAction(for row: ChatRow, isFirst: Bool) -> (() -> Void)? {
+        guard let split, !isFirst, row.kind == .final, row.role != .system else { return nil }
+        let id = row.id
+        return { split(id) }
     }
 
     private var rows: [ChatRow] {

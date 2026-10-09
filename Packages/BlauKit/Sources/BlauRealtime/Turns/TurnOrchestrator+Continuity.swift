@@ -129,6 +129,8 @@ extension TurnOrchestrator {
         rolloverDue = false
         isRollingOver = false
         continuityCounts = RealtimeSessionContinuity()
+        continuedTopic = nil
+        continuedTopicDelivered = false
     }
 
     func cancelContinuityTasks() {
@@ -192,8 +194,12 @@ extension TurnOrchestrator {
         sessionStartedAt = clock.uptime
         rolloverDue = false
         scheduleSessionTimers()
+        // A new server conversation knows nothing yet.
+        continuedTopicDelivered = false
         if needsReseed {
             reseed(session: session)
+        } else if continuedTopic != nil {
+            deliverContinuation(session: session)
         }
         sessionReady()
     }
@@ -227,10 +233,14 @@ extension TurnOrchestrator {
         let provider = reseedContext
         let client = client
         let epoch = epoch
+        // The note names the continued topic again (#58).
+        let continuing = continuedTopic
+        continuedTopicDelivered = continuing != nil
         outbox.enqueue { [weak self] in
             guard epoch.current == session else { return }
             let topic = await provider.topicContext(for: conversationID)
-            let events = RealtimeReseed.events(history: entries, topic: topic, limits: limits)
+            let events = RealtimeReseed.events(
+                history: entries, topic: topic, limits: limits, continuing: continuing)
             do throws(RealtimeClientError) {
                 for event in events {
                     guard epoch.current == session else { return }
@@ -242,6 +252,66 @@ extension TurnOrchestrator {
                 Log.realtime.error("Couldn't reseed the realtime session: \(error.description, privacy: .public)")
             }
         }
+    }
+
+    // MARK: Continuing an earlier topic (#58)
+
+    /// Picks up an earlier topic in the running conversation: Grok is told
+    /// about it (its summary and last exchanges) at once if the session is
+    /// ready, otherwise as soon as it is, before any queued utterance. It
+    /// replaces a topic continued before, and every later server session
+    /// is reminded of it.
+    ///
+    /// - Throws: ``OrchestratorError/notRunning`` when no conversation is
+    ///   running; start one with ``start(conversationID:waitsForConnection:continuing:)``.
+    public func continueTopic(_ topic: RealtimeContinuedTopic) throws(OrchestratorError) {
+        guard conversationID != nil else { throw .notRunning }
+        guard !topic.isEmpty else { return }
+        continuedTopic = topic
+        continuedTopicDelivered = false
+        Log.realtime.notice("Continuing topic \(topic.topicID, privacy: .public) in the running conversation")
+        guard isSessionReady, pendingResume == nil else { return }
+        deliverContinuation(session: epoch.current)
+    }
+
+    /// Sends ``continuedTopic`` to the server conversation of `session`: a
+    /// system note with the topic and its summary, then its last exchanges.
+    func deliverContinuation(session: UInt64) {
+        guard let topic = continuedTopic else { return }
+        let events = RealtimeContinuation.events(
+            for: topic, limits: configuration.continuity.reseed, timeZone: .current)
+        guard !events.isEmpty else { return }
+        continuedTopicDelivered = true
+        signposter.event("realtime.continueTopic")
+        Log.realtime.notice(
+            "Telling the realtime session about topic \(topic.topicID, privacy: .public) (\(events.count - 1, privacy: .public) utterance(s))"
+        )
+        let client = client
+        let epoch = epoch
+        outbox.enqueue { [weak self] in
+            do throws(RealtimeClientError) {
+                for event in events {
+                    guard epoch.current == session else {
+                        await self?.continuationNotDelivered(topic)
+                        return
+                    }
+                    try await client.send(event)
+                }
+                await self?.countTextInputs(in: events)
+            } catch {
+                Log.realtime.error(
+                    "Couldn't tell the realtime session about the continued topic: \(error.description, privacy: .public)"
+                )
+                await self?.continuationNotDelivered(topic)
+            }
+        }
+    }
+
+    /// `topic` didn't reach the session it was meant for: the next server
+    /// session that starts or resumes is told instead.
+    private func continuationNotDelivered(_ topic: RealtimeContinuedTopic) {
+        guard continuedTopic == topic else { return }
+        continuedTopicDelivered = false
     }
 
     // MARK: Resumption
@@ -337,6 +407,11 @@ extension TurnOrchestrator {
         }
         deleteDiscardedReplayedItems(pending.evidence.replayed)
         skipReplayedItems(pending.evidence.replayed)
+        // A topic continued while the connection was down hasn't reached
+        // the resumed conversation yet.
+        if continuedTopic != nil, !continuedTopicDelivered {
+            deliverContinuation(session: pending.session)
+        }
         sessionReady()
     }
 

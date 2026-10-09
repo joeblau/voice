@@ -312,6 +312,32 @@ struct VoiceLoopTests {
         #expect(second.stops == 1)
     }
 
+    // MARK: Continuing a topic (#58)
+
+    /// "Continue This Topic" while idle: the conversation opens with the
+    /// topic, so Grok hears about it before the user's first words.
+    @Test func aContinuedStartOpensTheConversationWithTheTopic() async throws {
+        let conversation = FakeLoopConversation()
+        let loop = makeLoop(conversation) { FakeLoopPipeline() }
+        let topic = RealtimeContinuedTopic(
+            topicID: UUID(), title: "Seed Round", summary: "Raise $2M.", startedAt: Self.t0)
+
+        await loop.start(continuing: topic)
+        #expect(loop.phase == .running)
+        #expect(conversation.continuedTopics == [topic])
+
+        // While it runs, another topic goes to the same conversation.
+        let next = RealtimeContinuedTopic(topicID: UUID(), title: "Hiring", summary: nil, startedAt: Self.t0)
+        try await loop.continueTopic(next)
+        #expect(conversation.continuedTopics == [topic, next])
+        #expect(conversation.opens == 1)
+
+        await loop.stop()
+        await #expect(throws: TurnOrchestrator.OrchestratorError.notRunning) {
+            try await loop.continueTopic(next)
+        }
+    }
+
     /// Polls `condition` until it holds, failing after 10 s.
     private func until(
         _ what: String, sourceLocation: SourceLocation = #_sourceLocation, _ condition: () -> Bool
@@ -363,10 +389,17 @@ private final class FakeLoopConversation: VoiceLoopConversation {
         self.openGate = openGate
     }
 
-    func open() async throws {
+    private(set) var continuedTopics: [RealtimeContinuedTopic] = []
+
+    func open(continuing topic: RealtimeContinuedTopic?) async throws {
         await openGate?.wait()
         opens += 1
         isOpen = true
+        if let topic { continuedTopics.append(topic) }
+    }
+
+    func continueTopic(_ topic: RealtimeContinuedTopic) async throws {
+        continuedTopics.append(topic)
     }
 
     func close() async {
