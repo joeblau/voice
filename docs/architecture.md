@@ -21,7 +21,7 @@ complete.
 
 | Layer | Module              | Owns                                                                                          |
 | ----- | ------------------- | --------------------------------------------------------------------------------------------- |
-| 0     | `BlauCore`          | Shared value types (`Utterance`, `Speaker`, `SpeakerDecision`, `AudioFrame`, `TimeRange`, `ConversationID`, `SpeechSegment`), the service protocols and their fakes, protocols shared across siblings (`TextEmbedder`, `TextGenerator`, `VoiceActivitySource`, `RecognitionVocabularySource`), feature flags, the app lifecycle, the `BlauClock` abstraction, run-time configuration overrides |
+| 0     | `BlauCore`          | Shared value types (`Utterance`, `Speaker`, `SpeakerDecision`, `AudioFrame`, `TimeRange`, `ConversationID`, `SpeechSegment`), the service protocols and their fakes, protocols shared across siblings (`TextEmbedder`, `TextGenerator`, `VoiceActivitySource`, `RecognitionVocabularySource`), feature flags, the app lifecycle, the `BlauClock` abstraction, the typed build configuration (`AppConfig`) and its run-time overrides |
 | 1     | `BlauTelemetry`     | Logger categories, `OSSignposter` intervals, MetricKit, the performance HUD model, the thermal and power policy (#75) |
 | 2     | `BlauAudio`         | `AVAudioSession` / `AVAudioEngine`, 16 kHz capture and fan-out, 24 kHz playback, resampling   |
 | 2     | `BlauPersistence`   | SwiftData schemas (CloudKit compatible, see [data-model.md](data-model.md)), migrations, iCloud sync and history ([sync.md](sync.md)), `ModelActor` writes |

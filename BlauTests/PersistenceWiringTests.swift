@@ -1,3 +1,4 @@
+import BlauCore
 import BlauPersistence
 import Foundation
 import Testing
