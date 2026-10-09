@@ -352,9 +352,15 @@
         /// (cosine about 0), plus the same kind of noise.
         func impostorProbe(for segment: SpeechSegment) -> SpeakerEmbedding {
             let seconds = Double(segment.sampleRange.count) / Double(segment.sampleRate)
-            return Self.embedding(
-                around: impostor, seed: UInt64(segment.sampleRange.lowerBound), model: config.modelIdentifier,
-                seconds: seconds)
+            return probe(startingAt: segment.sampleRange.lowerBound, seconds: seconds, impostor: true)
+        }
+
+        /// A probe for speech starting at `start` (a 16 kHz stream offset) and
+        /// lasting `seconds`: the enrolled speaker's, or the impostor's.
+        func probe(startingAt start: Int64, seconds: Double, impostor: Bool) -> SpeakerEmbedding {
+            Self.embedding(
+                around: impostor ? self.impostor : speaker, seed: UInt64(max(0, start)),
+                model: config.modelIdentifier, seconds: seconds)
         }
 
         private static func embedding(around speaker: [Float], seed: UInt64, model: String, seconds: Double)

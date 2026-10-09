@@ -24,8 +24,11 @@
     ///   topic, 30 s of TV dialogue from another voice and 30 s of silence
     ///   (`ConversationAudioScript.Interlude.tvAndSilence`), played into the
     ///   real `CaptureHub` (the app's virtual input) at `speed`.
-    /// - **Voice ID**: every VAD segment is scored, the TV's against another
-    ///   speaker's embedding: the TV must be rejected, the user accepted.
+    /// - **Voice ID**: the real `VerificationGate` (#47) between the
+    ///   transcriber and the orchestrator, as in a conversation. Its verifier
+    ///   (`SoakSpeechVerifier`) gives the TV's speech another speaker's
+    ///   embedding: every score of the TV must reject, every score of the user
+    ///   accept, and every user line must still reach Grok.
     /// - **Grok**: the real `TurnOrchestrator` and `RealtimeClient` against
     ///   `ScriptedRealtimeServer`, a local fake that streams canned replies
     ///   and counts every connection. xAI's session schedule (renew at 110
@@ -109,12 +112,20 @@
                 audio: output, transcript: tap, reseedContext: store,
                 configuration: .init(continuity: configuration.continuity))
 
+            // Voice ID: the verification gate between ASR and Grok.
+            let verifier = SoakSpeechVerifier(script: script)
+            let gate = VerificationGate(verifier: verifier, history: hub)
+
             // Failed turns: every time the orchestrator shows the error state.
+            // The gate's uncertain policy also follows Grok's activity, as in
+            // the voice loop.
             let failures = orchestrator.updates(bufferingPolicy: .bufferingNewest(64))
+            let turnActivity = gate.turnActivity
             let failureCount = Task {
                 var count = 0
                 var inError = false
                 for await snapshot in failures {
+                    turnActivity.agentActivityChanged(snapshot.state.isAgentActive)
                     if case .error = snapshot.state {
                         if !inError { count += 1 }
                         inError = true
@@ -125,37 +136,18 @@
                 return count
             }
 
-            // Voice ID on every speech segment: the user's and the TV's.
-            let voiceprint = ReplayVoiceprint()
-            let segments = vad.events()
-            let verification = Task {
-                var counts = VoiceIDCounts()
-                for await event in segments {
-                    guard case .speechEnded(let segment) = event else { continue }
-                    switch script.talker(in: segment.sampleRange) {
-                    case .background:
-                        let result = voiceprint.scorer.verify(
-                            voiceprint.impostorProbe(for: segment), config: voiceprint.config)
-                        counts.background += 1
-                        if result.decision == .reject { counts.backgroundRejected += 1 }
-                    case .user, .nobody:
-                        let result = voiceprint.scorer.verify(voiceprint.probe(for: segment), config: voiceprint.config)
-                        counts.user += 1
-                        if result.decision == .accept { counts.userAccepted += 1 }
-                    }
-                }
-                return counts
-            }
-
             try await orchestrator.start(conversationID: conversationID, waitsForConnection: true)
             let sessionStarted = clock.now
             try await transcriber.start()
+            // The gate subscribes to VAD's speech audio before VAD sees any.
+            let speech = vad.speechAudio()
+            let gating = Task { await gate.run(speech: speech) }
             let vadFrames = hub.frames()
             let voiceActivity = Task {
                 for await frame in vadFrames { await vad.process(frame) }
                 await vad.finish()
             }
-            let turns = Task { await orchestrator.run(transcript: transcriber.events) }
+            let turns = Task { await orchestrator.run(transcript: gate.filter(transcriber.events)) }
 
             let sampler = SoakSampler(
                 started: started, interval: configuration.sampleInterval, hub: hub, transcriber: transcriber,
@@ -190,6 +182,7 @@
             } catch {
                 hub.finish()
                 voiceActivity.cancel()
+                gating.cancel()
                 await transcriber.finish()
                 await orchestrator.shutdown()
                 failureCount.cancel()
@@ -210,7 +203,9 @@
             let final = await sampler.take(at: totalSeconds)
             let wallSinceSession = clock.now - sessionStarted
             await orchestrator.shutdown()
-            let counts = await verification.value
+            await gating.value
+            let counts = verifier.counts
+            let gateStatistics = gate.statistics
             let tapReport = await tap.finish()
             failureCount.cancel()
             let failed = await failureCount.value
@@ -220,8 +215,9 @@
                 scriptedTopicChanges: Set(script.lines.map { $0.exchange / Self.exchangesPerTopic }).count - 1,
                 expectedRollovers: configuration.expectedRollovers(wallTime: wallSinceSession),
                 userUtterances: tapReport.userUtterances, agentReplies: tapReport.agentReplies,
-                userSegments: counts.user, userAccepted: counts.userAccepted,
-                backgroundSegments: counts.background, backgroundRejected: counts.backgroundRejected,
+                userScores: counts.user, userAccepted: counts.userAccepted,
+                backgroundScores: counts.background, backgroundRejected: counts.backgroundRejected,
+                gateCommitted: gateStatistics.committed, gateDiscarded: gateStatistics.discarded,
                 topicBoundaries: tapReport.topicBoundaries, rollovers: final.rollovers, reseeds: final.reseeds,
                 connections: server.sockets.count, failedTurns: failed)
             let setup = SoakReport.Setup(
@@ -234,13 +230,6 @@
                 outcome: outcome, samples: await sampler.samples)
             Log.performance.notice("Soak finished: \(report.summary, privacy: .public)")
             return report
-        }
-
-        private struct VoiceIDCounts {
-            var user = 0
-            var userAccepted = 0
-            var background = 0
-            var backgroundRejected = 0
         }
 
         private static func voiceActivityModel(directory: URL?) async -> (any SpeechProbabilityModel, String) {
@@ -262,6 +251,53 @@
             // Timed by the call: the aligned recognizer runs no model and
             // reports no time of its own, and `asr.chunkLatency` needs one.
             return (TimedSpeechRecognizer(AlignedTranscriptRecognizer(words: words)), "scripted ASR")
+        }
+    }
+
+    /// The soak's voice ID verifier (#47's `SpeechVerifying`): instead of
+    /// embedding the audio with WeSpeaker (a model download), it looks up
+    /// who the script has speaking there and returns that speaker's
+    /// synthetic embedding (`ReplayVoiceprint`), then scores it against the
+    /// voiceprint with the calibrated thresholds, exactly as
+    /// `SpeakerVerifier` does after its embedding. It counts every score by
+    /// who was really speaking.
+    final class SoakSpeechVerifier: SpeechVerifying {
+        struct Counts: Sendable, Hashable {
+            var user = 0
+            var userAccepted = 0
+            var background = 0
+            var backgroundRejected = 0
+        }
+
+        private let script: ConversationAudioScript
+        private let voiceprint = ReplayVoiceprint()
+        private let tally = Mutex(Counts())
+
+        init(script: ConversationAudioScript) {
+            self.script = script
+        }
+
+        var counts: Counts { tally.withLock { $0 } }
+
+        func verify(_ speech: AudioFrame) async throws -> SpeakerScore {
+            let range = speech.sampleOffset..<speech.nextSampleOffset
+            let isBackground = script.talker(in: range) == .background
+            let seconds = Double(speech.sampleCount) / Double(AudioFrame.captureSampleRate)
+            let probe = voiceprint.probe(startingAt: speech.sampleOffset, seconds: seconds, impostor: isBackground)
+            let config = voiceprint.config
+            let verification = voiceprint.scorer.verify(probe, config: config)
+            tally.withLock { counts in
+                if isBackground {
+                    counts.background += 1
+                    if verification.decision == .reject { counts.backgroundRejected += 1 }
+                } else {
+                    counts.user += 1
+                    if verification.decision == .accept { counts.userAccepted += 1 }
+                }
+            }
+            return SpeakerScore(
+                score: verification.score, decision: verification.decision, audioDuration: probe.audioDuration,
+                thresholds: config.thresholds(forAudioDuration: probe.audioDuration))
         }
     }
 

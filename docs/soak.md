@@ -44,7 +44,7 @@ microphone.
 | Microphone | `ConversationAudioScript.session(lasting:interlude:)`: the user's lines (speech-shaped synthetic audio, -54 dBFS room noise between them) with an **interlude before every new topic**: 2 s of quiet, 30 s of TV dialogue (bursts of 3 to 8 s from another synthetic voice, about 6 dB below the user), 2 s of quiet, 30 s of silence. About 60% of the session is the conversation, 15% TV, the rest silence and room noise. Played into the real `CaptureHub` by `CaptureReplayFeeder` at `SOAK_SPEED` | Synthetic audio, real capture hub |
 | VAD | `VoiceActivitySegmenter`, energy model (Silero with real models) | Real |
 | ASR | `ParakeetStreamingTranscriber` on `AlignedTranscriptRecognizer`, wrapped in `TimedSpeechRecognizer` so each call that runs chunks reports its own duration (the aligned recognizer runs no model and reports none); Parakeet itself with `SOAK_ASR=parakeet`, which times its Core ML work | Real transcriber, stand-in model |
-| Voice ID | Every VAD segment scored by `VoiceprintScorer.verify`; segments on the TV get another speaker's embedding | Real scoring, synthetic embeddings |
+| Voice ID | The real `VerificationGate` (#47) between the transcriber and the orchestrator, fed VAD's speech audio, as in the voice loop. Its verifier, `SoakSpeechVerifier`, stands in for WeSpeaker: it gives the speech the embedding of whoever the script has talking there (the enrolled user, or another speaker for the TV) and scores it with `VoiceprintScorer.verify` and the calibrated thresholds, as `SpeakerVerifier` does after embedding | Real gate and scoring, synthetic embeddings |
 | Grok | `TurnOrchestrator` and `RealtimeClient` against `ScriptedRealtimeServer`, a local fake that answers each line with a canned reply as streamed PCM16 and transcript deltas, and records every connection | Fake server, real client and orchestrator |
 | Session renewal | xAI's schedule scaled so the renewal lands 60% into the audio (`SOAK_ROLLOVER_MINUTES`); the orchestrator mints a token, renews between turns, reseeds the new conversation from the stored transcript (`ConversationStore.topicDigest`), as in a real two-hour session ([realtime.md](realtime.md#long-sessions)) | Real |
 | Transcript, topics, memory | `ConversationStore` on SwiftData, `StreamingTopicSegmenter`, `MemoryIndex` and `MemorySearch` per exchange | Real |
@@ -79,7 +79,7 @@ pass, and on a simulator the leak readings must not grow.
 | `capture.droppedFrames` | More than 0.1% of capture frames were lost (dropped buffers plus frames a slow subscriber missed) | ≤ 0.1% |
 | `conversation.complete` | A line wasn't transcribed or answered, or a turn ended in the error state | all lines, 0 failed |
 | `realtime.rollover` | Fewer renewals than the run's length requires (every session ends by its deadline, so a run lasting `n` deadlines renewed at least `n` times), a renewal without a reseed, or no new connection for it | ≥ expected |
-| `voiceid.background` | A TV segment was accepted, a user segment wasn't, or the VAD never heard the TV | all |
+| `voiceid.background` | A score of the TV's speech didn't reject, a score of the user's didn't accept, the gate kept one of the user's lines from Grok, or the TV never reached voice ID | all |
 | `topics.count` | Topic boundaries below half the script's topic changes, or above 1.5× plus one (flapping) | 0.5× to 1.5× + 1 |
 
 The limits are `SoakThresholds.standard`; the report records the ones it
@@ -161,9 +161,9 @@ onboarding), a development-signed build, plugged in and on a desk:
 
 | Date | Where | Run | Wall time | Result | Memory slope | Renewals | Leaks |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 2026-10-09 | iPhone 17 simulator, iOS 27.0, Apple silicon Mac | 120 min at 10x, scripted ASR ([report](soak/2026-10-09-simulator-120min.md)) | 12.1 min | passed, 8/8: 265 lines answered, 0 of 363,022 frames lost, ASR 3.9 µs/chunk early and late, first audio 63.8 → 63.3 ms, 461 of 461 TV segments rejected, 43 topic boundaries for 44 changes | +0.30 MB/h (33.4 → 34.5 MB) | 1, reseeded (at 7.2 min wall, 72 audio min) | 56 leaks, 1,792 bytes at every reading (4 during, 1 after the run): no growth |
-| 2026-10-09 | same | 120 min at 10x, two earlier runs | 12.1 min each | passed, 8/8 | +0.32 and +0.28 MB/h | 1 each | no growth (56 leaks, 1,792 bytes) |
-| 2026-10-09 | same | 20 min at 10x (the nightly length) | 2.0 min | passed, 8/8 | +0.79 MB/h (33.5 → 34.4 MB) | 1 (at 1.2 min wall) | no growth (56 leaks, 1,792 bytes) |
+| 2026-10-09 | iPhone 17 simulator, iOS 27.0, Apple silicon Mac | 120 min at 10x, scripted ASR, through the verification gate ([report](soak/2026-10-09-simulator-120min.md)) | 12.1 min | passed, 8/8: 265 lines answered, 0 of 363,022 frames lost, ASR 3.9 → 4.2 µs/chunk, first audio 63.4 → 63.2 ms, 660 of 660 TV scores rejected and 831 of 831 user scores accepted by the gate, 43 topic boundaries for 44 changes | +0.25 MB/h (33.5 → 34.8 MB) | 1, reseeded (at 7.2 min wall, 72 audio min) | 56 leaks, 1,792 bytes at every reading (5 during, 1 after the run): no growth |
+| 2026-10-09 | same | 120 min at 10x, three earlier runs before the gate was wired in (voice ID scored beside the pipeline) | 12.1 min each | passed, 8/8 | +0.32, +0.28 and +0.30 MB/h | 1 each | no growth (56 leaks, 1,792 bytes) |
+| 2026-10-09 | same | 20 min at 10x (the nightly length), before the gate | 2.0 min | passed, 8/8 | +0.79 MB/h (33.5 → 34.4 MB) | 1 (at 1.2 min wall) | no growth (56 leaks, 1,792 bytes) |
 | | iPhone (A17 Pro or later) | 120 min at real time, Parakeet, xAI schedule | | pending (needs a device) | | | pending (Instruments Leaks) |
 
 ## Where this differs from the issue's plan, and why
@@ -192,11 +192,14 @@ onboarding), a development-signed build, plugged in and on a desk:
   would make the nightly run two hours long. The renewal is placed in the
   session instead, with the orchestrator's real schedule logic, and
   `SOAK_ROLLOVER_MINUTES=xai` keeps the real schedule for the device run.
-- **Voice ID scores but doesn't gate.** The verification gate (#47) isn't
-  between ASR and the orchestrator yet, so the soak checks voice ID's
-  verdicts on the TV separately; the TV's segments carry no words for the
-  scripted recognizer, so none reaches Grok (with Parakeet they would, until
-  the gate exists).
+- **The gate's verifier is scripted.** The verification gate (#47) is
+  the real one, but WeSpeaker needs its Core ML model, so the verifier
+  looks up who is talking in the script and uses synthetic embeddings
+  (cosine about 0.7 for the user, about 0 for the TV). The TV's speech
+  carries no words for the scripted recognizer, so the gate has no TV
+  utterance to keep back (`gateDiscarded` is 0); every score of the TV's
+  speech must still reject. With `SOAK_ASR=parakeet` the TV is transcribed
+  and the gate keeps those utterances from Grok.
 - **Leaks by the `leaks` tool on the simulator.** The Leaks instrument can't
   be driven headless in CI. `leaks` runs the same detector on the simulator
   app's process; on a device, Instruments' Leaks template is the way.

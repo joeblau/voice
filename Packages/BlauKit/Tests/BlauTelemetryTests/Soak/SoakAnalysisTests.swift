@@ -31,7 +31,8 @@ import Testing
 
     static let outcome = SoakOutcome(
         lines: 480, backgroundBursts: 400, scriptedTopicChanges: 79, expectedRollovers: 1, userUtterances: 480,
-        agentReplies: 480, userSegments: 480, userAccepted: 480, backgroundSegments: 410, backgroundRejected: 410,
+        agentReplies: 480, userScores: 960, userAccepted: 960, backgroundScores: 410, backgroundRejected: 410,
+        gateCommitted: 480, gateDiscarded: 0,
         topicBoundaries: 70, rollovers: 1, reseeds: 1, connections: 2, failedTurns: 0)
 
     static func check(_ name: String, _ checks: [SoakCheck]) throws -> SoakCheck {
@@ -167,9 +168,22 @@ import Testing
         #expect(
             !(try Self.check("voiceid.background", SoakAnalysis.checks(samples: Self.samples(), outcome: outcome))
                 .passed))
+        // A user line the gate kept from Grok fails.
+        outcome = Self.outcome
+        outcome.gateCommitted = 479
+        outcome.gateDiscarded = 1
+        #expect(
+            !(try Self.check("voiceid.background", SoakAnalysis.checks(samples: Self.samples(), outcome: outcome))
+                .passed))
+        // The TV's own utterances kept back (with a real recognizer) are fine.
+        outcome = Self.outcome
+        outcome.gateDiscarded = 12
+        #expect(
+            try Self.check("voiceid.background", SoakAnalysis.checks(samples: Self.samples(), outcome: outcome))
+                .passed)
         // Background the VAD never heard isn't a pass.
         outcome = Self.outcome
-        outcome.backgroundSegments = 0
+        outcome.backgroundScores = 0
         outcome.backgroundRejected = 0
         #expect(
             !(try Self.check("voiceid.background", SoakAnalysis.checks(samples: Self.samples(), outcome: outcome))

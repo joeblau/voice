@@ -253,16 +253,17 @@ public enum SoakAnalysis {
     }
 
     static func backgroundCheck(_ outcome: SoakOutcome) -> SoakCheck {
-        let userSegments = outcome.userSegments
-        let userAccepted = outcome.userAccepted
-        let heard = outcome.backgroundBursts == 0 || outcome.backgroundSegments > 0
-        let passed = heard && outcome.backgroundRejected == outcome.backgroundSegments && userAccepted == userSegments
+        let heard = outcome.backgroundBursts == 0 || outcome.backgroundScores > 0
+        let passed =
+            heard && outcome.backgroundRejected == outcome.backgroundScores
+            && outcome.userAccepted == outcome.userScores && outcome.gateCommitted == outcome.lines
         return SoakCheck(
             name: "voiceid.background", passed: passed,
             measured:
-                "\(outcome.backgroundRejected) of \(outcome.backgroundSegments) background segments rejected, "
-                + "\(userAccepted) of \(userSegments) user segments accepted",
-            limit: "every background segment rejected, every user segment accepted",
+                "\(outcome.backgroundRejected) of \(outcome.backgroundScores) background scores rejected, "
+                + "\(outcome.userAccepted) of \(outcome.userScores) user scores accepted; the gate passed on "
+                + "\(outcome.gateCommitted) and kept back \(outcome.gateDiscarded)",
+            limit: "every background score rejected, every user score accepted, every line passed on",
             detail: heard ? nil : "None of the \(outcome.backgroundBursts) background bursts reached voice ID")
     }
 

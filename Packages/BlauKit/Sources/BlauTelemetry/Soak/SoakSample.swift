@@ -91,13 +91,17 @@ public struct SoakOutcome: Codable, Hashable, Sendable {
     public var userUtterances: Int
     /// Replies received and stored.
     public var agentReplies: Int
-    /// Speech segments on the user's lines that voice ID scored, and how
-    /// many it accepted.
-    public var userSegments: Int
+    /// Voice ID scores (the verification gate's checkpoints) of the user's
+    /// speech, and how many accepted.
+    public var userScores: Int
     public var userAccepted: Int
-    /// Segments on the background speech, and how many voice ID rejected.
-    public var backgroundSegments: Int
+    /// Voice ID scores of the background speech, and how many rejected.
+    public var backgroundScores: Int
     public var backgroundRejected: Int
+    /// Final utterances the verification gate passed on to Grok, and those
+    /// it kept from Grok.
+    public var gateCommitted: Int
+    public var gateDiscarded: Int
     /// Topic boundaries confirmed.
     public var topicBoundaries: Int
     /// Age renewals, and new sessions given the history again.
@@ -115,10 +119,12 @@ public struct SoakOutcome: Codable, Hashable, Sendable {
         expectedRollovers: Int,
         userUtterances: Int,
         agentReplies: Int,
-        userSegments: Int,
+        userScores: Int,
         userAccepted: Int,
-        backgroundSegments: Int,
+        backgroundScores: Int,
         backgroundRejected: Int,
+        gateCommitted: Int,
+        gateDiscarded: Int,
         topicBoundaries: Int,
         rollovers: Int,
         reseeds: Int,
@@ -131,10 +137,12 @@ public struct SoakOutcome: Codable, Hashable, Sendable {
         self.expectedRollovers = expectedRollovers
         self.userUtterances = userUtterances
         self.agentReplies = agentReplies
-        self.userSegments = userSegments
+        self.userScores = userScores
         self.userAccepted = userAccepted
-        self.backgroundSegments = backgroundSegments
+        self.backgroundScores = backgroundScores
         self.backgroundRejected = backgroundRejected
+        self.gateCommitted = gateCommitted
+        self.gateDiscarded = gateDiscarded
         self.topicBoundaries = topicBoundaries
         self.rollovers = rollovers
         self.reseeds = reseeds
