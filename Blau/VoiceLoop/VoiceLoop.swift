@@ -450,6 +450,8 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
     let voiceIDStatus: VoiceIDGateStatus
     /// What the user says: the transcriber's events through the gate.
     let transcript: AsyncStream<TranscriptEvent>
+    /// Adaptive voiceprint updates (#49), saved when the pipeline stops.
+    private let voiceprintAdapter: VoiceprintAdapter?
     private let stopAudio: @Sendable () async -> Void
     private var vadTask: Task<Void, Never>?
     private var bargeInTask: Task<Void, Never>?
@@ -457,14 +459,15 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
 
     private init(
         transcriber: ParakeetStreamingTranscriber, voiceActivity: VoiceActivitySegmenter,
-        voiceGate: VerificationGate?, voiceIDStatus: VoiceIDGateStatus, gateTask: Task<Void, Never>?,
-        vadTask: Task<Void, Never>?, bargeInTask: Task<Void, Never>?,
+        voiceGate: VerificationGate?, voiceIDStatus: VoiceIDGateStatus, voiceprintAdapter: VoiceprintAdapter?,
+        gateTask: Task<Void, Never>?, vadTask: Task<Void, Never>?, bargeInTask: Task<Void, Never>?,
         stopAudio: @escaping @Sendable () async -> Void
     ) {
         self.transcriber = transcriber
         self.voiceActivity = voiceActivity
         self.voiceGate = voiceGate
         self.voiceIDStatus = voiceIDStatus
+        self.voiceprintAdapter = voiceprintAdapter
         self.gateTask = gateTask
         // Every final waits for voice ID's decision; partials of rejected
         // speech are held back.
@@ -582,7 +585,8 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
             let vadTask = Task { await vad.run(on: hub) }
             return LiveVoicePipeline(
                 transcriber: transcriber, voiceActivity: vad, voiceGate: gate, voiceIDStatus: voiceIDStatus,
-                gateTask: gateTask, vadTask: vadTask, bargeInTask: bargeInTask, stopAudio: stopAudio)
+                voiceprintAdapter: gateLoaded?.adapter, gateTask: gateTask, vadTask: vadTask,
+                bargeInTask: bargeInTask, stopAudio: stopAudio)
         #else
             throw VoiceLoop.StartError.unavailable
         #endif
@@ -610,5 +614,7 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
         gateTask?.cancel()
         gateTask = nil
         await stopAudio()
+        // The conversation is over: save what the voiceprint learned.
+        await voiceprintAdapter?.finish()
     }
 }

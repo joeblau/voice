@@ -82,8 +82,14 @@ public struct VoiceprintScorer: Sendable {
     }
 
     /// The score, with the probe's cohort statistics already computed.
-    public func score(_ probe: SpeakerEmbedding, probeStatistics: SpeakerCohort.Statistics?) -> Float {
-        let raw = rawScore(probe)
+    ///
+    /// - Parameter rawOffset: Subtracted from the raw cosine before any
+    ///   normalization: the adapted centroid's handicap
+    ///   (``VoiceprintMatcher/adaptedCentroidOffset``).
+    public func score(_ probe: SpeakerEmbedding, probeStatistics: SpeakerCohort.Statistics?, rawOffset: Float = 0)
+        -> Float
+    {
+        let raw = rawScore(probe) - rawOffset
         guard let enrollmentStatistics else { return raw }
         guard let probeStatistics else {
             preconditionFailure("AS-norm scoring needs the probe's cohort statistics")

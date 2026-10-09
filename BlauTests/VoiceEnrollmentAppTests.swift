@@ -42,6 +42,49 @@ struct VoiceEnrollmentAppTests {
         #expect(try context.fetchCount(FetchDescriptor<VoiceEnrollmentSet>()) == 0)
     }
 
+    /// Adaptive updates (#49) save a moved centroid into the app's store;
+    /// Settings shows it and can reset it to the enrollment centroid.
+    @Test func settingsShowsAndResetsAdaptation() async throws {
+        let environment = AppEnvironment.fake(kind: .unitTest)
+        await environment.persistence.start()
+        let container = try #require(environment.modelContainer)
+        let store = SwiftDataVoiceprintStore(modelContainer: container)
+        let clips = (0..<4).map { index in
+            var vector = [Float](repeating: 0, count: 256)
+            vector[0] = 1
+            vector[10 + index] = 0.3
+            return SpeakerEmbedding(
+                normalizing: vector, modelIdentifier: VoiceIDConfig.calibrated.modelIdentifier,
+                audioDuration: .seconds(5))!
+        }
+        let enrolled = try await store.enroll(
+            VoiceprintDraft(
+                model: .weSpeakerResNet34LM, deviceModel: "iPhone18,1", embeddings: clips,
+                recordedAt: Date(timeIntervalSince1970: 1_800_000_000)))
+        // A fresh context per read, so each sees the store's latest save.
+        func profile() throws -> VoiceProfile {
+            try #require(try ModelContext(container).fetch(FetchDescriptor<VoiceProfile>()).first)
+        }
+        #expect(!VoiceIDSettingsView.isAdapted(try profile()))
+
+        // What a conversation saves when it ends.
+        let enrollment = try #require(enrolled.enrollmentCentroid)
+        var toward = [Float](repeating: 0, count: 256)
+        toward[200] = 1
+        let adapted = VoiceprintAdaptation.capped(
+            SpeakerEmbedding(normalizing: toward, modelIdentifier: enrollment.modelIdentifier, audioDuration: .zero)!,
+            around: enrollment, maximumDrift: 0.05
+        ).embedding
+        try await store.saveAdaptedCentroid(
+            AdaptedVoiceprintCentroid(
+                voiceprintID: enrolled.id, centroid: adapted, maximumDrift: 0.1,
+                adaptedAt: Date(timeIntervalSince1970: 1_800_003_600)))
+        #expect(VoiceIDSettingsView.isAdapted(try profile()))
+
+        try await store.resetAdaptation(for: .weSpeakerResNet34LM, at: Date(timeIntervalSince1970: 1_800_007_200))
+        #expect(!VoiceIDSettingsView.isAdapted(try profile()))
+    }
+
     @Test func nonLiveEnvironmentsNeverTouchTheMicrophone() {
         #expect(AppEnvironment.scriptedEnrollmentSpeed(.unitTest) == nil)
         #expect(AppEnvironment.scriptedEnrollmentSpeed(.uiTest) == 8)

@@ -75,6 +75,9 @@ enum VoiceIDGateStatus: Equatable, Sendable {
 struct VoiceIDGateLoad {
     let gate: VerificationGate?
     let status: VoiceIDGateStatus
+    /// Adaptive voiceprint updates for the conversation (#49): finish it
+    /// when the conversation ends, which saves the adapted voiceprint.
+    var adapter: VoiceprintAdapter?
 
     static func without(_ status: VoiceIDGateStatus) -> VoiceIDGateLoad {
         VoiceIDGateLoad(gate: nil, status: status)
@@ -111,9 +114,10 @@ struct VoiceIDGateLoader: Sendable {
                 return .without(.unavailable(.voiceprintUnreadable))
             }
             let model = SpeakerEmbeddingModelInfo.weSpeakerResNet34LM
+            let store = SwiftDataVoiceprintStore(modelContainer: container)
             let status: VoiceprintStatus
             do {
-                status = try await SwiftDataVoiceprintStore(modelContainer: container).status(for: model)
+                status = try await store.status(for: model)
             } catch {
                 Log.voiceID.error("Reading the voiceprint failed: \(String(describing: error), privacy: .public)")
                 return .without(.unavailable(.voiceprintUnreadable))
@@ -129,12 +133,26 @@ struct VoiceIDGateLoader: Sendable {
             }
             do {
                 let embedder = try await WeSpeakerEmbedder.load(modelDirectory: directory)
+                // The voiceprint adapts to the owner's clearly accepted
+                // speech (#49); the conversation's updates are saved when
+                // it ends.
                 let verifier = try SpeakerVerifier(
-                    embedder: embedder, voiceprint: voiceprint, config: { settings.currentConfig() })
+                    embedder: embedder, voiceprint: voiceprint, config: { settings.currentConfig() },
+                    adaptation: .standard)
+                var adapter: VoiceprintAdapter?
+                var onScoredSpeech: (@Sendable (ScoredSpeechSegment) -> Void)?
+                if let adaptive = verifier.adaptive {
+                    let created = VoiceprintAdapter(voiceprint: adaptive, store: store)
+                    adapter = created
+                    onScoredSpeech = { segment in created.observe(segment) }
+                }
+                let gate = VerificationGate(verifier: verifier, history: history, onScoredSpeech: onScoredSpeech)
+                let adaptation = adapter == nil ? "off" : "on"
+                let drift = Double(voiceprint.adaptationDrift ?? 0)
                 Log.voiceID.notice(
-                    "Voice ID gate on: \(voiceprint.clipCount, privacy: .public) clip(s) from \(voiceprint.sets.count, privacy: .public) device(s)"
+                    "Voice ID gate on: \(voiceprint.clipCount, privacy: .public) clip(s) from \(voiceprint.sets.count, privacy: .public) device(s), adaptation \(adaptation, privacy: .public), drift \(drift, format: .fixed(precision: 4), privacy: .public)"
                 )
-                return VoiceIDGateLoad(gate: VerificationGate(verifier: verifier, history: history), status: .on)
+                return VoiceIDGateLoad(gate: gate, status: .on, adapter: adapter)
             } catch {
                 Log.voiceID.error(
                     "The voice ID gate couldn't start: \(String(describing: error), privacy: .public)")

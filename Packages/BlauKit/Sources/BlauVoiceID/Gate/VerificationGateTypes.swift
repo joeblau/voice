@@ -11,12 +11,47 @@ public struct SpeakerScore: Hashable, Sendable {
     /// The thresholds `decision` came from (the window's, after the
     /// sensitivity setting).
     public let thresholds: VoiceIDThresholds
+    /// The embedding that was scored, when the verifier has one: what
+    /// adaptive voiceprint updates (#49) learn from. Kept in memory only.
+    public let embedding: SpeakerEmbedding?
 
-    public init(score: Float, decision: SpeakerDecision, audioDuration: Duration, thresholds: VoiceIDThresholds) {
+    public init(
+        score: Float, decision: SpeakerDecision, audioDuration: Duration, thresholds: VoiceIDThresholds,
+        embedding: SpeakerEmbedding? = nil
+    ) {
         self.score = score
         self.decision = decision
         self.audioDuration = audioDuration
         self.thresholds = thresholds
+        self.embedding = embedding
+    }
+}
+
+/// A speech segment the gate accepted on its own score, with what adaptive
+/// voiceprint updates (#49) need to judge it: the deciding score and its
+/// embedding, and the segment's speech for the level checks.
+///
+/// The gate hands one to its `onScoredSpeech` observer
+/// (``VoiceprintAdapter/observe(_:)``) when the segment ends. The audio is
+/// the user's voice: keep it in memory only, and only as long as it takes
+/// to measure it.
+public struct ScoredSpeechSegment: Sendable {
+    /// The VAD segment (`SpeechSegment.id`).
+    public let segmentID: Int
+    /// The score that decided the segment (its ``SpeakerScore/embedding``
+    /// is set).
+    public let score: SpeakerScore
+    /// How long the segment's speech is.
+    public let speechDuration: Duration
+    /// The segment's speech, from its start to its end (at most the gate's
+    /// buffer, ``VerificationGateConfiguration/maximumBufferedSpeech``).
+    public let audio: AudioFrame
+
+    public init(segmentID: Int, score: SpeakerScore, speechDuration: Duration, audio: AudioFrame) {
+        self.segmentID = segmentID
+        self.score = score
+        self.speechDuration = speechDuration
+        self.audio = audio
     }
 }
 

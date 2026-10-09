@@ -150,6 +150,62 @@ public actor SwiftDataVoiceprintStore: ModelActor, VoiceprintStoring {
         }
     }
 
+    @discardableResult
+    public func saveAdaptedCentroid(_ update: AdaptedVoiceprintCentroid) throws -> Voiceprint {
+        do {
+            let (profile, record) = try canonicalProfile()
+            let adapted = try record.adapting(update)
+            profile.updateCentroid(update.centroid.vector, at: adapted.updatedAt)
+            try save()
+            Log.voiceID.notice("Saved the adapted voiceprint centroid")
+            return try Self.voiceprint(adapted, model: update.model)
+        } catch {
+            modelContext.rollback()
+            Log.voiceID.error(
+                "Saving the adapted voiceprint failed: \(String(describing: error), privacy: .public)")
+            throw error
+        }
+    }
+
+    @discardableResult
+    public func resetAdaptation(for model: SpeakerEmbeddingModelInfo, at date: Date) throws -> Voiceprint {
+        do {
+            let (profile, record) = try canonicalProfile()
+            let reset = try record.resettingAdaptation(for: model, at: date)
+            profile.updateCentroid(reset.centroid ?? [], at: reset.updatedAt)
+            try save()
+            Log.voiceID.notice("Reset the voiceprint's adaptation to the enrollment centroid")
+            return try Self.voiceprint(reset, model: model)
+        } catch {
+            modelContext.rollback()
+            Log.voiceID.error(
+                "Resetting the voiceprint's adaptation failed: \(String(describing: error), privacy: .public)")
+            throw error
+        }
+    }
+
+    /// The profile every device resolves to, with duplicates deleted (last
+    /// writer wins), and its snapshot.
+    private func canonicalProfile() throws -> (VoiceProfile, StoredVoiceprint) {
+        let profiles = try modelContext.fetch(FetchDescriptor<VoiceProfile>())
+        let snapshots = profiles.map(Self.snapshot)
+        guard let winner = StoredVoiceprint.canonical(snapshots),
+            let profile = profiles.first(where: { Self.snapshot($0) == winner })
+        else { throw VoiceprintStoreError.notEnrolled }
+        for duplicate in profiles where duplicate !== profile {
+            for set in duplicate.enrollmentSets ?? [] { modelContext.delete(set) }
+            modelContext.delete(duplicate)
+        }
+        return (profile, winner)
+    }
+
+    private static func voiceprint(_ record: StoredVoiceprint, model: SpeakerEmbeddingModelInfo) throws -> Voiceprint {
+        guard case .enrolled(let voiceprint) = StoredVoiceprint.status(of: [record], model: model) else {
+            throw VoiceprintStoreError.invalidEmbeddings
+        }
+        return voiceprint
+    }
+
     public func deleteVoiceprint() throws {
         try DataEraser.erase(.voiceprint, in: modelContext)
     }

@@ -198,6 +198,7 @@ decides with the proposed thresholds for its length.
 | Owner set: owner recordings across rooms and distances, other people, TV, podcasts, music with vocals, other languages, overlap ([Datasets/voice-id](../Datasets/voice-id/README.md)) | **Pending**: needs the recordings and consent. Re-run, then update the thresholds and this page |
 | With and without DeepFilterNet3 on the verification path | **Done** (#51) on the calibration set: see [noise-suppression.md](noise-suppression.md#voice-id). `BLAU_VOICEID_EVAL_SUPPRESSORS` runs it again on the owner set |
 | iPhone vs Mac score parity on the same audio | **Pending**: needs a device run |
+| Adaptive updates (#49) on real voices: the owner's recordings across several days replayed through `VoiceprintAdaptationReplay`, static against adaptive | **Pending**: needs multi-day owner recordings. The simulated week is in [voice-id.md](voice-id.md#the-simulated-week-acceptance-criterion) |
 | AS-norm with the production cohort (#47) | **Pending**: no gain on the public set, so the gate ships raw cosine without a bundled cohort; the harness takes any cohort recordings and the gate (`SpeakerVerifier(cohort:)`) any cohort, so re-test on the owner set |
 | The gate's FRR / FAR on the owner set (#47) | **Pending**: needs the owner set. On the public set: owner FRR 1.50% (3.75% with uncertain dropped), impostor FAR 0.71% (7.5% with uncertain sent), see [The verification gate](#the-verification-gate) |
 

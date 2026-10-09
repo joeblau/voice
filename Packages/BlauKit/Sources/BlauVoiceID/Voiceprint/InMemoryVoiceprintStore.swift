@@ -49,6 +49,27 @@ public actor InMemoryVoiceprintStore: VoiceprintStoring {
         return voiceprint
     }
 
+    @discardableResult
+    public func saveAdaptedCentroid(_ update: AdaptedVoiceprintCentroid) throws -> Voiceprint {
+        guard let canonical = StoredVoiceprint.canonical(records) else { throw VoiceprintStoreError.notEnrolled }
+        records = [try canonical.adapting(update)]
+        return try read(update.model)
+    }
+
+    @discardableResult
+    public func resetAdaptation(for model: SpeakerEmbeddingModelInfo, at date: Date) throws -> Voiceprint {
+        guard let canonical = StoredVoiceprint.canonical(records) else { throw VoiceprintStoreError.notEnrolled }
+        records = [try canonical.resettingAdaptation(for: model, at: date)]
+        return try read(model)
+    }
+
+    private func read(_ model: SpeakerEmbeddingModelInfo) throws -> Voiceprint {
+        guard case .enrolled(let voiceprint) = StoredVoiceprint.status(of: records, model: model) else {
+            throw VoiceprintStoreError.invalidEmbeddings
+        }
+        return voiceprint
+    }
+
     public func deleteVoiceprint() {
         records.removeAll()
     }

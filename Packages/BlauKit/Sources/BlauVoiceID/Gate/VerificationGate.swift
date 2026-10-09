@@ -89,6 +89,7 @@ public actor VerificationGate {
     private nonisolated let verdictContinuation: AsyncStream<GatedUtterance>.Continuation
     private let verifier: any SpeechVerifying
     private let history: (any CaptureFrameSource)?
+    private let onScoredSpeech: (@Sendable (ScoredSpeechSegment) -> Void)?
     private let clock: any BlauClock
     private let signposter: Signposter
     private nonisolated let shared = Mutex(VerificationGateStatistics())
@@ -161,16 +162,22 @@ public actor VerificationGate {
     ///   - turnActivity: Whether the conversation is in an active turn.
     ///   - clock: Times the waits and the hold on finals.
     ///   - signposter: Where the `voiceid.gate` hold on each final goes.
+    ///   - onScoredSpeech: Called with every segment accepted on its own
+    ///     score (not inherited), once it has ended: adaptive voiceprint
+    ///     updates (#49, ``VoiceprintAdapter/observe(_:)``). Called on the
+    ///     gate's actor, so it must return at once.
     public init(
         verifier: any SpeechVerifying,
         history: (any CaptureFrameSource)? = nil,
         configuration: VerificationGateConfiguration = .standard,
         turnActivity: ConversationTurnActivity? = nil,
         clock: any BlauClock = SystemClock(),
-        signposter: Signposter = Signposts.voiceID
+        signposter: Signposter = Signposts.voiceID,
+        onScoredSpeech: (@Sendable (ScoredSpeechSegment) -> Void)? = nil
     ) {
         self.verifier = verifier
         self.history = history
+        self.onScoredSpeech = onScoredSpeech
         self.configuration = configuration
         self.clock = clock
         self.signposter = signposter
@@ -333,6 +340,7 @@ public actor VerificationGate {
         guard var settled = segments[ended.id] else { return }
         settled.final = verdict
         if case .scored = verdict.basis { settled.evidenceEnd = speechEnd }
+        let accepted = acceptedSpeech(settled, verdict: verdict, speech: speech)
         // The audio is no longer needed: utterances use the final decision.
         settled.samples = []
         segments[ended.id] = settled
@@ -343,6 +351,22 @@ public actor VerificationGate {
             """
         )
         notifyWaiters()
+        if let accepted { onScoredSpeech?(accepted) }
+    }
+
+    /// The segment as adaptive updates see it, when it was accepted on its
+    /// own score and an observer wants it.
+    private func acceptedSpeech(_ segment: Segment, verdict: SegmentVerdict, speech: Int64) -> ScoredSpeechSegment? {
+        guard onScoredSpeech != nil, case .scored = verdict.basis, verdict.decision == .accept,
+            let best = segment.best, best.decision == .accept, best.embedding != nil
+        else { return nil }
+        let count = Int(min(Int64(segment.samples.count), max(0, speech)))
+        return ScoredSpeechSegment(
+            segmentID: segment.id, score: best,
+            speechDuration: .samples(speech, sampleRate: segment.sampleRate),
+            audio: AudioFrame(
+                samples: Array(segment.samples.prefix(count)), sampleRate: segment.sampleRate,
+                sampleOffset: segment.start))
     }
 
     /// Whether `count` samples of speech from the segment's start need a

@@ -37,7 +37,10 @@ public enum SpeakerVerifierError: Error, Hashable, Sendable {
 /// and its accept threshold to the performance HUD's gauges.
 public struct SpeakerVerifier: SpeechVerifying, VoiceGate {
     public let embedder: any SpeakerEmbedder
-    public let matcher: VoiceprintMatcher
+    /// The voiceprint adapting to the owner's voice this conversation
+    /// (#49), when adaptation is on; ``matcher`` then follows its centroid.
+    public let adaptive: AdaptiveVoiceprint?
+    private let fixedMatcher: VoiceprintMatcher
     private let config: @Sendable () -> VoiceIDConfig
     private let signposter: Signposter
     private let gauges: PerformanceGauges
@@ -48,6 +51,11 @@ public struct SpeakerVerifier: SpeechVerifying, VoiceGate {
     ///   - config: The thresholds to decide with, read for every score so a
     ///     Settings change applies to the next one.
     ///   - cohort: The impostor cohort, for an AS-norm scoring method.
+    ///   - adaptation: Adaptive voiceprint updates (#49): with a policy, the
+    ///     verifier scores against an ``AdaptiveVoiceprint`` (``adaptive``)
+    ///     that a ``VoiceprintAdapter`` moves with the owner's accepted
+    ///     speech. `nil` scores against `voiceprint` as stored. A voiceprint
+    ///     without readable enrollment sets isn't adapted.
     ///   - signposter: Where `voiceid.verify` goes.
     ///   - gauges: Where the HUD's voice score goes.
     public init(
@@ -55,6 +63,7 @@ public struct SpeakerVerifier: SpeechVerifying, VoiceGate {
         voiceprint: Voiceprint,
         config: @escaping @Sendable () -> VoiceIDConfig = { .calibrated },
         cohort: SpeakerCohort? = nil,
+        adaptation: VoiceprintAdaptationPolicy? = nil,
         signposter: Signposter = Signposts.voiceID,
         gauges: PerformanceGauges = .shared
     ) throws(SpeakerVerifierError) {
@@ -67,7 +76,10 @@ public struct SpeakerVerifier: SpeechVerifying, VoiceGate {
             throw .configModelMismatch(config: initial.modelIdentifier, embedder: model)
         }
         do {
-            matcher = try VoiceprintMatcher(voiceprint: voiceprint, scoring: initial.scoring, cohort: cohort)
+            fixedMatcher = try VoiceprintMatcher(voiceprint: voiceprint, scoring: initial.scoring, cohort: cohort)
+            adaptive = try adaptation.flatMap { policy throws(VoiceprintScorer.Error) in
+                try AdaptiveVoiceprint(voiceprint: voiceprint, scoring: initial.scoring, cohort: cohort, policy: policy)
+            }
         } catch {
             throw .scorer(error)
         }
@@ -76,6 +88,10 @@ public struct SpeakerVerifier: SpeechVerifying, VoiceGate {
         self.signposter = signposter
         self.gauges = gauges
     }
+
+    /// What to score against: the adapted voiceprint's matcher when
+    /// adaptation is on, the stored voiceprint's otherwise.
+    public var matcher: VoiceprintMatcher { adaptive?.matcher ?? fixedMatcher }
 
     public func verify(_ speech: AudioFrame) async throws -> SpeakerScore {
         let embedding = try await embedder.embed(speech)
@@ -86,7 +102,7 @@ public struct SpeakerVerifier: SpeechVerifying, VoiceGate {
         gauges.report(.voiceThreshold, Double(thresholds.accept))
         return SpeakerScore(
             score: verification.score, decision: verification.decision, audioDuration: embedding.audioDuration,
-            thresholds: thresholds)
+            thresholds: thresholds, embedding: embedding)
     }
 
     // MARK: VoiceGate
