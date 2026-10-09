@@ -7,7 +7,9 @@ import Testing
 struct BenchmarkEnvironmentTests {
     @Test func currentDeviceIsThisMac() {
         let device = BenchmarkDevice.current
-        #expect(device.modelIdentifier.hasPrefix("Mac") || device.modelIdentifier.contains("Book"))
+        // `Mac15,8`, `MacBookPro18,3`, `iMac21,1`, or `VirtualMac2,1` on a
+        // virtualized CI runner.
+        #expect(device.modelIdentifier.contains("Mac"), "\(device.modelIdentifier)")
         #expect(device.operatingSystem.hasPrefix("macOS "))
         #expect(device.chip?.isEmpty == false)
         #expect(device.physicalMemoryBytes > 0)

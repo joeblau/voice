@@ -69,10 +69,15 @@ public final class MemoryIndex: Sendable {
 
     // MARK: - Opening
 
-    /// Opens (or creates) the index at `url`. A file that can't be opened,
-    /// isn't a database or has another schema version is deleted and
+    /// Opens (or creates) the index at `url`. A file that isn't a
+    /// database, is corrupt or has another schema version is deleted and
     /// replaced by an empty index: everything in it is rebuildable, and
     /// `needsRebuild` says so.
+    ///
+    /// Any other failure is thrown and the file is left alone. A full disk,
+    /// or a file that can't be read because the app launched in the
+    /// background before first unlock, clears up on its own, and
+    /// recreating the index would mean embedding every chunk again.
     public static func open(at url: URL, fileManager: FileManager = .default) throws -> MemoryIndex {
         let directory = url.deletingLastPathComponent()
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -83,12 +88,21 @@ public final class MemoryIndex: Sendable {
 
         do {
             return try MemoryIndex(database: makePool(at: url), url: url)
-        } catch {
+        } catch let error where isUnusableFile(error) {
             Log.memory.error(
-                "Memory index failed to open, recreating it: \(String(describing: error), privacy: .public)")
+                "Memory index is unusable, recreating it: \(String(describing: error), privacy: .public)")
             try removeFiles(at: url, fileManager: fileManager)
             return try MemoryIndex(database: makePool(at: url), url: url)
         }
+    }
+
+    /// Whether an error opening the index means the file itself is bad (not
+    /// a database, corrupt, or another schema version), so only recreating
+    /// it helps.
+    static func isUnusableFile(_ error: any Error) -> Bool {
+        if error is Failure { return true }
+        guard let error = error as? DatabaseError else { return false }
+        return error.resultCode == .SQLITE_NOTADB || error.resultCode == .SQLITE_CORRUPT
     }
 
     /// A fresh index in memory, for tests and previews.

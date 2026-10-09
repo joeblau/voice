@@ -334,6 +334,41 @@ struct MemoryIndexTests {
                 == "Derived")
     }
 
+    @Test func aFileThatCantBeOpenedForNowIsLeftAlone() async throws {
+        let directory = try Support.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appending(path: MemoryIndex.fileName)
+        let path = url.path(percentEncoded: false)
+        let chunk = Self.chunk("an embedded chunk about kyoto")
+        do {
+            let index = try MemoryIndex.open(at: url)
+            try await index.replace([Self.source([chunk])])
+            try await index.markRebuilt(at: Support.t0)
+        }
+
+        // Unreadable, as before first unlock: SQLITE_CANTOPEN, not a bad file.
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: path)
+        #expect(throws: DatabaseError.self) { try MemoryIndex.open(at: url) }
+        #expect(MemoryIndex.isUnusableFile(DatabaseError(resultCode: .SQLITE_CANTOPEN)) == false)
+        #expect(MemoryIndex.isUnusableFile(DatabaseError(resultCode: .SQLITE_FULL)) == false)
+
+        // Readable again: nothing was lost, so nothing needs re-embedding.
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path)
+        let index = try MemoryIndex.open(at: url)
+        #expect(try await index.needsRebuild == false)
+        #expect(try await index.keywordSearch("kyoto", limit: 1).map(\.chunkID) == [chunk.id])
+    }
+
+    @Test func onlyABadFileIsRecreated() {
+        #expect(MemoryIndex.isUnusableFile(DatabaseError(resultCode: .SQLITE_NOTADB)))
+        #expect(MemoryIndex.isUnusableFile(DatabaseError(resultCode: .SQLITE_CORRUPT)))
+        #expect(MemoryIndex.isUnusableFile(DatabaseError(resultCode: .SQLITE_CORRUPT_INDEX)))
+        #expect(MemoryIndex.isUnusableFile(MemoryIndex.Failure.schemaVersionMismatch(found: 1, expected: 2)))
+        #expect(!MemoryIndex.isUnusableFile(DatabaseError(resultCode: .SQLITE_IOERR)))
+        #expect(!MemoryIndex.isUnusableFile(DatabaseError(resultCode: .SQLITE_BUSY)))
+        #expect(!MemoryIndex.isUnusableFile(CocoaError(.fileWriteOutOfSpace)))
+    }
+
     @Test func searchesRunWhileWriting() async throws {
         let directory = try Support.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

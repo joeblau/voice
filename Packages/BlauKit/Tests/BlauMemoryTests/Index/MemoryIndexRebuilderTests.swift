@@ -158,6 +158,27 @@ struct MemoryIndexRebuilderTests {
         #expect(try await index.statistics().chunks == report.chunks)
     }
 
+    /// Drops the last vector of every batch.
+    final class ShortEmbedder: MemoryChunkEmbedding {
+        let base = IndexTestSupport.HashingEmbedder()
+        func currentModelVersion() async throws -> String { base.version }
+        func embedDocuments(_ texts: [String]) async throws -> [TextEmbedding] {
+            Array(try await base.embedDocuments(texts).dropLast())
+        }
+    }
+
+    @Test func anEmbedderReturningTheWrongCountIsAFailureNotASilentGap() async throws {
+        let index = try MemoryIndex.inMemory()
+        let rebuilder = Self.rebuilder(index: index, sources: Self.sources(), embedder: ShortEmbedder())
+        let report = try await rebuilder.rebuild()
+        #expect(report.modelVersion == nil)
+        #expect(report.embeddingFailure == String(describing: ChunkEmbeddingCountMismatch(expected: 3, received: 2)))
+        #expect(report.embedded == 0)
+        #expect(try await index.statistics().chunks == report.chunks)
+
+        await #expect(throws: ChunkEmbeddingCountMismatch.self) { try await rebuilder.embedMissingVectors() }
+    }
+
     @Test func cancellationKeepsTheWorkDoneAndLeavesTheIndexMarkedForRebuild() async throws {
         let index = try MemoryIndex.inMemory()
         let sources = Self.sources()

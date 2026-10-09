@@ -100,8 +100,8 @@ public final class MemoryToolService: MemoryToolBackend, MemoryService {
     ///   - chunkEmbedder: Embeds a remembered or forgotten fact's chunk when
     ///     it is written, so vector search ranks it at once (the same
     ///     service); `nil` leaves that to the indexer.
-    ///   - chunker: Cuts a remembered or forgotten fact's chunk; the same
-    ///     chunking the indexer uses.
+    ///   - chunker: Cuts a remembered or forgotten fact's chunk when the
+    ///     context has no indexer; otherwise the indexer's chunking is used.
     ///   - clock: When facts are remembered and forgotten.
     public init(
         context: @escaping @Sendable () async -> Context?,
@@ -388,6 +388,9 @@ public final class MemoryToolService: MemoryToolBackend, MemoryService {
     /// the indexer reads the store's history.
     private func indexFact(_ fact: MemoryToolFact, in context: Context) async {
         context.entities.invalidate()
+        // The indexer's chunking spells the date in the index's pinned time
+        // zone, so the indexer keeps this chunk (and its vector) as is.
+        let chunker = await context.indexer?.chunker ?? self.chunker
         if let index = context.index,
             let chunk = chunker.chunk(
                 for: FactSnapshot(
