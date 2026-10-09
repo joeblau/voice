@@ -15,6 +15,7 @@ evaluation.
 | `app-tests`     | XcodeGen, then the `Blau` scheme's `Blau` test plan (`BlauTests` + `BlauUITests`) on an iOS Simulator | `make test` | `app-tests.xcresult` |
 | `perf-kit`      | The BlauKit micro-benchmarks (package-benchmark) on the macOS host; fails when an allocation count (and, on a machine with performance counters, an instruction count) is more than 10% above `Packages/BlauKitBenchmarks/Thresholds` ([performance.md](performance.md#micro-benchmarks)) | `make microbench-check` | `perf-kit-results` (the check's output), 30 days; the output on the summary page |
 | `perf`          | Nightly (and on demand) only: `Blau-Perf` scheme, `BlauPerf` test plan, Release with the scripted session, then the regression gate against `BlauPerfTests/Baselines/ci-simulator.json`: 10% on memory, tolerances calibrated to the runner's run-to-run spread on time ([performance.md](performance.md#the-regression-gate)) | `make perf perf-check` | `perf-results` (`perf.xcresult`, `perf-report.md`, `perf-results.json`), 90 days; the report on the summary page |
+| `soak`          | Nightly (and on demand) only: the long-session soak test at reduced length, 20 minutes of mixed audio at 10x through the app's pipeline on the simulator against a local fake realtime server, plus the app's leaks read during and after the run; fails on any soak check or on leak growth ([soak.md](soak.md)) | `make soak SOAK_MINUTES=20` | `soak-results` (`report.json`, `report.md`, `leaks.*`, `summary.md`, `soak.xcresult`), 90 days; `summary.md` on the summary page |
 | `asr-eval`      | Nightly (and on demand) only: every ASR engine on the LFS fixtures with the real models; fails on the regression gate ([asr-eval.md](asr-eval.md#nightly-ci)) | `make eval-asr` | `asr-eval-report` (`report.json`, `report.md`, `summary.txt`), 90 days; `report.md` on the summary page |
 | `memory-eval`   | Nightly (and on demand) only: memory retrieval (and, where Apple's on-device model can run, LLM-judged answers) on the memory eval set; fails on the regression gate ([memory-eval.md](memory-eval.md#nightly-ci)) | `make eval-memory` | `memory-eval-report` (`report.json`, `report.md`, `summary.txt`), 90 days; `report.md` on the summary page |
 
@@ -40,8 +41,9 @@ machine; device numbers are a separate, manual table.
 - `pull_request`, `push` to `main`, `merge_group` (GitHub merge queue) and
   `workflow_dispatch` run `lint`, `package-tests`, `app-tests` and
   `perf-kit`.
-- `schedule` (08:23 UTC daily, `main`) runs those plus `perf`, `asr-eval` and
-  `memory-eval`. **Run workflow** has a checkbox for each of the three.
+- `schedule` (08:23 UTC daily, `main`) runs those plus `perf`, `soak`,
+  `asr-eval` and `memory-eval`. **Run workflow** has a checkbox for each of
+  the four (and a length for the soak).
 - A new push to a pull request cancels that PR's in-flight run. Runs on `main`
   are never cancelled mid-flight, so every merged commit gets a result; GitHub
   still drops a *queued* `main` run once a newer one is waiting.
@@ -87,6 +89,8 @@ Override any of these without a code change through repository variables
 | `BLAU_CI_SIMULATOR`     | `iPhone 17`                | `iPhone 18 Pro` |
 | `BLAU_CI_MEMORY_EVAL_READER` | `auto` (Apple's on-device model if it can run) | `none` ([memory-eval.md](memory-eval.md#nightly-ci)) |
 | `BLAU_CI_MEMORY_EVAL_REQUIRE_ANSWERS` | `0` | `1` on a self-hosted runner with Apple Intelligence |
+| `BLAU_CI_SOAK_MINUTES`  | `20`                       | `120` for the full two hours (about 15 minutes at 10x) ([soak.md](soak.md)) |
+| `BLAU_CI_SOAK_LEAKS`    | `1`                        | `0` if the runner can't read the simulator app's leaks |
 
 When GitHub promotes Xcode 27 to a general-availability `macos-27` image, set
 `BLAU_CI_RUNNER` (or change the default in `ci.yml`).
@@ -96,7 +100,7 @@ When GitHub promotes Xcode 27 to a general-availability `macos-27` image, set
 | Job             | Cached                                | Key                                       |
 | --------------- | ------------------------------------- | ----------------------------------------- |
 | `package-tests` | `Packages/BlauKit/.build`: clones, FluidAudio's binary artifacts and build products | Xcode build + `Package.swift` + `Package.resolved` |
-| `app-tests`, `perf` | `.build/DerivedData/SourcePackages`: package clones and binary artifacts | Xcode build + `Package.swift` + `Package.resolved` |
+| `app-tests`, `perf`, `soak` | `.build/DerivedData/SourcePackages`: package clones and binary artifacts | Xcode build + `Package.swift` + `Package.resolved` |
 | `perf-kit`      | `Packages/BlauKitBenchmarks/.build`: clones and build products | Xcode build + the benchmark package's `Package.swift` and `Package.resolved` + BlauKit's `Package.swift` |
 | `asr-eval`      | `Packages/BlauKit/.build` (shared with `package-tests`) and `.build/models`: the pinned Core ML models, about 700 MB | The same as `package-tests`; the models by `PinnedModelManifest.swift` |
 | `memory-eval`   | `Packages/BlauKit/.build` (shared with `package-tests`); the vectors are recorded fixtures, so nothing is downloaded | The same as `package-tests` |
@@ -133,7 +137,7 @@ that added CI (#15), `xcode-27` image, Xcode 27.1, warm cache:
 Booting the simulator and UI testing dominate. They grow with the number of UI
 tests, not with the code. If `app-tests` approaches the budget, move UI tests
 into their own job before reaching for a larger runner. Each job's
-`timeout-minutes` (15 to 40, 60 for `asr-eval`, 90 for `perf`) is a safety
+`timeout-minutes` (15 to 40, 60 for `asr-eval`, 75 for `soak`, 90 for `perf`) is a safety
 net for a hung simulator, not the budget.
 
 ## Secrets

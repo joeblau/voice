@@ -322,11 +322,13 @@
         let config = VoiceIDConfig.calibrated
         let scorer: VoiceprintScorer
         private let speaker: [Float]
+        private let impostor: [Float]
 
         init(seed: UInt64 = 0x0000_0B1A) {
             var random = SeededRandomGenerator(seed: seed)
             let dimension = SpeakerEmbeddingModelInfo.weSpeakerResNet34LM.dimension
             let speaker = (0..<dimension).map { _ in Float(random.nextUnit() * 2 - 1) }
+            impostor = (0..<dimension).map { _ in Float(random.nextUnit() * 2 - 1) }
             let calibrated = VoiceIDConfig.calibrated
             let enrollment = (0..<5).map { clip in
                 Self.embedding(
@@ -343,6 +345,22 @@
             return Self.embedding(
                 around: speaker, seed: UInt64(segment.sampleRange.lowerBound), model: config.modelIdentifier,
                 seconds: seconds)
+        }
+
+        /// A probe for `segment` spoken by someone else (the soak test's TV,
+        /// #76): another synthetic speaker, unrelated to the enrolled one
+        /// (cosine about 0), plus the same kind of noise.
+        func impostorProbe(for segment: SpeechSegment) -> SpeakerEmbedding {
+            let seconds = Double(segment.sampleRange.count) / Double(segment.sampleRate)
+            return probe(startingAt: segment.sampleRange.lowerBound, seconds: seconds, impostor: true)
+        }
+
+        /// A probe for speech starting at `start` (a 16 kHz stream offset) and
+        /// lasting `seconds`: the enrolled speaker's, or the impostor's.
+        func probe(startingAt start: Int64, seconds: Double, impostor: Bool) -> SpeakerEmbedding {
+            Self.embedding(
+                around: impostor ? self.impostor : speaker, seed: UInt64(max(0, start)),
+                model: config.modelIdentifier, seconds: seconds)
         }
 
         private static func embedding(around speaker: [Float], seed: UInt64, model: String, seconds: Double)
@@ -365,6 +383,8 @@
         struct Report: Sendable {
             var userUtterances = 0
             var agentReplies = 0
+            /// User utterances no reply followed when the tap finished.
+            var unansweredUtterances = 0
             var topicUnits = 0
             var topicBoundaries = 0
             var memoryChunks = 0
@@ -397,6 +417,8 @@
 
         var userUtterances: Int { report.userUtterances }
         var agentReplies: Int { report.agentReplies }
+        /// Topic boundaries confirmed so far (the soak test samples it, #76).
+        var topicBoundaries: Int { report.topicBoundaries }
 
         // MARK: TurnTranscriptRecording
 
@@ -435,6 +457,7 @@
         /// Ends topic segmentation and returns the counts.
         func finish() async -> Report {
             report.topicBoundaries += await segmenter.finish().filter(\.isConfirmation).count
+            report.unansweredUtterances = pendingUser.count
             return report
         }
 
