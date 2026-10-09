@@ -349,8 +349,13 @@ public actor VerificationGate {
         let speech = speechEnd - segment.start
         // The language check of speech shorter than the window, alongside
         // the end-of-segment score (unless voice ID already rejected it).
+        // Only start a task when there is something to check: an idle child
+        // task on every segment end (no filter, or speech past the window)
+        // still has to hop onto the actor, which lengthens the hold.
         let early = segment.decision == .reject ? nil : startLanguageCheck(ended.id, speech: speech)
-        async let earlyLanguage: Void = runLanguageCheck(ended.id, early)
+        let earlyLanguage: Task<Void, Never>? = early.map { audio in
+            Task { await self.runLanguageCheck(ended.id, audio) }
+        }
         let minimum = configuration.minimumScoredSpeech.sampleCount(sampleRate: segment.sampleRate)
         var verdict: SegmentVerdict
         if speech < minimum {
@@ -372,7 +377,7 @@ public actor VerificationGate {
         // decision it inherited): check its language before the audio goes.
         let late = verdict.decision == .reject ? nil : startLanguageCheck(ended.id, speech: speech)
         guard var settled = segments[ended.id] else {
-            await earlyLanguage
+            await earlyLanguage?.value
             return
         }
         settled.final = verdict
@@ -388,7 +393,7 @@ public actor VerificationGate {
             """
         )
         notifyWaiters()
-        await earlyLanguage
+        await earlyLanguage?.value
         await runLanguageCheck(ended.id, late)
         guard let accepted, let checked = segments[ended.id] else { return }
         if checked.languageCheck == .running {
