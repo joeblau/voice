@@ -140,14 +140,33 @@ struct OnboardingAppTests {
     @Test func aVoiceprintAndAProfileFromAnotherDeviceCountAsDone() async throws {
         let harness = await makeHarness()
         let context = try #require(harness.persistence.stack?.container.mainContext)
-        context.insert(
-            VoiceProfile(
-                name: "Me", embeddingModelVersion: VoiceIDConfig.calibrated.modelIdentifier, centroid: [0.1, 0.2],
-                createdAt: Date()))
+        context.insert(Self.usableVoiceprint())
         try AboutYouDocument.save("I'm building Blau.", in: context)
         try context.save()
         #expect(harness.controller.prerequisites.voiceEnrollment == .satisfied)
         #expect(harness.controller.prerequisites.aboutYou == .satisfied)
+    }
+
+    /// A voiceprint for the current model the gate can read: a 256-d
+    /// centroid.
+    static func usableVoiceprint() -> VoiceProfile {
+        var centroid = [Float](repeating: 0, count: SpeakerEmbeddingModelInfo.weSpeakerResNet34LM.dimension)
+        centroid[0] = 1
+        return VoiceProfile(
+            name: "Me", embeddingModelVersion: VoiceIDConfig.calibrated.modelIdentifier, centroid: centroid,
+            createdAt: Date())
+    }
+
+    /// A voiceprint whose vectors can't be read (the CloudKit-encrypted
+    /// fields lost with a reset iCloud Keychain) isn't an enrollment.
+    @Test func anUnreadableVoiceprintNeedsEnrollingAgain() async throws {
+        let harness = await makeHarness()
+        let context = try #require(harness.persistence.stack?.container.mainContext)
+        let profile = Self.usableVoiceprint()
+        profile.centroid = Data()
+        context.insert(profile)
+        try context.save()
+        #expect(harness.controller.prerequisites.voiceEnrollment == .missing)
     }
 
     @Test func aVoiceprintFromAnOlderModelNeedsEnrollingAgain() async throws {
@@ -277,10 +296,7 @@ struct OnboardingAppTests {
 
         // A voiceprint synced while Blau was in the background shows up on
         // the next activation.
-        context.insert(
-            VoiceProfile(
-                name: "Me", embeddingModelVersion: VoiceIDConfig.calibrated.modelIdentifier, centroid: [0.1, 0.2],
-                createdAt: Date()))
+        context.insert(Self.usableVoiceprint())
         try context.save()
         harness.controller.checkPrerequisites()
         #expect(harness.controller.prerequisites.voiceEnrollment == .satisfied)

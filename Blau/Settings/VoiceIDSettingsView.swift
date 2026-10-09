@@ -81,8 +81,7 @@ struct VoiceIDSettingsView: View {
                 LabeledContent("Updated") {
                     Text(profile.updatedAt, format: .relative(presentation: .named))
                 }
-                LabeledContent(
-                    "Clips", value: (profile.enrollmentSets ?? []).reduce(0) { $0 + $1.clipCount }.formatted())
+                LabeledContent("Clips", value: Self.clipCount(in: profile).formatted())
                 if Self.isAdapted(profile) {
                     // Adaptive updates (#49) moved the voiceprint towards
                     // the owner's recent voice; resetting goes back to what
@@ -216,6 +215,19 @@ struct VoiceIDSettingsView: View {
             .filter { seen.insert($0).inserted }
     }
 
+    /// The clips the voiceprint holds: the newest set per device model, as
+    /// `SwiftDataVoiceprintStore` resolves them. An older set of the same
+    /// model (two devices of one model topping up before they synced)
+    /// loses until the next write deletes it, so it isn't counted.
+    static func clipCount(in profile: VoiceProfile) -> Int {
+        var newest: [String: VoiceEnrollmentSet] = [:]
+        for set in profile.enrollmentSets ?? [] {
+            if let existing = newest[set.deviceModel], existing.createdAt >= set.createdAt { continue }
+            newest[set.deviceModel] = set
+        }
+        return newest.values.reduce(0) { $0 + $1.clipCount }
+    }
+
     static func hasSet(for deviceModel: String, in profile: VoiceProfile) -> Bool {
         (profile.enrollmentSets ?? []).contains { $0.deviceModel == deviceModel }
     }
@@ -272,6 +284,11 @@ struct VoiceIDStatus: Equatable {
         /// Enrolled with a different embedding model than the gate uses:
         /// its vectors can't be compared, so the user must re-enroll.
         case needsReenrollment
+        /// Enrolled with the current model, but its vectors can't be read
+        /// (malformed, or the CloudKit-encrypted fields were lost with a
+        /// reset iCloud Keychain): the gate can't use it, so the user must
+        /// re-enroll.
+        case unreadable
     }
 
     let kind: Kind
@@ -280,8 +297,22 @@ struct VoiceIDStatus: Equatable {
         self.kind = kind
     }
 
+    /// What `profile` means for the gate's model, resolved the way the
+    /// gate's store resolves it (`SwiftDataVoiceprintStore`), so a
+    /// voiceprint whose vectors can't be read isn't shown as enrolled.
     init(profile: VoiceProfile?, currentModel: String = VoiceIDConfig.calibrated.modelIdentifier) {
-        self.init(embeddingModelVersion: profile?.embeddingModelVersion, currentModel: currentModel)
+        guard let profile else {
+            self.init(kind: .notEnrolled)
+            return
+        }
+        let model = SpeakerEmbeddingModelInfo(
+            identifier: currentModel, dimension: SpeakerEmbeddingModelInfo.weSpeakerResNet34LM.dimension)
+        switch SwiftDataVoiceprintStore.status(of: [profile], model: model) {
+        case .notEnrolled: self.init(kind: .notEnrolled)
+        case .enrolled: self.init(kind: .enrolled)
+        case .needsReenrollment: self.init(kind: .needsReenrollment)
+        case .unreadable: self.init(kind: .unreadable)
+        }
     }
 
     init(embeddingModelVersion: String?, currentModel: String = VoiceIDConfig.calibrated.modelIdentifier) {
@@ -296,7 +327,7 @@ struct VoiceIDStatus: Equatable {
         switch kind {
         case .notEnrolled: String(localized: "Not enrolled")
         case .enrolled: String(localized: "Enrolled")
-        case .needsReenrollment: String(localized: "Re-enroll needed")
+        case .needsReenrollment, .unreadable: String(localized: "Re-enroll needed")
         }
     }
 
@@ -316,6 +347,11 @@ struct VoiceIDStatus: Equatable {
             String(
                 localized:
                     "Blau's voice model changed since you enrolled. Re-enroll so Blau can recognize you again."
+            )
+        case .unreadable:
+            String(
+                localized:
+                    "Your voiceprint couldn't be read on this device, for example after an iCloud Keychain reset. Re-enroll so Blau can recognize you again."
             )
         }
     }

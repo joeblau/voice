@@ -143,11 +143,20 @@ if case .rejected = enrollment.phase { await enrollment.retry() }
   ([audio.md](audio.md)). It refuses to start while a conversation holds
   the microphone (`microphoneBusy`) and unmutes "pause listening" first.
   Like any capture, it shows the recording Live Activity while it runs.
+  Its frame stream finishes as soon as the keeper stops delivering audio
+  (an interruption, the Live Activity's Stop), and the enrollment then
+  fails with `microphoneStopped` and lets go of the microphone instead of
+  waiting for audio that won't come.
 - **Hands-free.** The microphone stays on from the first prompt to the
   last. A clip ends by itself once it holds 5 s of talking time and the
-  user pauses for 0.5 s, or at 12 s; **Done Speaking** ends it early. An
-  accepted clip moves straight on to the next prompt; a rejected one shows
-  why and waits for **Try Again**.
+  user pauses for 0.5 s, or at 12 s; **Done Speaking** ends it early, even
+  if no audio has arrived since. An accepted clip moves straight on to the
+  next prompt; a rejected one shows why and waits for **Try Again**. A
+  rejection left for 30 s turns the microphone off (and with it the Live
+  Activity and background audio); Try Again turns it back on.
+- **Cancel** discards the clips and stores nothing. It is hidden, and does
+  nothing, once the voiceprint is being saved: the save can't be taken
+  back, so the sheet shows the stored voiceprint instead.
 - **Under a minute.** Four clean clips are about 4 × 7 s of audio (a
   second of reading, 5–6 s of speech, the pause). The worst case with no
   retries is 4 × 12 s = 48 s of recording. On the Mac, analysis and the
@@ -218,7 +227,10 @@ data; the vectors are CloudKit-encrypted ([data-model.md](data-model.md)).
   app's model differs, the status is `needsReenrollment` and Settings shows
   "Re-enroll needed" with the Re-enroll button; a top-up is refused
   (`modelMismatch`). Unreadable vectors (a reset iCloud Keychain loses the
-  encrypted fields) are `unreadable` and also need re-enrollment.
+  encrypted fields) are `unreadable` and also need re-enrollment; Settings
+  resolves the profiles it queries the same way
+  (`SwiftDataVoiceprintStore.status(of:model:)`), so it shows "Re-enroll
+  needed" for them too and doesn't offer a top-up.
 - **Deleting** (Settings → Voice ID or Privacy & Data) goes through
   `DataEraser`, record by record, so the deletion syncs and the voiceprint
   disappears from every device.
@@ -960,7 +972,7 @@ The gate's start line gives the stored drift. A failed save logs at
 | Real model on the fixture set (opt-in) | Download the pinned model once, then point `BLAU_SPEAKER_MODEL_DIR` at it (commands below). Checks that every same-speaker pair scores above every different-speaker pair at 1.5 s, 3 s and the whole clip, that a two-clip voiceprint picks its own speaker's held-out clip, parity with FluidAudio's `EmbeddingExtractor`, and that other segments in a call don't change a result |
 | Latency (opt-in) | Add `BLAU_SPEAKER_BENCHMARK=1` to the command above: times every compute-unit setting and prints Markdown tables and the Core ML compute plan |
 | Latency on iPhone (opt-in) | `SpeakerEmbeddingDeviceBenchmarkTests` in `BlauTests` with `BLAU_DEVICE_TESTS=1`, after the app has downloaded its models ([benchmarks.md](benchmarks.md)) |
-| Enrollment (hermetic) | `EnrollmentQualityTests`, `EnrollmentConsistencyTests`, `VoiceEnrollmentTests`, `VoiceprintStoreTests` and `VoiceprintMatcherTests`: the analysis on synthetic speech and the fixture clips, the recorder's stop rules, the checks, every flow (clean, rejected, someone else, restart, top-up, denied microphone, missing model, cancel, Done), both stores (model version, top-up, duplicates, delete) and max-over-sets scoring. `ScriptedEnrollmentAudio` and `ScriptedSpeakerEmbedder` stand in for the microphone and the model |
+| Enrollment (hermetic) | `EnrollmentQualityTests`, `EnrollmentConsistencyTests`, `VoiceEnrollmentTests`, `VoiceEnrollmentControlTests`, `VoiceprintStoreTests` and `VoiceprintMatcherTests`: the analysis on synthetic speech and the fixture clips, the recorder's stop rules, the checks, every flow (clean, rejected, someone else, restart, top-up, denied microphone, missing model, cancel, Done), a hub-like microphone that goes quiet or stops mid-clip, cancel while saving, double taps, the idle microphone after a rejection, a store read error, both stores (model version, top-up, duplicates, delete) and max-over-sets scoring. `ScriptedEnrollmentAudio` and `ScriptedSpeakerEmbedder` stand in for the microphone and the model |
 | Enrollment on the real model (opt-in) | `RealModelEnrollmentTests` with `BLAU_SPEAKER_MODEL_DIR`: each fixture speaker enrolls, another speaker's clip is rejected, and the compute time is reported |
 | Enrollment in the app | `VoiceEnrollmentAppTests` (`BlauTests`) and `VoiceEnrollmentUITests` (`BlauUITests`): enrolling from Settings stores the voiceprint Settings reads, cancelling stores nothing, deleting removes it |
 | Gate (hermetic) | `VerificationGateTests`, `VerificationGateRulesTests`, `SpeakerVerifierTests`: checkpoints and re-scores, short-segment inheritance and its limit, the uncertain policy, utterances spanning segments, finals before their segment ends or starts, the capture-history fallback, continuations after VAD's 8 s split and gaps in VAD's audio (no silence scored), checkpoints reached on the hangover, which utterances extend the active turn, the transcript filter (dropped finals passed on as `.reject`), barge-in verdicts and timeouts, the hold on finals; `ScriptedVerifier` scores a scripted speaker timeline. `VoiceGateTranscriptIntegrationTests` (BlauKitIntegrationTests) runs a TV line through `gate.filter` into the real `TurnOrchestrator` |

@@ -189,6 +189,31 @@ struct VoiceprintStoreTests {
         #expect(try await store.status(for: model).requiresEnrollment)
     }
 
+    /// Settings reads the profiles with `@Query` and resolves them the way
+    /// the store does, so a voiceprint whose CloudKit-encrypted vectors
+    /// were lost (an iCloud Keychain reset leaves them empty) isn't shown as
+    /// enrolled.
+    @Test func queriedProfilesResolveLikeTheStore() async throws {
+        let container = try BlauModelContainer.makeInMemory()
+        let store = SwiftDataVoiceprintStore(modelContainer: container)
+        let context = ModelContext(container)
+        #expect(SwiftDataVoiceprintStore.status(of: [], model: model) == .notEnrolled)
+
+        try await store.enroll(draft(owner))
+        let profiles = try context.fetch(FetchDescriptor<VoiceProfile>())
+        let stored = try await store.status(for: model)
+        #expect(SwiftDataVoiceprintStore.status(of: profiles, model: model) == stored)
+        #expect(SwiftDataVoiceprintStore.status(of: profiles, model: model).voiceprint != nil)
+
+        // The encrypted fields didn't come back.
+        let profile = try #require(profiles.first)
+        profile.centroid = Data()
+        for set in profile.enrollmentSets ?? [] { set.embeddings = Data() }
+        try context.save()
+        #expect(SwiftDataVoiceprintStore.status(of: [profile], model: model) == .unreadable)
+        #expect(try await store.status(for: model) == .unreadable)
+    }
+
     // MARK: Resolution rules
 
     @Test func theNewestSetPerDeviceModelWins() {
