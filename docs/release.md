@@ -97,6 +97,26 @@ and tick it there.
       TestFlight build on a device with existing data: the migration runs and
       the old conversations are still there and still sync.
 
+## Privacy manifest and labels
+
+Run this before every TestFlight or App Store upload too (#79,
+[privacy.md](privacy.md#the-privacy-manifest)).
+
+- [ ] `make check-privacy PRIVACY_BUNDLE=<path to the .xcarchive>` passes:
+      both manifests are valid, every required-reason API in the sources is
+      declared, and the app and BlauWidgets carry their manifests.
+- [ ] Xcode → Organizer → the archive → right-click → **Generate Privacy
+      Report**. It lists Blau, BlauWidgets and GRDB with no errors, and Blau's
+      entries match the table in privacy.md.
+- [ ] **Validate App** in the Organizer succeeds (it rejects missing or
+      invalid required-reason declarations).
+- [ ] App Store Connect → App Privacy matches the manifest: **User Content →
+      Other User Content**, linked to the user, used for App Functionality,
+      not for tracking. No other data types.
+- [ ] If a dependency was added or updated, check whether it ships a
+      `PrivacyInfo.xcprivacy` (and is on Apple's list of SDKs that must) and
+      re-run the report.
+
 ## Release history
 
 | Version (build) | Schema version | Schema deployed to Production | Sync test plan run by / result |

@@ -38,6 +38,10 @@ public enum FactExtractionEvent: Hashable, Sendable {
     case waitingForGenerator
     /// Learning was turned off; the queued topics were dropped.
     case discarded(topicIDs: [UUID])
+    /// `suspend()` stopped the worker. Every event of the work done before
+    /// the suspension was delivered before this one, so a subscriber that
+    /// sees it has seen everything extraction wrote.
+    case suspended
 }
 
 /// What to do after an attempt fails.
@@ -153,6 +157,9 @@ public actor FactExtractionPipeline {
     private var notBefore: [UUID: Duration] = [:]
     private var worker: Task<Void, Never>?
     private var wake: Task<Void, Never>?
+    /// `suspend()` calls not yet ended; nothing is extracted while above
+    /// zero.
+    private var suspensions = 0
     /// Topics extracted since launch (the most recent
     /// `recentTopicCapacity`), so a topic reported closed again isn't sent
     /// twice.
@@ -245,6 +252,37 @@ public actor FactExtractionPipeline {
         }
     }
 
+    // MARK: Suspending
+
+    /// Whether `suspend()` holds the worker.
+    public var isSuspended: Bool { suspensions > 0 }
+
+    /// Stops extraction until `endSuspension()`, for Settings → Privacy &
+    /// Data deleting the learned facts (#79): an extraction that read the
+    /// store before the delete must not write facts after it.
+    ///
+    /// The topic being extracted is cancelled (its request too) and stays
+    /// queued, without counting an attempt; a window it already wrote stays
+    /// written, so it is deleted with the rest. Returns once the worker has
+    /// stopped, after yielding `.suspended`. Calls nest: each needs its own
+    /// `endSuspension()`.
+    public func suspend() async {
+        suspensions += 1
+        worker?.cancel()
+        await waitUntilIdle()
+        broadcaster.yield(.suspended)
+        Log.memory.notice("Fact extraction suspended")
+    }
+
+    /// Ends one `suspend()`; after the last one the queue runs again.
+    public func endSuspension() {
+        guard suspensions > 0 else { return }
+        suspensions -= 1
+        guard suspensions == 0 else { return }
+        Log.memory.notice("Fact extraction resumed after a suspension")
+        startWorker()
+    }
+
     // MARK: Queueing
 
     /// A topic closed: queue it for extraction and return. Ignored while
@@ -282,7 +320,7 @@ public actor FactExtractionPipeline {
     // MARK: Worker
 
     private func startWorker() {
-        guard worker == nil, !pending.isEmpty else { return }
+        guard worker == nil, suspensions == 0, !pending.isEmpty else { return }
         worker = Task(priority: .utility) { [weak self] in
             await self?.drain()
         }
@@ -290,7 +328,7 @@ public actor FactExtractionPipeline {
 
     private func drain() async {
         defer { worker = nil }
-        while !Task.isCancelled {
+        while !Task.isCancelled, suspensions == 0 {
             guard !pending.isEmpty else { return }
             guard await isEnabled() else {
                 discardPending()
@@ -348,6 +386,13 @@ public actor FactExtractionPipeline {
         } catch {
             interval.end(message: "failed")
             let reason = String(describing: error)
+            if suspensions > 0, Task.isCancelled {
+                // `suspend()` cancelled it: not the topic's fault, so no
+                // attempt is counted. It runs again after the suspension.
+                Log.memory.notice("Extraction of topic \(topicID, privacy: .public) stopped by a suspension")
+                broadcaster.yield(.failed(topicID: topicID, reason: "suspended", willRetry: true))
+                return false
+            }
             switch classify(error) {
             case .discard:
                 remove(topicID)

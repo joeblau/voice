@@ -155,11 +155,19 @@ secrets: ## Create Config/Secrets.xcconfig from the example (kept if it exists)
 	env -u XAI_DEV_API_KEY scripts/write-secrets-xcconfig.sh
 
 .PHONY: test-scripts
-test-scripts: ## Test the secrets, CI, Instruments template and perf gate scripts
+test-scripts: ## Test the secrets, CI, Instruments template, perf gate and privacy manifest scripts
 	scripts/tests/test-secrets-scripts.sh
 	scripts/tests/test-ci-scripts.sh
 	scripts/tests/test-instruments-template.sh
 	scripts/tests/test-perf-gate.sh
+	scripts/tests/test-privacy-manifest.sh
+
+# Privacy manifests (#79, docs/privacy.md). PRIVACY_BUNDLE: a built Blau.app
+# or a Blau .xcarchive to check as well.
+.PHONY: check-privacy
+check-privacy: ## Validate the privacy manifests and that the sources' required-reason APIs are declared
+	scripts/check-privacy-manifest.py
+	$(if $(PRIVACY_BUNDLE),scripts/check-privacy-manifest.py bundle '$(PRIVACY_BUNDLE)')
 
 # Instruments template (Tools/Instruments; see docs/performance.md).
 #   TRACE_DEVICE  device name or UDID for `make trace`

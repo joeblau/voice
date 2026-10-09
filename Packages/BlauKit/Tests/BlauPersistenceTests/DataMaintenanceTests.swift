@@ -87,6 +87,37 @@ struct DataMaintenanceTests {
         #expect(try count(VoiceProfile.self) == 1)
     }
 
+    @Test func erasingLearnedFactsKeepsTheUsersPages() throws {
+        try seed()
+        // A fact about the user (no entity) as well as one about an entity.
+        context.insert(Fact(predicate: "lives in", objectText: "Austin", validFrom: start, origin: .extracted))
+        try context.save()
+        #expect(try DataEraser.count(.learnedFacts, in: context) == 2)
+
+        let summary = try DataEraser.erase(.learnedFacts, in: context)
+
+        #expect(summary.facts == 2)
+        #expect(summary.entities == 1)
+        #expect(summary.profileBlocks == 1)
+        #expect(summary.documents == 0)
+        #expect(try count(Fact.self) == 0)
+        #expect(try count(MemoryEntity.self) == 0)
+        #expect(try count(ProfileBlock.self) == 0)
+        // What the user wrote, the conversations and the voiceprint stay.
+        #expect(try count(MemoryDocument.self) == 1)
+        #expect(try count(CollectionItem.self) == 1)
+        #expect(try count(Conversation.self) == 2)
+        #expect(try count(VoiceProfile.self) == 1)
+    }
+
+    @Test func whichScopesEraseTheLearnedFacts() {
+        #expect(DataEraseScope.learnedFacts.erasesLearnedFacts)
+        #expect(DataEraseScope.knowledge.erasesLearnedFacts)
+        #expect(DataEraseScope.everything.erasesLearnedFacts)
+        #expect(!DataEraseScope.conversations.erasesLearnedFacts)
+        #expect(!DataEraseScope.voiceprint.erasesLearnedFacts)
+    }
+
     @Test func erasingTheVoiceprintRemovesItsEnrollmentSets() throws {
         try seed()
         #expect(try DataEraser.count(.voiceprint, in: context) == 1)

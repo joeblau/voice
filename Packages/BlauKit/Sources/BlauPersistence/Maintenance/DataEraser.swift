@@ -7,17 +7,30 @@ import os
 public enum DataEraseScope: String, CaseIterable, Hashable, Sendable {
     /// Every conversation with its topics and transcript.
     case conversations
-    /// The knowledge base: profile, documents, collections, entities and
-    /// facts.
+    /// What Blau learned from conversations (Settings → Knowledge → What
+    /// Blau Learned): every fact, the people and things they are about, and
+    /// the pinned profile summary consolidated from them. The pages the user
+    /// wrote (About Me, Company, Notes, Collections) stay.
+    case learnedFacts
+    /// The whole knowledge base: the user's pages and collections, and
+    /// everything `learnedFacts` covers.
     case knowledge
     /// The enrolled voiceprint and its enrollment clips' embeddings.
     case voiceprint
     /// All of the above.
     case everything
 
-    /// The scopes this one covers, `everything` expanded.
+    /// The scopes this one covers, `everything` expanded. `knowledge`
+    /// already covers `learnedFacts`, so it isn't listed again.
     public var components: [DataEraseScope] {
         self == .everything ? [.conversations, .knowledge, .voiceprint] : [self]
+    }
+
+    /// Whether erasing this scope removes the learned facts and the pinned
+    /// profile, so per-device copies of them (the consolidation log and its
+    /// notes) should go too.
+    public var erasesLearnedFacts: Bool {
+        self == .learnedFacts || self == .knowledge || self == .everything
     }
 }
 
@@ -71,12 +84,12 @@ public enum DataEraser {
                     summary.utterances = try deleteAll(StoredUtterance.self, in: context)
                     summary.topics = try deleteAll(Topic.self, in: context)
                     summary.conversations = try deleteAll(Conversation.self, in: context)
+                case .learnedFacts:
+                    try eraseLearnedFacts(into: &summary, in: context)
                 case .knowledge:
                     summary.collectionItems = try deleteAll(CollectionItem.self, in: context)
                     summary.documents = try deleteAll(MemoryDocument.self, in: context)
-                    summary.facts = try deleteAll(Fact.self, in: context)
-                    summary.entities = try deleteAll(MemoryEntity.self, in: context)
-                    summary.profileBlocks = try deleteAll(ProfileBlock.self, in: context)
+                    try eraseLearnedFacts(into: &summary, in: context)
                 case .voiceprint:
                     summary.enrollmentSets = try deleteAll(VoiceEnrollmentSet.self, in: context)
                     summary.voiceProfiles = try deleteAll(VoiceProfile.self, in: context)
@@ -102,6 +115,9 @@ public enum DataEraser {
             switch component {
             case .conversations:
                 total += try context.fetchCount(FetchDescriptor<Conversation>())
+            case .learnedFacts:
+                // What the user sees in What Blau Learned: one row per fact.
+                total += try context.fetchCount(FetchDescriptor<Fact>())
             case .knowledge:
                 total += try context.fetchCount(FetchDescriptor<MemoryDocument>())
                 total += try context.fetchCount(FetchDescriptor<Fact>())
@@ -114,6 +130,15 @@ public enum DataEraser {
             }
         }
         return total
+    }
+
+    /// Facts first (an entity's delete rule would cascade to its facts
+    /// anyway; deleting them explicitly also catches facts about the user,
+    /// which have no entity), then entities and the profile blocks.
+    private static func eraseLearnedFacts(into summary: inout DataEraseSummary, in context: ModelContext) throws {
+        summary.facts = try deleteAll(Fact.self, in: context)
+        summary.entities = try deleteAll(MemoryEntity.self, in: context)
+        summary.profileBlocks = try deleteAll(ProfileBlock.self, in: context)
     }
 
     private static func deleteAll<Model: PersistentModel>(_ type: Model.Type, in context: ModelContext) throws -> Int {

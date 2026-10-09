@@ -232,6 +232,43 @@ final class SettingsUITests: XCTestCase {
         XCTAssertTrue(opened, "Share sheet did not open")
     }
 
+    /// Settings → Privacy & Data (#79): what goes to xAI is spelled out, and
+    /// Export All Data hands a zip to the share sheet.
+    func testExportingAllDataOffersTheShareSheet() {
+        let app = launchOnFakes()
+        openSettingsPane(SettingsPaneID.privacy, in: app)
+        XCTAssertTrue(
+            app.staticTexts["What you say, as text"].waitForExistence(timeout: 5),
+            "Privacy & Data doesn't say what is sent to xAI")
+        let export = app.buttons["settings.privacy.export.prepare"]
+        scrollTo(export, in: app.collectionViews.firstMatch)
+        export.tap()
+        let share = app.buttons["settings.privacy.export.share"]
+        XCTAssertTrue(share.waitForExistence(timeout: 10), "No share button after exporting")
+        XCTAssertTrue(app.buttons["settings.privacy.export.again"].exists, "No Export Again after exporting")
+        share.tap()
+        let opened =
+            app.otherElements["ActivityListView"].waitForExistence(timeout: 10)
+            || app.buttons["Copy"].waitForExistence(timeout: 2)
+        XCTAssertTrue(opened, "Share sheet did not open")
+    }
+
+    func testDeletingLearnedFactsAsksFirst() {
+        let app = launchOnFakes()
+        openSettingsPane(SettingsPaneID.privacy, in: app)
+        let delete = app.buttons["settings.privacy.delete.learnedFacts"]
+        scrollTo(delete, in: app.collectionViews.firstMatch)
+        delete.tap()
+        let confirm = app.buttons.matching(identifier: "Delete Learned Facts").firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), "No confirmation before deleting")
+        XCTAssertTrue(
+            app.staticTexts["Delete what Blau learned?"].exists, "The confirmation doesn't say what it deletes")
+        confirm.tap()
+        let result = app.staticTexts["settings.privacy.result"]
+        XCTAssertTrue(result.waitForExistence(timeout: 10), "No result after deleting")
+        XCTAssertEqual(result.label, "Deleted 0 learned facts.")
+    }
+
     func testDeletingConversationsAsksFirst() {
         let app = launchOnFakes()
         openSettingsPane(SettingsPaneID.privacy, in: app)

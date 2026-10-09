@@ -383,4 +383,57 @@ struct ProfileConsolidatorTests {
         }
         #expect(seen.first == .started(.manual))
     }
+
+    // MARK: Erasing (#79)
+
+    /// Settings → Privacy & Data deleted the learned facts: this device's
+    /// log (profile text before and after each run) and waiting notes go
+    /// too, while the schedule stays.
+    @Test func erasingLocalHistoryDropsRecordsAndNotes() async throws {
+        let fixture = try ProfileFixture()
+        try fixture.addFacts([(nil, "works at", "Acme")])
+        let generator = ScriptedTextGenerator(replies: [ProfileFixture.reply(profile: "Work: Acme.")])
+        let log = InMemoryProfileConsolidationLogStore()
+        let notes = InMemoryProfileConsolidationNoteStore()
+        let consolidator = makeConsolidator(fixture, generator: generator, log: log, notes: notes)
+        _ = await consolidator.consolidate(reason: .manual)
+        await consolidator.record(FactExtractionOutcome(topicID: UUID(), summary: "The user closed the round."))
+        await consolidator.noteRemovedFacts(count: 2)
+        #expect(!log.load().records.isEmpty)
+        #expect(!notes.load().isEmpty)
+
+        await consolidator.eraseLocalHistory()
+
+        #expect(log.load().records.isEmpty)
+        #expect(log.load().pendingRemovals == 0)
+        #expect(log.load().lastRunAt == Self.now)
+        #expect(notes.load().isEmpty)
+        #expect(await consolidator.log().records.isEmpty)
+    }
+
+    /// A run that already read the facts finishes before they are deleted,
+    /// so it can't write a profile from them afterwards.
+    @Test func waitingUntilIdleWaitsForTheRunningConsolidation() async throws {
+        let fixture = try ProfileFixture()
+        try fixture.addFacts([(nil, "works at", "Acme")])
+        let latch = Latch()
+        let generator = ScriptedTextGenerator { _, _ in
+            await latch.wait()
+            return ProfileFixture.reply(profile: "Work: Acme.")
+        }
+        let consolidator = makeConsolidator(fixture, generator: generator)
+        // Nothing running: returns at once.
+        await consolidator.waitUntilIdle()
+
+        let run = Task { await consolidator.consolidate() }
+        try await eventually { generator.requests.count == 1 }
+        let waiter = Task { await consolidator.waitUntilIdle() }
+        try await eventually { await consolidator.waiterCount == 1 }
+        #expect(await consolidator.isRunning)
+        latch.open()
+        await waiter.value
+        _ = await run.value
+        #expect(try fixture.blocks().first?.text == "Work: Acme.")
+        #expect(await consolidator.waiterCount == 0)
+    }
 }

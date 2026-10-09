@@ -230,6 +230,35 @@ public actor ProfileConsolidator {
         logStore.load().pendingRemovals
     }
 
+    // MARK: Erasing
+
+    /// Waits for a consolidation that is running to finish. Settings →
+    /// Privacy & Data calls it before deleting the learned facts, so a run
+    /// that already read them can't write a new profile block from them
+    /// after they are gone.
+    public func waitUntilIdle() async {
+        guard let running else { return }
+        waiterCount += 1
+        defer { waiterCount -= 1 }
+        _ = await running.value
+    }
+
+    /// Forgets this device's own copies of what consolidation read and
+    /// wrote, after the user deleted the learned facts and the profile
+    /// (Settings → Privacy & Data): the log's records (the profile text
+    /// before and after each run, the rewritten topic summaries) and the
+    /// extraction notes waiting for the next run. The schedule (last run,
+    /// retry backoff) stays; the removal count is cleared, since there is
+    /// nothing left for a run to take out.
+    public func eraseLocalHistory() {
+        var log = logStore.load()
+        log.records = []
+        log.pendingRemovals = 0
+        logStore.save(log)
+        noteStore.save([])
+        Log.memory.notice("Erased this device's profile consolidation log and notes")
+    }
+
     // MARK: Scheduling
 
     /// Whether a consolidation is due, from this device's last run, the

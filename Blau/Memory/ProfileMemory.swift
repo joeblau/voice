@@ -39,6 +39,12 @@ final class ProfileMemory {
     static let foregroundCatchUpDelay: TimeInterval = 3 * 24 * 3_600
 
     @ObservationIgnored private var followers: [Task<Void, Never>] = []
+    /// Fact extraction, once `start(learning:)` follows it; Privacy & Data
+    /// suspends it around a delete of the learned facts.
+    @ObservationIgnored private var extraction: FactExtractionPipeline?
+    /// Deletes waiting for the extraction follower to see `.suspended`,
+    /// that is, to have recorded every outcome from before the suspension.
+    @ObservationIgnored private var suspensionWaiters: [AsyncStream<Void>.Continuation] = []
 
     init(consolidator: ProfileConsolidator, pinned: PinnedMemoryProvider, schedulesBackgroundWork: Bool) {
         self.consolidator = consolidator
@@ -60,14 +66,21 @@ final class ProfileMemory {
         guard followers.isEmpty else { return }
         let consolidator = consolidator
         let pinned = pinned
+        extraction = learning.pipeline
         let extractions = learning.pipeline.events()
         followers.append(
-            Task(priority: .utility) {
+            Task(priority: .utility) { @MainActor [weak self] in
                 for await event in extractions {
-                    guard case .finished(let outcome) = event else { continue }
-                    await consolidator.record(outcome)
-                    if !outcome.insertedFactIDs.isEmpty || !outcome.invalidatedFactIDs.isEmpty {
-                        await pinned.invalidate()
+                    switch event {
+                    case .finished(let outcome):
+                        await consolidator.record(outcome)
+                        if !outcome.insertedFactIDs.isEmpty || !outcome.invalidatedFactIDs.isEmpty {
+                            await pinned.invalidate()
+                        }
+                    case .suspended:
+                        self?.extractionSuspended()
+                    default:
+                        continue
                     }
                 }
             })
@@ -144,6 +157,59 @@ final class ProfileMemory {
     /// a conversation (`catchUpIfOverdue`) or background task.
     func factsRemoved(count: Int) async {
         await removals.factsRemoved(count: count)
+    }
+
+    /// Call before Settings → Privacy & Data deletes the learned facts or the
+    /// knowledge base (#79), then `memoryErased()` or `eraseFailed()`:
+    ///
+    /// - Fact extraction is suspended. The request in flight is cancelled
+    ///   (its topic stays queued), and this returns only after the follower
+    ///   has recorded every outcome from before the suspension, so no note
+    ///   or fact from an extraction that read the store before the delete
+    ///   arrives after it.
+    /// - A consolidation that already read the facts finishes, so it can't
+    ///   write a profile from them once they are gone.
+    func prepareToErase() async {
+        if let extraction {
+            let (delivered, continuation) = AsyncStream<Void>.makeStream()
+            suspensionWaiters.append(continuation)
+            await extraction.suspend()
+            for await _ in delivered { break }
+        }
+        await consolidator.waitUntilIdle()
+    }
+
+    /// Call after Settings → Privacy & Data deleted the learned facts or the
+    /// knowledge base (#79): drops this device's consolidation log and
+    /// notes (they hold profile text) and the pinned cache, so the next
+    /// session's instructions no longer carry what was deleted. The topics
+    /// still waiting for extraction were closed before the delete, so they
+    /// are dropped rather than learned again; extraction resumes for the
+    /// conversations that follow.
+    func memoryErased() async {
+        await consolidator.eraseLocalHistory()
+        await pinned.invalidate()
+        lastOutcome = nil
+        await reloadLog()
+        if let extraction {
+            await extraction.discardPending()
+            await extraction.endSuspension()
+        }
+    }
+
+    /// Call when a delete `prepareToErase()` prepared for failed: nothing
+    /// was deleted, so extraction carries on with its queue.
+    func eraseFailed() async {
+        await extraction?.endSuspension()
+    }
+
+    /// The follower saw `.suspended`: every earlier outcome is recorded.
+    private func extractionSuspended() {
+        for waiter in suspensionWaiters {
+            waiter.yield()
+            waiter.finish()
+        }
+        suspensionWaiters = []
     }
 
     /// `backend` with each fact the `forget` tool forgets (#68) reported as

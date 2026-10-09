@@ -6,7 +6,9 @@ See issue #1 for the architecture overview and
 [`docs/architecture.md`](docs/architecture.md) for the module layout. Data is
 stored with SwiftData and synced through the user's private iCloud container
 ([`docs/sync.md`](docs/sync.md)), with an optional Markdown copy of every
-conversation in iCloud Drive → Blau ([`docs/export.md`](docs/export.md));
+conversation in iCloud Drive → Blau ([`docs/export.md`](docs/export.md)).
+What Blau keeps, what it sends to xAI, exporting and deleting it, and the
+privacy manifest are in [`docs/privacy.md`](docs/privacy.md);
 [`docs/release.md`](docs/release.md) has the
 checklist to run before every TestFlight build.
 
@@ -52,7 +54,8 @@ configured. See [docs/configuration.md](docs/configuration.md).
 | `make eval-memory` | Evaluate memory retrieval (Recall@k, MRR) and LLM-judged answers on the memory eval set, with the regression gate ([docs](docs/memory-eval.md)) |
 | `make icon-previews` | Render the app icon in every appearance into `.build/AppIcon` ([docs](docs/branding.md)) |
 | `make secrets`   | Create `Config/Secrets.xcconfig` from the example                |
-| `make test-scripts` | Test the secrets, CI and Instruments template scripts         |
+| `make test-scripts` | Test the secrets, CI, Instruments template, perf gate and privacy manifest scripts |
+| `make check-privacy` | Validate the privacy manifests and that every required-reason API the sources use is declared (`PRIVACY_BUNDLE=<.app or .xcarchive>` checks a build too, [docs](docs/privacy.md#the-privacy-manifest)) |
 | `make install-instruments-template` | Add the Blau template to Instruments' chooser ([docs](docs/performance.md#instruments-template)) |
 | `make trace`     | Record Blau on `TRACE_DEVICE` with the Blau Instruments template |
 | `make instruments-template` | Regenerate `Tools/Instruments/Blau.tracetemplate`     |
