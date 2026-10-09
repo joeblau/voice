@@ -18,7 +18,7 @@ public struct DiagnosticsOverview: Codable, Sendable, Hashable {
     public var lastPeriodEnd: Date?
     /// When the newest payload arrived on this device.
     public var lastReceivedAt: Date?
-    /// App version of the newest payload.
+    /// App version of the payload covering the latest period.
     public var latestAppVersion: String?
 
     // MARK: Hangs
@@ -34,9 +34,10 @@ public struct DiagnosticsOverview: Codable, Sendable, Hashable {
 
     /// Highest peak memory across all metric payloads, in bytes.
     public var peakMemoryBytes: Double?
-    /// Peak memory in the newest metric payload, in bytes.
+    /// Peak memory in the metric payload covering the latest period, in bytes.
     public var latestPeakMemoryBytes: Double?
-    /// Average memory while suspended in the newest metric payload, in bytes.
+    /// Average memory while suspended in the metric payload covering the
+    /// latest period, in bytes.
     public var latestAverageSuspendedMemoryBytes: Double?
     /// Exits caused by the memory limit or memory pressure.
     public var memoryExitCount = 0
@@ -75,13 +76,20 @@ public struct DiagnosticsOverview: Codable, Sendable, Hashable {
     public init() {}
 
     /// Rolls `records` up. Order doesn't matter.
+    ///
+    /// The "latest" values come from the payload covering the latest period,
+    /// not the last one delivered: at the first launch after an install or
+    /// update, MetricKit hands over a whole batch of past payloads at once,
+    /// in no guaranteed order.
     public init(records: [DiagnosticsRecord]) {
-        let byArrival = records.sorted { ($0.receivedAt, $0.summary.periodEnd) < ($1.receivedAt, $1.summary.periodEnd) }
+        let byPeriod = records.sorted {
+            ($0.summary.periodEnd, $0.receivedAt, $0.id) < ($1.summary.periodEnd, $1.receivedAt, $1.id)
+        }
 
         var crashLabels: [String: Int] = [:]
         var signpostsByKey: [String: SignpostMetricSummary] = [:]
 
-        for record in byArrival {
+        for record in byPeriod {
             let summary = record.summary
             firstPeriodStart = min(firstPeriodStart ?? summary.periodStart, summary.periodStart)
             lastPeriodEnd = max(lastPeriodEnd ?? summary.periodEnd, summary.periodEnd)
@@ -116,6 +124,11 @@ public struct DiagnosticsOverview: Codable, Sendable, Hashable {
     /// Whether any payload has been stored yet.
     public var isEmpty: Bool { metricPayloadCount == 0 && diagnosticPayloadCount == 0 }
 
+    /// Whether there is anything to show about launches: measured launch
+    /// times from the daily metrics, or slow-launch reports. Either can
+    /// arrive without the other.
+    public var hasLaunchData: Bool { (timeToFirstDraw?.sampleCount ?? 0) > 0 || slowLaunchReportCount > 0 }
+
     /// Hangs from both sources: the daily metric counts plus hang reports.
     /// The two overlap (a reported hang is also counted in the metrics), so
     /// the screen shows them separately; this is the larger of the two.
@@ -138,7 +151,7 @@ public struct DiagnosticsOverview: Codable, Sendable, Hashable {
         }
 
         for signpost in metrics.signposts {
-            let key = "\(signpost.category)\u{1F}\(signpost.name)"
+            let key = signpost.id
             guard var existing = signposts[key] else {
                 signposts[key] = signpost
                 continue

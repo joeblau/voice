@@ -57,6 +57,23 @@ struct AppDiagnosticsTests {
         #expect(context["bundleIdentifier"] as? String == Bundle.main.bundleIdentifier)
     }
 
+    @Test func collectingTurnsOnOnlyAfterRegistrationRuns() async throws {
+        defer { cleanUp() }
+        let registration = DispatchSemaphore(value: 0)
+        let diagnostics = AppDiagnostics(store: FileDiagnosticsStore(directory: directory)) { _ in
+            // Stands in for MetricKit registration, held until the test lets go.
+            registration.wait()
+        }
+
+        let task = try #require(diagnostics.start())
+        #expect(!diagnostics.isCollecting, "registration hasn't run yet")
+        #expect(diagnostics.start() == nil, "starts once")
+
+        registration.signal()
+        await task.value
+        #expect(diagnostics.isCollecting)
+    }
+
     @Test func withoutStorageDiagnosticsAreOff() async {
         let diagnostics = AppDiagnostics(store: nil)
         diagnostics.start()
