@@ -31,6 +31,9 @@ public enum PipelineInterval: CaseIterable, Sendable {
     case voiceIDEmbed
     /// Scoring one speech segment against the enrolled voiceprint.
     case voiceIDVerify
+    /// The voice ID gate holding a final utterance until its decision is
+    /// made (#47): the gate's share of the latency budget (#74).
+    case voiceIDGate
     /// One full turn: committing the user's text to Grok until the
     /// response is done (or cancelled by barge-in).
     case realtimeTurn
@@ -83,6 +86,7 @@ public enum PipelineInterval: CaseIterable, Sendable {
         case .modelWarmUp: "model.warmUp"
         case .voiceIDEmbed: "voiceid.embed"
         case .voiceIDVerify: "voiceid.verify"
+        case .voiceIDGate: "voiceid.gate"
         case .realtimeTurn: "realtime.turn"
         case .realtimeFirstAudio: "realtime.firstAudio"
         case .realtimeConnect: "realtime.connect"
@@ -105,7 +109,7 @@ public enum PipelineInterval: CaseIterable, Sendable {
         switch self {
         case .captureFrame, .playbackFirstBuffer: .audio
         case .vadChunk, .asrChunk, .asrEndOfUtterance, .asrSecondPass, .modelDownload, .modelWarmUp: .asr
-        case .voiceIDEmbed, .voiceIDVerify: .voiceID
+        case .voiceIDEmbed, .voiceIDVerify, .voiceIDGate: .voiceID
         case .realtimeTurn, .realtimeFirstAudio, .realtimeConnect, .realtimeEvent: .realtime
         case .topicsSegment, .topicsLabel: .topics
         case .memoryEmbed, .memorySearch, .memoryExtract, .memoryConsolidate: .memory

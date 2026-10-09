@@ -146,6 +146,10 @@ public struct PipelineReadings: Sendable, Hashable {
     public var firstAudio: LatencyStats?
     /// End of utterance → `response.done`.
     public var turnTime: LatencyStats?
+    /// Each hop of the latency budget (#74), from the turn orchestrator's
+    /// window: end of speech → EOU, the voice gate, commit → first audio,
+    /// the first buffer and the total.
+    public var latencyHops: [LatencyHop: LatencyStats]
     public var usage: Usage?
     /// Barge-ins this conversation and how fast the last one went silent,
     /// described.
@@ -161,6 +165,7 @@ public struct PipelineReadings: Sendable, Hashable {
         session: String? = nil,
         firstAudio: LatencyStats? = nil,
         turnTime: LatencyStats? = nil,
+        latencyHops: [LatencyHop: LatencyStats] = [:],
         usage: Usage? = nil,
         bargeIn: String? = nil
     ) {
@@ -173,6 +178,7 @@ public struct PipelineReadings: Sendable, Hashable {
         self.session = session
         self.firstAudio = firstAudio
         self.turnTime = turnTime
+        self.latencyHops = latencyHops
         self.usage = usage
         self.bargeIn = bargeIn
     }

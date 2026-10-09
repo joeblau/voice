@@ -123,7 +123,8 @@ extension PipelineInterval {
     /// two in sync.
     public var reportsToMetricKit: Bool {
         switch self {
-        case .asrEndOfUtterance, .voiceIDVerify, .realtimeTurn, .realtimeFirstAudio, .topicsLabel, .memorySearch:
+        case .asrEndOfUtterance, .voiceIDVerify, .voiceIDGate, .realtimeTurn, .realtimeFirstAudio, .topicsLabel,
+            .memorySearch:
             true
         case .captureFrame, .playbackFirstBuffer, .vadChunk, .asrChunk, .asrSecondPass, .modelDownload, .modelWarmUp,
             .voiceIDEmbed, .realtimeConnect, .realtimeEvent, .topicsSegment, .memoryEmbed, .memoryExtract,

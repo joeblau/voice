@@ -23,6 +23,7 @@ final class FakeAudioOutput: AgentAudioOutput {
         var flushes = 0
         var played: [PlaybackItemID: Int64] = [:]
         var received: [PlaybackItemID: Int64] = [:]
+        var firstRendered: [PlaybackItemID: Duration] = [:]
         var isIdle = true
         var idleWaiters: [CheckedContinuation<Void, Never>] = []
     }
@@ -37,6 +38,12 @@ final class FakeAudioOutput: AgentAudioOutput {
     /// How much of `item` the user "heard".
     func setPlayed(_ item: PlaybackItemID, milliseconds: Int) {
         state.withLock { $0.played[item] = Int64(milliseconds) * 24 }
+    }
+
+    /// When `item`'s first frame "was rendered" (the clock's uptime), for
+    /// the latency budget (#74).
+    func setFirstRendered(_ item: PlaybackItemID, at uptime: Duration) {
+        state.withLock { $0.firstRendered[item] = uptime }
     }
 
     /// While `false`, `waitUntilIdle()` waits: the reply is still playing.
@@ -70,7 +77,9 @@ final class FakeAudioOutput: AgentAudioOutput {
                 let played = state.played[item] ?? 0
                 let received = state.received[item] ?? 0
                 guard played < received else { return nil }
-                return PlayedItem(id: item, playedFrames: played, receivedFrames: received, sampleRate: 24_000)
+                return PlayedItem(
+                    id: item, playedFrames: played, receivedFrames: received, sampleRate: 24_000,
+                    firstRenderedAt: state.firstRendered[item])
             }
             state.received.removeAll()
             return PlaybackFlushResult(interrupted: interrupted, droppedDuration: .zero)
@@ -81,7 +90,7 @@ final class FakeAudioOutput: AgentAudioOutput {
         state.withLock { state in
             PlayedItem(
                 id: item, playedFrames: state.played[item] ?? 0, receivedFrames: state.received[item] ?? 0,
-                sampleRate: 24_000)
+                sampleRate: 24_000, firstRenderedAt: state.firstRendered[item])
         }
     }
 
@@ -176,6 +185,10 @@ struct TurnHarness {
     let transcript: any TurnTranscriptRecording
     let recording: RecordingTranscript?
     let signposts = RecordingSignpostBackend()
+    /// The transcriber's side of the latency budget (#74): tests record
+    /// marks here before handing the orchestrator a final.
+    let latencyMarks = LatencyMarks()
+    let latencyTracker = LatencyBudgetTracker()
     let orchestrator: TurnOrchestrator
     let conversationID = ConversationID()
     let tokens: FakeTokenProvider
@@ -223,7 +236,8 @@ struct TurnHarness {
         orchestrator = TurnOrchestrator(
             client: client, configurator: configurator, audio: audio, transcript: self.transcript,
             reseedContext: reseedContext, tools: tools, clock: clock,
-            signposter: Signposter(category: .realtime, backend: signposts), configuration: configuration)
+            signposter: Signposter(category: .realtime, backend: signposts), latencyMarks: latencyMarks,
+            latencyTracker: latencyTracker, configuration: configuration)
     }
 
     /// Starts the conversation and waits for the session to be configured.

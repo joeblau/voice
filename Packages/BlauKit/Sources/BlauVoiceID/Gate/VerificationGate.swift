@@ -70,8 +70,10 @@ import os
 ///
 /// **Latency.** The gate holds a final only while a decision is still being
 /// computed: normally the end-of-speech re-score, one embedding (target:
-/// < 100 ms beyond end of utterance). ``statistics`` keeps the hold time;
-/// every score is a `voiceid.embed` and a `voiceid.verify` interval.
+/// < 100 ms beyond end of utterance, the gate's share of the latency
+/// budget, #74). ``statistics`` keeps the hold time and every hold is a
+/// `voiceid.gate` interval (its end message is the disposition); every
+/// score is a `voiceid.embed` and a `voiceid.verify` interval.
 public actor VerificationGate {
     public nonisolated let configuration: VerificationGateConfiguration
 
@@ -88,6 +90,7 @@ public actor VerificationGate {
     private let verifier: any SpeechVerifying
     private let history: (any CaptureFrameSource)?
     private let clock: any BlauClock
+    private let signposter: Signposter
     private nonisolated let shared = Mutex(VerificationGateStatistics())
 
     /// Segments by VAD id, and their ids in the order they started.
@@ -157,17 +160,20 @@ public actor VerificationGate {
     ///     waits.
     ///   - turnActivity: Whether the conversation is in an active turn.
     ///   - clock: Times the waits and the hold on finals.
+    ///   - signposter: Where the `voiceid.gate` hold on each final goes.
     public init(
         verifier: any SpeechVerifying,
         history: (any CaptureFrameSource)? = nil,
         configuration: VerificationGateConfiguration = .standard,
         turnActivity: ConversationTurnActivity? = nil,
-        clock: any BlauClock = SystemClock()
+        clock: any BlauClock = SystemClock(),
+        signposter: Signposter = Signposts.voiceID
     ) {
         self.verifier = verifier
         self.history = history
         self.configuration = configuration
         self.clock = clock
+        self.signposter = signposter
         self.turnActivity = turnActivity ?? ConversationTurnActivity(clock: clock)
         (verdicts, verdictContinuation) = AsyncStream.makeStream(
             of: GatedUtterance.self, bufferingPolicy: .bufferingNewest(64))
@@ -543,6 +549,7 @@ public actor VerificationGate {
     /// and whether it is sent.
     public func decide(_ utterance: Utterance) async -> GatedUtterance {
         let receivedAt = clock.uptime
+        let hold = signposter.beginInterval(.voiceIDGate)
         let range = Self.sampleRange(of: utterance.timeRange)
         // The transcriber's VAD stream can be ahead of the gate's.
         _ = await waitUntil(configuration.segmentArrivalTimeout) { !self.segmentIDs(overlapping: range).isEmpty }
@@ -558,6 +565,7 @@ public actor VerificationGate {
             for: decision, duration: utterance.duration, isTurnActive: turnActivity.isActive,
             policy: configuration.uncertainPolicy)
         let delay = max(.zero, clock.uptime - receivedAt)
+        hold.end(message: disposition.rawValue)
         let gated = GatedUtterance(
             utterance: utterance, decision: decision, disposition: disposition, segments: verdicts, delay: delay)
 
