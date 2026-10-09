@@ -222,6 +222,56 @@ struct VerificationGateTests {
         #expect(!activity.isActive)
     }
 
+    /// The owner opens with a short phrase and a pause ("Okay, so…
+    /// [pause] what about tomorrow?"): one utterance, two segments. The
+    /// opener is under 1 s with nothing recent to inherit, so it is
+    /// uncertain for lack of evidence, not because voice ID doubted it. It
+    /// doesn't count against the scored speech, and the owner is heard.
+    @Test func theOwnersShortOpenerDoesNotDropTheUtteranceWhenIdle() async throws {
+        let clock = ManualClock()
+        let activity = ConversationTurnActivity(window: .seconds(10), clock: clock)
+        let verifier = ScriptedVerifier(SpeakerTimeline([(0, 10, .owner)]))
+        let gate = VerificationGate(verifier: verifier, turnActivity: activity, clock: clock)
+        await gate.feed(SpeechScript.segment(0, from: 0, to: 0.7))
+        await gate.feed(SpeechScript.segment(1, from: 1.1, to: 2.4))
+        #expect(!activity.isActive)
+
+        let gated = await gate.decide(finalUtterance("Okay, so… what about tomorrow?", from: 0, to: 2.4))
+
+        #expect(gated.segments.map(\.decision) == [.uncertain, .accept])
+        #expect(gated.segments.map(\.basis) == [.noRecentDecision, .scored])
+        #expect(gated.decision == .accept)
+        #expect(gated.disposition == .accepted)
+        #expect(activity.isActive)
+    }
+
+    /// The owner answering Grok ("Yes. [pause] Do it.") after Grok spoke
+    /// for longer than the inheritance window: the opener has nothing to
+    /// inherit, and the whole utterance is under 2 s, so counting the
+    /// opener as uncertain would drop it even inside the active turn.
+    @Test func theOwnersShortOpenerDoesNotDropTheUtteranceInAnActiveTurn() async throws {
+        let clock = ManualClock()
+        let activity = ConversationTurnActivity(window: .seconds(10), clock: clock)
+        let verifier = ScriptedVerifier(SpeakerTimeline([(0, 30, .owner)]))
+        let gate = VerificationGate(verifier: verifier, turnActivity: activity, clock: clock)
+        // The owner's question, then Grok answers for 7 s.
+        await gate.feed(SpeechScript.segment(0, from: 0, to: 2.5))
+        let question = await gate.decide(finalUtterance("Should I book it?", from: 0, to: 2.5))
+        #expect(question.disposition == .accepted)
+        activity.agentActivityChanged(true)
+        activity.agentActivityChanged(false)
+        #expect(activity.isActive)
+
+        await gate.feed(SpeechScript.segment(1, from: 10, to: 10.65))
+        await gate.feed(SpeechScript.segment(2, from: 10.85, to: 11.95))
+        let gated = await gate.decide(finalUtterance("Yes. Do it.", from: 10, to: 11.95))
+
+        #expect(gated.segments.map(\.decision) == [.uncertain, .accept])
+        #expect(gated.segments.map(\.basis) == [.noRecentDecision, .scored])
+        #expect(gated.decision == .accept)
+        #expect(gated.disposition == .accepted)
+    }
+
     /// The model can end an utterance before VAD ends the segment: the gate
     /// scores what it has instead of waiting.
     @Test func aFinalBeforeTheSegmentEndsIsScoredAtOnce() async throws {

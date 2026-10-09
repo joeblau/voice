@@ -25,6 +25,12 @@ public enum VerificationGateRules {
     ///   riding along with a few accepted (or rejected) words. The owner's
     ///   2 s with a 0.5 s uncertain tail still accepts (80%); 1.4 s
     ///   accepted then 6 s of an unattributed voice doesn't (19%).
+    ///   Only evidence of uncertainty counts: a part that is `uncertain`
+    ///   just because it was too short to score and had nothing recent to
+    ///   inherit (``SegmentVerdict/Basis/noRecentDecision``) says nothing
+    ///   about who spoke, so it is left out of the shares. Otherwise the
+    ///   owner's "Okay, so… [pause] what about tomorrow?" would lose to its
+    ///   own short opener.
     /// - Otherwise, accepted parts and no rejected ones: `accept`; rejected
     ///   and no accepted ones: `reject`.
     /// - Both: the larger share of speech decides, unless the smaller share
@@ -41,12 +47,16 @@ public enum VerificationGateRules {
             switch segment.decision {
             case .accept: accepted += weight
             case .reject: rejected += weight
-            case .uncertain: uncertain += weight
+            case .uncertain:
+                if case .noRecentDecision = segment.basis { continue }
+                uncertain += weight
             }
         }
         guard accepted > .zero || rejected > .zero else { return .uncertain }
         let total = (accepted + rejected + uncertain).timeInterval
-        if max(accepted, rejected).timeInterval / total < 1 - minorityShare { return .uncertain }
+        // The share outside the dominant decision, so exactly two thirds
+        // still decides (`2 / 3 < 1 - 1 / 3` in floating point).
+        if (total - max(accepted, rejected).timeInterval) / total > minorityShare { return .uncertain }
         switch (accepted > .zero, rejected > .zero) {
         case (true, false): return .accept
         case (false, true): return .reject

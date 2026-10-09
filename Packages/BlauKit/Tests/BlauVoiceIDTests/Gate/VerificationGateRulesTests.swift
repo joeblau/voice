@@ -7,10 +7,12 @@ import Testing
 
 @Suite("Verification gate rules")
 struct VerificationGateRulesTests {
-    static func verdict(_ decision: SpeakerDecision, seconds: Double) -> SegmentVerdict {
+    static func verdict(
+        _ decision: SpeakerDecision, seconds: Double, basis: SegmentVerdict.Basis = .scored
+    ) -> SegmentVerdict {
         SegmentVerdict(
             segmentID: 0, decision: decision, score: nil, scoredDuration: .zero, speechDuration: .seconds(seconds),
-            basis: .scored)
+            basis: basis)
     }
 
     static func score(_ decision: SpeakerDecision, seconds: Double, score: Float = 0) -> SpeakerScore {
@@ -60,6 +62,36 @@ struct VerificationGateRulesTests {
         #expect(combine([(.accept, 7), (.reject, 3), (.uncertain, 0.2)]) == .accept)
         // A close conflict with a little uncertainty stays uncertain.
         #expect(combine([(.accept, 3), (.reject, 2), (.uncertain, 0.2)]) == .uncertain)
+        // Exactly two thirds decides, as documented.
+        #expect(combine([(.accept, 2), (.uncertain, 1)]) == .accept)
+        #expect(combine([(.reject, 2), (.uncertain, 1)]) == .reject)
+    }
+
+    /// A short segment that is uncertain only because it had nothing recent
+    /// to inherit carries no evidence about who spoke, so it doesn't count
+    /// against the scored speech: the owner's "Okay, so… [pause] what about
+    /// tomorrow?" accepts. Scored, inherited, unscored and timed-out
+    /// uncertain parts still count.
+    @Test func aShortOpenerWithNothingToInheritDoesNotCount() {
+        let combine = { (parts: [(SpeakerDecision, Double, SegmentVerdict.Basis)]) in
+            VerificationGateRules.combine(
+                parts.map { Self.verdict($0.0, seconds: $0.1, basis: $0.2) }, minorityShare: 1.0 / 3)
+        }
+        #expect(combine([(.uncertain, 0.7, .noRecentDecision), (.accept, 1.3, .scored)]) == .accept)
+        #expect(combine([(.uncertain, 0.65, .noRecentDecision), (.accept, 1.1, .scored)]) == .accept)
+        #expect(combine([(.uncertain, 0.9, .noRecentDecision), (.reject, 1.1, .scored)]) == .reject)
+        // Several short unattributed parts around a scored one.
+        #expect(
+            combine([
+                (.uncertain, 0.8, .noRecentDecision), (.accept, 1.2, .scored), (.uncertain, 0.9, .noRecentDecision),
+            ]) == .accept)
+        // Nothing but unattributed short parts: still uncertain.
+        #expect(combine([(.uncertain, 0.7, .noRecentDecision), (.uncertain, 0.6, .noRecentDecision)]) == .uncertain)
+        // Real evidence of uncertainty still counts.
+        #expect(combine([(.accept, 1.4, .scored), (.uncertain, 6, .scored)]) == .uncertain)
+        for basis: SegmentVerdict.Basis in [.scored, .inherited(from: 3), .unscored, .timedOut] {
+            #expect(combine([(.uncertain, 0.7, basis), (.accept, 1.3, .scored)]) == .uncertain)
+        }
     }
 
     @Test func aConflictGoesToTheMajorityUnlessItIsClose() {
