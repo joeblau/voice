@@ -1,7 +1,7 @@
 {
   "configurations" : [
     {
-      "id" : "8C4E2A7D-1B3F-4D6A-A9E2-5F0C7B3D9A02",
+      "id" : "5D1C7A3E-9B42-4F6E-8A1D-3C7E2B9F0A76",
       "name" : "Release",
       "options" : {
 
@@ -10,6 +10,12 @@
   ],
   "defaultOptions" : {
     "codeCoverage" : false,
+    "environmentVariableEntries" : [
+      {
+        "key" : "BLAU_SOAK",
+        "value" : "1"
+      }
+    ],
     "targetForVariableExpansion" : {
       "containerPath" : "container:Blau.xcodeproj",
       "identifier" : "B7AD843E63F08167B6A61353",
@@ -18,8 +24,8 @@
   },
   "testTargets" : [
     {
-      "skippedTests" : [
-        "SoakTests"
+      "selectedTests" : [
+        "SoakTests\/testLongSession()"
       ],
       "target" : {
         "containerPath" : "container:Blau.xcodeproj",

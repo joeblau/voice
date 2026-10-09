@@ -1385,7 +1385,10 @@ and real xAI credentials, so the first rows are still pending:
 
 ## What comes next
 
-The rest of the performance epic (#11) builds on these names: the soak test
-(#76). The XCTest performance suite and its CI baselines (#73), thermal and
-power adaptation (#75) and the latency budget (#74) are described above,
-and the performance HUD above shows the same intervals live.
+The performance epic (#11) is built on these names. The XCTest performance
+suite and its CI baselines (#73), thermal and power adaptation (#75) and
+the latency budget (#74) are described above, and the performance HUD
+above shows the same intervals live. The long-session soak test (#76),
+which runs the scripted session for one to two hours with mixed audio and
+checks memory growth, latency drift, dropped frames, session renewal and
+leaks, has its own page: [soak.md](soak.md).

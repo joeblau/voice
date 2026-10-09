@@ -145,8 +145,14 @@
                     LongSessionDebugView()
                 }
                 .accessibilityIdentifier(LongSessionAccessibility.openLink)
+                NavigationLink("Automated soak (scripted audio)") {
+                    SoakView(models: environment.speechModels)
+                }
             } footer: {
-                Text("Keeps the microphone and the VAD running with the screen locked (#26).")
+                Text(
+                    "The soak test keeps the microphone and the VAD running with the screen locked (#26). The "
+                        + "automated soak plays two hours of scripted audio through the pipeline against a fake "
+                        + "realtime server and reports memory, latency and renewals (#76).")
             }
         }
 

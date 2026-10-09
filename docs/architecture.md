@@ -186,6 +186,10 @@ The complete list of declared edges:
 - [embeddings.md](embeddings.md): the shared text embedding service
   (EmbeddingGemma 256-d int8): tokenizer, token table, batches, model
   versions, and how topics use it.
+- [soak.md](soak.md): the automated long-session soak test (#76): one to
+  two hours of mixed audio through the pipeline against a fake realtime
+  server, sampled and judged on memory growth, latency drift, dropped
+  frames, session renewal, topics and leaks.
 - [asr.md](asr.md): streaming ASR with Parakeet realtime EOU (partials,
   end-of-utterance and the VAD fallback, utterance commit, measured
   latencies and the hour-long soak).

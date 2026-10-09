@@ -296,6 +296,8 @@ schemes:
       testPlans:
         - path: TestPlans/BlauPerf.xctestplan
           defaultPlan: true
+        # The long-session soak test (#76, `make soak`).
+        - path: TestPlans/BlauSoak.xctestplan
     profile:
       config: Release
     analyze:

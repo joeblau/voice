@@ -48,6 +48,8 @@ struct BlauApp: App {
             .debugBenchmarksEntry()
             // The perf suite's scripted session (#73): only with BLAU_PERF_REPLAY=1.
             .perfReplayEntry(models: environment.speechModels)
+            // The long-session soak test (#76): only with BLAU_SOAK=1.
+            .soakEntry(models: environment.speechModels)
         }
         .onChange(of: scenePhase, initial: true) { _, phase in
             environment.handleScenePhase(phase)

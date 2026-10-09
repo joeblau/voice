@@ -711,7 +711,7 @@ Tests: `swift test --filter "ContinuedTopicTests|TurnOrchestratorContinueTopicTe
 | Expired conversation | Resume a `conversation_id` idle for over 30 minutes (or a made-up one): note whether the upgrade is refused (HTTP status) or a new `conversation.created` arrives; either way Console shows a reseed | pending (needs xAI credentials) |
 | 120-minute limit | Run a session past 120 minutes with `continuity.rolloverAfter = nil`: note the `max_duration` error and whether resuming its `conversation_id` is ended at once. If resuming resets the clock, `resumesAtRollover` can be turned on | pending (needs xAI credentials and two hours) |
 | Renewal on a device | Hold a conversation past 110 minutes (or set `rolloverAfter` to 5 minutes in a debug build): the next reply after the renewal shows Grok still knows the conversation; the HUD's Session row shows `1 renewed · 1 reseeded` | pending (needs a device and xAI credentials) |
-| Soak | The 1–2 h soak test (#76) covers renewal with real audio | pending (#76) |
+| Soak | The 1–2 h soak test (#76, [soak.md](soak.md)) renews the session part-way through every run against the scripted server, with the real orchestrator and a reseed from the stored transcript (`realtime.rollover` check). With xAI itself it needs a device and credentials | scripted: passes (simulator, 2 h of audio at 10x); with xAI: pending |
 
 ## Barge-in
 

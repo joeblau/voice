@@ -84,6 +84,23 @@ perf-baseline: ## Record PERF_RESULT as the PERF_BASELINE baseline (commit it)
 	scripts/perf/perf-gate.py record --xcresult '$(PERF_RESULT)' \
 		--baseline BlauPerfTests/Baselines/$(PERF_BASELINE).json --environment $(PERF_BASELINE)
 
+# Long-session soak test (#76): the BlauSoak test plan (BlauPerfTests/SoakTests)
+# in Release with the BLAU_PERF condition. Plays SOAK_MINUTES of mixed audio
+# (the user, a TV, silence) through the app's pipeline at SOAK_SPEED against a
+# local fake realtime server, and on a simulator reads the app's leaks during
+# and after the run. The report and leak readings land in SOAK_OUTPUT. See
+# scripts/soak/soak.sh and docs/soak.md.
+SOAK_MINUTES ?= 120
+SOAK_SPEED   ?= 10
+SOAK_ASR     ?= scripted
+SOAK_OUTPUT  ?= .build/results/soak
+
+.PHONY: soak
+soak: generate ## Run the long-session soak test: SOAK_MINUTES (120) of audio at SOAK_SPEED (10x), plus leaks
+	DESTINATION='$(DESTINATION)' DERIVED_DATA='$(DERIVED_DATA)' XCODEBUILD_FLAGS='$(XCODEBUILD_FLAGS)' \
+		SOAK_MINUTES='$(SOAK_MINUTES)' SOAK_SPEED='$(SOAK_SPEED)' SOAK_ASR='$(SOAK_ASR)' \
+		SOAK_OUTPUT='$(SOAK_OUTPUT)' scripts/soak/soak.sh
+
 # BlauKit micro-benchmarks (#73): package-benchmark in Packages/BlauKitBenchmarks
 # on this Mac. The check gates instructions and allocations at 10% against
 # Packages/BlauKitBenchmarks/Thresholds. See scripts/perf/microbench.sh.
@@ -172,13 +189,14 @@ secrets: ## Create Config/Secrets.xcconfig from the example (kept if it exists)
 	env -u XAI_DEV_API_KEY scripts/write-secrets-xcconfig.sh
 
 .PHONY: test-scripts
-test-scripts: ## Test the secrets, CI, Instruments template, perf gate, privacy manifest and release scripts
+test-scripts: ## Test the secrets, CI, Instruments template, perf gate, privacy manifest, release and soak scripts
 	scripts/tests/test-secrets-scripts.sh
 	scripts/tests/test-ci-scripts.sh
 	scripts/tests/test-instruments-template.sh
 	scripts/tests/test-perf-gate.sh
 	scripts/tests/test-privacy-manifest.sh
 	scripts/tests/test-release-scripts.sh
+	scripts/tests/test-soak-scripts.sh
 
 # Privacy manifests (#79, docs/privacy.md). PRIVACY_BUNDLE: a built Blau.app
 # or a Blau .xcarchive to check as well.
