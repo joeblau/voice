@@ -41,9 +41,9 @@ microphone.
 
 | Stage | In the soak | Real or stand-in |
 | --- | --- | --- |
-| Microphone | `ConversationAudioScript.session(lasting:interlude:)`: the user's lines (speech-shaped synthetic audio, -54 dBFS room noise between them) with an **interlude before every new topic**: 2 s of quiet, 30 s of TV dialogue (bursts of 3 to 8 s from another synthetic voice, about 6 dB below the user), 2 s of quiet, 30 s of silence. About 60% of the session is the conversation, 15% TV, the rest silence and room noise. Played into the real `CaptureHub` by `CaptureReplayFeeder` at `SOAK_SPEED` | Synthetic audio, real capture hub |
-| VAD | `VoiceActivitySegmenter`, energy model (Silero with real models) | Real |
-| ASR | `ParakeetStreamingTranscriber` on `AlignedTranscriptRecognizer`, wrapped in `TimedSpeechRecognizer` so each call that runs chunks reports its own duration (the aligned recognizer runs no model and reports none); Parakeet itself with `SOAK_ASR=parakeet`, which times its Core ML work | Real transcriber, stand-in model |
+| Microphone | `ConversationAudioScript.session(lasting:interlude:)`: the user's lines (speech-shaped synthetic audio with the scripted recognizer; with `SOAK_ASR=parakeet`, real speech: each topic's own sentences and the TV's script spoken once by the system synthesizer, see below; -54 dBFS room noise between them) with an **interlude before every new topic**: 2 s of quiet, 30 s of TV dialogue (bursts of 3 to 8 s from another synthetic voice, about 6 dB below the user), 2 s of quiet, 30 s of silence. About 60% of the session is the conversation, 15% TV, the rest silence and room noise. Played into the real `CaptureHub` by `CaptureReplayFeeder` at `SOAK_SPEED` | Synthetic audio, real capture hub |
+| VAD | `VoiceActivitySegmenter`, energy model (Silero from the installed models with `SOAK_ASR=parakeet`) | Real |
+| ASR | `ParakeetStreamingTranscriber` on `AlignedTranscriptRecognizer`, wrapped in `TimedSpeechRecognizer` so each call that runs chunks reports its own duration (the aligned recognizer runs no model and reports none); Parakeet itself with `SOAK_ASR=parakeet`, which times its Core ML work. A Parakeet soak never falls back to the scripted recognizer or the energy VAD: without both installed models (or if one doesn't load) it stops with `error: …` (`SoakRun.SetupError`), and the screen keeps **Start** disabled until the models are installed | Real transcriber, stand-in model (or Parakeet) |
 | Voice ID | The real `VerificationGate` (#47) between the transcriber and the orchestrator, fed VAD's speech audio, as in the voice loop. Its verifier, `SoakSpeechVerifier`, stands in for WeSpeaker: it gives the speech the embedding of whoever the script has talking there (the enrolled user, or another speaker for the TV) and scores it with `VoiceprintScorer.verify` and the calibrated thresholds, as `SpeakerVerifier` does after embedding | Real gate and scoring, synthetic embeddings |
 | Grok | `TurnOrchestrator` and `RealtimeClient` against `ScriptedRealtimeServer`, a local fake that answers each line with a canned reply as streamed PCM16 and transcript deltas, and records every connection | Fake server, real client and orchestrator |
 | Session renewal | xAI's schedule scaled so the renewal lands 60% into the audio (`SOAK_ROLLOVER_MINUTES`); the orchestrator mints a token, renews between turns, reseeds the new conversation from the stored transcript (`ConversationStore.topicDigest`), as in a real two-hour session ([realtime.md](realtime.md#long-sessions)) | Real |
@@ -76,11 +76,11 @@ pass, and on a simulator the leak readings must not grow.
 | `memory.slope` | The footprint climbs: the Theil–Sen slope (median of the slopes between every pair of samples, so a transient spike doesn't move it) in MB per hour of **audio**, so a leak per frame, chunk or turn reads the same at any speed | ≤ 2 MB/h |
 | `asr.chunkLatency` | The recognizer's time per chunk in the late third of the run is more than 1.5× the early third and more than 2 ms longer. With the scripted recognizer a chunk takes microseconds, so only work that grows into milliseconds (a history that is never reset, say) trips it; with Parakeet the 1.5× applies | 1.5×, 2 ms floor |
 | `realtime.firstAudio` | The same for the time from end of utterance to Grok's first audio | 1.5×, 50 ms floor |
-| `capture.droppedFrames` | More than 0.1% of capture frames were lost (dropped buffers plus frames a slow subscriber missed) | ≤ 0.1% |
-| `conversation.complete` | A line wasn't transcribed or answered, or a turn ended in the error state | all lines, 0 failed |
+| `capture.droppedFrames` | More than 0.1% of the captured frames were lost before publishing (dropped buffers, as a share of the frames published plus those lost), or more than 0.1% of the published frames were missed by a slow subscriber (as a share of the frames published: they were published, so they are counted once, in `CaptureStatistics.droppedFrames(frameLength:)`, and kept apart as `subscriberFramesDropped`) | ≤ 0.1% each |
+| `conversation.complete` | A line wasn't transcribed or answered, or a turn ended in the error state. With Parakeet: fewer utterances than 90% of the lines, an utterance not answered, or a failed turn (a model may split a line in two or miss one) | all lines, 0 failed (Parakeet: ≥ 90%, all answered) |
 | `realtime.rollover` | Fewer renewals than the run's length requires (every session ends by its deadline, so a run lasting `n` deadlines renewed at least `n` times), a renewal without a reseed, or no new connection for it | ≥ expected |
-| `voiceid.background` | A score of the TV's speech didn't reject, a score of the user's didn't accept, the gate kept one of the user's lines from Grok, or the TV never reached voice ID | all |
-| `topics.count` | Topic boundaries below half the script's topic changes, or above 1.5× plus one (flapping) | 0.5× to 1.5× + 1 |
+| `voiceid.background` | A score of the TV's speech didn't reject, a score of the user's didn't accept, the gate kept one of the user's lines from Grok, or the TV never reached voice ID. With Parakeet the TV is transcribed and the gate keeps those utterances back: its discards are counted, and it must pass on at least 90% of the lines | all |
+| `topics.count` | Topic boundaries below half the script's topic changes, or above 1.5× plus one (flapping). With Parakeet the segmenter sees what the model heard, so only the upper bound applies | 0.5× to 1.5× + 1 (Parakeet: ≤ 1.5× + 1) |
 
 The limits are `SoakThresholds.standard`; the report records the ones it
 was judged by. A failing report names the checks (`failed: memory.slope`)
@@ -101,6 +101,25 @@ debuggable by `leaks` and the soak doesn't turn on malloc stack logging, so
 the readings count leaks but don't say where they were allocated: to find
 the owner of a new leak, record the soak with Instruments' Leaks template
 (below), which keeps the allocation stacks.
+
+**Scripted or recognized.** The report's outcome says where the transcript
+came from (`SoakOutcome.transcript`): `scripted`, the script's own word
+alignment, so every line is exactly one utterance and the checks count lines
+exactly; or `recognized`, Parakeet on synthesized speech, where the three
+conversation checks above loosen as described (`SoakThresholds.minimumRecognizedLineFraction`,
+0.9). The user also stops waiting for "the reply to every earlier line"
+before speaking: with Parakeet they wait until every utterance heard so far
+is answered, so a line the model missed doesn't cost the 20 s timeout.
+
+**Parakeet's speech.** The synthetic signal has no words, so Parakeet would
+transcribe nothing like one utterance per line. A Parakeet soak first has the
+system synthesizer (`AudioFixture.synthesizedSpeech`, en-US) speak each
+topic's sentences from the script (`ConversationAudioScript.topicPassages`,
+about half a minute per topic) and a short newscast for the TV (en-GB where
+the device has that voice), and cuts every line from its topic's clip
+(`topicVoices`). The model hears the topic's vocabulary, so the segmenter
+still sees the topics change; the timing and the script are unchanged. This
+takes a few seconds before the run starts and isn't counted in its wall time.
 
 ## Configuration
 
@@ -144,7 +163,11 @@ onboarding), a development-signed build, plugged in and on a desk:
 1. `make soak DESTINATION='id=<udid>' SOAK_SPEED=realtime SOAK_ASR=parakeet SOAK_ROLLOVER_MINUTES=xai`
    (`xcrun devicectl list devices` for the UDID). Two hours; the session
    renews at 110 minutes as a real one would. Keep the device awake (the
-   test runner does) and on power.
+   test runner does) and on power. With `SOAK_ASR=parakeet` the app starts
+   with its real model manager (no `BLAU_MODEL_FIXTURES`), which finds the
+   installed models; `SoakTests` waits up to three minutes for **Start** to
+   enable and fails, naming the missing models, if they aren't installed.
+   The report's setup must say `Parakeet EOU, Silero VAD`.
 2. For leaks: Instruments → **Leaks** template → attach to **Blau** on the
    device once the soak screen shows `running`, and keep it recording
    (`xcrun xctrace record --template Leaks --device <udid> --attach Blau
@@ -177,9 +200,9 @@ onboarding), a development-signed build, plugged in and on a desk:
   and the owner's voice couldn't be shared in a public repository's CI. The
   script's word alignment is exact, so the scripted recognizer "hears" the
   owner's words without a model, and the TV is known to the sample, so voice
-  ID's verdicts can be checked. With `SOAK_ASR=parakeet` the model runs on
-  this audio too: its per-chunk cost depends on the audio's length, not its
-  words, so `asr.chunkLatency` stays meaningful.
+  ID's verdicts can be checked. With `SOAK_ASR=parakeet` the speech is
+  synthesized instead (above), because the model needs words, and the checks
+  allow for its segmentation.
 - **The virtual input is the capture hub.** The soak feeds the real
   `CaptureHub`, which every consumer (VAD, ASR, barge-in) subscribes to,
   rather than injecting audio below `AVAudioEngine`. Everything after the

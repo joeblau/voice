@@ -35,6 +35,8 @@ public struct ConversationAudioScript: Sendable {
     public struct Line: Hashable, Sendable {
         /// The exchange it belongs to (`ScriptedConversation.Exchange.index`).
         public let exchange: Int
+        /// The exchange's topic (`ScriptedConversation.Exchange.topic`).
+        public let topic: String
         public let text: String
         /// The speech, in absolute 16 kHz sample offsets.
         public let sampleRange: Range<Int64>
@@ -141,9 +143,13 @@ public struct ConversationAudioScript: Sendable {
     /// The length of the capture: the last reply and turn gap included.
     public let totalSamples: Int64
     /// Where the speech came from (`AudioFixture.source`).
-    public var source: String { voice.source }
+    public var source: String {
+        guard let topicVoice = topicVoices.values.first else { return voice.source }
+        return "\(topicVoice.source), a clip per topic"
+    }
 
     private let voice: AudioFixture
+    private let topicVoices: [String: AudioFixture]
     private let backgroundVoice: AudioFixture
     private let backgroundGain: Float
     private let noise: [Float]
@@ -162,16 +168,24 @@ public struct ConversationAudioScript: Sendable {
     ///     (the default) for none.
     ///   - backgroundVoice: The speech the background is cut from, looped:
     ///     another speaker than `voice`.
+    ///   - topicVoices: Speech to cut a topic's lines from instead of
+    ///     `voice`, by topic name (`ScriptedConversation.Topic.name`), looped
+    ///     the same way. For a real speech model: synthesized speech of the
+    ///     topic's own sentences (`topicPassages(exchangesPerTopic:topics:)`)
+    ///     gives it words to transcribe, and the topic segmenter the topic's
+    ///     vocabulary. Topics without one use `voice`.
     public init(
         conversation: ScriptedConversation,
         timing: Timing = .standard,
         voice: AudioFixture = AudioFixture.syntheticSignal(duration: .seconds(12), pauses: false),
         noiseLevel: Float = 0.002,
         interlude: Interlude? = nil,
-        backgroundVoice: AudioFixture = Self.defaultBackgroundVoice
+        backgroundVoice: AudioFixture = Self.defaultBackgroundVoice,
+        topicVoices: [String: AudioFixture] = [:]
     ) {
         precondition(!voice.samples.isEmpty, "The voice clip must not be empty")
         precondition(!backgroundVoice.samples.isEmpty, "The background voice clip must not be empty")
+        precondition(topicVoices.values.allSatisfy { !$0.samples.isEmpty }, "A topic's voice clip must not be empty")
         let rate = Self.sampleRate
         var position = timing.leadIn.sampleCount(sampleRate: rate)
         var lines: [Line] = []
@@ -198,7 +212,8 @@ public struct ConversationAudioScript: Sendable {
             let replyDuration = timing.agentWordDuration * replyWords
             lines.append(
                 Line(
-                    exchange: exchange.index, text: words.joined(separator: " "), sampleRange: start..<end,
+                    exchange: exchange.index, topic: exchange.topic, text: words.joined(separator: " "),
+                    sampleRange: start..<end,
                     words: aligned, reply: exchange.agent, replyDuration: replyDuration))
             position =
                 end + (timing.responseDelay + replyDuration + timing.turnGap).sampleCount(sampleRate: rate)
@@ -207,6 +222,7 @@ public struct ConversationAudioScript: Sendable {
         self.backgroundBursts = bursts
         self.totalSamples = position
         self.voice = voice
+        self.topicVoices = topicVoices
         self.backgroundVoice = backgroundVoice
         self.backgroundGain = interlude?.backgroundGain ?? 0
         var random = SeededRandomGenerator(seed: 0x0015_E5EE)
@@ -222,7 +238,9 @@ public struct ConversationAudioScript: Sendable {
         exchangesPerTopic: Int = 6,
         timing: Timing = .standard,
         voice: AudioFixture = AudioFixture.syntheticSignal(duration: .seconds(12), pauses: false),
-        interlude: Interlude? = nil
+        interlude: Interlude? = nil,
+        backgroundVoice: AudioFixture = Self.defaultBackgroundVoice,
+        topicVoices: [String: AudioFixture] = [:]
     ) -> ConversationAudioScript {
         let target = duration.sampleCount(sampleRate: sampleRate)
         // Every exchange takes several seconds, so this many always suffice;
@@ -243,7 +261,8 @@ public struct ConversationAudioScript: Sendable {
             if let last = ends.firstIndex(where: { $0 >= target }) {
                 return ConversationAudioScript(
                     conversation: ScriptedConversation(exchanges: last + 1, exchangesPerTopic: exchangesPerTopic),
-                    timing: timing, voice: voice, interlude: interlude)
+                    timing: timing, voice: voice, interlude: interlude, backgroundVoice: backgroundVoice,
+                    topicVoices: topicVoices)
             }
             upper *= 2
         }
@@ -265,18 +284,20 @@ public struct ConversationAudioScript: Sendable {
         for index in samples.indices {
             samples[index] = noise[Int((lower + Int64(index)) % noiseCount)]
         }
-        // Speech where a line is spoken. Each line starts at a different
-        // place in the voice clip so consecutive lines don't sound alike.
-        let voiceCount = Int64(voice.samples.count)
+        // Speech where a line is spoken, from its topic's clip if it has
+        // one. Each line starts at a different place in the clip so
+        // consecutive lines don't sound alike.
         var lineIndex = firstLine(endingAfter: lower)
         while lineIndex < lines.count, lines[lineIndex].sampleRange.lowerBound < upper {
             let line = lines[lineIndex]
+            let clip = topicVoices[line.topic]?.samples ?? voice.samples
+            let clipCount = Int64(clip.count)
             let from = max(line.sampleRange.lowerBound, lower)
             let to = min(line.sampleRange.upperBound, upper)
             let clipStart = Int64(line.exchange) * 7_919
             for offset in from..<to {
-                let clipIndex = Int((clipStart + offset - line.sampleRange.lowerBound) % voiceCount)
-                samples[Int(offset - lower)] += voice.samples[clipIndex]
+                let clipIndex = Int((clipStart + offset - line.sampleRange.lowerBound) % clipCount)
+                samples[Int(offset - lower)] += clip[clipIndex]
             }
             lineIndex += 1
         }
@@ -322,6 +343,20 @@ public struct ConversationAudioScript: Sendable {
     /// another seed and with pauses, like dialogue.
     public static let defaultBackgroundVoice = AudioFixture.syntheticSignal(
         duration: .seconds(12), seed: 0x0007_1EE5, pauses: true)
+
+    /// Text to synthesize each topic's voice from (`topicVoices`): the
+    /// user's lines of the topic's first visit in a `ScriptedConversation`
+    /// with `exchangesPerTopic`, as sentences. Spoken, each is about half a
+    /// minute of speech in the topic's vocabulary.
+    public static func topicPassages(
+        exchangesPerTopic: Int = 6, topics: [ScriptedConversation.Topic] = ScriptedConversation.standardTopics
+    ) -> [String: String] {
+        let conversation = ScriptedConversation(
+            exchanges: exchangesPerTopic * topics.count, exchangesPerTopic: exchangesPerTopic, topics: topics)
+        return Dictionary(grouping: conversation.exchanges, by: \.topic).mapValues { exchanges in
+            exchanges.map { $0.user.hasSuffix(".") ? $0.user : $0.user + "." }.joined(separator: " ")
+        }
+    }
 
     /// Bursts of 3 to 8 seconds with 1 to 3 seconds between them, filling
     /// `length` samples from `start`.

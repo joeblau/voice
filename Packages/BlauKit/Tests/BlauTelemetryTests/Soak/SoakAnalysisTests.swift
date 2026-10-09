@@ -12,16 +12,21 @@ import Testing
         memory: (Int) -> Double = { 40 + (($0 * 7) % 5 == 0 ? 0.8 : 0) },
         asrMilliseconds: (Int) -> Double = { _ in 12 },
         firstAudioMilliseconds: (Int) -> Double = { _ in 650 },
-        dropped: Int64 = 0
+        dropped: Int64 = 0,
+        subscriberDropped: Int64 = 0
     ) -> [SoakSample] {
         var asrSeconds = 0.0
         return (0..<count).map { minute in
             let chunks = Int64(minute) * 180
             if minute > 0 { asrSeconds += 180 * asrMilliseconds(minute) / 1_000 }
+            let isLast = minute == count - 1
+            // As `CaptureStatistics.droppedFrames(frameLength:)` counts them:
+            // capture drops plus subscriber drops.
             return SoakSample(
                 audioSeconds: Double(minute) * 60, wallSeconds: Double(minute) * 6,
                 footprintBytes: UInt64(memory(minute) * 1_048_576), asrChunks: chunks, asrSeconds: asrSeconds,
-                framesDelivered: Int64(minute) * 3_000, framesDropped: minute == count - 1 ? dropped : 0,
+                framesDelivered: Int64(minute) * 3_000, framesDropped: isLast ? dropped + subscriberDropped : 0,
+                subscriberFramesDropped: isLast ? subscriberDropped : 0,
                 userUtterances: minute * 4, agentReplies: minute * 4, topicBoundaries: minute / 2,
                 rollovers: minute >= 72 ? 1 : 0, reseeds: minute >= 72 ? 1 : 0,
                 firstAudioCount: minute > 0 ? 4 : 0,
@@ -119,7 +124,39 @@ import Testing
         let many = Self.samples(dropped: 1_000)
         let check = try Self.check("capture.droppedFrames", SoakAnalysis.checks(samples: many, outcome: Self.outcome))
         #expect(!check.passed)
-        #expect(check.measured == "1000 of 361000")
+        #expect(check.measured == "1000 of 361000 lost in capture, 0 of 360000 missed by a subscriber")
+    }
+
+    /// Frames a subscriber missed were published: they count once (the
+    /// sample's `framesDropped` already holds them) and as a share of the
+    /// frames published, not of the published plus the dropped.
+    @Test func subscriberDropsCountOnceAgainstThePublishedFrames() throws {
+        func check(capture: Int64, subscriber: Int64) throws -> SoakCheck {
+            try Self.check(
+                "capture.droppedFrames",
+                SoakAnalysis.checks(
+                    samples: Self.samples(dropped: capture, subscriberDropped: subscriber), outcome: Self.outcome))
+        }
+
+        // 300 of 360,000 published frames missed (0.083%) and nothing lost
+        // in capture. Counting the drops twice (600 of 360,600, 0.17%)
+        // would fail it.
+        let missed = try check(capture: 0, subscriber: 300)
+        #expect(missed.passed, "\(missed.measured)")
+        #expect(missed.measured == "0 of 360000 lost in capture, 300 of 360000 missed by a subscriber")
+        let loss = SoakAnalysis.frameLoss(try #require(Self.samples(subscriberDropped: 300).last))
+        #expect(loss == .init(lostInCapture: 0, captured: 360_000, missedBySubscribers: 300, published: 360_000))
+
+        // Both kinds at once, each under the limit: 300 of 360,300 lost in
+        // capture and 300 of 360,000 missed. Adding the subscriber drops a
+        // second time (900 of 360,900, 0.25%) would fail it.
+        let both = try check(capture: 300, subscriber: 300)
+        #expect(both.passed, "\(both.measured)")
+        #expect(both.measured == "300 of 360300 lost in capture, 300 of 360000 missed by a subscriber")
+
+        // Over the limit on either side fails.
+        #expect(try !check(capture: 0, subscriber: 400).passed)
+        #expect(try !check(capture: 400, subscriber: 0).passed)
     }
 
     @Test func aStalledConversationFails() throws {
@@ -204,6 +241,84 @@ import Testing
         #expect(try !passes(121), "flapping")
     }
 
+    /// A Parakeet run (`SOAK_ASR=parakeet`) on synthesized speech: the model
+    /// may split or miss a line and transcribes the TV, and the topics
+    /// follow what it heard, so the line-exact checks loosen.
+    static let recognizedOutcome = SoakOutcome(
+        lines: 480, backgroundBursts: 400, scriptedTopicChanges: 79, expectedRollovers: 1, userUtterances: 451,
+        agentReplies: 451, userScores: 960, userAccepted: 960, backgroundScores: 410, backgroundRejected: 410,
+        gateCommitted: 451, gateDiscarded: 37,
+        topicBoundaries: 14, rollovers: 1, reseeds: 1, connections: 2, failedTurns: 0, transcript: .recognized)
+
+    @Test func aRecognizedTranscriptIsJudgedAllowingForTheModel() throws {
+        func verdicts(_ change: (inout SoakOutcome) -> Void = { _ in }) -> [String: Bool] {
+            var outcome = Self.recognizedOutcome
+            change(&outcome)
+            let checks = SoakAnalysis.checks(samples: Self.samples(), outcome: outcome)
+            return Dictionary(uniqueKeysWithValues: checks.map { ($0.name, $0.passed) })
+        }
+
+        // 451 of 480 lines (94%, at least 90% needed), every one answered,
+        // the TV's utterances kept back, few topics: a pass.
+        #expect(verdicts().values.allSatisfy { $0 }, "\(verdicts())")
+        // The same counts fail line by line with the scripted transcript.
+        let scripted = verdicts { $0.transcript = .scripted }
+        #expect(scripted["conversation.complete"] == false)
+        #expect(scripted["voiceid.background"] == false)
+        #expect(scripted["topics.count"] == false)
+
+        // conversation.complete: at least 432 utterances (90% of 480), more
+        // than the lines (split lines) is fine, every one answered.
+        #expect(
+            verdicts {
+                $0.userUtterances = 432
+                $0.agentReplies = 432
+            }["conversation.complete"] == true)
+        #expect(
+            verdicts {
+                $0.userUtterances = 431
+                $0.agentReplies = 431
+            }["conversation.complete"] == false)
+        #expect(
+            verdicts {
+                $0.userUtterances = 530
+                $0.agentReplies = 530
+            }["conversation.complete"] == true)
+        #expect(verdicts { $0.agentReplies = 450 }["conversation.complete"] == false, "an unanswered utterance")
+        #expect(verdicts { $0.failedTurns = 1 }["conversation.complete"] == false)
+        #expect(verdicts { $0.lines = 0 }["conversation.complete"] == false)
+
+        // voiceid.background: discards are counted, not required to be 0;
+        // every score still decides right, and most lines reach Grok.
+        #expect(verdicts { $0.gateDiscarded = 200 }["voiceid.background"] == true)
+        #expect(verdicts { $0.gateCommitted = 431 }["voiceid.background"] == false)
+        #expect(verdicts { $0.backgroundRejected = 409 }["voiceid.background"] == false)
+        #expect(verdicts { $0.userAccepted = 959 }["voiceid.background"] == false)
+        #expect(
+            verdicts {
+                $0.backgroundScores = 0
+                $0.backgroundRejected = 0
+            }["voiceid.background"] == false)
+
+        // topics.count: only bounded above (1.5 × 79 + 1 = 120).
+        #expect(verdicts { $0.topicBoundaries = 0 }["topics.count"] == true)
+        #expect(verdicts { $0.topicBoundaries = 120 }["topics.count"] == true)
+        #expect(verdicts { $0.topicBoundaries = 121 }["topics.count"] == false, "flapping")
+
+        // Everything else is judged as on the scripted path.
+        #expect(
+            verdicts {
+                $0.rollovers = 0
+                $0.reseeds = 0
+                $0.connections = 1
+            }["realtime.rollover"] == false)
+
+        let checks = SoakAnalysis.checks(samples: Self.samples(), outcome: Self.recognizedOutcome)
+        let conversation = try Self.check("conversation.complete", checks)
+        #expect(conversation.limit == "≥ 432 utterances for 480 lines, every one answered, no failed turn")
+        #expect(try Self.check("topics.count", checks).limit == "≤ 120")
+    }
+
     @Test func reportRoundTripsAndRendersMarkdown() throws {
         let device = BenchmarkDevice(
             modelIdentifier: "iPhone17,1", marketingName: "iPhone 16 Pro", chip: "A18 Pro",
@@ -225,11 +340,27 @@ import Testing
         #expect(markdown.hasPrefix("## Long-session soak: passed"))
         #expect(markdown.contains("| `memory.slope` | pass |"))
         #expect(markdown.contains("iPhone 16 Pro (A18 Pro)"))
-        #expect(markdown.contains("renewed after 7.2 min"))
+        #expect(markdown.contains("renewal scheduled after 7.2 min of wall time"))
+        #expect(markdown.contains("renewed 1 time."), "the renewals that happened, not the schedule")
+        #expect(markdown.contains("Transcript: the script's word alignment"))
         let rows = markdown.components(separatedBy: "\n").filter {
             $0.hasPrefix("| ") && $0.dropFirst(2).first?.isNumber == true
         }
         #expect(rows.count == 121)
+
+        var unrenewed = report.outcome
+        unrenewed.rollovers = 0
+        let notRenewed = SoakReport(
+            device: device, startedAt: report.startedAt, wallSeconds: 726, setup: report.setup, outcome: unrenewed,
+            samples: report.samples)
+        #expect(notRenewed.markdown.contains("renewed 0 times."))
+
+        let recognized = SoakReport(
+            device: device, startedAt: report.startedAt, wallSeconds: 7_300, setup: report.setup,
+            outcome: Self.recognizedOutcome, samples: report.samples)
+        #expect(recognized.passed)
+        #expect(try SoakReport.decode(recognized.jsonData()) == recognized)
+        #expect(recognized.markdown.contains("Transcript: recognized by the model"))
 
         var failing = report
         failing.checks[0].passed = false

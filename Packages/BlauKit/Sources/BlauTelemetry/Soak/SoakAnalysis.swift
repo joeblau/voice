@@ -28,6 +28,11 @@ public struct SoakThresholds: Codable, Hashable, Sendable {
     /// The most topic boundaries, as a multiple of the script's topic
     /// changes, plus one: more means the segmenter flaps.
     public var maximumTopicRatio: Double
+    /// With a speech model's transcript (`SoakTranscriptSource.recognized`):
+    /// the fewest user utterances transcribed and passed on to Grok, as a
+    /// share of the script's lines. A model may split a line in two, so
+    /// there is no upper limit; every utterance must still be answered.
+    public var minimumRecognizedLineFraction: Double
 
     public init(
         warmUpFraction: Double = 0.1,
@@ -37,7 +42,8 @@ public struct SoakThresholds: Codable, Hashable, Sendable {
         firstAudioNoiseFloorMilliseconds: Double = 50,
         maximumDroppedFrameFraction: Double = 0.001,
         minimumTopicRecall: Double = 0.5,
-        maximumTopicRatio: Double = 1.5
+        maximumTopicRatio: Double = 1.5,
+        minimumRecognizedLineFraction: Double = 0.9
     ) {
         self.warmUpFraction = warmUpFraction
         self.maximumMemorySlopeMegabytesPerHour = maximumMemorySlopeMegabytesPerHour
@@ -47,6 +53,7 @@ public struct SoakThresholds: Codable, Hashable, Sendable {
         self.maximumDroppedFrameFraction = maximumDroppedFrameFraction
         self.minimumTopicRecall = minimumTopicRecall
         self.maximumTopicRatio = maximumTopicRatio
+        self.minimumRecognizedLineFraction = minimumRecognizedLineFraction
     }
 
     public static let standard = SoakThresholds()
@@ -77,6 +84,12 @@ public struct SoakCheck: Codable, Hashable, Sendable {
 /// not creeping up, frames not dropped, the conversation answered end to
 /// end across session renewals, background speech rejected and a sane
 /// number of topics (#76).
+///
+/// The conversation checks depend on `SoakOutcome.transcript`. With the
+/// scripted recognizer every line is one utterance, so they count lines
+/// exactly. With a speech model on synthesized speech they can't: they
+/// require most lines transcribed, every utterance answered and no topic
+/// flapping instead.
 public enum SoakAnalysis {
     /// A trend summary of one series over the run.
     public struct Trend: Codable, Hashable, Sendable {
@@ -98,9 +111,9 @@ public enum SoakAnalysis {
             asrLatencyCheck(samples, thresholds),
             firstAudioCheck(samples, thresholds),
             droppedFramesCheck(samples, thresholds),
-            conversationCheck(outcome),
+            conversationCheck(outcome, thresholds),
             rolloverCheck(outcome),
-            backgroundCheck(outcome),
+            backgroundCheck(outcome, thresholds),
             topicCheck(outcome, thresholds),
         ]
     }
@@ -216,28 +229,84 @@ public enum SoakAnalysis {
             detail: "\(values.count) intervals; median of the early and late thirds")
     }
 
+    /// The frames lost in capture and the frames a subscriber missed, each
+    /// as a share of the frames it could have lost.
+    ///
+    /// `framesDropped` counts both kinds; they have different denominators.
+    /// A capture drop is audio that was never published, so its share is of
+    /// every frame captured (`framesDelivered` plus those lost). A
+    /// subscriber drop is a frame that was published (and so is already in
+    /// `framesDelivered`) but missed by a subscriber that fell behind, so
+    /// its share is of the frames published.
+    public struct FrameLoss: Hashable, Sendable {
+        public var lostInCapture: Int64
+        public var captured: Int64
+        public var missedBySubscribers: Int64
+        public var published: Int64
+
+        public var captureFraction: Double { captured > 0 ? Double(lostInCapture) / Double(captured) : 0 }
+        public var subscriberFraction: Double {
+            published > 0 ? Double(missedBySubscribers) / Double(published) : 0
+        }
+    }
+
+    /// The frame loss as of `sample` (its counters are cumulative).
+    public static func frameLoss(_ sample: SoakSample) -> FrameLoss {
+        let missed = min(max(sample.subscriberFramesDropped, 0), max(sample.framesDropped, 0))
+        let lost = max(sample.framesDropped, 0) - missed
+        return FrameLoss(
+            lostInCapture: lost, captured: sample.framesDelivered + lost, missedBySubscribers: missed,
+            published: sample.framesDelivered)
+    }
+
     static func droppedFramesCheck(_ samples: [SoakSample], _ thresholds: SoakThresholds) -> SoakCheck {
-        let limit = "≤ \(format(thresholds.maximumDroppedFrameFraction * 100))% of frames"
+        let limit =
+            "≤ \(format(thresholds.maximumDroppedFrameFraction * 100))% of frames lost in capture, "
+            + "and of published frames missed by a subscriber"
         guard let last = samples.last, last.framesDelivered > 0 else {
             return SoakCheck(
                 name: "capture.droppedFrames", passed: false, measured: "n/a", limit: limit,
                 detail: "No frames were delivered")
         }
-        let fraction = Double(last.framesDropped) / Double(last.framesDelivered + last.framesDropped)
+        let loss = frameLoss(last)
+        let passed =
+            loss.captureFraction <= thresholds.maximumDroppedFrameFraction
+            && loss.subscriberFraction <= thresholds.maximumDroppedFrameFraction
         return SoakCheck(
-            name: "capture.droppedFrames", passed: fraction <= thresholds.maximumDroppedFrameFraction,
-            measured: "\(last.framesDropped) of \(last.framesDelivered + last.framesDropped)", limit: limit)
+            name: "capture.droppedFrames", passed: passed,
+            measured:
+                "\(loss.lostInCapture) of \(loss.captured) lost in capture, "
+                + "\(loss.missedBySubscribers) of \(loss.published) missed by a subscriber",
+            limit: limit)
     }
 
-    static func conversationCheck(_ outcome: SoakOutcome) -> SoakCheck {
-        let passed =
-            outcome.lines > 0 && outcome.userUtterances == outcome.lines && outcome.agentReplies == outcome.lines
-            && outcome.failedTurns == 0
-        return SoakCheck(
-            name: "conversation.complete", passed: passed,
-            measured:
-                "\(outcome.userUtterances) transcribed, \(outcome.agentReplies) answered, \(outcome.failedTurns) failed",
-            limit: "all \(outcome.lines) lines, no failed turn")
+    /// The fewest utterances a recognized transcript must have for `lines`
+    /// scripted lines.
+    static func requiredRecognizedUtterances(lines: Int, _ thresholds: SoakThresholds) -> Int {
+        max(1, Int((Double(lines) * thresholds.minimumRecognizedLineFraction).rounded(.up)))
+    }
+
+    static func conversationCheck(_ outcome: SoakOutcome, _ thresholds: SoakThresholds) -> SoakCheck {
+        let measured =
+            "\(outcome.userUtterances) transcribed, \(outcome.agentReplies) answered, \(outcome.failedTurns) failed"
+        switch outcome.transcript {
+        case .scripted:
+            let passed =
+                outcome.lines > 0 && outcome.userUtterances == outcome.lines
+                && outcome.agentReplies == outcome.lines && outcome.failedTurns == 0
+            return SoakCheck(
+                name: "conversation.complete", passed: passed, measured: measured,
+                limit: "all \(outcome.lines) lines, no failed turn")
+        case .recognized:
+            let required = requiredRecognizedUtterances(lines: outcome.lines, thresholds)
+            let passed =
+                outcome.lines > 0 && outcome.userUtterances >= required
+                && outcome.agentReplies == outcome.userUtterances && outcome.failedTurns == 0
+            return SoakCheck(
+                name: "conversation.complete", passed: passed, measured: measured,
+                limit: "≥ \(required) utterances for \(outcome.lines) lines, every one answered, no failed turn",
+                detail: "Recognized transcript: a line may be split or missed")
+        }
     }
 
     static func rolloverCheck(_ outcome: SoakOutcome) -> SoakCheck {
@@ -252,30 +321,53 @@ public enum SoakAnalysis {
             detail: required == 0 ? "The run was too short on the session clock to need a renewal" : nil)
     }
 
-    static func backgroundCheck(_ outcome: SoakOutcome) -> SoakCheck {
+    static func backgroundCheck(_ outcome: SoakOutcome, _ thresholds: SoakThresholds) -> SoakCheck {
         let heard = outcome.backgroundBursts == 0 || outcome.backgroundScores > 0
-        let passed =
+        let scored =
             heard && outcome.backgroundRejected == outcome.backgroundScores
-            && outcome.userAccepted == outcome.userScores && outcome.gateCommitted == outcome.lines
-        return SoakCheck(
-            name: "voiceid.background", passed: passed,
-            measured:
-                "\(outcome.backgroundRejected) of \(outcome.backgroundScores) background scores rejected, "
-                + "\(outcome.userAccepted) of \(outcome.userScores) user scores accepted; the gate passed on "
-                + "\(outcome.gateCommitted) and kept back \(outcome.gateDiscarded)",
-            limit: "every background score rejected, every user score accepted, every line passed on",
-            detail: heard ? nil : "None of the \(outcome.backgroundBursts) background bursts reached voice ID")
+            && outcome.userAccepted == outcome.userScores
+        let measured =
+            "\(outcome.backgroundRejected) of \(outcome.backgroundScores) background scores rejected, "
+            + "\(outcome.userAccepted) of \(outcome.userScores) user scores accepted; the gate passed on "
+            + "\(outcome.gateCommitted) and kept back \(outcome.gateDiscarded)"
+        let unheard = heard ? nil : "None of the \(outcome.backgroundBursts) background bursts reached voice ID"
+        switch outcome.transcript {
+        case .scripted:
+            return SoakCheck(
+                name: "voiceid.background", passed: scored && outcome.gateCommitted == outcome.lines,
+                measured: measured,
+                limit: "every background score rejected, every user score accepted, every line passed on",
+                detail: unheard)
+        case .recognized:
+            // The TV is transcribed too, and the gate keeps those
+            // utterances back: discards are counted, not required to be 0.
+            let required = requiredRecognizedUtterances(lines: outcome.lines, thresholds)
+            return SoakCheck(
+                name: "voiceid.background", passed: scored && outcome.gateCommitted >= required,
+                measured: measured,
+                limit:
+                    "every background score rejected, every user score accepted, ≥ \(required) utterances passed on",
+                detail: unheard ?? "Recognized transcript: the gate keeps the TV's utterances back")
+        }
     }
 
     static func topicCheck(_ outcome: SoakOutcome, _ thresholds: SoakThresholds) -> SoakCheck {
         let changes = Double(outcome.scriptedTopicChanges)
-        let lower = max(1, Int((changes * thresholds.minimumTopicRecall).rounded(.down)))
         let upper = Int((changes * thresholds.maximumTopicRatio).rounded(.up)) + 1
-        let passed = (lower...max(lower, upper)).contains(outcome.topicBoundaries)
-        return SoakCheck(
-            name: "topics.count", passed: passed,
-            measured: "\(outcome.topicBoundaries) boundaries for \(outcome.scriptedTopicChanges) topic changes",
-            limit: "\(lower)...\(max(lower, upper))")
+        let measured = "\(outcome.topicBoundaries) boundaries for \(outcome.scriptedTopicChanges) topic changes"
+        switch outcome.transcript {
+        case .scripted:
+            let lower = max(1, Int((changes * thresholds.minimumTopicRecall).rounded(.down)))
+            let passed = (lower...max(lower, upper)).contains(outcome.topicBoundaries)
+            return SoakCheck(
+                name: "topics.count", passed: passed, measured: measured, limit: "\(lower)...\(max(lower, upper))")
+        case .recognized:
+            // The segmenter sees what the model heard, not the script's
+            // words: only flapping (too many boundaries) is judged.
+            return SoakCheck(
+                name: "topics.count", passed: outcome.topicBoundaries <= upper, measured: measured,
+                limit: "≤ \(upper)", detail: "Recognized transcript: only an upper bound")
+        }
     }
 
     // MARK: Helpers

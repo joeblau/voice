@@ -45,23 +45,26 @@ final class SoakTests: XCTestCase {
             throw XCTSkip("The soak test runs for an hour or two. Run it with `make soak` (the BlauSoak test plan).")
         }
         let app = XCUIApplication()
-        app.launchEnvironment["BLAU_SOAK"] = "1"
-        // Fixture speech models: launching never starts a real download.
-        app.launchEnvironment["BLAU_MODEL_FIXTURES"] = "1"
-        if environment["BLAU_SOAK_ASR"] != "parakeet" {
-            // Fakes for every app service the soak doesn't use (no Keychain,
-            // no iCloud, no audio session): only the soak's pipeline runs.
-            app.launchEnvironment["BLAU_APP_ENVIRONMENT"] = "ui-test"
-        }
-        for key in Self.forwardedKeys {
-            app.launchEnvironment[key] = environment[key]
-        }
+        app.launchEnvironment = Self.launchEnvironment(environment)
         app.launch()
 
         let start = app.buttons["blau.soak.start"]
         guard start.waitForExistence(timeout: 60) else {
             throw XCTSkip(
                 "The soak isn't compiled into this build. Run `make soak`, which builds with the BLAU_PERF condition.")
+        }
+        if Self.usesParakeet(environment) {
+            // Start stays disabled until the device's own Silero and
+            // Parakeet models are installed: the run never falls back to
+            // the scripted recognizer.
+            let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: start)
+            guard XCTWaiter.wait(for: [enabled], timeout: 180) == .completed else {
+                let missing = app.staticTexts["blau.soak.models"]
+                XCTFail(
+                    "SOAK_ASR=parakeet needs the speech models installed on the device (open Blau and finish "
+                        + "onboarding first). \(missing.exists ? missing.label : "")")
+                return
+            }
         }
         start.tap()
 
@@ -91,6 +94,30 @@ final class SoakTests: XCTestCase {
             _ = XCTWaiter.wait(for: [XCTestExpectation(description: "hold")], timeout: hold)
         }
         XCTAssertEqual(status.label, "passed", "The soak failed; see the attached report")
+    }
+
+    static func usesParakeet(_ environment: [String: String]) -> Bool {
+        environment["BLAU_SOAK_ASR"] == "parakeet"
+    }
+
+    /// The app's launch environment for a soak described by the test
+    /// runner's `environment`.
+    ///
+    /// A scripted soak runs on fixture speech models (launching never starts
+    /// a real download) and fakes for every app service it doesn't use (no
+    /// Keychain, no iCloud, no audio session). A Parakeet soak gets neither:
+    /// it needs the real `ModelManager`, which finds the models installed on
+    /// the device; the fixture one would hand it nothing, or 512 KB blobs.
+    static func launchEnvironment(_ environment: [String: String]) -> [String: String] {
+        var launch = ["BLAU_SOAK": "1"]
+        if !usesParakeet(environment) {
+            launch["BLAU_MODEL_FIXTURES"] = "1"
+            launch["BLAU_APP_ENVIRONMENT"] = "ui-test"
+        }
+        for key in forwardedKeys {
+            launch[key] = environment[key]
+        }
+        return launch
     }
 
     /// Three times the run's expected wall time, plus ten minutes.

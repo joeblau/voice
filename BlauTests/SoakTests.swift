@@ -1,3 +1,4 @@
+import BlauAudio
 import BlauRealtime
 import BlauTelemetry
 import Foundation
@@ -79,6 +80,67 @@ struct SoakTests {
         #expect(SoakController.Status.error("boom").label == "error: boom")
     }
 
+    /// `SOAK_ASR=parakeet` without the installed models must not run (and
+    /// pass) on the scripted recognizer and the energy VAD.
+    @Test func aParakeetSoakWithoutItsModelsFailsInsteadOfFallingBack() async throws {
+        let script = ConversationAudioScript.session(lasting: .seconds(30))
+        await #expect(throws: SoakRun.SetupError.modelsMissing(["Silero VAD", "Parakeet EOU"])) {
+            _ = try await SoakRun.models(.parakeet, vadDirectory: nil, asrDirectory: nil, script: script)
+        }
+        let someDirectory = FileManager.default.temporaryDirectory
+        await #expect(throws: SoakRun.SetupError.modelsMissing(["Parakeet EOU"])) {
+            _ = try await SoakRun.models(.parakeet, vadDirectory: someDirectory, asrDirectory: nil, script: script)
+        }
+        // The whole run fails the same way, before it synthesizes or plays
+        // anything.
+        let configuration = SoakConfiguration(duration: .seconds(60), speed: nil, recognizer: .parakeet)
+        await #expect(throws: SoakRun.SetupError.modelsMissing(["Silero VAD", "Parakeet EOU"])) {
+            _ = try await SoakRun(configuration: configuration).run()
+        }
+
+        // The scripted soak needs no models and judges line by line.
+        let scripted = try await SoakRun.models(.scripted, vadDirectory: nil, asrDirectory: nil, script: script)
+        #expect(scripted.recognizerName == "scripted ASR")
+        #expect(scripted.voiceActivityName == "energy VAD")
+        #expect(scripted.transcript == .scripted)
+        let speech = try await SoakRun.speech(for: .scripted)
+        #expect(speech.topics.isEmpty, "the hermetic signal, nothing synthesized")
+    }
+
+    /// The screen keeps Start disabled for a Parakeet soak until both models
+    /// are installed (the fixture manager has installed nothing before it
+    /// starts).
+    @Test func aParakeetSoakWaitsForTheInstalledModels() {
+        let models = SpeechModels.fixtureManager(
+            root: FileManager.default.temporaryDirectory.appending(path: "soak-models-\(UUID().uuidString)"))
+        let parakeet = SoakController(
+            configuration: SoakConfiguration(duration: .seconds(60), speed: 1, recognizer: .parakeet))
+        #expect(parakeet.missingModels(models) == ["Silero VAD", "Parakeet EOU"])
+        let scripted = SoakController(configuration: SoakConfiguration(duration: .seconds(60), speed: 1))
+        #expect(scripted.missingModels(models).isEmpty)
+    }
+
+    /// `CaptureStatistics.droppedFrames(frameLength:)` already counts the
+    /// subscriber drops: a sample holds them once, and apart.
+    @Test func subscriberDropsAreSampledOnce() {
+        var capture = CaptureStatistics()
+        capture.framesPublished = 10_000
+        capture.droppedSamples = 640  // two frames lost in capture
+        capture.subscriberDroppedFrames = 5
+        let frames = SoakSampler.frameCounts(capture)
+        #expect(frames.delivered == 10_000)
+        #expect(frames.dropped == 7, "2 lost in capture + 5 missed by a subscriber, not 12")
+        #expect(frames.missedBySubscribers == 5)
+        let loss = SoakAnalysis.frameLoss(
+            SoakSample(
+                audioSeconds: 200, wallSeconds: 20, footprintBytes: nil, framesDelivered: frames.delivered,
+                framesDropped: frames.dropped, subscriberFramesDropped: frames.missedBySubscribers))
+        #expect(loss.lostInCapture == 2)
+        #expect(loss.captured == 10_002)
+        #expect(loss.missedBySubscribers == 5)
+        #expect(loss.published == 10_000)
+    }
+
     /// Six minutes of audio at 20x: about 20 s, with the session renewed
     /// part-way through and the TV in the interludes rejected.
     @Test(.timeLimit(.minutes(3)))
@@ -110,6 +172,8 @@ struct SoakTests {
         #expect(report.samples.last?.agentReplies == outcome.lines)
         #expect(report.samples.last.map { $0.framesDelivered > 0 } == true)
         #expect(report.setup.recognizer == "scripted ASR")
+        #expect(outcome.transcript == .scripted)
+        #expect(report.samples.last?.subscriberFramesDropped == 0)
         #expect(report.setup.audio.contains("TV"))
 
         // Everything but memory (too short a run to read a slope from) is

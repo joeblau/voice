@@ -111,4 +111,58 @@ import Testing
         #expect(again.backgroundBursts == session.backgroundBursts)
         #expect(again.lines == session.lines)
     }
+
+    /// The Parakeet soak's speech (`SOAK_ASR=parakeet`): each topic's lines
+    /// are cut from that topic's own clip (synthesized speech of its
+    /// sentences on a device), so a model has words to transcribe and the
+    /// segmenter the topic's vocabulary. Timing doesn't change.
+    @Test func topicVoicesSpeakEachTopicsLines() throws {
+        let topics = Set(conversation.exchanges.map(\.topic))
+        #expect(topics.count == 3)
+        // A constant level per topic, so where each sample came from shows.
+        var levels: [String: Float] = [:]
+        for (index, topic) in topics.sorted().enumerated() { levels[topic] = Float(index + 1) / 10 }
+        let voices = levels.mapValues { AudioFixture(samples: [Float](repeating: $0, count: 4_000), source: "clip") }
+        let voiced = ConversationAudioScript(
+            conversation: conversation, noiseLevel: 0, interlude: interlude, topicVoices: voices)
+        let plain = ConversationAudioScript(conversation: conversation, noiseLevel: 0, interlude: interlude)
+        #expect(voiced.lines == plain.lines)
+        #expect(voiced.totalSamples == plain.totalSamples)
+        #expect(voiced.backgroundBursts == plain.backgroundBursts)
+        #expect(voiced.source == "clip, a clip per topic")
+        for line in voiced.lines {
+            let speech = voiced.samples(in: line.sampleRange)
+            let level = try #require(levels[line.topic])
+            #expect(speech.allSatisfy { $0 == level }, "line \(line.exchange) is spoken in \(line.topic)'s voice")
+        }
+        // Topics without a clip keep the default voice.
+        let partial = ConversationAudioScript(
+            conversation: conversation, noiseLevel: 0, interlude: interlude,
+            topicVoices: [conversation.exchanges[0].topic: try #require(voices[conversation.exchanges[0].topic])])
+        let later = try #require(partial.lines.last)
+        #expect(partial.samples(in: later.sampleRange) == plain.samples(in: later.sampleRange))
+
+        // session(lasting:) passes them through (with the room noise, under
+        // 0.004 at its default level).
+        let session = ConversationAudioScript.session(
+            lasting: .seconds(120), interlude: interlude, topicVoices: voices)
+        let first = try #require(session.lines.first)
+        let firstLevel = try #require(levels[first.topic])
+        #expect(session.samples(in: first.sampleRange).allSatisfy { abs($0 - firstLevel) < 0.004 })
+    }
+
+    @Test func topicPassagesHoldEachTopicsOwnSentences() throws {
+        let passages = ConversationAudioScript.topicPassages(exchangesPerTopic: 6)
+        let topics = ScriptedConversation.standardTopics
+        #expect(Set(passages.keys) == Set(topics.map(\.name)))
+        let conversation = ScriptedConversation(exchanges: 6 * topics.count, exchangesPerTopic: 6)
+        for exchange in conversation.exchanges {
+            let passage = try #require(passages[exchange.topic])
+            #expect(passage.contains(exchange.user))
+        }
+        for topic in topics {
+            let passage = try #require(passages[topic.name])
+            #expect(ScriptedConversation.words(in: passage).count > 50, "about half a minute of speech")
+        }
+    }
 }

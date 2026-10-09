@@ -23,7 +23,16 @@
     /// - **Audio**: the user's scripted conversation with an interlude every
     ///   topic, 30 s of TV dialogue from another voice and 30 s of silence
     ///   (`ConversationAudioScript.Interlude.tvAndSilence`), played into the
-    ///   real `CaptureHub` (the app's virtual input) at `speed`.
+    ///   real `CaptureHub` (the app's virtual input) at `speed`. The user's
+    ///   speech is the hermetic speech-shaped signal for the scripted
+    ///   recognizer, and synthesized speech of each topic's sentences for
+    ///   Parakeet (`speech(for:)`).
+    /// - **ASR**: the scripted recognizer on the script's word alignment,
+    ///   or Parakeet and Silero from the installed models
+    ///   (`BLAU_SOAK_ASR=parakeet`), never a silent fallback from one to the
+    ///   other (`SetupError`). The checks are line-exact for the first and
+    ///   allow for split or missed lines with the second
+    ///   (`SoakTranscriptSource`).
     /// - **Voice ID**: the real `VerificationGate` (#47) between the
     ///   transcriber and the orchestrator, as in a conversation. Its verifier
     ///   (`SoakSpeechVerifier`) gives the TV's speech another speaker's
@@ -63,12 +72,22 @@
 
         // swiftlint:disable:next function_body_length
         func run() async throws -> SoakReport {
+            // The speech and the models first, before the clock starts: a
+            // Parakeet soak that can't run Parakeet fails here instead of
+            // quietly running the scripted recognizer.
+            let recognizerKind = configuration.recognizer
+            try Self.requireModelDirectories(recognizerKind, vad: vadModelDirectory, asr: asrModelDirectory)
+            let clips = try await Self.speech(for: recognizerKind)
+            let script = ConversationAudioScript.session(
+                lasting: configuration.duration, exchangesPerTopic: Self.exchangesPerTopic, interlude: .tvAndSilence,
+                backgroundVoice: clips.background, topicVoices: clips.topics)
+            let models = try await Self.models(
+                recognizerKind, vadDirectory: vadModelDirectory, asrDirectory: asrModelDirectory, script: script)
+
             // Whole seconds, so the report's ISO 8601 JSON round-trips.
             let startedAt = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down))
             let clock = ContinuousClock()
             let started = clock.now
-            let script = ConversationAudioScript.session(
-                lasting: configuration.duration, exchangesPerTopic: Self.exchangesPerTopic, interlude: .tvAndSilence)
 
             let directory = FileManager.default.temporaryDirectory.appending(
                 path: "Soak-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -86,12 +105,9 @@
 
             // Audio, VAD, ASR.
             let hub = CaptureHub()
-            let (vadModel, vadName) = await Self.voiceActivityModel(directory: vadModelDirectory)
-            let vad = VoiceActivitySegmenter(model: vadModel)
-            let (recognizer, recognizerName) = try await Self.recognizer(
-                configuration.recognizer, directory: asrModelDirectory, script: script)
+            let vad = VoiceActivitySegmenter(model: models.voiceActivity)
             let transcriber = ParakeetStreamingTranscriber(
-                recognizer: recognizer, audio: hub, voiceActivity: vad, conversationID: conversationID)
+                recognizer: models.recognizer, audio: hub, voiceActivity: vad, conversationID: conversationID)
 
             // Grok, played by the local fake server.
             let replies = Dictionary(script.lines.map { ($0.text, $0.reply) }, uniquingKeysWith: { first, _ in first })
@@ -158,17 +174,20 @@
                 "Soak: \(script.lines.count, privacy: .public) lines, \(script.backgroundBursts.count, privacy: .public) background bursts, \(Int(totalSeconds), privacy: .public) s, \(self.configuration.summary, privacy: .public)"
             )
             await sampler.take(at: 0)
+            let transcript = models.transcript
 
             do {
                 try await CaptureReplayFeeder(script: script, speed: speed).feed(
                     into: hub,
                     consumed: { min(vad.statistics.samplesProcessed, await transcriber.receivedPosition ?? 0) },
                     beforeLine: { line in
-                        // The user waits for Blau's answer to every earlier
-                        // line before speaking (at most 20 s; a reply that
-                        // never comes shows up in the report).
+                        // The user waits for Blau's answer before speaking
+                        // (at most 20 s; a reply that never comes shows up
+                        // in the report).
                         let deadline = ContinuousClock.now + .seconds(20)
-                        while await tap.agentReplies < line, ContinuousClock.now < deadline {
+                        while await Self.awaitsReply(before: line, transcript: transcript, tap: tap),
+                            ContinuousClock.now < deadline
+                        {
                             try? await Task.sleep(for: .milliseconds(5))
                         }
                     },
@@ -219,10 +238,13 @@
                 backgroundScores: counts.background, backgroundRejected: counts.backgroundRejected,
                 gateCommitted: gateStatistics.committed, gateDiscarded: gateStatistics.discarded,
                 topicBoundaries: tapReport.topicBoundaries, rollovers: final.rollovers, reseeds: final.reseeds,
-                connections: server.sockets.count, failedTurns: failed)
+                connections: server.sockets.count, failedTurns: failed, transcript: models.transcript)
             let setup = SoakReport.Setup(
-                audioSeconds: totalSeconds, speed: speed, recognizer: recognizerName, voiceActivity: vadName,
-                audio: "user speech, TV dialogue (\(script.backgroundBursts.count) bursts) and silence",
+                audioSeconds: totalSeconds, speed: speed, recognizer: models.recognizerName,
+                voiceActivity: models.voiceActivityName,
+                audio:
+                    "user speech from \(script.source); TV dialogue (\(script.backgroundBursts.count) bursts) "
+                    + "from \(clips.background.source); and silence",
                 rolloverAfterSeconds: configuration.continuity.rolloverAfter?.timeInterval,
                 sampleIntervalSeconds: configuration.sampleInterval.timeInterval)
             let report = SoakReport(
@@ -232,25 +254,143 @@
             return report
         }
 
-        private static func voiceActivityModel(directory: URL?) async -> (any SpeechProbabilityModel, String) {
-            if let directory, let silero = try? await SileroSpeechProbabilityModel(modelDirectory: directory) {
-                return (silero, "Silero VAD")
+        /// Why a soak couldn't start. A Parakeet soak never falls back to the
+        /// scripted recognizer or the energy VAD: it would pass while
+        /// claiming to be the device run.
+        enum SetupError: Error, Equatable, CustomStringConvertible {
+            /// `BLAU_SOAK_ASR=parakeet`, but these models aren't installed.
+            case modelsMissing([String])
+            /// A model is installed but didn't load.
+            case modelFailedToLoad(model: String, reason: String)
+            /// The system speech synthesizer gave no speech for the user's
+            /// lines or the TV.
+            case speechUnavailable(String)
+
+            var description: String {
+                switch self {
+                case .modelsMissing(let models):
+                    "The Parakeet soak needs the installed speech models; missing: \(models.joined(separator: ", "))"
+                case .modelFailedToLoad(let model, let reason):
+                    "\(model) didn't load: \(reason)"
+                case .speechUnavailable(let reason):
+                    "No synthesized speech for the Parakeet soak: \(reason)"
+                }
             }
-            return (EnergySpeechProbabilityModel(), "energy VAD")
         }
 
-        private static func recognizer(
-            _ kind: PerfReplayConfiguration.Recognizer, directory: URL?, script: ConversationAudioScript
-        ) async throws -> (any StreamingSpeechRecognizer, String) {
-            if kind == .parakeet, let directory {
-                return (try await ParakeetEouRecognizer.load(modelDirectory: directory), "Parakeet EOU")
+        /// The audio the script cuts its speech from.
+        struct Speech {
+            /// Each topic's clip (`ConversationAudioScript.topicVoices`);
+            /// empty for the default voice.
+            var topics: [String: AudioFixture] = [:]
+            var background = ConversationAudioScript.defaultBackgroundVoice
+        }
+
+        /// The scripted recognizer reads the script's word alignment, so the
+        /// hermetic speech-shaped signal is all it needs. Parakeet needs
+        /// words to transcribe: each topic's sentences and the TV's, spoken
+        /// by the system synthesizer (about four and a half minutes of
+        /// audio, rendered once).
+        static func speech(for kind: PerfReplayConfiguration.Recognizer) async throws -> Speech {
+            guard kind == .parakeet else { return Speech() }
+            var speech = Speech()
+            do {
+                for (topic, passage) in ConversationAudioScript.topicPassages(exchangesPerTopic: exchangesPerTopic) {
+                    speech.topics[topic] = try await AudioFixture.synthesizedSpeech(passage)
+                }
+                // Another voice for the TV where the system has one.
+                speech.background = try await AudioFixture.synthesizedSpeech(tvPassage, language: "en-GB")
+            } catch {
+                throw SetupError.speechUnavailable(String(describing: error))
             }
-            let words = script.words.map {
-                AlignedTranscriptRecognizer.Word(text: $0.text, end: $0.end, endsUtterance: $0.endsLine)
+            return speech
+        }
+
+        /// What the TV says in the Parakeet soak's interludes.
+        static let tvPassage = """
+            Good evening and welcome to the late news. Heavy rain is moving across the coast tonight, \
+            and drivers are being asked to stay off the motorway until the morning. In sport, the home \
+            side came back from two goals down to win in the final minute. Markets closed slightly \
+            higher after a quiet day of trading. And finally, the city zoo has welcomed a baby giraffe, \
+            the first born there in more than ten years. Now, the weather for the weekend.
+            """
+
+        /// The voice activity model and recognizer a run uses.
+        struct Models {
+            var voiceActivity: any SpeechProbabilityModel
+            var voiceActivityName: String
+            var recognizer: any StreamingSpeechRecognizer
+            var recognizerName: String
+            var transcript: SoakTranscriptSource
+        }
+
+        /// Throws `SetupError.modelsMissing` when `kind` needs installed
+        /// models and a directory is missing.
+        static func requireModelDirectories(
+            _ kind: PerfReplayConfiguration.Recognizer, vad: URL?, asr: URL?
+        ) throws {
+            guard kind == .parakeet else { return }
+            let missing = [vad == nil ? "Silero VAD" : nil, asr == nil ? "Parakeet EOU" : nil].compactMap { $0 }
+            if !missing.isEmpty { throw SetupError.modelsMissing(missing) }
+        }
+
+        /// The energy VAD and the scripted recognizer, or Silero and Parakeet
+        /// from the installed models.
+        ///
+        /// - Throws: `SetupError` when Parakeet is asked for and a model
+        ///   directory is missing or a model doesn't load.
+        static func models(
+            _ kind: PerfReplayConfiguration.Recognizer, vadDirectory: URL?, asrDirectory: URL?,
+            script: ConversationAudioScript
+        ) async throws -> Models {
+            switch kind {
+            case .scripted:
+                let words = script.words.map {
+                    AlignedTranscriptRecognizer.Word(text: $0.text, end: $0.end, endsUtterance: $0.endsLine)
+                }
+                // Timed by the call: the aligned recognizer runs no model and
+                // reports no time of its own, and `asr.chunkLatency` needs one.
+                return Models(
+                    voiceActivity: EnergySpeechProbabilityModel(), voiceActivityName: "energy VAD",
+                    recognizer: TimedSpeechRecognizer(AlignedTranscriptRecognizer(words: words)),
+                    recognizerName: "scripted ASR", transcript: .scripted)
+            case .parakeet:
+                try requireModelDirectories(kind, vad: vadDirectory, asr: asrDirectory)
+                guard let vadDirectory, let asrDirectory else { throw SetupError.modelsMissing([]) }
+                let silero: SileroSpeechProbabilityModel
+                do {
+                    silero = try await SileroSpeechProbabilityModel(modelDirectory: vadDirectory)
+                } catch {
+                    throw SetupError.modelFailedToLoad(model: "Silero VAD", reason: String(describing: error))
+                }
+                let parakeet: ParakeetEouRecognizer
+                do {
+                    parakeet = try await ParakeetEouRecognizer.load(modelDirectory: asrDirectory)
+                } catch {
+                    throw SetupError.modelFailedToLoad(model: "Parakeet EOU", reason: String(describing: error))
+                }
+                return Models(
+                    voiceActivity: silero, voiceActivityName: "Silero VAD", recognizer: parakeet,
+                    recognizerName: "Parakeet EOU", transcript: .recognized)
             }
-            // Timed by the call: the aligned recognizer runs no model and
-            // reports no time of its own, and `asr.chunkLatency` needs one.
-            return (TimedSpeechRecognizer(AlignedTranscriptRecognizer(words: words)), "scripted ASR")
+        }
+
+        /// Whether the user, about to say line `line` (from 1), is still
+        /// waiting for Blau.
+        ///
+        /// With the script's alignment every earlier line is one utterance,
+        /// so the user waits for `line` replies. A model may split a line or
+        /// miss one, so then the user waits until every utterance heard so
+        /// far is answered: waiting for a reply to a line the model missed
+        /// would cost the whole timeout every time.
+        static func awaitsReply(
+            before line: Int, transcript: SoakTranscriptSource, tap: ReplayTranscriptTap
+        ) async -> Bool {
+            let replies = await tap.agentReplies
+            switch transcript {
+            case .scripted: return replies < line
+            case .recognized: return await replies < tap.userUtterances
+            }
         }
     }
 
@@ -353,14 +493,16 @@
             let fresh = min(firstAudio.totalCount - firstAudioSeen, firstAudio.samples.count)
             firstAudioSeen = firstAudio.totalCount
             let recent = firstAudio.samples.suffix(max(0, fresh))
+            let frames = Self.frameCounts(capture)
             let sample = SoakSample(
                 audioSeconds: audioSeconds,
                 wallSeconds: (ContinuousClock.now - started).timeInterval,
                 footprintBytes: memory.snapshot()?.physicalFootprint,
                 asrChunks: asr.chunksProcessed,
                 asrSeconds: asr.modelTime.timeInterval,
-                framesDelivered: capture.framesPublished,
-                framesDropped: capture.droppedFrames(frameLength: 320) + capture.subscriberDroppedFrames,
+                framesDelivered: frames.delivered,
+                framesDropped: frames.dropped,
+                subscriberFramesDropped: frames.missedBySubscribers,
                 userUtterances: await tap.userUtterances,
                 agentReplies: await tap.agentReplies,
                 topicBoundaries: await tap.topicBoundaries,
@@ -372,6 +514,23 @@
             samples.append(sample)
             return sample
         }
+
+        /// A sample's frame counters from the capture hub's statistics.
+        /// `droppedFrames(frameLength:)` already includes the subscriber
+        /// drops, so they are not added again; they are kept apart as well,
+        /// because they were published (`SoakAnalysis.frameLoss`).
+        static func frameCounts(
+            _ capture: CaptureStatistics
+        ) -> (delivered: Int64, dropped: Int64, missedBySubscribers: Int64) {
+            (
+                capture.framesPublished,
+                capture.droppedFrames(frameLength: frameLength),
+                capture.subscriberDroppedFrames
+            )
+        }
+
+        /// The frames `CaptureReplayFeeder` plays: 20 ms at 16 kHz.
+        static let frameLength = 320
     }
 
     /// Saves soak reports to `Documents/Soak` as JSON and Markdown, plus

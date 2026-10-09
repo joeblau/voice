@@ -17,8 +17,9 @@ public struct SoakReport: Codable, Hashable, Sendable {
         public var voiceActivity: String
         /// What the audio holds: `owner speech, TV, silence`.
         public var audio: String
-        /// When the realtime session is renewed, in seconds of wall time
-        /// (xAI's 110 minutes scaled to the run).
+        /// When the realtime session is scheduled to be renewed, in seconds
+        /// of wall time (xAI's 110 minutes scaled to the run). How often it
+        /// actually was is `SoakOutcome.rollovers`.
         public var rolloverAfterSeconds: Double?
         /// Seconds of audio between samples.
         public var sampleIntervalSeconds: Double
@@ -103,8 +104,15 @@ public struct SoakReport: Codable, Hashable, Sendable {
         if let rollover = setup.rolloverAfterSeconds {
             lines.append("")
             lines.append(
-                "Realtime session renewed after \(Self.minutes(rollover)) of wall time (xAI's 110 minutes, scaled).")
+                "Realtime session renewal scheduled after \(Self.minutes(rollover)) of wall time "
+                    + "(xAI's 110 minutes, scaled); renewed \(outcome.rollovers) "
+                    + "time\(outcome.rollovers == 1 ? "" : "s").")
         }
+        lines.append("")
+        lines.append(
+            outcome.transcript == .scripted
+                ? "Transcript: the script's word alignment, judged line by line."
+                : "Transcript: recognized by the model, judged allowing for split or missed lines.")
         lines.append("")
         lines.append("| Check | Result | Measured | Limit |")
         lines.append("| --- | --- | --- | --- |")

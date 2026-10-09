@@ -23,7 +23,10 @@ extension View {
 
     /// Accessibility identifiers `SoakTests` drives the screen with.
     enum SoakAccessibility {
+        /// Disabled until the models a Parakeet soak needs are installed.
         static let start = "blau.soak.start"
+        /// Which installed models a Parakeet soak is still waiting for.
+        static let models = "blau.soak.models"
         /// `idle`, `running`, `passed`, `failed: <checks>` or
         /// `error: <reason>`.
         static let status = "blau.soak.status"
@@ -68,6 +71,19 @@ extension View {
 
         var isRunning: Bool { status == .running }
 
+        /// The installed models a run needs and doesn't have yet: Silero and
+        /// Parakeet for a Parakeet soak, nothing for the scripted one.
+        func missingModels(_ models: ModelManager) -> [String] {
+            guard configuration.recognizer == .parakeet else { return [] }
+            return [
+                models.directory(for: .sileroVAD) == nil ? "Silero VAD" : nil,
+                models.directory(for: .parakeetRealtimeEOU) == nil ? "Parakeet EOU" : nil,
+            ].compactMap { $0 }
+        }
+
+        /// Starts a run. A Parakeet run whose models aren't installed ends
+        /// at once in `error` (`SoakRun.SetupError.modelsMissing`); the
+        /// screen keeps Start disabled until they are.
         func start(models: ModelManager) {
             guard !isRunning else { return }
             status = .running
@@ -117,12 +133,19 @@ extension View {
                     Text(controller.configuration.summary)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    let missing = controller.missingModels(models)
                     Button("Start soak") {
                         controller.start(models: models)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(controller.isRunning)
+                    .disabled(controller.isRunning || !missing.isEmpty)
                     .accessibilityIdentifier(SoakAccessibility.start)
+                    if !missing.isEmpty {
+                        Text("Waiting for the installed speech models: \(missing.joined(separator: ", "))")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier(SoakAccessibility.models)
+                    }
                     Text(controller.status.label)
                         .monospaced()
                         .accessibilityIdentifier(SoakAccessibility.status)
