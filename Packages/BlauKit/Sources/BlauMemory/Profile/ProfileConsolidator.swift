@@ -259,6 +259,20 @@ public actor ProfileConsolidator {
         Log.memory.notice("Erased this device's profile consolidation log and notes")
     }
 
+    /// Forgets the topic summaries this device's log holds, after the user
+    /// deleted every conversation (Settings → Privacy & Data → Delete All
+    /// Conversations): each record's rewritten topic summaries (the topics'
+    /// titles and summaries before and after) go, and a record that changed
+    /// nothing else goes with them. The profile changes, the notes and the
+    /// schedule stay: deleting conversations keeps what was learned from
+    /// them.
+    public func eraseTopicHistory() {
+        var log = logStore.load()
+        log.removeTopicChanges()
+        logStore.save(log)
+        Log.memory.notice("Erased the topic summaries in this device's profile consolidation log")
+    }
+
     // MARK: Scheduling
 
     /// Whether a consolidation is due, from this device's last run, the

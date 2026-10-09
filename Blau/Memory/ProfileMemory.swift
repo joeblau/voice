@@ -197,6 +197,24 @@ final class ProfileMemory {
         }
     }
 
+    /// Call before Settings → Privacy & Data deletes every conversation
+    /// (and nothing learned), then `conversationsErased()`: a consolidation
+    /// that is running finishes first, so the topic summaries it rewrites
+    /// are in the log by the time `conversationsErased()` removes them.
+    func prepareToEraseConversations() async {
+        await consolidator.waitUntilIdle()
+    }
+
+    /// Call after Settings → Privacy & Data deleted every conversation
+    /// (#67 review): drops the topic titles and summaries this device's
+    /// consolidation log holds, so the change history no longer shows
+    /// deleted conversations. What was learned from them (the profile, its
+    /// history, the notes and the pinned facts) stays.
+    func conversationsErased() async {
+        await consolidator.eraseTopicHistory()
+        await reloadLog()
+    }
+
     /// Call when a delete `prepareToErase()` prepared for failed: nothing
     /// was deleted, so extraction carries on with its queue.
     func eraseFailed() async {
