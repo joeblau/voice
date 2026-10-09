@@ -57,9 +57,14 @@ final class VoiceLoop {
     private(set) var snapshot = TurnSnapshot()
     /// What the voice ID gate (#47) kept from Grok this conversation, newest
     /// last (at most ``ignoredSpeechLimit``): the DEBUG "ignored speech"
-    /// lane. Rejected speech and uncertain speech the policy dropped.
+    /// lane. Rejected speech and uncertain speech the policy dropped. Filled
+    /// in DEBUG builds only.
     private(set) var ignoredSpeech: [GatedUtterance] = []
     static let ignoredSpeechLimit = 50
+    /// Whether the voice ID gate guards the running conversation (`nil`
+    /// while none runs). Settings → Voice ID warns when it should but
+    /// couldn't start (`VoiceIDGateStatus.unavailable`).
+    private(set) var voiceIDStatus: VoiceIDGateStatus?
 
     /// The realtime half: the `TurnOrchestrator`. `nil` when this
     /// environment can't run a conversation (previews and tests run on a
@@ -273,12 +278,21 @@ final class VoiceLoop {
         let events = pipeline.transcript
         transcriptTask = Task { await conversation.run(transcript: events) }
         ignoredSpeech = []
+        voiceIDStatus = pipeline.voiceIDStatus
         if let verdicts = pipeline.voiceVerdicts {
-            verdictTask = Task { [weak self] in
-                for await verdict in verdicts where !verdict.disposition.isCommitted {
-                    self?.noteIgnored(verdict)
+            #if DEBUG
+                verdictTask = Task { [weak self] in
+                    for await verdict in verdicts where !verdict.disposition.isCommitted {
+                        self?.noteIgnored(verdict)
+                    }
                 }
-            }
+            #else
+                // Only the DEBUG "ignored speech" lane reads them: drained
+                // unread, so other people's words aren't kept in memory.
+                verdictTask = Task {
+                    for await _ in verdicts {}
+                }
+            #endif
         }
         phase = .running
         Log.ui.notice("Voice loop started")
@@ -311,6 +325,7 @@ final class VoiceLoop {
         transcriptTask = nil
         verdictTask?.cancel()
         verdictTask = nil
+        voiceIDStatus = nil
         await conversation?.close()
         await pipeline?.stop()
         pipeline = nil
@@ -390,11 +405,14 @@ protocol VoiceLoopPipeline: AnyObject {
     func agentActivityChanged(_ isActive: Bool)
     /// What the voice ID gate decided for each final utterance, when it runs.
     var voiceVerdicts: AsyncStream<GatedUtterance>? { get }
+    /// Whether the voice ID gate guards this conversation.
+    var voiceIDStatus: VoiceIDGateStatus { get }
 }
 
 extension VoiceLoopPipeline {
     func agentActivityChanged(_ isActive: Bool) {}
     var voiceVerdicts: AsyncStream<GatedUtterance>? { nil }
+    var voiceIDStatus: VoiceIDGateStatus { .off }
 }
 
 /// The on-device half of the voice loop for one conversation: the VAD and
@@ -409,6 +427,8 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
     let voiceActivity: VoiceActivitySegmenter
     /// The voice ID gate, when a voiceprint is enrolled and voice ID is on.
     let voiceGate: VerificationGate?
+    /// Whether it runs, and if not, why.
+    let voiceIDStatus: VoiceIDGateStatus
     /// What the user says: the transcriber's events through the gate.
     let transcript: AsyncStream<TranscriptEvent>
     private let stopAudio: @Sendable () async -> Void
@@ -418,13 +438,14 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
 
     private init(
         transcriber: ParakeetStreamingTranscriber, voiceActivity: VoiceActivitySegmenter,
-        voiceGate: VerificationGate?, gateTask: Task<Void, Never>?,
+        voiceGate: VerificationGate?, voiceIDStatus: VoiceIDGateStatus, gateTask: Task<Void, Never>?,
         vadTask: Task<Void, Never>?, bargeInTask: Task<Void, Never>?,
         stopAudio: @escaping @Sendable () async -> Void
     ) {
         self.transcriber = transcriber
         self.voiceActivity = voiceActivity
         self.voiceGate = voiceGate
+        self.voiceIDStatus = voiceIDStatus
         self.gateTask = gateTask
         // Every final waits for voice ID's decision; partials of rejected
         // speech are held back.
@@ -489,7 +510,9 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
                 await keeper.stopCapture()
                 throw error
             }
-            let gate = await gateLoad.value
+            let gateLoaded = await gateLoad.value
+            let gate = gateLoaded?.gate
+            let voiceIDStatus = gateLoaded?.status ?? .off
 
             // An audio failure (say, microphone permission denied) surfaces
             // here, after the models have loaded: loading isn't cancellable
@@ -539,8 +562,8 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
             }
             let vadTask = Task { await vad.run(on: hub) }
             return LiveVoicePipeline(
-                transcriber: transcriber, voiceActivity: vad, voiceGate: gate, gateTask: gateTask, vadTask: vadTask,
-                bargeInTask: bargeInTask, stopAudio: stopAudio)
+                transcriber: transcriber, voiceActivity: vad, voiceGate: gate, voiceIDStatus: voiceIDStatus,
+                gateTask: gateTask, vadTask: vadTask, bargeInTask: bargeInTask, stopAudio: stopAudio)
         #else
             throw VoiceLoop.StartError.unavailable
         #endif

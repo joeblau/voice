@@ -35,7 +35,9 @@ struct GateScenario {
 
     /// Runs the scene through `gate` the way the pipeline does: each line's
     /// VAD segment, then its final utterance through ``VerificationGate/filter(_:)``.
-    /// Returns the texts that reached Grok and the gate's verdicts.
+    /// Returns the texts that reached Grok (finals the orchestrator commits:
+    /// the gate passes dropped ones on marked `reject`) and the gate's
+    /// verdicts.
     func run(through gate: VerificationGate) async -> (sent: [String], verdicts: [GatedUtterance]) {
         let track = track
         let samples: @Sendable (Int64) -> Float = { index in index < track.count ? track[Int(index)] : 0 }
@@ -44,7 +46,9 @@ struct GateScenario {
         let reader = Task {
             var texts: [String] = []
             for await event in output {
-                if case .final(let utterance) = event { texts.append(utterance.text) }
+                if case .final(let utterance) = event, utterance.speakerDecision?.isRejected != true {
+                    texts.append(utterance.text)
+                }
             }
             return texts
         }

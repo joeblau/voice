@@ -48,9 +48,21 @@ import os
 /// | `uncertain` | Passed on with `speakerDecision: .uncertain` if the ``UncertainSpeechPolicy`` allows (by default: in an active turn and at least 2 s long); dropped otherwise |
 /// | `reject` | Dropped. Never sent; listed in ``verdicts`` for the DEBUG "ignored speech" lane |
 ///
+/// A dropped final still reaches the orchestrator, marked
+/// `speakerDecision: .reject`, which it ignores (never sent, never stored):
+/// that ends the utterance in progress, so the partial text and the
+/// `userSpeaking` state the speech's first partials started don't linger.
 /// Partials of speech already rejected are held back, so a TV's words don't
 /// show as the user's live text. A refined transcript (#30) is passed on
-/// only for a final that was.
+/// only for a final that was sent.
+///
+/// **Long speech.** VAD splits a segment at 8 s and the next one
+/// (`SpeechOnset.isContinuation`) starts at the split point, which can be up
+/// to a second before where VAD's audio carries on. The gate starts the
+/// continuation with the audio the split segment had already received past
+/// that point, so the continuation is scored on its own speech. Any other
+/// gap in VAD's audio is filled from the capture history, and only with
+/// silence when the history no longer holds it (a capture drop).
 ///
 /// **Barge-in.** ``bargeInDecision(for:)`` (the `BargeInSpeakerGate` of
 /// BlauRealtime's `BargeInMonitor`) waits for the speech's first decision,
@@ -83,6 +95,10 @@ public actor VerificationGate {
     private var order: [Int] = []
     /// The segment VAD's speech audio is currently filling.
     private var openSegmentID: Int?
+    /// The audio past the split point of a segment VAD split at its maximum
+    /// duration: the start of the continuation that follows, which VAD
+    /// doesn't send again.
+    private var splitTail: AudioFrame?
     /// Tasks waiting for the gate's state to change.
     private var waiters: [UInt64: CheckedContinuation<Void, Never>] = [:]
     private var nextWaiterID: UInt64 = 0
@@ -114,7 +130,16 @@ public actor VerificationGate {
 
         var hasEnded: Bool { speechEnd != nil }
         var bufferedEnd: Int64 { start + Int64(samples.count) }
-        var best: SpeakerScore? { VerificationGateRules.decision(from: scores) }
+        /// The best score: the one that covered the most audio. Once the
+        /// segment has ended, only scores within its speech count: a
+        /// checkpoint reached on VAD's hangover (the audio after the
+        /// speech) scored silence too, with a longer window's thresholds.
+        var best: SpeakerScore? {
+            guard let speechEnd else { return VerificationGateRules.decision(from: scores) }
+            let speech = speechEnd - start
+            return VerificationGateRules.decision(
+                from: scores.filter { $0.audioDuration.sampleCount(sampleRate: sampleRate) <= speech })
+        }
         /// The latest decision: the final one, or the best score so far.
         var decision: SpeakerDecision? { final?.decision ?? best?.decision }
 
@@ -173,6 +198,8 @@ public actor VerificationGate {
         switch event {
         case .started(let onset):
             open(id: onset.segmentID, start: onset.startOffset, sampleRate: onset.sampleRate)
+            if onset.isContinuation { seedContinuation(onset.segmentID) }
+            splitTail = nil
         case .audio(let frame):
             guard let id = openSegmentID else { return }
             append(frame, to: id)
@@ -197,15 +224,29 @@ public actor VerificationGate {
         notifyWaiters()
     }
 
+    /// Starts a continuation (VAD split the speech at its maximum duration)
+    /// with the audio the split segment already received past the split
+    /// point. VAD's audio simply carries on after a split, so without it the
+    /// continuation's audio would begin up to a second after its start.
+    private func seedContinuation(_ id: Int) {
+        guard let tail = splitTail, var segment = segments[id], segment.samples.isEmpty,
+            tail.sampleRate == segment.sampleRate, tail.sampleOffset <= segment.start,
+            segment.start < tail.nextSampleOffset
+        else { return }
+        let limit = Int(configuration.maximumBufferedSpeech.sampleCount(sampleRate: segment.sampleRate))
+        let skip = Int(segment.start - tail.sampleOffset)
+        segment.samples.append(contentsOf: tail.samples[skip...].prefix(limit))
+        segments[id] = segment
+        shared.withLock { $0.seededContinuations += 1 }
+    }
+
     private func append(_ frame: AudioFrame, to id: Int) {
         guard var segment = segments[id], !segment.hasEnded, frame.sampleRate == segment.sampleRate else { return }
         let limit = Int(configuration.maximumBufferedSpeech.sampleCount(sampleRate: segment.sampleRate))
         guard segment.samples.count < limit else { return }
         let end = segment.bufferedEnd
         if frame.sampleOffset > end {
-            // A gap in the stream (a capture drop): keep positions aligned.
-            segment.samples.append(
-                contentsOf: repeatElement(0, count: Int(min(frame.sampleOffset - end, Int64(limit)))))
+            fillGap(end..<frame.sampleOffset, in: &segment, limit: limit)
         }
         let skip = Int(max(0, segment.bufferedEnd - frame.sampleOffset))
         if skip < frame.sampleCount {
@@ -213,6 +254,27 @@ public actor VerificationGate {
         }
         segments[id] = segment
         notifyWaiters()
+    }
+
+    /// Fills `gap`, audio of the segment VAD's stream didn't carry, from the
+    /// capture history where it still holds it, and with silence (to keep
+    /// positions aligned) where it doesn't: a capture drop.
+    private func fillGap(_ gap: Range<Int64>, in segment: inout Segment, limit: Int) {
+        var position = gap.lowerBound
+        if let history, let frame = history.history(in: gap), frame.sampleRate == segment.sampleRate,
+            frame.sampleOffset >= gap.lowerBound, frame.nextSampleOffset <= gap.upperBound
+        {
+            let silence = Int(frame.sampleOffset - position)
+            segment.samples.append(
+                contentsOf: repeatElement(0, count: max(0, min(silence, limit - segment.samples.count))))
+            segment.samples.append(contentsOf: frame.samples.prefix(max(0, limit - segment.samples.count)))
+            position = frame.nextSampleOffset
+            shared.withLock { $0.gapSamplesFromHistory += frame.sampleCount }
+        }
+        let silence = Int(gap.upperBound - position)
+        guard silence > 0 else { return }
+        segment.samples.append(contentsOf: repeatElement(0, count: max(0, min(silence, limit - segment.samples.count))))
+        shared.withLock { $0.gapSamplesSilenced += silence }
     }
 
     /// Scores the segment at every checkpoint its audio has reached.
@@ -234,6 +296,12 @@ public actor VerificationGate {
     private func finish(_ ended: SpeechSegment) async {
         guard var segment = segments[ended.id] else { return }
         let speechEnd = max(segment.start, ended.sampleRange.upperBound)
+        if ended.endReason == .maximumDuration, segment.bufferedEnd > speechEnd {
+            // The continuation VAD starts next begins at the split point.
+            let from = Int(speechEnd - segment.start)
+            splitTail = AudioFrame(
+                samples: Array(segment.samples[from...]), sampleRate: segment.sampleRate, sampleOffset: speechEnd)
+        }
         segment.speechEnd = speechEnd
         segments[ended.id] = segment
         notifyWaiters()
@@ -273,7 +341,9 @@ public actor VerificationGate {
 
     /// Whether `count` samples of speech from the segment's start need a
     /// new score: nothing scored yet, or the best score covers less than
-    /// all of it by at least the re-score gain.
+    /// all of it by at least the re-score gain. (Once the segment has ended,
+    /// ``Segment/best`` ignores scores that ran past its speech, so speech
+    /// a hangover-tainted checkpoint covered is scored again on its own.)
     private func needsScore(_ segment: Segment, through count: Int64) -> Bool {
         guard let best = segment.best else { return true }
         let covered = best.audioDuration.sampleCount(sampleRate: segment.sampleRate)
@@ -442,6 +512,10 @@ public actor VerificationGate {
 
     /// One transcriber event through the gate: the event to pass on, or
     /// `nil` to drop it.
+    ///
+    /// Every final is passed on: with its decision when it is sent, and
+    /// with `.reject` when it isn't (rejected, or uncertain and dropped by
+    /// the policy), which the orchestrator ignores.
     public func gate(_ event: TranscriptEvent) async -> TranscriptEvent? {
         switch event {
         case .partial(_, let range):
@@ -454,8 +528,11 @@ public actor VerificationGate {
             return event
         case .final(let utterance):
             let gated = await decide(utterance)
-            guard gated.disposition.isCommitted else { return nil }
-            return .final(utterance.withSpeakerDecision(gated.decision))
+            // A final that isn't sent still goes on, marked `reject`: the
+            // orchestrator ignores it (never sent, never stored) but it ends
+            // the utterance in progress, clearing the partial text and the
+            // `userSpeaking` state the speech's partials started.
+            return .final(utterance.withSpeakerDecision(gated.disposition.isCommitted ? gated.decision : .reject))
         case .refined(let utterance):
             guard committedFinals.contains(utterance.id) else { return nil }
             return .refined(utterance)
@@ -484,8 +561,13 @@ public actor VerificationGate {
         let gated = GatedUtterance(
             utterance: utterance, decision: decision, disposition: disposition, segments: verdicts, delay: delay)
 
-        if disposition.isCommitted {
+        if disposition == .accepted {
+            // Only the owner's speech (or Grok's reply) keeps a turn active:
+            // uncertain speech sent in an active turn doesn't extend it, so
+            // a podcast can't keep itself flowing to Grok.
             turnActivity.userUtteranceCommitted()
+        }
+        if disposition.isCommitted {
             committedFinals.append(utterance.id)
             if committedFinals.count > 256 { committedFinals.removeFirst(committedFinals.count - 256) }
         }
@@ -537,6 +619,7 @@ public actor VerificationGate {
         segments.removeAll()
         order.removeAll()
         openSegmentID = nil
+        splitTail = nil
         committedFinals.removeAll()
         turnActivity.reset()
         notifyWaiters()

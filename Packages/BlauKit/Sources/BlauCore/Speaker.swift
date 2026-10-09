@@ -21,8 +21,9 @@ public enum SpeakerDecision: String, CaseIterable, Codable, Hashable, Sendable {
     /// Not enough evidence yet either way.
     case uncertain
 
-    /// Whether speech with this verdict may be committed and sent to Grok
-    /// on its own merit. `uncertain` speech is sent only when the voice
-    /// gate's uncertain policy allows it.
-    public var allowsCommit: Bool { self == .accept }
+    /// Whether the speech is kept from Grok: the gate rejected it, or it was
+    /// uncertain and the gate's uncertain policy dropped it (the gate passes
+    /// those finals on marked `reject`, #47). The turn orchestrator ignores
+    /// such an utterance.
+    public var isRejected: Bool { self == .reject }
 }

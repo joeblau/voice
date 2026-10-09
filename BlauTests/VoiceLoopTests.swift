@@ -156,6 +156,32 @@ struct VoiceLoopTests {
         await loop.stop()
     }
 
+    /// An enrolled user whose gate couldn't start is told: the conversation
+    /// runs unprotected (#47).
+    @Test func theVoiceIDStatusFollowsTheConversation() async {
+        let (snapshots, _) = AsyncStream.makeStream(of: TurnSnapshot.self)
+        let pipeline = FakeLoopPipeline()
+        pipeline.voiceIDStatus = .unavailable(.modelNotInstalled)
+        let loop = VoiceLoop(
+            conversation: FakeLoopConversation(), snapshots: snapshots, startPipeline: { pipeline },
+            performance: FixedPerformanceLevel())
+        #expect(loop.voiceIDStatus == nil)
+
+        await loop.start()
+        #expect(loop.voiceIDStatus == .unavailable(.modelNotInstalled))
+        #expect(loop.voiceIDStatus?.isDegraded == true)
+        #expect(loop.voiceIDStatus?.explanation?.contains("can reach Grok") == true)
+
+        await loop.stop()
+        #expect(loop.voiceIDStatus == nil)
+    }
+
+    @Test(arguments: [VoiceIDGateStatus.on, .off, .notEnrolled])
+    func onlyAGateThatCouldNotStartIsAWarning(status: VoiceIDGateStatus) {
+        #expect(!status.isDegraded)
+        #expect(status.explanation == nil)
+    }
+
     @Test func startRunsAndStopEndsEverything() async {
         let conversation = FakeLoopConversation()
         let pipeline = FakeLoopPipeline()
@@ -360,6 +386,7 @@ private final class FakeLoopPipeline: VoiceLoopPipeline {
     let verdictFeed: AsyncStream<GatedUtterance>.Continuation
     private(set) var stops = 0
     private(set) var agentActivity: [Bool] = []
+    var voiceIDStatus: VoiceIDGateStatus = .off
 
     init() {
         (transcript, continuation) = AsyncStream.makeStream(of: TranscriptEvent.self)

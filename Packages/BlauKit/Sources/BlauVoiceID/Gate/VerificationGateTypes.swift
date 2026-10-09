@@ -138,6 +138,14 @@ public struct VerificationGateStatistics: Hashable, Sendable {
     public var discarded = 0
     /// Partial transcripts held back because their speech was rejected.
     public var suppressedPartials = 0
+    /// Continuations of a split segment started with the audio the split
+    /// segment had received past the split point.
+    public var seededContinuations = 0
+    /// Samples missing from VAD's audio stream, filled from the capture
+    /// history, and those filled with silence (the history no longer held
+    /// them).
+    public var gapSamplesFromHistory = 0
+    public var gapSamplesSilenced = 0
     /// Barge-ins that asked for a verdict, and those that gave up waiting.
     public var bargeInQueries = 0
     public var bargeInTimeouts = 0

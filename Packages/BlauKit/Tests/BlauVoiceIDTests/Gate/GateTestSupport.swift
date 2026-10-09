@@ -46,6 +46,7 @@ final class ScriptedVerifier: SpeechVerifying {
     /// Speech that fails to embed, by start time in seconds.
     let failing: Set<Double>
     private let recorded = Mutex<[Range<Int64>]>([])
+    private let silences = Mutex<[Int]>([])
 
     init(
         _ timeline: SpeakerTimeline, config: VoiceIDConfig = .calibrated, delay: Duration = .zero,
@@ -60,9 +61,14 @@ final class ScriptedVerifier: SpeechVerifying {
 
     /// The sample ranges scored, in order.
     var calls: [Range<Int64>] { recorded.withLock { $0 } }
+    /// How many samples of each scored range were exactly zero (silence the
+    /// gate filled in), in the order of ``calls``.
+    var silentSamples: [Int] { silences.withLock { $0 } }
 
     func verify(_ speech: AudioFrame) async throws -> SpeakerScore {
         recorded.withLock { $0.append(speech.sampleOffset..<speech.nextSampleOffset) }
+        let silent = speech.samples.reduce(0) { $1 == 0 ? $0 + 1 : $0 }
+        silences.withLock { $0.append(silent) }
         if delay > .zero { try await clock.sleep(for: delay) }
         let start = Double(speech.sampleOffset) / Double(speech.sampleRate)
         guard !failing.contains(start) else { throw SpeakerEmbedderError.invalidOutput }

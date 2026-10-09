@@ -262,10 +262,10 @@ let bargeIn = BargeInMonitor(target: orchestrator, ..., speakerGate: VoiceIDBarg
 | `SpeechVerifying` / `SpeakerVerifier` | Embeds speech and scores it against the voiceprint (`VoiceprintMatcher`, best of the centroid and every device's set) with the current sensitivity's thresholds. Also the `VoiceGate` service |
 | `VerificationGateConfiguration` | Windows, the short-segment and inheritance rules, the uncertain policy, the waits |
 | `UncertainSpeechPolicy` | What happens to uncertain utterances: `.commitDuringActiveTurn(minimumDuration: 2 s)` (default), `.commit`, `.discard` |
-| `ConversationTurnActivity` | Whether the conversation is in an active turn: Grok answering, or within 10 s of Grok's reply or of an utterance sent |
+| `ConversationTurnActivity` | Whether the conversation is in an active turn: Grok answering, or within 10 s of Grok's reply or of an accepted utterance |
 | `VerificationGateRules` | The decision rules as pure functions (also replayed by the evaluation harness) |
 | `GatedUtterance`, `SegmentVerdict`, `SpeakerScore` | What the gate decided and why: the DEBUG lane, logs, adaptive updates (#49) |
-| `VerificationGateStatistics` | Scores, failures, decisions, committed and dropped utterances, partials held back, barge-in queries, the hold on finals |
+| `VerificationGateStatistics` | Scores, failures, decisions, committed and dropped utterances, partials held back, continuations seeded and stream gaps filled, barge-in queries, the hold on finals |
 
 ### Speculative ASR
 
@@ -285,6 +285,22 @@ The score that covered the most audio decides, with `VoiceIDConfig`'s
 thresholds for its length (`short` under 3 s, `long` from 3 s, after the
 sensitivity shift): **accept** at or above `T_hi`, **reject** below `T_lo`,
 **uncertain** in between.
+
+**The hangover.** VAD sends about 300 ms of audio past the speech before
+it ends a segment, so a segment of 1.2 - 1.5 s (or 2.7 - 3 s) can reach a
+checkpoint on audio that includes the silence after it. Once the segment
+has ended, scores that ran past its speech no longer count, and the end of
+segment score covers exactly the speech.
+
+**Long speech.** VAD splits a segment at 8 s, at the quietest point of the
+last second, and the continuation (`SpeechOnset.isContinuation`) starts at
+the split point. VAD's audio stream simply carries on from where it had
+got to, up to a second past that point, so the gate starts the
+continuation with the audio the split segment had already received past
+the split. Any other gap in VAD's audio is filled from the capture history
+(`CaptureFrameSource.history(in:)`), and only with silence when the history
+no longer holds it. `VerificationGateStatistics` counts both
+(`seededContinuations`, `gapSamplesFromHistory`, `gapSamplesSilenced`).
 
 **Short segments.** Speech under 1 s isn't scored (18% EER at 1 s). It
 inherits the previous segment's decision when the last *scored* speech
@@ -306,14 +322,25 @@ it uncertain (the text can't be split by speaker).
 | --- | --- | --- |
 | accept | `accepted` | The final, `speakerDecision: .accept`: committed to Grok |
 | uncertain, in an active turn and ≥ 2 s | `uncertainCommitted` | The final, `speakerDecision: .uncertain`: committed (the orchestrator ignores only `.reject`) |
-| uncertain otherwise | `uncertainDiscarded` | Nothing |
-| reject | `rejected` | Nothing. Never sent |
+| uncertain otherwise | `uncertainDiscarded` | The final, `speakerDecision: .reject`: ignored |
+| reject | `rejected` | The final, `speakerDecision: .reject`: ignored. Never sent, never stored |
+
+A final that isn't sent still reaches the orchestrator, marked `.reject`:
+the speech's partials reach it before the first score (1.5 s), moving it to
+`userSpeaking` with the TV's words as the live text, and only a final ends
+that utterance. The orchestrator ignores the final (it is neither sent nor
+stored) and goes back to `listening`.
+
+Only accepted utterances (and Grok's replies) keep a turn active
+(`ConversationTurnActivity`): uncertain speech sent during an active turn
+doesn't extend it, so a podcast can't keep itself flowing to Grok.
 
 Partials of a segment already rejected are held back, so a TV's words don't
 show as the user's live text; a refined transcript (#30) follows only a
 final that was sent. Everything the gate didn't send is listed, greyed, in
 the DEBUG **Ignored Speech** lane (Debug menu → Voice Loop) from
-`VerificationGate.verdicts`; it is kept in memory only.
+`VerificationGate.verdicts`; it is kept in memory only, and only in DEBUG
+builds (Release drains the verdicts unread).
 
 The gate runs when the `voiceIDEnabled` flag is on and a voiceprint is
 enrolled for the current model (`VoiceIDGateLoader` in the app, per
@@ -321,7 +348,10 @@ conversation). Without a voiceprint every utterance goes through, as
 onboarding and Settings explain. If a voiceprint is enrolled but the gate
 can't start (the speaker model isn't installed, the store can't be read),
 the conversation runs unprotected and the failure is logged at `error`:
-better than not hearing the user at all.
+better than not hearing the user at all. The user is told: while that
+conversation runs, Settings → Voice ID shows "Off for this conversation"
+with the reason (`VoiceIDGateStatus.unavailable`, from `VoiceLoop.voiceIDStatus`),
+and the debug Voice Loop screen shows the gate's status.
 
 ### Barge-in
 
@@ -419,7 +449,7 @@ Voiceprint saves are `db.save` intervals.
 | Enrollment (hermetic) | `EnrollmentQualityTests`, `EnrollmentConsistencyTests`, `VoiceEnrollmentTests`, `VoiceprintStoreTests` and `VoiceprintMatcherTests`: the analysis on synthetic speech and the fixture clips, the recorder's stop rules, the checks, every flow (clean, rejected, someone else, restart, top-up, denied microphone, missing model, cancel, Done), both stores (model version, top-up, duplicates, delete) and max-over-sets scoring. `ScriptedEnrollmentAudio` and `ScriptedSpeakerEmbedder` stand in for the microphone and the model |
 | Enrollment on the real model (opt-in) | `RealModelEnrollmentTests` with `BLAU_SPEAKER_MODEL_DIR`: each fixture speaker enrolls, another speaker's clip is rejected, and the compute time is reported |
 | Enrollment in the app | `VoiceEnrollmentAppTests` (`BlauTests`) and `VoiceEnrollmentUITests` (`BlauUITests`): enrolling from Settings stores the voiceprint Settings reads, cancelling stores nothing, deleting removes it |
-| Gate (hermetic) | `VerificationGateTests`, `VerificationGateRulesTests`, `SpeakerVerifierTests`: checkpoints and re-scores, short-segment inheritance and its limit, the uncertain policy, utterances spanning segments, finals before their segment ends or starts, the capture-history fallback, the transcript filter, barge-in verdicts and timeouts, the hold on finals; `ScriptedVerifier` scores a scripted speaker timeline |
+| Gate (hermetic) | `VerificationGateTests`, `VerificationGateRulesTests`, `SpeakerVerifierTests`: checkpoints and re-scores, short-segment inheritance and its limit, the uncertain policy, utterances spanning segments, finals before their segment ends or starts, the capture-history fallback, continuations after VAD's 8 s split and gaps in VAD's audio (no silence scored), checkpoints reached on the hangover, which utterances extend the active turn, the transcript filter (dropped finals passed on as `.reject`), barge-in verdicts and timeouts, the hold on finals; `ScriptedVerifier` scores a scripted speaker timeline. `VoiceGateTranscriptIntegrationTests` (BlauKitIntegrationTests) runs a TV line through `gate.filter` into the real `TurnOrchestrator` |
 | Gate scenarios (hermetic) | `VerificationGateScenarioTests`: the owner talking to Blau between a TV, a podcast and another person (synthetic voices through the real `SpeakerVerifier`); only the owner's lines are sent, with the turn idle and active |
 | Gate on the real model (opt-in) | `RealModelGateScenarioTests` with `BLAU_SPEAKER_MODEL_DIR`: the owner (CMU ARCTIC `bdl`) close and in a small room, other speakers through a simulated TV loudspeaker and in the room; only the owner is sent. Also measures the hold on a final |
 | Barge-in with voice ID | `VoiceGateBargeInIntegrationTests` (`BlauKitIntegrationTests`): the real `BargeInMonitor` asking the real gate; accepted and uncertain speech interrupt, rejected doesn't |

@@ -47,6 +47,9 @@
                     .disabled(!loop.isAvailable || loop.phase == .starting)
                     .accessibilityIdentifier(Self.toggleIdentifier)
                     LabeledContent("Loop", value: phaseDescription)
+                    if let status = loop.voiceIDStatus {
+                        LabeledContent("Voice ID", value: status.summary)
+                    }
                 } footer: {
                     if !loop.isAvailable {
                         Text("Only the live environment runs the voice loop.")

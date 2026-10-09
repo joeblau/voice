@@ -268,11 +268,14 @@ struct VerificationGateTests {
         var passed: [TranscriptEvent] = []
         for await event in gate.filter(input) { passed.append(event) }
 
+        // The TV's final still goes on, marked `reject`, so the orchestrator
+        // ends the utterance in progress (and ignores it); its partial and
+        // its refined text don't.
         #expect(
             passed == [
                 .partial(text: "Hi", range: TimeRange(start: .zero, end: .seconds(1))),
-                .final(owner.withSpeakerDecision(.accept)), .refined(owner),
-                .final(ownerAgain.withSpeakerDecision(.accept)),
+                .final(owner.withSpeakerDecision(.accept)), .final(tv.withSpeakerDecision(.reject)),
+                .refined(owner), .final(ownerAgain.withSpeakerDecision(.accept)),
             ])
         #expect(gate.statistics.suppressedPartials == 1)
 
@@ -283,6 +286,114 @@ struct VerificationGateTests {
         }
         #expect(verdicts.map(\.disposition) == [.accepted, .rejected, .accepted])
         #expect(verdicts[1].utterance.text == "And now the weather")
+    }
+
+    @Test func anUncertainFinalThePolicyDropsGoesOnAsRejected() async throws {
+        let (gate, _) = Self.gate(SpeakerTimeline([(0, 10, .borderline)]))
+        await gate.feed(SpeechScript.segment(0, from: 0, to: 2.5))
+        let maybe = finalUtterance("Maybe me", from: 0, to: 2.5)
+        // Outside an active turn: dropped, and passed on marked `reject`.
+        #expect(await gate.gate(.final(maybe)) == .final(maybe.withSpeakerDecision(.reject)))
+        #expect(await gate.gate(.refined(maybe)) == nil)
+    }
+
+    /// Only accepted speech keeps a turn active: uncertain speech the policy
+    /// sends doesn't, so a podcast can't keep itself flowing to Grok.
+    @Test func onlyAcceptedSpeechExtendsTheActiveTurn() async throws {
+        let clock = ManualClock()
+        let activity = ConversationTurnActivity(window: .seconds(10), clock: clock)
+        let verifier = ScriptedVerifier(SpeakerTimeline([(0, 10, .borderline), (20, 30, .owner)]))
+        let gate = VerificationGate(verifier: verifier, turnActivity: activity, clock: clock)
+        activity.agentActivityChanged(true)
+        activity.agentActivityChanged(false)
+
+        await gate.feed(SpeechScript.segment(0, from: 0, to: 2.5))
+        let podcast = await gate.decide(finalUtterance("…and that's the show", from: 0, to: 2.5))
+        #expect(podcast.disposition == .uncertainCommitted)
+        clock.advance(by: .seconds(11))
+        #expect(!activity.isActive)
+
+        await gate.feed(SpeechScript.segment(1, from: 20, to: 22.5))
+        let owner = await gate.decide(finalUtterance("Next question", from: 20, to: 22.5))
+        #expect(owner.disposition == .accepted)
+        #expect(activity.isActive)
+    }
+
+    // MARK: Long speech and gaps
+
+    /// VAD splits speech at 8 s, a little before where its audio stream has
+    /// got to, and carries the audio on for the continuation from there. The
+    /// continuation must be scored on its own speech, not on silence.
+    @Test func aContinuationIsScoredOnItsOwnSpeech() async throws {
+        let (gate, verifier) = Self.gate(SpeakerTimeline([(0, 20, .owner)]))
+        // Segment 0 heard to 8.2 s, split at 7.4 s (VAD's quietest point).
+        await gate.feed([.started(SpeechScript.onset(0, at: 0))] + SpeechScript.audio(from: 0, to: 8.2))
+        await gate.feed([.ended(SpeechScript.ended(0, from: 0, to: 7.4, reason: .maximumDuration))])
+        // The continuation starts at the split; VAD's audio resumes at 8.2 s.
+        await gate.feed(
+            [.started(SpeechScript.onset(1, at: 7.4, continuation: true))] + SpeechScript.audio(from: 8.2, to: 11.3)
+                + [.ended(SpeechScript.ended(1, from: 7.4, to: 11))])
+
+        let continuation = zip(verifier.calls, verifier.silentSamples).filter {
+            $0.0.lowerBound == SpeechScript.offset(7.4)
+        }
+        // 1.5 s, 3 s, then the whole 3.6 s at its end.
+        #expect(continuation.map(\.0.count) == [24_000, 48_000, 57_600])
+        #expect(continuation.allSatisfy { $0.1 == 0 })
+        #expect(gate.statistics.seededContinuations == 1)
+        #expect(gate.statistics.gapSamplesSilenced == 0)
+
+        let gated = await gate.decide(finalUtterance("A long story", from: 0, to: 11))
+        #expect(gated.segments.map(\.segmentID) == [0, 1])
+        #expect(gated.segments.map(\.decision) == [.accept, .accept])
+        #expect(gated.decision == .accept)
+    }
+
+    @Test func aGapInVADsAudioIsFilledFromTheCaptureHistory() async throws {
+        let verifier = ScriptedVerifier(SpeakerTimeline([(0, 10, .owner)]))
+        let gate = VerificationGate(verifier: verifier, history: FixedHistory(seconds: 10))
+        await gate.feed(
+            [.started(SpeechScript.onset(0, at: 0))] + SpeechScript.audio(from: 0, to: 0.5)
+                + SpeechScript.audio(from: 0.9, to: 2.0))
+        #expect(verifier.calls.map(\.count) == [24_000])
+        #expect(verifier.silentSamples == [0])
+        #expect(gate.statistics.gapSamplesFromHistory == 6_400)
+        #expect(gate.statistics.gapSamplesSilenced == 0)
+    }
+
+    @Test func aGapTheHistoryNoLongerHoldsIsSilence() async throws {
+        let (gate, verifier) = Self.gate(SpeakerTimeline([(0, 10, .owner)]))
+        await gate.feed(
+            [.started(SpeechScript.onset(0, at: 0))] + SpeechScript.audio(from: 0, to: 0.5)
+                + SpeechScript.audio(from: 0.9, to: 2.0))
+        // Positions stay aligned: 1.5 s of audio, 0.4 s of it silence.
+        #expect(verifier.calls == [0..<24_000])
+        #expect(verifier.silentSamples == [6_400])
+        #expect(gate.statistics.gapSamplesSilenced == 6_400)
+    }
+
+    // MARK: The hangover
+
+    /// VAD sends ~300 ms of hangover before it ends a segment, so a
+    /// checkpoint can be reached on audio past the speech. At the end the
+    /// gate scores exactly the speech instead of keeping that score.
+    @Test(arguments: [
+        (1.3, [24_000, 20_800], SpeakerDecision.uncertain),
+        (2.8, [24_000, 48_000, 44_800], .uncertain),
+    ])
+    func aCheckpointPastTheSpeechIsScoredAgainOnTheSpeech(
+        speech: Double, calls: [Int], expected: SpeakerDecision
+    ) async throws {
+        // Uncertain on short windows, rejected on 3 s ones: a 3 s score
+        // taken over the hangover would wrongly reject 2.8 s of speech.
+        let (gate, verifier) = Self.gate(SpeakerTimeline([(0, 10, .fadingOut)]))
+        await gate.feed(SpeechScript.segment(0, from: 0, to: speech))
+        #expect(verifier.calls.map(\.count) == calls)
+        #expect(await gate.decision(ofSegment: 0) == expected)
+        let gated = await gate.decide(finalUtterance("…", from: 0, to: speech))
+        #expect(
+            gated.segments.first?.scoredDuration.sampleCount(sampleRate: SpeechScript.rate)
+                == SpeechScript.offset(speech))
     }
 
     // MARK: Barge-in

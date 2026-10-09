@@ -46,10 +46,10 @@ struct SpeakerTests {
         #expect(SpeakerDecision.allCases.map(\.rawValue) == ["accept", "reject", "uncertain"])
     }
 
-    @Test func onlyAcceptedSpeechIsCommitted() {
-        #expect(SpeakerDecision.accept.allowsCommit)
-        #expect(!SpeakerDecision.reject.allowsCommit)
-        #expect(!SpeakerDecision.uncertain.allowsCommit)
+    @Test func onlyRejectedSpeechIsKeptFromGrok() {
+        #expect(!SpeakerDecision.accept.isRejected)
+        #expect(SpeakerDecision.reject.isRejected)
+        #expect(!SpeakerDecision.uncertain.isRejected)
     }
 }
 
