@@ -4,6 +4,7 @@ import BlauPersistence
 import BlauTelemetry
 import Foundation
 import SwiftData
+import Synchronization
 import Testing
 
 @testable import BlauRealtime
@@ -177,6 +178,77 @@ struct TurnOrchestratorBargeInTests {
         #expect(await harness.orchestrator.state == .listening)
     }
 
+    /// Regression (PR #123 review, item 5): a reply of two items, the first
+    /// complete (`response.output_audio.done`) and heard in full, the second
+    /// still being generated. Only the second was cut short; the first was
+    /// marked interrupted too, because the response was cancelled.
+    @Test func anEarlierItemHeardInFullIsNotMarkedInterrupted() async throws {
+        let harness = TurnHarness()
+        harness.audio.setIdle(false)
+        let socket = try await harness.start()
+        await harness.orchestrator.handle(.final(harness.utterance("Tell me about the bridge", from: 0, to: 2)))
+        try await harness.waitForSent("response.create", on: socket)
+        socket.push(ServerEvents.responseCreated("resp_1", turn: socket.turnTag()))
+        socket.push(ServerEvents.itemAdded("item_1", response: "resp_1"))
+        socket.push(ServerEvents.audio("item_1", response: "resp_1", milliseconds: 500))
+        socket.push(ServerEvents.transcript("item_1", response: "resp_1", "Sure."))
+        socket.push(ServerEvents.audioDone("item_1", response: "resp_1"))
+        socket.push(ServerEvents.itemAdded("item_2", response: "resp_1"))
+        socket.push(ServerEvents.audio("item_2", response: "resp_1", milliseconds: 1000))
+        socket.push(ServerEvents.transcript("item_2", response: "resp_1", Self.reply))
+        try await harness.waitForState(.agentSpeaking)
+        try await waitUntil("second item") { harness.audio.finished.contains(PlaybackItemID(itemID: "item_1")) }
+        try await waitUntil("transcripts") { await harness.snapshot().agentText.hasSuffix(Self.reply) }
+        harness.audio.setPlayed(PlaybackItemID(itemID: "item_1"), milliseconds: 500)
+        harness.audio.setPlayed(PlaybackItemID(itemID: "item_2"), milliseconds: 300)
+
+        let record = try #require(await harness.orchestrator.bargeIn(Self.trigger(at: harness.clock.uptime)))
+
+        #expect(record.cancelledResponse)
+        #expect(record.cut.map(\.itemID) == ["item_2"])
+        let cut = try #require(record.cut.first?.utteranceID)
+        #expect(await harness.snapshot().interruptedAgentUtterances == [cut])
+        try await harness.waitForSent("conversation.item.truncate", on: socket)
+        #expect(
+            socket.sentEvents.filter { $0.type == "conversation.item.truncate" } == [
+                .conversationItemTruncate(itemID: "item_2", contentIndex: 0, audioEndMilliseconds: 300)
+            ])
+        // Both are stored: the first in full, the second as heard.
+        await harness.orchestrator.waitUntilSettled()
+        #expect(harness.recording?.stored.filter { $0.speaker == .agent }.map(\.text) == ["Sure.", "The Golden Gate"])
+    }
+
+    /// The player catching up with an item whose audio is still arriving
+    /// (all of what came was heard, but more was coming) is cut short.
+    @Test func anItemStillArrivingIsMarkedInterruptedEvenIfAllOfItWasHeard() async throws {
+        let harness = TurnHarness()
+        _ = try await Self.speakingTurn(harness)
+        harness.audio.setPlayed(Self.item, milliseconds: 1000)
+        let record = try #require(await harness.orchestrator.bargeIn(Self.trigger(at: harness.clock.uptime)))
+        let cut = try #require(record.cut.first?.utteranceID)
+        #expect(record.cut.map(\.itemID) == ["item_1"])
+        #expect(await harness.snapshot().interruptedAgentUtterances == [cut])
+    }
+
+    /// `agentSpeakingChanges()`, which `BargeInMonitor.run` follows: the
+    /// current value, then each change.
+    @Test func theOrchestratorReportsWhenGrokStartsAndStopsSpeaking() async throws {
+        let harness = TurnHarness()
+        let seen = Mutex<[Bool]>([])
+        let changes = harness.orchestrator.agentSpeakingChanges()
+        let watching = Task {
+            for await speaking in changes {
+                seen.withLock { $0.append(speaking) }
+            }
+        }
+        try await waitUntil("current value") { seen.withLock { $0 } == [false] }
+        _ = try await Self.speakingTurn(harness)
+        try await waitUntil("speaking") { seen.withLock { $0 } == [false, true] }
+        await harness.orchestrator.bargeIn(Self.trigger(at: harness.clock.uptime))
+        try await waitUntil("stopped") { seen.withLock { $0 } == [false, true, false] }
+        watching.cancel()
+    }
+
     @Test func nothingIsCutUnlessGrokIsSpeaking() async throws {
         let harness = TurnHarness()
         #expect(await harness.orchestrator.bargeIn(Self.trigger(at: .zero)) == nil)  // paused
@@ -292,9 +364,11 @@ struct TurnOrchestratorBargeInTests {
         #expect(player.snapshot.state == .idle)
 
         // Interrupt → silence: the flush plus at most one 20 ms render cycle.
+        // Only the criterion's bound is checked on the wall clock: a tighter
+        // one could fail on a loaded CI runner (the reaction time itself is
+        // a fraction of a millisecond; the perf suite, #73, tracks it).
         let silence = record.reactionTime + .milliseconds(20)
         #expect(silence < .milliseconds(150))
-        #expect(record.reactionTime < .milliseconds(50))
 
         // Grok is told exactly what was rendered, fade included.
         try await waitUntil("truncate") { socket.sentEvents.contains { $0.type == "conversation.item.truncate" } }

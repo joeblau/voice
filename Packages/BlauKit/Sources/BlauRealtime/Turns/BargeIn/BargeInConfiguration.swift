@@ -4,9 +4,10 @@
 /// The defaults are starting points: calibrate them on a device with the
 /// agent on the loudspeaker (docs/realtime.md, "Barge-in").
 public struct BargeInConfiguration: Sendable, Hashable {
-    /// Speech that starts in the first `playbackGracePeriod` of an agent
-    /// item's audio is suspect: the voice-processing echo canceller is still
-    /// converging and leaks the agent's voice. It barges in only once
+    /// Speech that starts in the first `playbackGracePeriod` of the agent's
+    /// audio (from when it last started after silence, not from each item)
+    /// is suspect: the voice-processing echo canceller is still converging
+    /// and leaks the agent's voice. It barges in only once
     /// ``speechAfterGrace`` more of it has been heard after the grace
     /// period, and the segment is still open.
     public var playbackGracePeriod: Duration
@@ -28,7 +29,14 @@ public struct BargeInConfiguration: Sendable, Hashable {
     /// relative check off.
     public var echoMargin: Float?
 
-    /// The audio before the onset that ``echoMargin`` compares against.
+    /// The audio before the onset that ``echoMargin`` compares against,
+    /// clipped to when the agent's audio started (there is no leak before
+    /// it, only the user's own earlier speech).
+    ///
+    /// Long enough that a short sound of the user's own just before they
+    /// barge in (an "uh", a cough) fills under 10 % of its 20 ms pieces and
+    /// so doesn't become the reference: up to 180 ms of it in 2 s. The leak
+    /// itself, at syllable rate (30 % or more of the time), still sets it.
     public var referenceWindow: Duration
 
     public init(
@@ -36,7 +44,7 @@ public struct BargeInConfiguration: Sendable, Hashable {
         speechAfterGrace: Duration = .milliseconds(200),
         minimumSpeechLevel: Float? = -45,
         echoMargin: Float? = 9,
-        referenceWindow: Duration = .milliseconds(500)
+        referenceWindow: Duration = .seconds(2)
     ) {
         precondition(playbackGracePeriod >= .zero, "playbackGracePeriod must not be negative")
         precondition(speechAfterGrace >= .zero, "speechAfterGrace must not be negative")

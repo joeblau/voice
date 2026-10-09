@@ -86,6 +86,10 @@ final class PlaybackRenderer: Sendable {
         // Output.
         var level = PlaybackLevel.silent
         var renderedFrames: Int64 = 0
+        /// Frames played since the player last left `idle`: how long the
+        /// agent's audio has been playing without a break, across items.
+        /// Reset when it goes idle; an underrun (`buffering`) keeps it.
+        var playedSinceIdle: Int64 = 0
 
         func isCurrent(slot: Int, sequence: UInt64) -> Bool {
             items[slot].sequence == sequence && items[slot].id != nil
@@ -212,6 +216,7 @@ final class PlaybackRenderer: Sendable {
             state.queuedFrames = 0
             state.tailSlot = nil
             state.mode = .idle
+            state.playedSinceIdle = 0
             state.waitedFrames = 0
             state.level = .silent
             return (
@@ -253,7 +258,8 @@ final class PlaybackRenderer: Sendable {
                 bufferedDuration: .samples(Int64(state.queuedFrames), sampleRate: configuration.sampleRate),
                 currentItem: current,
                 underrunCount: state.underrunCount,
-                renderedFrames: state.renderedFrames
+                renderedFrames: state.renderedFrames,
+                playedSinceIdleFrames: state.playedSinceIdle
             )
         }
     }
@@ -297,6 +303,7 @@ final class PlaybackRenderer: Sendable {
             if state.mode == .buffering {
                 if state.queuedFrames == 0 && !state.awaitingMore {
                     state.mode = .idle
+                    state.playedSinceIdle = 0
                 } else if state.queuedFrames >= state.startThreshold || !state.awaitingMore
                     || state.waitedFrames >= configuration.maximumPrerollWaitFrames
                 {
@@ -320,6 +327,7 @@ final class PlaybackRenderer: Sendable {
                         state.waitedFrames = 0
                     } else {
                         state.mode = .idle
+                        state.playedSinceIdle = 0
                     }
                 }
             }
@@ -368,6 +376,7 @@ final class PlaybackRenderer: Sendable {
             copied += n
             state.readOffset += n
             state.queuedFrames -= n
+            state.playedSinceIdle += Int64(n)
             if state.isCurrent(slot: slot, sequence: sequence) {
                 state.items[slot].playedFrames += Int64(n)
                 state.items[slot].queuedFrames -= n

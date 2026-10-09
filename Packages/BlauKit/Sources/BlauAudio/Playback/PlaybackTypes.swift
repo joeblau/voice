@@ -116,6 +116,11 @@ public struct PlaybackSnapshot: Sendable, Hashable {
     /// Total frames rendered by the node (silence included), at the stream's
     /// sample rate.
     public var renderedFrames: Int64
+    /// Frames of audio played since the player last left `idle`, across
+    /// items: how long the agent's voice has been coming out without a
+    /// break. Back to 0 when the player goes idle (the queue drained or a
+    /// flush); an underrun keeps it.
+    public var playedSinceIdleFrames: Int64
 
     public init(
         state: PlaybackState,
@@ -123,7 +128,8 @@ public struct PlaybackSnapshot: Sendable, Hashable {
         bufferedDuration: Duration,
         currentItem: PlaybackItemID?,
         underrunCount: Int,
-        renderedFrames: Int64
+        renderedFrames: Int64,
+        playedSinceIdleFrames: Int64 = 0
     ) {
         self.state = state
         self.level = level
@@ -131,6 +137,7 @@ public struct PlaybackSnapshot: Sendable, Hashable {
         self.currentItem = currentItem
         self.underrunCount = underrunCount
         self.renderedFrames = renderedFrames
+        self.playedSinceIdleFrames = playedSinceIdleFrames
     }
 
     /// Whether the agent is audibly speaking.

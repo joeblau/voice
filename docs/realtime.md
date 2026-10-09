@@ -742,11 +742,35 @@ the VAD and the transcriber.
 | Cancel | `response.cancel` with the response id, if the reply is still being generated. A reply that is done but still playing needs none |
 | Truncate | Per agent item: `conversation.item.truncate {item_id, content_index, audio_end_ms}` with the milliseconds the player rendered (`PlayedItem.playedMilliseconds`, rounded down, fade included), or `conversation.item.delete` if none of it was heard. Grok's next reply builds only on what the user heard |
 | Store | The heard share of the transcript is written at once and replaced by the server's `conversation.item.truncated` transcript when it arrives (see [Rapid follow-ups and interruptions](#rapid-follow-ups-and-interruptions)) |
-| Mark | The agent utterance's id goes into `TurnSnapshot.interruptedAgentUtterances`; `TurnSnapshot.lastBargeIn` (`BargeInRecord`) says what was cut and how fast |
+| Mark | The id of each agent utterance that was cut short goes into `TurnSnapshot.interruptedAgentUtterances`: one with less heard than arrived, or whose audio was still arriving. An earlier item of the reply that was complete (`response.output_audio.done`) and heard in full isn't marked. `TurnSnapshot.lastBargeIn` (`BargeInRecord`) says what was cut and how fast |
 | State | `agentSpeaking → listening` (`userSpeaking` once ASR partials arrive). The user's final utterance starts the next turn as usual; its `response.create` waits for the cancelled response's `response.done` (see [Matching responses to turns](#matching-responses-to-turns)) |
 
-Speech while Grok is still *thinking* doesn't barge in: there is nothing to
-silence, and the final utterance interrupts the pending reply anyway (#36).
+Speech while Grok is still *thinking* doesn't barge in when it happens:
+there is nothing to silence yet. If it ends before Grok speaks, the final
+utterance interrupts the pending reply (#36). If it is still going when
+Grok starts speaking (its VAD segment is still open, so no new onset will
+come), the monitor judges it then: `TurnOrchestrator.agentSpeakingChanges()`
+tells `BargeInMonitor.run` that Grok started, and the speech is treated like
+speech from the grace period. It is held until 200 ms of it have been heard
+after the first 300 ms of Grok's audio, and it barges in only if the segment
+is still open, the speech is loud enough, and it is within `echoMargin` of
+the user's own level before Grok spoke. That last check stops a leak that
+holds the segment open after the user stopped: the leak sits well under the
+user's voice.
+
+Only speech that began after Grok last stopped speaking is carried over
+this way. Speech that began while Grok was still speaking, and that VAD
+confirmed only once Grok had stopped, may be Grok's own leak: in a tool
+round, the filler's leak is often confirmed after the player goes idle
+(`agentThinking`), and the follow-up's first audio can arrive before VAD's
+300 ms of silence closes that segment. Carried over, the filler's leak
+would become "the user's own level before Grok spoke", the follow-up's
+leak would never be `echoMargin` under it, and Grok would barge in on
+itself and cancel the tool answer. The monitor notes when Grok stopped
+(`agentSpeakingChanged(false)`) and compares it with when the speech began
+(when the onset reached it, less VAD's detection latency; for a
+continuation, when the speech it carries on began), dropping an onset it
+had already noted if the change reaches it after VAD's onset did.
 
 ### Echo guard
 
@@ -756,15 +780,25 @@ canceller converges. `BargeInConfiguration` (defaults below) decides:
 
 | Check | Default | Rule |
 | ----- | ------- | ---- |
-| Grace period | `playbackGracePeriod` 300 ms, `speechAfterGrace` 200 ms | An onset in the first 300 ms of an agent item's audio is held until 200 ms of speech *after* the grace period has been heard; it barges in only if the segment is still open then, and the level checks run on that later audio. Speech that began before the agent's audio can't be its echo and is not held |
+| Grace period | `playbackGracePeriod` 300 ms, `speechAfterGrace` 200 ms | An onset in the first 300 ms of the agent's audio (from when it last started after silence; the next item of a reply, or a response that plays straight on, doesn't restart it) is held until 200 ms of speech *after* the grace period has been heard; it barges in only if the segment is still open then, and the level checks run on that later audio. Speech that began before the agent's audio can't be its echo and is not held |
 | Absolute level | `minimumSpeechLevel` −45 dBFS | The speech's RMS on the 16 kHz capture must reach it |
-| Relative level | `echoMargin` 9 dB over the peaks of `referenceWindow` 500 ms | The speech must be that much louder than the peak level (90th percentile of 20 ms pieces) of the microphone just before the onset, which is where the agent's echo leak shows while it talks. The leak is speech with pauses, and VAD trips on its loud syllables, so the reference is those syllables: a median would sit at the pauses, near the noise floor, and let the agent's own voice barge in. The 90th percentile rather than the maximum, so one click doesn't set it. A voice close to the phone jumps well above the leak's peaks |
+| Relative level | `echoMargin` 9 dB over the peaks of `referenceWindow` 2 s | The speech must be that much louder than the peak level (90th percentile of 20 ms pieces) of the microphone just before the onset, which is where the agent's echo leak shows while it talks. The leak is speech with pauses, and VAD trips on its loud syllables, so the reference is those syllables: a median would sit at the pauses, near the noise floor, and let the agent's own voice barge in. The 90th percentile rather than the maximum, so one click doesn't set it. A voice close to the phone jumps well above the leak's peaks. The window is 2 s so that a short sound of the user's own just before they cut in (an "uh", a cough) fills under 10 % of it and doesn't become the reference: up to 180 ms of it is tolerated, where a 500 ms window let 60 ms suppress a real barge-in. The leak, at syllable rate (30 % of the time or more), still sets it, and the longer window keeps its syllables in view across a pause between the agent's sentences. The window stops where the agent's audio started (there is no leak before it, only the user's own last utterance) |
 | Speaker | `BargeInSpeakerGate` | Voice ID's verdict on the onset (#47, `VerificationGate`): only `reject` stops the barge-in, so `uncertain` still interrupts, as the issue asks. The gate answers with the segment's first decision (its 1.5 s score, or its end for shorter speech), so with a voiceprint enrolled a barge-in lands about 1.2 s after VAD confirms the onset; without one there is no gate and any voice the guard lets through interrupts at once. The monitor handles VAD's events one at a time, so while it waits for that verdict (up to 2 s) the onset's `speechEnded` and any later onset queue behind it; that is harmless, because the orchestrator's `bargeIn` after the verdict returns `nil` once Grok has stopped speaking (outcome `agentNotSpeaking`), so a stale verdict never cuts anything |
 
-Where playback started is read from the player (`AgentPlaybackObserving`,
-how long the item now playing has been audible) and placed on the capture
-timeline at the onset's `detectedAt`. Without a player there is no grace
-period; without the capture history the level checks are skipped.
+Where playback started is read from the player (`AgentPlaybackObserving`:
+how long the agent's audio has played without a break since the player was
+last idle, `PlaybackSnapshot.playedSinceIdleFrames`) and placed on the
+capture timeline at the onset's `detectedAt`. Without a player there is no
+grace period and the reference window isn't clipped; without the capture
+history the level checks are skipped.
+
+The trade-off of the relative check: in the first 2 s of the agent's audio
+the clipped window is shorter, so a short sound of the user's own in it
+(over 10 % of what there is) can still set the reference and suppress a real barge-in; the
+user's speech then interrupts at its end of utterance (#36). A double-talk
+check against the player's rendered signal (Geigel-style: compare the mic
+level with the far-end level over the window) would remove the guesswork;
+it needs no device to build, but its thresholds do to calibrate.
 
 Two more rules close gaps where the guard would otherwise fail open:
 
@@ -803,14 +837,23 @@ From the user's first sound, VAD's confirmation comes first: Silero scores
 keeps coughs and clicks from cutting Grok off; the HUD's **Barge-in** row
 shows both numbers (`2 · last 0.3 ms to flush (VAD +290 ms)`).
 
+So the criterion is met only when measured from the barge-in decision. From
+the user's first sound this design can't meet 150 ms on any device: VAD's
+confirmation alone takes 250–500 ms, and with a voiceprint enrolled the
+speaker gate adds about 1.2 s. Meeting it from the first sound would need an
+earlier signal, for example ducking playback on a rise in microphone energy
+before VAD confirms, and restoring it if VAD doesn't. Whether that is worth
+the extra false ducks is the owner's call.
+
 ### Not stored yet
 
 The SwiftData `Utterance` model has no "interrupted" field, and adding one
 is a schema change (`SchemaV3`, see [data-model.md](data-model.md)) with a
-CloudKit production deploy. Until then the stored agent row is cut to what
-was heard (its text and its `endedAt`), and the live conversation's
-interrupted replies are in `TurnSnapshot.interruptedAgentUtterances` for the
-transcript view (#42) to mark.
+CloudKit production deploy, tracked in #160. Until then the stored agent
+row is cut to what was heard (its text and its `endedAt`), and the live
+conversation's interrupted replies are in
+`TurnSnapshot.interruptedAgentUtterances` for the transcript view (#42) to
+mark; after a relaunch the mark is gone.
 
 ### Barge-in tests
 
@@ -819,14 +862,26 @@ every echo-guard rule against fakes and a `ManualClock`, with synthetic
 microphone signals: speech over a faint echo, the agent's own voice leaking
 through at syllable rate, with and without speech pauses at the noise floor
 between syllables (and the user talking over each), the reference level
-being the leak's syllables rather than its pauses or one click, quiet
+being the leak's syllables rather than its pauses or one click, an "uh" or
+a cough just before the user cuts in, the user's last utterance before
+Grok's audio, a leak resuming after a pause between sentences, quiet
 speech, onsets inside and after the grace period, a segment that ends
-during the hold, a rejected or uncertain speaker) and `TurnOrchestratorBargeInTests` (the cut over fake sockets: the
+during the hold (its hold cancelled), a newer onset replacing a held one,
+speech already under way when Grok starts speaking (barging in, held until
+after the grace period of the actual audio, and a leak holding the segment
+open after the user stopped), speech that began while Grok spoke not being
+carried over (a filler's leak confirmed after the player went idle, the
+stop reaching the monitor after the onset, a continuation of such speech)
+while speech that began after Grok stopped still is, the player's audible
+duration running across
+items until it goes idle, a rejected or uncertain speaker) and
+`TurnOrchestratorBargeInTests` (the cut over fake sockets: the
 cancel and the truncate at the played milliseconds, a reply nobody heard
-deleted, a reply done but still playing, nothing cut outside
-`agentSpeaking`, the next turn going out after the cancelled response;
-the stored row through the real `ConversationStore`; and the end-to-end
-path from a VAD onset through the real `StreamingAudioPlayer`).
+deleted, a reply done but still playing, an earlier item heard in full not
+marked interrupted, nothing cut outside `agentSpeaking`, the next turn
+going out after the cancelled response, `agentSpeakingChanges()`; the
+stored row through the real `ConversationStore`; and the end-to-end path
+from a VAD onset through the real `StreamingAudioPlayer`).
 
 ## Testing
 
@@ -871,5 +926,5 @@ path from a VAD onset through the real `StreamingAudioPlayer`).
 | Barge-in → silence | Debug menu → Voice Loop on the loudspeaker; ask for a long answer and say "wait" mid-sentence. The audio stops at once; Console (`category:realtime`) shows `Barge-in on segment …: playback flushed … ms after the onset` and `Flushed playback` (`category:audio`). Record the HUD's **Barge-in** row over 10 barge-ins, and a screen recording's onset → silence | pending (needs a device and xAI credentials) |
 | Next reply heard-only | Ask for a numbered list of five items, barge in during item two and ask "what was the last item you said?". Grok names item one or two, never a later one; the truncate's `audio_end_ms` matches what was heard (audio.md check 11) | pending (needs a device and xAI credentials) |
 | No self-interruption | Loudspeaker at full volume, phone on a table, 10 long replies without speaking: no `Barge-in` log. `No barge-in … (echo)` or `(playbackGrace)` lines, if any, show the guard working; note their levels | pending (needs a device and xAI credentials) |
-| Guard calibration | During the two checks above, collect the `No barge-in` and `Barge-in` log lines (speech and reference dBFS) at arm's length, across the room and on AirPods, and set `BargeInConfiguration.standard` between the echo and the speech levels | pending (needs a device and xAI credentials) |
+| Guard calibration | During the two checks above, collect the `No barge-in` and `Barge-in` log lines (speech and reference dBFS) at arm's length, across the room and on AirPods, and set `BargeInConfiguration.standard` between the echo and the speech levels. Also barge in with "um… wait" and after a cough, early (in the first 2 s of a reply) and late, and check the `referenceWindow` trade-off: an `(echo)` line for real speech means a pre-sound set the reference. And keep talking through Grok's thinking until it starts speaking: Console shows `Grok started speaking over segment …` and then a barge-in | pending (needs a device and xAI credentials) |
 | TV in the room | With voice ID (#47) wired as the `BargeInSpeakerGate`, play a talk show near the phone while Grok speaks: no barge-in (`otherSpeaker`) | pending (needs a device) |
