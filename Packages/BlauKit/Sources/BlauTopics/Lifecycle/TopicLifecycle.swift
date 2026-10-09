@@ -715,6 +715,17 @@ public actor TopicLifecycle: TopicService {
             await emit(topicID) { finalizing && announcesClose ? .closed($0) : .updated($0) }
             return
         }
+        if let snapshot = try? await store.topicSnapshot(topicID),
+            PracticeRunTopic.isPracticeRun(title: snapshot.title, summary: snapshot.summary)
+        {
+            // The in-memory set only covers the live conversation. After it
+            // finishes (or the app relaunches), a merge or split still must
+            // not replace the run's record, which nothing else keeps (#69).
+            // Not guarded in `applyTopicLabel`: the run's updates write
+            // through it.
+            await emit(topicID) { finalizing && announcesClose ? .closed($0) : .updated($0) }
+            return
+        }
         do {
             var previousTitle: String?
             if let conversationID {

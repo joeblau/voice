@@ -28,7 +28,9 @@ struct PracticeRunState: Sendable {
 ///   boundaries are ignored: a run of unrelated questions would otherwise
 ///   become a topic per question. The run's title is final and its
 ///   summary is never replaced by a labeler; re-segmentation leaves it
-///   alone.
+///   alone. That holds after the conversation too: `refine` (reached from
+///   a user's merge or split, even after a relaunch) also skips a stored
+///   topic `PracticeRunTopic` recognizes, not just the live run's.
 /// - **Closing.** After `end_practice` the topic stays current until the
 ///   user speaks again, so Grok's summary stays with the run; then a new
 ///   topic opens at that utterance. A conversation that finishes during a

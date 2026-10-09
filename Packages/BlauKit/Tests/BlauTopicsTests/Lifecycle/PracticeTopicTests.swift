@@ -140,6 +140,80 @@ struct PracticeTopicTests {
         #expect(await lifecycle.beginPracticeRun(title: Self.title, at: fixture.origin) == nil)
     }
 
+    static let record =
+        "Practiced 1 of 30 questions in YC interview questions, average 80%.\n"
+        + "- Why now? 80%. Lead with the shift."
+
+    /// A finished conversation of three topics, the second a practice run
+    /// (exchanges 3 to 5) with a record: `topics[1]`.
+    static func finishedRun() async throws -> (LifecycleFixture, [TopicSnapshot]) {
+        let fixture = try LifecycleFixture(.threeTopics)
+        let lifecycle = fixture.lifecycle
+        try await fixture.begin()
+        try await fixture.play(0..<3)
+        var runID: UUID?
+        try await Self.play(fixture, 3) {
+            runID = await lifecycle.beginPracticeRun(title: Self.title, at: Self.requestTime(fixture, 3))
+        }
+        let run = try #require(runID)
+        await lifecycle.updatePracticeRun(run, summary: Self.record)
+        try await fixture.play(4..<6)
+        await lifecycle.endPracticeRun(run, at: Self.requestTime(fixture, 5))
+        try await fixture.play(6..<9)
+        try await fixture.finish()
+        let topics = try await fixture.topics()
+        #expect(topics.count == 3)
+        #expect(topics[1].title == Self.title)
+        #expect(topics[1].summary == Self.record)
+        return (fixture, topics)
+    }
+
+    /// The lifecycle no longer tracks the run once the conversation
+    /// finished, so the guard must come from the stored topic: a merge
+    /// relabels the survivor, and the record is kept nowhere else.
+    @Test func mergingIntoARunAfterTheConversationKeepsItsRecord() async throws {
+        let (fixture, topics) = try await Self.finishedRun()
+        let log = LifecycleEventLog(fixture.lifecycle)
+
+        let survivor = try await fixture.lifecycle.mergeWithPrevious(topics[2].id)
+        await fixture.lifecycle.waitUntilIdle()
+        #expect(survivor == topics[1].id)
+        let merged = try await fixture.topics()
+        #expect(merged.map(\.id) == [topics[0].id, topics[1].id])
+        #expect(merged[1].title == Self.title)
+        #expect(merged[1].summary == Self.record)
+        #expect(try await fixture.topicOfExchange(8) == survivor)
+        // Listeners still hear about the revised topic.
+        try await waitFor { log.updated.contains { $0.id == survivor } }
+    }
+
+    @Test func aRenamedRunKeepsItsRecordThroughAMergeToo() async throws {
+        let (fixture, topics) = try await Self.finishedRun()
+        try await fixture.lifecycle.rename(topics[1].id, to: "Mock interview")
+        await fixture.lifecycle.waitUntilIdle()
+
+        try await fixture.lifecycle.mergeWithPrevious(topics[2].id)
+        await fixture.lifecycle.waitUntilIdle()
+        let merged = try await fixture.topics()
+        #expect(merged[1].title == "Mock interview")
+        #expect(merged[1].summary == Self.record)
+    }
+
+    @Test func splittingARunAfterTheConversationKeepsItsRecord() async throws {
+        let (fixture, topics) = try await Self.finishedRun()
+
+        let newID = try await fixture.lifecycle.split(topics[1].id, atUtterance: fixture.users[5].id)
+        await fixture.lifecycle.waitUntilIdle()
+        let split = try await fixture.topics()
+        #expect(split.map(\.id) == [topics[0].id, topics[1].id, newID, topics[2].id])
+        // The run's part keeps its record; the new part is labeled as usual.
+        #expect(split[1].title == Self.title)
+        #expect(split[1].summary == Self.record)
+        #expect(split[2].title != Topic.placeholderTitle)
+        #expect(split[2].summary != Self.record)
+        #expect(try await fixture.topicOfExchange(5) == newID)
+    }
+
     @Test func aSecondRunReplacesARunWaitingToClose() async throws {
         let fixture = try LifecycleFixture(.threeTopics)
         let lifecycle = fixture.lifecycle

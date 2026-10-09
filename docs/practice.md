@@ -169,6 +169,15 @@ Practiced 10 of 30 questions in YC interview questions, average 68%.
   ignored too (the run drew those edges). The title is final, the summary
   is the tools' (a labeler never replaces it, on close or otherwise), and
   re-segmentation leaves the topic alone.
+- **Edits later.** A "Merge with Previous" or "Split Here" from the
+  timeline relabels the topics it touches, also after the conversation
+  finished or the app relaunched, when the lifecycle no longer tracks the
+  run. `TopicLifecycle.refine` therefore also checks the stored topic: one
+  `PracticeRunTopic` recognizes keeps its title and summary (merging the
+  next topic into the run's, or splitting the run's own topic, leaves the
+  run's part with its record; a new part split off is labeled as usual).
+  The guard is in `refine`, not `ConversationStore.applyTopicLabel`, since
+  the run's own updates write through that.
 - **Summary.** Rewritten after every recorded answer, so a run cut short
   (the conversation ends, the app is killed) still has its record.
 - **Closing.** After `end_practice` the topic stays current until the user
@@ -262,7 +271,7 @@ Prompts, answers, notes and scores are never logged.
 | The tools over fakes: a full ten-question run (order, answers, scores, the topic's summaries), the next run's order, switching collections, runs ending, calls of one reply (a result and the end, two next questions, a result just after the end), scores and ids, listing and the budget, failures, the instructions | `BlauRealtimeTests/Tools/PracticeToolsTests` |
 | Consolidation never rewriting a run's record, renamed or not | `BlauMemoryTests/Profile/ProfileConsolidatorTests`, `BlauPersistenceTests/ConversationStoreTopicEditTests` |
 | Function calls from the scripted server (`ScriptedRealtimeServer.Reply.functionCalls`) | used by the integration test |
-| Topics: a run from the request to the next thing the user says, no topics inside it, labels never replacing its title or summary, the first topic taken, a finished conversation, a second run | `BlauTopicsTests/Lifecycle/PracticeTopicTests` |
+| Topics: a run from the request to the next thing the user says, no topics inside it, labels never replacing its title or summary, the first topic taken, a finished conversation, a merge or split after it finished, a second run | `BlauTopicsTests/Lifecycle/PracticeTopicTests` |
 | End to end: a full run of ten questions by voice through the real client, orchestrator, tool runner, tools, SwiftData store and topic lifecycle, with a scripted Grok interviewing | `BlauKitIntegrationTests/PracticeModeIntegrationTests` |
 | The app's wiring: declared and taught, drilling the open store, "Practice with Grok" as the user's turn, the Collections screen's record | `BlauTests/PracticeModeAppTests` |
 
