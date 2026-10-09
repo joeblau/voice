@@ -23,6 +23,7 @@ struct AccessibilityTests {
 
     @Test func topicAnnouncementsNameTheTopic() {
         #expect(BlauAnnouncement.text(for: .newTopic(title: "Pricing")) == "New topic: Pricing")
+        #expect(BlauAnnouncement.text(for: .newTopic(title: nil)) == "New topic", "never 'New topic: New topic'")
         #expect(
             BlauAnnouncement.text(for: .titleRefined(title: "Pricing Experiments"))
                 == "Topic named Pricing Experiments")

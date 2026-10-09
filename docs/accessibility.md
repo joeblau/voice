@@ -11,7 +11,7 @@ needs a person with a device.
 | Where | What VoiceOver gets |
 | --- | --- |
 | Topic timeline | A container labelled "Topics" with a **Topics** rotor that jumps between bullets. Each bullet is one button with the header trait: the title as its label, "Current topic, started 9:41 AM, recording" or "Yesterday, 6:08 PM, 8 minutes, collapsed" as its value, what a tap does as its hint ([timeline.md](timeline.md#voiceover)) |
-| Topic changes | Announced without moving focus: "New topic: Pricing" when a new topic opens in the conversation on screen, "Topic named Pricing Experiments" when the labeler refines the current topic's provisional title. Quiet otherwise (see below) |
+| Topic changes | Announced without moving focus: "New topic: Pricing" when a new topic opens in the conversation on screen (plain "New topic" while it still has the placeholder title), "Topic named Pricing Experiments" when the current topic gets its name: the labeler's first title replacing the placeholder, or a provisional title refined when the topic closes. Quiet otherwise (see below) |
 | Chat rows | One element per row: the speaker as the label ("You", "Grok", "Blau" for app notes and tool chips) and the words as the value, with "still speaking", "interrupted", "waiting to send" or "not sent" appended when it applies ([chat.md](chat.md)) |
 | Record button | The label says what a tap does ("Start Conversation", "End Conversation"), the value where the conversation is ("Listening", "Grok is speaking", "Paused, microphone muted", "Lost the connection to Grok"...), the hint what isn't obvious. Pause and Resume Listening are custom actions. The large content viewer shows it at large text sizes |
 | "You're muted" | Announced when it appears |
@@ -23,16 +23,32 @@ with a speech priority: topic changes are `low`, so they queue behind what
 VoiceOver is saying instead of cutting it off.
 
 **When a topic change is announced** is BlauKit's `TopicAnnouncer`
-(`BlauTopics/Timeline`), tested on the Mac. It stays quiet:
+(`BlauTopics/Timeline`), tested on the Mac.
+
+The placeholder title (`Topic.placeholderTitle`, "New topic") counts as no
+title at all. The topic lifecycle opens a topic with it when the candidate
+has no label yet, when a practice run closes and when the user splits a
+topic, and the labeler's title arrives a moment later as a first guess that
+stays provisional for as long as the topic is open (it is finalized only
+when the topic closes). So a new topic with the placeholder is announced as
+plain "New topic", never "New topic: New topic", and the placeholder giving
+way to a real title is announced as "Topic named …" right away, even though
+that title is still provisional.
+
+It stays quiet:
 
 - on the first topic it sees (the screen just opened);
 - when the focus moves to another conversation (starting a conversation is
   already on the record button);
 - when a conversation's stand-in bullet gives way to its first real topic;
 - when the current topic is merged into the one before it;
-- while a provisional title is replaced by another provisional one (the
-  labeler is still guessing);
-- when a title that wasn't provisional changes (the user renamed it).
+- while a real provisional title is replaced by another provisional one
+  (the labeler is still guessing);
+- when a title goes back to the placeholder;
+- when the user renames a topic on the timeline (`TopicEditor` tells it
+  which topics, so a rename of the open topic, whose title is still
+  provisional, isn't taken for the labeler's);
+- when a title that wasn't provisional changes (renamed elsewhere).
 
 ## Dynamic Type
 
@@ -94,10 +110,24 @@ There is no setting that hides Grok's text.
 
 - Secondary text Blau draws on the background (times, durations,
   conversation headings, an expanded topic's summary and span, speech in
-  progress, delivery notes, app notes, tool chips, the caption's speaker) uses the `secondaryText` brand token instead of the
-  system's `.secondary`, which reaches only about 3.5:1 on white. The token
-  reaches 4.5:1 or more in every appearance and contrast level
-  ([branding.md](branding.md#color-tokens), checked by `BrandingTests`).
+  progress, delivery notes, app notes, tool chips, the caption's speaker),
+  the Settings root (row summaries, the version footer), every onboarding
+  page and the speech-model card uses the `secondaryText` brand token
+  instead of the system's `.secondary`, which reaches only about 3.5:1 on
+  white. The token reaches 4.5:1 or more in every appearance and contrast
+  level ([branding.md](branding.md#color-tokens), checked by
+  `BrandingTests`). The Settings panes, the knowledge base and voice
+  enrollment still use `.secondary`; they aren't covered by this pass or
+  its audits.
+- The speech-model card and onboarding's iCloud status card are filled
+  with the opaque secondary system background instead of a material, so
+  their text keeps its contrast whatever is behind them (through the
+  material, the audit found the card's status text failing at AX5 and the
+  iCloud detail failing at the default size).
+- Onboarding's progress bar and the speech-model card's download bar are
+  each one plain element 44 pt tall ("Setup progress, Step 2 of 6",
+  "Download progress, 40%"), not a 4 pt element the audit reports as a hit
+  area too small (`accessibilityProgressBar`).
 - The record button's face is white on a brand fill in every state. While a
   conversation runs the button is a menu (touch and hold for Pause), and it
   now uses `.menuStyle(.button)` so the bar draws it with the prominent fill;
@@ -112,7 +142,7 @@ There is no setting that hides Grok's text.
 | `ChatCaptionTests` (BlauKit) | which reply is captioned, cutting to whole words, fewer words at the accessibility sizes |
 | `AccessibilityTests` (BlauTests) | the announcement wording and priorities, the Reduce Motion animation, the caption following the live model |
 | `BrandingTests` (BlauTests) | `secondaryText` contrast, like the other tints |
-| `AccessibilityAuditUITests` | XCTest's accessibility audit (`performAccessibilityAudit(for: .all)`, the checks of Accessibility Inspector's Audit tab) on the empty main screen, the timeline, a running conversation, the history with an expanded topic and the live caption, and Settings, each at the default size and at AX5 |
+| `AccessibilityAuditUITests` | XCTest's accessibility audit (`performAccessibilityAudit(for: .all)`, the checks of Accessibility Inspector's Audit tab) on the empty main screen, the timeline, a running conversation, the history with an expanded topic and the live caption, the Settings root, the speech-model setup card while it downloads, and every onboarding page of a fresh install (welcome, xAI account at the top and scrolled to Skip, microphone, speech models with the card, iCloud, voice enrollment, about you, ready), each at the default size and at AX5. `-BlauModelFixtureChunkDelay 2000` slows the fixture download so the card stays up |
 | `LiveCaptionUITests` | the caption appears only when Grok's row is out of view, reads as Grok's, shows the reply's latest words, sits above Now, lets a swipe that starts on it scroll the history, and goes when Now returns to the latest line; at AX5 it stays on screen with fewer words |
 | `MainScreenUITests`, `TopicTimelineUITests`, `ChatTranscriptUITests` | the bottom bar, the timeline and the transcript at AX5 |
 
@@ -121,18 +151,22 @@ The UI tests set the text size with the launch arguments
 (AX5). Run them with `make test-ui`, or only these with
 `-only-testing:BlauUITests/AccessibilityAuditUITests -only-testing:BlauUITests/LiveCaptionUITests`.
 
-The audit fails on every issue except four kinds it can't judge fairly,
+The audit fails on every issue except five kinds it can't judge fairly,
 listed in `AccessibilityAuditUITests`:
 
 1. issues with no element (nodes the lazy stack built off screen, with no
-   frame);
+   frame), on the screens with the timeline only; on onboarding and the
+   setup card they fail like any other;
 2. contrast of content under the bars (and within 24 pt of them), which the
    system's scroll edge effect fades on purpose, and of content under the
-   live caption and the Now pill; the caption and the pill themselves are
-   judged;
-3. Dynamic Type of navigation and toolbar buttons, system controls that cap
+   live caption and the Now pill; the caption, the pill, the record and
+   Settings buttons and onboarding's own controls are judged;
+3. contrast of disabled controls (Connect on the xAI page and Save and
+   Continue on About You until there is text), which WCAG 1.4.3 exempts;
+4. Dynamic Type of navigation and toolbar buttons, system controls that cap
    their size and show the large content viewer instead;
-4. "partially unsupported" Dynamic Type of plain text in the timeline. The
+5. "partially unsupported" Dynamic Type of plain text in the timeline, in
+   the main-screen audits only (not Settings or onboarding). The
    audit grows the text size and measures each element again, but the
    timeline is a scroll view anchored to its latest line (or to the top while
    reading history), so growing everything moves what it measures. It flags
@@ -142,7 +176,12 @@ listed in `AccessibilityAuditUITests`:
    headings at the default size and at AX5 and requires them to at least
    double (transcript lines use the same system text styles, and
    `ChatTranscriptUITests` lays them out at AX5). Text that doesn't scale at
-   all still fails.
+   all still fails. Outside the timeline one text is excused the same way:
+   the Settings version footer at the bottom of the sheet, flagged at the
+   default size (also when it was a row instead of a footer).
+   `testSettingsFooterScalesWithDynamicType` requires it to at least double
+   in height at AX5 (it goes from about 30 pt to 67 pt, its text about
+   three times as large, the footer's insets not at all).
 
 At AX5 the audit's Dynamic Type check has no larger size to try; the AX5
 runs are there for clipped text, contrast, hit regions and descriptions at
@@ -173,7 +212,7 @@ The simulator audit can't stand in for these:
 | VoiceOver navigation | Settings → Accessibility → VoiceOver. Swipe through the timeline; rotor → Topics jumps between bullets; double-tap expands; the record button's actions offer Pause Listening | pending |
 | Announcements | With VoiceOver on, talk through a topic change: "New topic: …" is spoken after Grok's sentence, and "Topic named …" when the title is refined | pending |
 | Live caption with VoiceOver | Scroll into history while Grok speaks: the caption reads "Grok, …" and VoiceOver can reach the Now pill below it | pending |
-| AX5 everywhere | Settings → Accessibility → Display & Text Size → Larger Text, largest size: every screen, including onboarding, Settings panes and the knowledge base | pending |
+| AX5 everywhere | Settings → Accessibility → Display & Text Size → Larger Text, largest size: every screen, including the Settings panes, the knowledge base and voice enrollment (the simulator audits cover the main screen, the Settings root, the setup card and onboarding) | pending |
 | Reduce Motion | Settings → Accessibility → Motion → Reduce Motion: record, pause, scroll into history and back, expand topics | pending |
 | Increased Contrast and Bold Text | Settings → Accessibility → Display & Text Size | pending |
 | No layout loop at AX5 with VoiceOver | AX5 and VoiceOver on, a long reply on screen: go offline and back so the issue banner comes and goes; the screen stays responsive (see the known issue above) | pending |

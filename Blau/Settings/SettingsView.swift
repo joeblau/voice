@@ -81,6 +81,7 @@ enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
 enum SettingsIdentifiers {
     static let list = "settings.list"
     static let done = "settings.done"
+    static let version = "settings.version"
 }
 
 /// The settings sheet presented from the main screen's bottom-left button
@@ -163,6 +164,7 @@ private struct SettingsRootList: View {
                             // the grouped background (#81).
                             .foregroundStyle(Color.brand(.secondaryText))
                             .frame(maxWidth: .infinity)
+                            .accessibilityIdentifier(SettingsIdentifiers.version)
                     }
                 }
             }

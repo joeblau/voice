@@ -109,7 +109,7 @@ struct XAIProblemView: View {
             }
             Text(problem.message)
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.brand(.secondaryText))
                 .fixedSize(horizontal: false, vertical: true)
             if problem.canSaveAnyway {
                 Button("Save Without Checking", action: onSaveAnyway)

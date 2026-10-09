@@ -29,7 +29,7 @@ struct XAIKeyOnboardingStep: View {
                         + "It's stored in your iCloud Keychain, so you only enter it once for all your devices, "
                         + "and it's only ever sent to xAI."
                 )
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.brand(.secondaryText))
 
                 if let consoleURL = URL(string: "https://console.x.ai") {
                     Link(destination: consoleURL) {

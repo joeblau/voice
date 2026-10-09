@@ -11,7 +11,8 @@ enum BlauAnnouncement {
     /// The spoken text for a topic change.
     static func text(for announcement: TopicAnnouncer.Announcement) -> String {
         switch announcement {
-        case .newTopic(let title): String(localized: "New topic: \(title)")
+        case .newTopic(let title?): String(localized: "New topic: \(title)")
+        case .newTopic(nil): String(localized: "New topic")
         case .titleRefined(let title): String(localized: "Topic named \(title)")
         }
     }
@@ -48,19 +49,21 @@ enum BlauAnnouncement {
 
 extension View {
     /// Announces the timeline's current topic changes to VoiceOver
-    /// (`TopicAnnouncer` decides which ones).
-    func announcesTopicChanges(current: TimelineTopic?) -> some View {
-        modifier(TopicChangeAnnouncements(current: current))
+    /// (`TopicAnnouncer` decides which ones), except the titles the user
+    /// typed (`renamedByUser`).
+    func announcesTopicChanges(current: TimelineTopic?, renamedByUser: Set<UUID> = []) -> some View {
+        modifier(TopicChangeAnnouncements(current: current, renamedByUser: renamedByUser))
     }
 }
 
 private struct TopicChangeAnnouncements: ViewModifier {
     let current: TimelineTopic?
+    let renamedByUser: Set<UUID>
     @State private var announcer = TopicAnnouncer()
 
     func body(content: Content) -> some View {
         content.onChange(of: current, initial: true) { _, topic in
-            if let announcement = announcer.update(topic) {
+            if let announcement = announcer.update(topic, renamedByUser: renamedByUser) {
                 BlauAnnouncement.post(BlauAnnouncement.text(for: announcement), urgency: .polite)
             }
         }

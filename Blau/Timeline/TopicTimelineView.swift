@@ -307,7 +307,7 @@ private struct TopicTimelineScrollView: View {
             .animation(reduceMotion ? nil : .snappy, value: isAtBottom)
         }
         // VoiceOver hears when a new topic opens or its title is refined.
-        .announcesTopicChanges(current: timeline.current)
+        .announcesTopicChanges(current: timeline.current, renamedByUser: editor.renamedTopicIDs)
         .accessibilityRotor("Topics") {
             ForEach(timeline.topics) { topic in
                 AccessibilityRotorEntry(Text(verbatim: topic.title), id: topic.id, in: rotor)

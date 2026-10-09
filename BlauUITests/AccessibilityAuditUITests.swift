@@ -8,23 +8,34 @@ import XCTest
 /// `UICTContentSizeCategoryAccessibilityXXXL`). Runs on fake services
 /// (`BLAU_APP_ENVIRONMENT=ui-test`) with the canned topic history.
 ///
+/// The surfaces: the empty main screen, the timeline, recording, the
+/// history with the live caption, Settings, the speech-model setup card on
+/// the main screen, and every onboarding page a fresh install goes through
+/// (the speech models page included).
+///
 /// Every issue fails the test except these, each of which the audit can't
 /// judge fairly:
 ///
-/// - **No element.** The audit reports some issues against nodes it can't
-///   resolve to an on-screen element (rows the lazy stack built off screen,
-///   with no frame). They can't be located or checked; `unattributed` logs
-///   how many.
+/// - **No element, on the timeline.** The audit reports some issues
+///   against nodes it can't resolve to an on-screen element (rows the lazy
+///   stack built off screen, with no frame). They can't be located or
+///   checked; `unattributed` logs how many. On screens without the lazy
+///   timeline (onboarding, the setup card over the empty main screen) they
+///   fail like any other issue.
 /// - **Contrast under the bars.** Content scrolls under the Liquid Glass
 ///   bars, where the system's scroll edge effect fades it on purpose (the
 ///   fade reaches about 24 pt past each bar), and
 ///   under the controls floating above the bottom bar (the Now pill and the
 ///   live caption). Only elements wholly inside the area between them are
 ///   judged; the floating controls themselves are.
+/// - **Contrast of disabled controls.** They are dimmed to show they're
+///   inactive, which WCAG 1.4.3 exempts (Connect on the xAI page and Save
+///   and Continue on About You, until there is text).
 /// - **Dynamic Type of bar buttons.** Navigation and toolbar buttons are
 ///   system controls that cap their text size and show the large content
 ///   viewer instead (touch and hold).
-/// - **"Partially unsupported" Dynamic Type of text in the timeline.** The
+/// - **"Partially unsupported" Dynamic Type of text in the timeline** (only
+///   in the audits that use the main screen's content area). The
 ///   audit grows the text size and measures each element again, but the
 ///   timeline is a scroll view anchored to its latest line (or, reading
 ///   history, to the top), so growing everything moves the texts it
@@ -32,7 +43,10 @@ import XCTest
 ///   texts away from the anchor, never the ones beside it. They do scale:
 ///   `testTimelineTextScalesWithDynamicType` measures the same headings at
 ///   the default size and at AX5. Text that doesn't scale at all ("font
-///   sizes are unsupported") still fails.
+///   sizes are unsupported") still fails. Outside the timeline one text
+///   is excused the same way, the Settings version footer at the bottom of
+///   the sheet (moving it into a row didn't change the finding);
+///   `testSettingsFooterScalesWithDynamicType` measures it instead.
 @MainActor
 final class AccessibilityAuditUITests: XCTestCase {
     enum Identifier {
@@ -47,8 +61,26 @@ final class AccessibilityAuditUITests: XCTestCase {
         static let record = "blau.record"
         static let settings = "blau.settings.open"
         static let settingsList = "settings.list"
+        static let settingsVersion = "settings.version"
         static let modelSetup = "blau.models.setup"
+        static let modelProgress = "blau.models.progress"
+        static let modelStatus = "blau.models.status"
+        static let modelAction = "blau.models.action"
     }
+
+    /// Onboarding's identifiers (`OnboardingIdentifiers` in the app).
+    enum Onboarding {
+        static let back = "blau.onboarding.back"
+        static let progress = "blau.onboarding.progress"
+        static let primary = "blau.onboarding.primary"
+        static let skip = "blau.onboarding.skip"
+        static let xaiSkip = "xai.onboarding.skip"
+        static func step(_ step: String) -> String { "blau.onboarding.step.\(step)" }
+    }
+
+    /// The fixture models' pace while a test looks at the setup card: 25
+    /// chunks of 2 s, so the download takes minutes instead of a second.
+    static let slowModelDownload = ["-BlauModelFixtureChunkDelay", "2000"]
 
     override func setUp() async throws {
         continueAfterFailure = false
@@ -148,6 +180,121 @@ final class AccessibilityAuditUITests: XCTestCase {
         try assertAuditPasses(app, "History")
     }
 
+    // MARK: Speech-model setup card
+
+    /// The card the main screen shows while the speech models download, on
+    /// every first launch.
+    func testSpeechModelCard() throws {
+        try auditSpeechModelCard(largestText: false)
+    }
+
+    func testSpeechModelCardAtTheLargestTextSize() throws {
+        try auditSpeechModelCard(largestText: true)
+    }
+
+    private func auditSpeechModelCard(largestText: Bool) throws {
+        let app = launch(Self.slowModelDownload, largestText: largestText, waitForModels: false)
+        let card = app.descendants(matching: .any)[Identifier.modelSetup]
+        XCTAssertTrue(card.waitForExistence(timeout: 30), "No setup card")
+        XCTAssertTrue(
+            app.descendants(matching: .any)[Identifier.modelProgress].waitForExistence(timeout: 15),
+            "Not downloading")
+        waitUntilStill(card)
+        try assertAuditPasses(
+            app, "Speech model card",
+            alsoJudged: [Identifier.modelStatus, Identifier.modelAction, Identifier.modelProgress],
+            allowsUnattributed: false)
+        XCTAssertTrue(card.exists, "The card went away during the audit")
+    }
+
+    // MARK: Onboarding
+
+    func testOnboarding() throws {
+        try auditOnboarding(largestText: false)
+    }
+
+    func testOnboardingAtTheLargestTextSize() throws {
+        try auditOnboarding(largestText: true)
+    }
+
+    /// Every page a fresh install goes through, as `OnboardingUITests` does:
+    /// skipping the key, allowing the (stub) microphone, and with the fixture
+    /// models still downloading, so the speech models page and its setup
+    /// card show.
+    private func auditOnboarding(largestText: Bool) throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["BLAU_APP_ENVIRONMENT"] = "ui-test"
+        app.launchEnvironment["BLAU_UI_TEST_ONBOARDING"] = "fresh"
+        app.launchEnvironment["BLAU_UI_TEST_MICROPHONE"] = "undetermined"
+        app.launchEnvironment["BLAU_UI_TEST_XAI"] = "accept"
+        app.launchArguments += Self.slowModelDownload
+        if largestText {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
+        app.launch()
+
+        try auditOnboardingPage("welcome", app)
+        tapOnboardingButton(Onboarding.primary, on: "welcome", app)
+
+        try auditOnboardingPage("xaiAccount", app)
+        let skipKey = app.buttons[Onboarding.xaiSkip]
+        scrollTo(skipKey, in: app.descendants(matching: .any)[Onboarding.step("xaiAccount")])
+        waitUntilStill(skipKey)
+        try auditOnboardingPage("xaiAccount", app, context: "Onboarding xaiAccount, scrolled to Skip")
+        skipKey.tap()
+
+        try auditOnboardingPage("microphone", app)
+        tapOnboardingButton(Onboarding.primary, on: "microphone", app)
+
+        let models = try auditOnboardingPage("speechModels", app)
+        XCTAssertTrue(
+            models.descendants(matching: .any)[Identifier.modelProgress].exists, "The models aren't downloading")
+        tapOnboardingButton(Onboarding.primary, on: "speechModels", app)
+
+        try auditOnboardingPage("iCloud", app)
+        tapOnboardingButton(Onboarding.primary, on: "iCloud", app)
+
+        try auditOnboardingPage("voiceEnrollment", app)
+        tapOnboardingButton(Onboarding.primary, on: "voiceEnrollment", app)
+
+        try auditOnboardingPage("aboutYou", app)
+        tapOnboardingButton(Onboarding.skip, on: "aboutYou", app)
+
+        try auditOnboardingPage("ready", app)
+    }
+
+    /// Waits for onboarding's `step` page to settle, then audits it: the
+    /// page between the top bar and its pinned buttons (content scrolls
+    /// under the buttons' bar), plus the bar's own controls.
+    @discardableResult
+    private func auditOnboardingPage(_ step: String, _ app: XCUIApplication, context: String? = nil) throws
+        -> XCUIElement
+    {
+        let page = app.descendants(matching: .any)[Onboarding.step(step)]
+        XCTAssertTrue(page.waitForExistence(timeout: 15), "The \(step) page didn't appear")
+        waitUntilStill(page)
+        let window = app.windows.firstMatch.frame
+        let progress = app.descendants(matching: .any)[Onboarding.progress]
+        let top = progress.exists ? progress.frame.maxY : page.frame.minY
+        let primary = page.buttons[Onboarding.primary]
+        let bottom = primary.exists ? primary.frame.minY - 12 : min(page.frame.maxY, window.maxY)
+        let area = CGRect(x: window.minX, y: top, width: window.width, height: max(0, bottom - top))
+        try assertAuditPasses(
+            app, context ?? "Onboarding \(step)", contentArea: area,
+            alsoJudged: [
+                Onboarding.back, Onboarding.progress, Onboarding.primary, Onboarding.skip, Onboarding.xaiSkip,
+                Identifier.modelStatus, Identifier.modelAction, Identifier.modelProgress,
+            ],
+            allowsUnattributed: false)
+        return page
+    }
+
+    private func tapOnboardingButton(_ identifier: String, on step: String, _ app: XCUIApplication) {
+        let button = app.descendants(matching: .any)[Onboarding.step(step)].buttons[identifier]
+        XCTAssertTrue(button.waitForExistence(timeout: 10), "No \(identifier) on \(step)")
+        button.tap()
+    }
+
     // MARK: Settings
 
     func testSettings() throws {
@@ -176,6 +323,32 @@ final class AccessibilityAuditUITests: XCTestCase {
             x: list.frame.minX, y: navigationBar.maxY, width: list.frame.width,
             height: list.frame.maxY - navigationBar.maxY)
         try assertAuditPasses(app, "Settings", contentArea: area)
+    }
+
+    /// The Settings version footer grows with Dynamic Type: at least twice
+    /// as tall at AX5 as at the default size (its text about three times,
+    /// the footer's insets not at all). The audit flags it as "partially
+    /// unsupported" at the default size, the one excused text outside the
+    /// timeline (see the class comment).
+    func testSettingsFooterScalesWithDynamicType() throws {
+        var small: CGFloat?
+        for largestText in [false, true] {
+            let app = launch(["-BlauTimelineFixture", "12"], largestText: largestText)
+            app.buttons[Identifier.settings].tap()
+            let list = app.collectionViews[Identifier.settingsList]
+            XCTAssertTrue(list.waitForExistence(timeout: 10))
+            app.navigationBars["Settings"].swipeUp()
+            waitUntilStill(list)
+            let footer = app.staticTexts[Identifier.settingsVersion]
+            scrollTo(footer, in: list)
+            let frame = footer.frame
+            if let small {
+                XCTAssertGreaterThanOrEqual(frame.height, small * 2, "\(small) → \(frame.height)")
+            } else {
+                small = frame.height
+            }
+            app.terminate()
+        }
     }
 
     /// Text in the timeline grows with Dynamic Type: the day and
@@ -229,7 +402,9 @@ final class AccessibilityAuditUITests: XCTestCase {
             && app.descendants(matching: .any)[Identifier.timeline].exists
     }
 
-    private func launch(_ arguments: [String] = [], largestText: Bool) -> XCUIApplication {
+    private func launch(_ arguments: [String] = [], largestText: Bool, waitForModels: Bool = true)
+        -> XCUIApplication
+    {
         let app = XCUIApplication()
         app.launchEnvironment["BLAU_APP_ENVIRONMENT"] = "ui-test"
         app.launchArguments += arguments
@@ -241,10 +416,13 @@ final class AccessibilityAuditUITests: XCTestCase {
             app.descendants(matching: .any)[Identifier.content].waitForExistence(timeout: 30),
             "The main screen did not appear")
         // The speech-model setup card shows while the fixture models
-        // "download" after every launch; audit the screen without it.
-        XCTAssertTrue(
-            app.descendants(matching: .any)[Identifier.modelSetup].waitForNonExistence(timeout: 30),
-            "The model setup card stayed")
+        // "download" after every launch; audit the screen without it (the
+        // card has audits of its own).
+        if waitForModels {
+            XCTAssertTrue(
+                app.descendants(matching: .any)[Identifier.modelSetup].waitForNonExistence(timeout: 30),
+                "The model setup card stayed")
+        }
         waitUntilStill(app.buttons[Identifier.record])
         return app
     }
@@ -273,29 +451,46 @@ final class AccessibilityAuditUITests: XCTestCase {
 
     /// Runs the full audit and fails with every issue it finds, except the
     /// ones the class comment lists.
+    ///
+    /// - Parameters:
+    ///   - contentArea: Where content isn't covered by bars, or `nil` for
+    ///     the main screen's (`contentArea(_:)`). Only the main screen's
+    ///     excuses the timeline's "partially unsupported" Dynamic Type.
+    ///   - alsoJudged: Controls whose contrast is judged outside the content
+    ///     area too (they float over it, or sit in a bar).
+    ///   - allowsUnattributed: Whether issues with no element pass (only
+    ///     the lazy timeline has them for a reason).
     private func assertAuditPasses(
-        _ app: XCUIApplication, _ context: String, contentArea: CGRect? = nil, file: StaticString = #filePath,
-        line: UInt = #line
+        _ app: XCUIApplication, _ context: String, contentArea: CGRect? = nil, alsoJudged: Set<String> = [],
+        allowsUnattributed: Bool = true, file: StaticString = #filePath, line: UInt = #line
     ) throws {
         let area = contentArea ?? Self.contentArea(app)
-        let floatingIdentifiers: Set = [Identifier.now, Identifier.caption]
+        let excusesTimelineScaling = contentArea == nil
+        // The floating controls and the bottom bar's own buttons: content
+        // under the bars is excused, the bars' controls are not.
+        let floatingIdentifiers: Set<String> =
+            alsoJudged.union([Identifier.now, Identifier.caption, Identifier.record, Identifier.settings])
         let navigationBars = app.navigationBars.allElementsBoundByIndex.map(\.frame)
         let bars = navigationBars + app.toolbars.allElementsBoundByIndex.map(\.frame)
         var failures: [String] = []
         var unattributed = 0
         try app.performAccessibilityAudit(for: .all) { issue in
-            guard let element = issue.element, element.exists else {
+            guard let element = issue.element, element.exists, !element.frame.isEmpty else {
                 unattributed += 1
+                if !allowsUnattributed {
+                    failures.append("\(issue.compactDescription) (no element): \(issue.detailedDescription)")
+                }
                 return true
             }
             let frame = element.frame
-            if frame.isEmpty {
-                unattributed += 1
-                return true
-            }
             if issue.auditType == .contrast, !area.insetBy(dx: -1, dy: -1).contains(frame),
                 !floatingIdentifiers.contains(element.identifier)
             {
+                return true
+            }
+            // WCAG 1.4.3 exempts inactive controls, which are dimmed on
+            // purpose (Connect and Save and Continue until there's text).
+            if issue.auditType == .contrast, !element.isEnabled {
                 return true
             }
             if issue.auditType == .dynamicType || issue.auditType == .textClipped,
@@ -304,7 +499,9 @@ final class AccessibilityAuditUITests: XCTestCase {
                 return true
             }
             if issue.auditType == .dynamicType, element.elementType == .staticText,
-                issue.compactDescription.localizedCaseInsensitiveContains("partially"), Self.isInTimeline(element, app)
+                issue.compactDescription.localizedCaseInsensitiveContains("partially"),
+                (excusesTimelineScaling && Self.isInTimeline(element, app))
+                    || element.identifier == Identifier.settingsVersion
             {
                 return true
             }

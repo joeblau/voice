@@ -32,21 +32,16 @@ struct SpeechModelSetupView: View {
                 )
                 actionButton("Download") { await downloadRequired() }
             case .downloading:
-                ProgressView(value: status.fractionCompleted)
-                    .accessibilityIdentifier(Identifier.progress)
-                    .accessibilityValue(
-                        Text(status.fractionCompleted.formatted(.percent.precision(.fractionLength(0)))))
+                progressBar(status.fractionCompleted)
                 statusText(
                     "Downloading \(status.bytesReceived.formattedByteCount) of \(status.totalBytes.formattedByteCount)")
             case .waiting(.unmeteredNetwork):
-                ProgressView(value: status.fractionCompleted)
-                    .accessibilityIdentifier(Identifier.progress)
+                progressBar(status.fractionCompleted)
                 statusText(
                     "Waiting for Wi-Fi to download \((status.totalBytes - status.bytesReceived).formattedByteCount).")
                 actionButton("Download Using Cellular Data") { models.allowExpensiveNetworkThisSession() }
             case .waiting(.connection):
-                ProgressView(value: status.fractionCompleted)
-                    .accessibilityIdentifier(Identifier.progress)
+                progressBar(status.fractionCompleted)
                 statusText("Waiting for an internet connection. The download resumes on its own.")
             case .preparing:
                 ProgressView()
@@ -61,16 +56,27 @@ struct SpeechModelSetupView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(.regularMaterial, in: .rect(cornerRadius: 16))
+        // Opaque, so the status text keeps its contrast whatever the card
+        // covers: at the largest text sizes it covers much of the main
+        // screen, and through a material the audit found it failing (#81).
+        .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 16))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(Identifier.container)
         .animation(.default, value: status.phase)
     }
 
+    /// The download's progress bar, read as "Download progress, 40%".
+    private func progressBar(_ fraction: Double) -> some View {
+        ProgressView(value: fraction)
+            .accessibilityProgressBar(
+                "Download progress", value: Text(fraction.formatted(.percent.precision(.fractionLength(0)))),
+                identifier: Identifier.progress)
+    }
+
     private func statusText(_ text: LocalizedStringKey) -> some View {
         Text(text)
             .font(.subheadline)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Color.brand(.secondaryText))
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityIdentifier(Identifier.status)
     }
