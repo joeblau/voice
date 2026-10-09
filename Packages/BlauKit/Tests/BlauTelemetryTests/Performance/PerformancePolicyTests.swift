@@ -142,6 +142,78 @@ struct PerformancePolicyTests {
         #expect(statistics.secondsHotAtNormal == 0)
     }
 
+    /// `setOverride` runs on the main actor while the observation task and
+    /// the recovery timer call `update` and `reevaluate`: changes applied
+    /// concurrently must reach a stream in the order they were applied, or
+    /// a `bufferingNewest(1)` subscriber is left holding a stale level.
+    @Test func racingChangesLeaveEveryStreamOnTheCurrentLevel() async {
+        for run in 0..<Self.raceRuns {
+            let policy = makePolicy()
+            let levels = policy.performanceLevels()
+            let snapshots = policy.updates()
+            await Self.race(
+                {
+                    policy.setOverride(.normal)
+                    policy.setOverride(.reduced)
+                },
+                {
+                    policy.setOverride(.normal)
+                    policy.setOverride(.minimal)
+                })
+            var levelIterator = levels.makeAsyncIterator()
+            var snapshotIterator = snapshots.makeAsyncIterator()
+            let delivered = await levelIterator.next()
+            let deliveredSnapshot = await snapshotIterator.next()
+            #expect(delivered == policy.performanceLevel, "run \(run)")
+            #expect(deliveredSnapshot == policy.snapshot, "run \(run)")
+            if delivered != policy.performanceLevel || deliveredSnapshot != policy.snapshot { return }
+        }
+    }
+
+    /// The same ordering for the manual source: the last reading a stream
+    /// delivers is the source's current one.
+    @Test func racingSendsDeliverTheCurrentConditionsLast() async {
+        let iterations = 20
+        for run in 0..<(3 * Self.raceRuns) {
+            let manual = ManualDeviceConditionsSource()
+            var iterator = manual.conditions().makeAsyncIterator()
+            let serious = DeviceConditions(thermalState: .serious)
+            let critical = DeviceConditions(thermalState: .critical)
+            await Self.race(
+                {
+                    manual.send(.nominal)
+                    manual.send(serious)
+                },
+                {
+                    manual.send(.nominal)
+                    manual.send(critical)
+                },
+                iterations: iterations)
+            var last: DeviceConditions?
+            // The initial reading, then one per send.
+            for _ in 0..<(1 + 2 * 2 * iterations) { last = await iterator.next() }
+            #expect(last == manual.current, "run \(run)")
+            if last != manual.current { return }
+        }
+    }
+
+    /// Enough short runs to catch an out-of-order delivery: before the fix
+    /// the policy race failed within 1000 runs in 8 of 8 runs of the suite,
+    /// and the cheaper source race (3000 runs) in 7 of 8 even at 1000.
+    static let raceRuns = 1000
+
+    /// Runs two bodies `iterations` times each on two detached tasks.
+    static func race(
+        _ first: @escaping @Sendable () -> Void,
+        _ second: @escaping @Sendable () -> Void,
+        iterations: Int = 20
+    ) async {
+        let a = Task.detached { for _ in 0..<iterations { first() } }
+        let b = Task.detached { for _ in 0..<iterations { second() } }
+        await a.value
+        await b.value
+    }
+
     @Test func endsItsStreamsWhenReleased() async {
         var policy: PerformancePolicy? = makePolicy()
         let levels = policy!.performanceLevels()

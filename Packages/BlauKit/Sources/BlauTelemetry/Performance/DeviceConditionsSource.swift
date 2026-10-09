@@ -157,13 +157,17 @@ public final class ManualDeviceConditionsSource: DeviceConditionsSource {
     public var current: DeviceConditions { state.withLock { $0.conditions } }
 
     /// Replaces the conditions and tells every open stream.
+    ///
+    /// Streams are told under the lock, so concurrent sends reach every
+    /// stream in the order they were applied and the last reading a stream
+    /// delivers is `current`. `yield` neither blocks nor runs
+    /// `onTermination`, so the lock is never re-entered.
     public func send(_ conditions: DeviceConditions) {
-        let subscribers = state.withLock { state in
+        state.withLock { state in
             state.conditions = conditions
-            return Array(state.subscribers.values)
-        }
-        for subscriber in subscribers {
-            subscriber.yield(conditions)
+            for subscriber in state.subscribers.values {
+                subscriber.yield(conditions)
+            }
         }
     }
 
