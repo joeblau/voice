@@ -46,6 +46,37 @@ struct BackgroundInferenceProbeTests {
         }
     }
 
+    /// Foreground until `lockAt`, then locked for good. The first check at
+    /// or after `freezeAt` simulates a suspension the app resumes from while
+    /// still locked (an audio interruption ending, a background wake): the
+    /// clock jumps by `freeze` and the phase stays `.locked`.
+    final class FreezingWhileLockedPhases: ExecutionPhaseProvider {
+        let clock: VirtualClock
+        let lockAt: Duration
+        let freezeAt: Duration
+        let freeze: Duration
+        let frozen = Mutex(false)
+
+        init(clock: VirtualClock, lockAt: Duration, freezeAt: Duration, freeze: Duration) {
+            self.clock = clock
+            self.lockAt = lockAt
+            self.freezeAt = freezeAt
+            self.freeze = freeze
+        }
+
+        func currentPhase() async -> ExecutionPhase {
+            if clock.uptime < lockAt { return .foreground }
+            if clock.uptime >= freezeAt {
+                let first = frozen.withLock { frozen in
+                    defer { frozen = true }
+                    return !frozen
+                }
+                if first { clock.advance(by: freeze) }
+            }
+            return .locked
+        }
+    }
+
     struct ANEUnavailable: Error, CustomStringConvertible {
         var description: String { "ANE unavailable" }
     }
@@ -155,6 +186,44 @@ struct BackgroundInferenceProbeTests {
         #expect(coverage < 0.3)
         #expect(report.mitigation == .fixBackgroundExecution)
         #expect((report.analysis.runEndedAtUptimeSeconds ?? 0) > 80)
+    }
+
+    @Test func aSuspensionResumedWhileStillLockedIsNotCaughtUp() async throws {
+        // Locked at 15 s, frozen for 400 s at 30 s, then running (still
+        // locked) until the 600 s run ends: only about a third of the
+        // off-screen time ran. Replaying the missed hops back to back after
+        // resuming used to fill the gap with burst samples, so coverage
+        // came out near 0.58 and the verdict `.works` (#22).
+        let clock = VirtualClock()
+        let probe = BackgroundInferenceProbe(
+            processor: FakeStreamingProcessor(clock: clock),
+            cpuProcessor: nil,
+            phases: FreezingWhileLockedPhases(
+                clock: clock, lockAt: .seconds(15), freezeAt: .seconds(30), freeze: .seconds(400)),
+            neuralEngineListed: { true },
+            audio: Self.audio,
+            configuration: .init(
+                duration: .seconds(600), cpuBaselineWindows: 30, warmupWindows: 4, utteranceSeconds: 10)
+        )
+        let report = try await Self.run(probe, clock: clock)
+
+        guard case .suspended(let coverage) = report.analysis.verdict else {
+            Issue.record("Expected suspended, got \(report.analysis.verdict)")
+            return
+        }
+        #expect(coverage < 0.4)
+        #expect(report.mitigation == .fixBackgroundExecution)
+
+        // The missed hops are skipped, not run in a burst: consecutive locked
+        // samples stay about a hop apart, apart from the gap the freeze left
+        // and the one late window run straight after resuming (before the
+        // fix, 1,382 of the locked samples were catch-up bursts).
+        let locked = report.samples.filter { $0.phase == .locked }.map(\.uptimeSeconds)
+        let gaps = zip(locked, locked.dropFirst()).map { $1 - $0 }
+        #expect(gaps.count { $0 < 0.2 } <= 1)
+        #expect(gaps.count { $0 > 300 } == 1)
+        // About (600 - 15 - 400) s of locked running at one sample per 320 ms.
+        #expect(locked.count < 650)
     }
 
     @Test func reportRoundTripsThroughJSON() async throws {

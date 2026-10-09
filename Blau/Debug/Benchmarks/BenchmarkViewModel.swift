@@ -128,18 +128,22 @@
                 var report = BenchmarkReport(
                     device: .current, startedAt: .now, results: [],
                     buildConfiguration: BenchmarkCatalog.buildConfiguration)
-                for benchmark in selected {
-                    if Task.isCancelled { break }
-                    self?.setState(.running(fraction: nil, message: "Starting"), for: benchmark.id)
-                    // Detached so no benchmark work runs on the main actor.
-                    let work = Task.detached(priority: .userInitiated) { await runner.run(benchmark) }
-                    let result = await withTaskCancellationHandler {
-                        await work.value
-                    } onCancel: {
-                        work.cancel()
+                // The cases fetch their models with FluidAudio's own loaders,
+                // which the app's launch-time offline mode blocks (#22).
+                await FluidAudioModels.withImplicitDownloads {
+                    for benchmark in selected {
+                        if Task.isCancelled { break }
+                        self?.setState(.running(fraction: nil, message: "Starting"), for: benchmark.id)
+                        // Detached so no benchmark work runs on the main actor.
+                        let work = Task.detached(priority: .userInitiated) { await runner.run(benchmark) }
+                        let result = await withTaskCancellationHandler {
+                            await work.value
+                        } onCancel: {
+                            work.cancel()
+                        }
+                        report.merge(result)
+                        self?.setState(.finished(result), for: benchmark.id)
                     }
-                    report.merge(result)
-                    self?.setState(.finished(result), for: benchmark.id)
                 }
                 self?.complete(report)
             }
@@ -204,17 +208,22 @@
                 let phases = ApplicationExecutionPhaseProvider()
                 let probe = BackgroundInferenceProbe.parakeetEou(
                     .ms320, phases: phases, audio: audio, configuration: configuration)
-                let work = Task.detached(priority: .userInitiated) {
-                    try await probe.run(
-                        onStatus: { status in Task { @MainActor in self?.probeStatusChanged(status) } },
-                        onSample: { sample in Task { @MainActor in self?.probeSamples.append(sample) } }
-                    )
-                }
                 do {
-                    let report = try await withTaskCancellationHandler {
-                        try await work.value
-                    } onCancel: {
-                        work.cancel()
+                    // The probe downloads EOU-320 with FluidAudio's own
+                    // loader, which the app's launch-time offline mode
+                    // blocks (#22). The scope opens before the work starts.
+                    let report = try await FluidAudioModels.withImplicitDownloads {
+                        let work = Task.detached(priority: .userInitiated) {
+                            try await probe.run(
+                                onStatus: { status in Task { @MainActor in self?.probeStatusChanged(status) } },
+                                onSample: { sample in Task { @MainActor in self?.probeSamples.append(sample) } }
+                            )
+                        }
+                        return try await withTaskCancellationHandler {
+                            try await work.value
+                        } onCancel: {
+                            work.cancel()
+                        }
                     }
                     let name =
                         "background-probe-\(report.startedAt.formatted(.iso8601))-\(report.device.modelIdentifier).json"
