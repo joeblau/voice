@@ -185,26 +185,34 @@ public final class PerformancePolicy: PerformanceLevelProviding, Sendable {
         var from: PerformanceLevel
         var to: PerformanceLevel
         var snapshot: PerformanceSnapshot
-        var snapshotSubscribers: [AsyncStream<PerformanceSnapshot>.Continuation]
-        var levelSubscribers: [AsyncStream<PerformanceLevel>.Continuation]
     }
 
+    /// Applies one change and delivers it, all under the lock.
+    ///
+    /// `update` (the observation task), `reevaluate` (the recovery timer)
+    /// and `setOverride` (the main actor) can run at the same time, so the
+    /// clock is read and the subscribers are told inside the same critical
+    /// section that applies the change. Otherwise two changes applied as A
+    /// then B could reach a `bufferingNewest(1)` stream as B then A, leaving
+    /// it on a stale level until the next change, and the tracker could get
+    /// an older timestamp than the change before it. `yield` neither blocks
+    /// nor runs `onTermination`, so the lock is never re-entered.
     private func apply(_ body: (inout PerformanceLevelTracker, Duration) -> Bool) {
-        let now = clock.uptime
         let change = state.withLock { state -> Change in
+            let now = clock.uptime
             let before = Self.snapshot(of: state.tracker)
             _ = body(&state.tracker, now)
             let after = Self.snapshot(of: state.tracker)
             state.recorder.record(after, at: now)
             scheduleRecovery(&state, now: now)
             updateSignposts(&state, from: before.level, to: after.level)
-            return Change(
-                from: before.level,
-                to: after.level,
-                snapshot: after,
-                snapshotSubscribers: before != after ? Array(state.snapshotSubscribers.values) : [],
-                levelSubscribers: before.level != after.level ? Array(state.levelSubscribers.values) : []
-            )
+            if before != after {
+                for subscriber in state.snapshotSubscribers.values { subscriber.yield(after) }
+            }
+            if before.level != after.level {
+                for subscriber in state.levelSubscribers.values { subscriber.yield(after.level) }
+            }
+            return Change(from: before.level, to: after.level, snapshot: after)
         }
         if change.from != change.to {
             let reasons = change.snapshot.reasons.map(\.description).joined(separator: ", ")
@@ -220,8 +228,6 @@ public final class PerformancePolicy: PerformanceLevelProviding, Sendable {
                 """
             )
         }
-        for subscriber in change.snapshotSubscribers { subscriber.yield(change.snapshot) }
-        for subscriber in change.levelSubscribers { subscriber.yield(change.to) }
     }
 
     /// Keeps one timer running for the tracker's recovery deadline.
