@@ -1,6 +1,10 @@
 import BlauAudio
+import BlauCore
+import BlauMemory
+import BlauPersistence
 import BlauRealtime
 import BlauTelemetry
+import BlauTopics
 import Foundation
 import Testing
 
@@ -139,6 +143,85 @@ struct SoakTests {
         #expect(loss.captured == 10_002)
         #expect(loss.missedBySubscribers == 5)
         #expect(loss.published == 10_000)
+    }
+
+    /// With Parakeet, a line split wider than the merge window abandons the
+    /// first half's turn as interrupted. When Grok's audio hadn't arrived,
+    /// that utterance never gets a reply of its own: the replies stay one
+    /// behind the utterances for the rest of the run. The user must still
+    /// speak as soon as no turn is in flight, not wait out the 20 s timeout
+    /// before every later line.
+    @Test func oneUnansweredUtteranceDoesNotKeepLaterLinesWaiting() {
+        let idle = TurnSnapshot(state: .listening)
+        // 451 utterances heard, 450 replies (one interrupted split), Blau
+        // done: speak.
+        for line in [452, 453, 480] {
+            #expect(
+                !SoakRun.awaitsReply(before: line, transcript: .recognized, replies: 450, utterances: 451, turn: idle))
+        }
+        #expect(!SoakRun.awaitsReply(before: nil, transcript: .recognized, replies: 450, utterances: 451, turn: idle))
+        // A failed turn is over too (the report counts it).
+        let failed = TurnSnapshot(state: .error(TurnFailure(kind: .response, message: "x")))
+        #expect(!SoakRun.awaitsReply(before: 452, transcript: .recognized, replies: 450, utterances: 451, turn: failed))
+        // The scripted path still counts lines exactly.
+        #expect(SoakRun.awaitsReply(before: 452, transcript: .scripted, replies: 451, utterances: 451, turn: idle))
+        #expect(!SoakRun.awaitsReply(before: 452, transcript: .scripted, replies: 452, utterances: 452, turn: idle))
+        #expect(SoakRun.awaitsReply(before: nil, transcript: .scripted, replies: 450, utterances: 451, turn: idle))
+        #expect(!SoakRun.awaitsReply(before: nil, transcript: .scripted, replies: 451, utterances: 451, turn: idle))
+    }
+
+    /// With Parakeet the user waits while a turn is in flight, whatever the
+    /// counts say.
+    @Test func aRecognizedSoakWaitsWhileATurnIsInFlight() {
+        func waits(_ turn: TurnSnapshot) -> Bool {
+            SoakRun.awaitsReply(before: 452, transcript: .recognized, replies: 451, utterances: 451, turn: turn)
+        }
+        #expect(!waits(TurnSnapshot(state: .listening)))
+        #expect(waits(TurnSnapshot(state: .userSpeaking)), "the last line's final is still on its way")
+        #expect(waits(TurnSnapshot(state: .committing)))
+        #expect(waits(TurnSnapshot(state: .agentThinking)))
+        #expect(waits(TurnSnapshot(state: .agentSpeaking)))
+        let speech = TurnSnapshot.AgentSpeech(
+            utteranceID: UUID(), playbackID: PlaybackItemID(itemID: "item"), transcript: "Sure.")
+        #expect(waits(TurnSnapshot(state: .listening, agentSpeech: [speech])), "reply audio still listed")
+        #expect(waits(TurnSnapshot(state: .listening, queuedUtterances: 1)), "queued for a session not yet ready")
+    }
+
+    /// The tap counts the user utterances no reply followed: an utterance
+    /// whose turn was interrupted is answered by the next reply, and only
+    /// those left at the end count.
+    @Test func theTapCountsOnlyUtterancesLeftUnansweredAtTheEnd() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(
+            path: "soak-tap-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let conversationID = ConversationID()
+        let store = ConversationStore(
+            modelContainer: try BlauModelContainer.makeLocal(url: directory.appending(path: "Blau.store")))
+        let tap = ReplayTranscriptTap(
+            store: store, index: try MemoryIndex.open(at: directory.appending(path: MemoryIndex.fileName)),
+            segmenter: StreamingTopicSegmenter(embedder: LexicalTextEmbedder()), conversationID: conversationID)
+        try await tap.beginConversation(conversationID, at: .now)
+        var seconds = 0
+        func utterance(_ speaker: Speaker, _ text: String) -> Utterance {
+            seconds += 2
+            return Utterance(
+                conversationID: conversationID, speaker: speaker, text: text,
+                timeRange: TimeRange(start: .seconds(seconds), duration: .seconds(1)), startedAt: .now)
+        }
+
+        // A split line: the first half's turn interrupted, one reply.
+        try await tap.record(utterance(.user, "I went hiking"))
+        try await tap.record(utterance(.user, "up the ridge last weekend"))
+        try await tap.record(utterance(.agent, "Sounds lovely."))
+        let answered = await tap.finish()
+        #expect(answered.userUtterances == 2)
+        #expect(answered.agentReplies == 1)
+        #expect(answered.unansweredUtterances == 0)
+
+        // A line no reply followed.
+        try await tap.record(utterance(.user, "And then it rained"))
+        #expect(await tap.finish().unansweredUtterances == 1)
     }
 
     /// Six minutes of audio at 20x: about 20 s, with the session renewed

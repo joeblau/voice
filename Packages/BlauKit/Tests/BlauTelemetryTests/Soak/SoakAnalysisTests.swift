@@ -267,8 +267,9 @@ import Testing
         #expect(scripted["voiceid.background"] == false)
         #expect(scripted["topics.count"] == false)
 
-        // conversation.complete: at least 432 utterances (90% of 480), more
-        // than the lines (split lines) is fine, every one answered.
+        // conversation.complete: at least 432 utterances and replies (90% of
+        // 480), more than the lines (split lines) is fine, nothing left
+        // waiting at the end, no failed turn.
         #expect(
             verdicts {
                 $0.userUtterances = 432
@@ -284,9 +285,31 @@ import Testing
                 $0.userUtterances = 530
                 $0.agentReplies = 530
             }["conversation.complete"] == true)
-        #expect(verdicts { $0.agentReplies = 450 }["conversation.complete"] == false, "an unanswered utterance")
+        // A line split wider than the merge window whose first turn the
+        // second half interrupted before Grok's audio: that utterance has
+        // no reply of its own, the next reply answers both. A pass.
+        #expect(verdicts { $0.agentReplies = 450 }["conversation.complete"] == true, "an interrupted split")
+        #expect(verdicts { $0.agentReplies = 432 }["conversation.complete"] == true, "19 interrupted splits")
+        #expect(verdicts { $0.agentReplies = 431 }["conversation.complete"] == false, "too few lines answered")
+        // Interrupted after Grok's audio started: the heard part is a reply
+        // of its own, so replies may exceed utterances.
+        #expect(verdicts { $0.agentReplies = 452 }["conversation.complete"] == true, "a split cut mid-reply")
+        // The conversation stalled: utterances left waiting at the end.
+        #expect(verdicts { $0.unansweredUtterances = 1 }["conversation.complete"] == false, "a stall")
+        #expect(
+            verdicts {
+                $0.agentReplies = 450
+                $0.unansweredUtterances = 1
+            }["conversation.complete"] == false, "the last utterance unanswered")
         #expect(verdicts { $0.failedTurns = 1 }["conversation.complete"] == false)
         #expect(verdicts { $0.lines = 0 }["conversation.complete"] == false)
+        // The scripted path stays exact: one missing reply fails.
+        #expect(
+            verdicts {
+                $0.transcript = .scripted
+                $0.userUtterances = 480
+                $0.agentReplies = 479
+            }["conversation.complete"] == false)
 
         // voiceid.background: discards are counted, not required to be 0;
         // every score still decides right, and most lines reach Grok.
@@ -315,7 +338,10 @@ import Testing
 
         let checks = SoakAnalysis.checks(samples: Self.samples(), outcome: Self.recognizedOutcome)
         let conversation = try Self.check("conversation.complete", checks)
-        #expect(conversation.limit == "≥ 432 utterances for 480 lines, every one answered, no failed turn")
+        #expect(
+            conversation.limit
+                == "≥ 432 utterances and replies for 480 lines, none unanswered at the end, no failed turn")
+        #expect(conversation.measured == "451 transcribed, 451 answered, 0 failed, 0 unanswered at the end")
         #expect(try Self.check("topics.count", checks).limit == "≤ 120")
     }
 

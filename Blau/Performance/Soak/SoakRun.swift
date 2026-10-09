@@ -184,12 +184,9 @@
                         // The user waits for Blau's answer before speaking
                         // (at most 20 s; a reply that never comes shows up
                         // in the report).
-                        let deadline = ContinuousClock.now + .seconds(20)
-                        while await Self.awaitsReply(before: line, transcript: transcript, tap: tap),
-                            ContinuousClock.now < deadline
-                        {
-                            try? await Task.sleep(for: .milliseconds(5))
-                        }
+                        await Self.waitForReply(
+                            before: line, transcript: transcript, tap: tap, orchestrator: orchestrator,
+                            deadline: ContinuousClock.now + .seconds(20))
                     },
                     progress: { position in
                         let audioSeconds = Double(position) / Double(ConversationAudioScript.sampleRate)
@@ -213,12 +210,9 @@
             await turns.value
 
             // Let the last replies arrive and be written, as the replay does.
-            await orchestrator.waitUntilSettled()
-            let deadline = clock.now + .seconds(30)
-            while await tap.agentReplies < tap.userUtterances, clock.now < deadline {
-                try await Task.sleep(for: .milliseconds(20))
-                await orchestrator.waitUntilSettled()
-            }
+            await Self.waitForReply(
+                before: nil, transcript: transcript, tap: tap, orchestrator: orchestrator,
+                deadline: ContinuousClock.now + .seconds(30))
             let final = await sampler.take(at: totalSeconds)
             let wallSinceSession = clock.now - sessionStarted
             await orchestrator.shutdown()
@@ -238,7 +232,8 @@
                 backgroundScores: counts.background, backgroundRejected: counts.backgroundRejected,
                 gateCommitted: gateStatistics.committed, gateDiscarded: gateStatistics.discarded,
                 topicBoundaries: tapReport.topicBoundaries, rollovers: final.rollovers, reseeds: final.reseeds,
-                connections: server.sockets.count, failedTurns: failed, transcript: models.transcript)
+                connections: server.sockets.count, failedTurns: failed,
+                unansweredUtterances: tapReport.unansweredUtterances, transcript: models.transcript)
             let setup = SoakReport.Setup(
                 audioSeconds: totalSeconds, speed: speed, recognizer: models.recognizerName,
                 voiceActivity: models.voiceActivityName,
@@ -375,22 +370,67 @@
             }
         }
 
-        /// Whether the user, about to say line `line` (from 1), is still
-        /// waiting for Blau.
+        /// Waits while ``awaitsReply(before:transcript:replies:utterances:turn:)``
+        /// says the user is still waiting for Blau, until `deadline` at the
+        /// latest. Every check, and the return, follows `waitUntilSettled()`,
+        /// so a finished turn's writes have landed (its reply counted, its
+        /// exchange segmented and indexed) and what the user says next sees
+        /// them.
         ///
-        /// With the script's alignment every earlier line is one utterance,
-        /// so the user waits for `line` replies. A model may split a line or
-        /// miss one, so then the user waits until every utterance heard so
-        /// far is answered: waiting for a reply to a line the model missed
-        /// would cost the whole timeout every time.
-        static func awaitsReply(
-            before line: Int, transcript: SoakTranscriptSource, tap: ReplayTranscriptTap
-        ) async -> Bool {
-            let replies = await tap.agentReplies
-            switch transcript {
-            case .scripted: return replies < line
-            case .recognized: return await replies < tap.userUtterances
+        /// - Parameter line: The line about to be said (from 1), or `nil`
+        ///   once the script is over.
+        static func waitForReply(
+            before line: Int?, transcript: SoakTranscriptSource, tap: ReplayTranscriptTap,
+            orchestrator: TurnOrchestrator, deadline: ContinuousClock.Instant
+        ) async {
+            while true {
+                await orchestrator.waitUntilSettled()
+                let waits = await awaitsReply(
+                    before: line, transcript: transcript, replies: tap.agentReplies,
+                    utterances: tap.userUtterances, turn: orchestrator.snapshot)
+                guard waits, ContinuousClock.now < deadline else {
+                    // A turn that ended after the drain above queued its
+                    // last writes: let them land too.
+                    await orchestrator.waitUntilSettled()
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(5))
             }
+        }
+
+        /// Whether the user, about to say line `line` (from 1; `nil` once
+        /// the script is over), is still waiting for Blau.
+        ///
+        /// - **Scripted:** every earlier line is exactly one utterance, so
+        ///   the user waits for `line` replies (at the end, one reply per
+        ///   utterance).
+        /// - **Recognized:** the counts can't tell. A model may miss a line,
+        ///   and when it splits one with a pause longer than the
+        ///   orchestrator's merge window, the second half abandons the first
+        ///   half's turn as interrupted (`TurnOrchestrator.commit`). That
+        ///   utterance is stored but, when Grok's audio hadn't arrived yet,
+        ///   never answered, and comparing replies with utterances would
+        ///   then cost the whole timeout before every later line. So the
+        ///   user waits while a turn is in flight instead
+        ///   (``isTurnInFlight(_:)``).
+        static func awaitsReply(
+            before line: Int?, transcript: SoakTranscriptSource, replies: Int, utterances: Int, turn: TurnSnapshot
+        ) -> Bool {
+            switch transcript {
+            case .scripted: replies < (line ?? utterances)
+            case .recognized: isTurnInFlight(turn)
+            }
+        }
+
+        /// Whether `turn` shows an utterance still on its way to a reply:
+        /// Grok is working on or speaking one (`committing`, `agentThinking`,
+        /// `agentSpeaking`, or reply audio still listed), the last line's
+        /// final hasn't come through the gate yet (`userSpeaking`), or an
+        /// utterance waits for a session that isn't ready. A failed turn
+        /// (`error`) is over: it shows up in the report, not as a wait.
+        static func isTurnInFlight(_ turn: TurnSnapshot) -> Bool {
+            turn.state.isAgentActive || turn.state == .userSpeaking || !turn.agentSpeech.isEmpty
+                || turn.queuedUtterances > 0
         }
     }
 

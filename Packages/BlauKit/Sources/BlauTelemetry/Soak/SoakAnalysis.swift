@@ -298,14 +298,24 @@ public enum SoakAnalysis {
                 name: "conversation.complete", passed: passed, measured: measured,
                 limit: "all \(outcome.lines) lines, no failed turn")
         case .recognized:
+            // A line split wider than the orchestrator's merge window is two
+            // utterances; when the second arrives before Grok's audio for
+            // the first, that turn is abandoned unanswered and the next
+            // reply answers both. When Grok's audio had started, the heard
+            // part is stored as a reply of its own. So replies may fall
+            // below or exceed the utterances: the check asks for most lines
+            // heard and answered, and for nothing left waiting at the end.
             let required = requiredRecognizedUtterances(lines: outcome.lines, thresholds)
             let passed =
-                outcome.lines > 0 && outcome.userUtterances >= required
-                && outcome.agentReplies == outcome.userUtterances && outcome.failedTurns == 0
+                outcome.lines > 0 && outcome.userUtterances >= required && outcome.agentReplies >= required
+                && outcome.unansweredUtterances == 0 && outcome.failedTurns == 0
             return SoakCheck(
-                name: "conversation.complete", passed: passed, measured: measured,
-                limit: "≥ \(required) utterances for \(outcome.lines) lines, every one answered, no failed turn",
-                detail: "Recognized transcript: a line may be split or missed")
+                name: "conversation.complete", passed: passed,
+                measured: measured + ", \(outcome.unansweredUtterances) unanswered at the end",
+                limit:
+                    "≥ \(required) utterances and replies for \(outcome.lines) lines, none unanswered at the end, "
+                    + "no failed turn",
+                detail: "Recognized transcript: a line may be split or missed, and a split's first turn interrupted")
         }
     }
 

@@ -77,7 +77,7 @@ pass, and on a simulator the leak readings must not grow.
 | `asr.chunkLatency` | The recognizer's time per chunk in the late third of the run is more than 1.5× the early third and more than 2 ms longer. With the scripted recognizer a chunk takes microseconds, so only work that grows into milliseconds (a history that is never reset, say) trips it; with Parakeet the 1.5× applies | 1.5×, 2 ms floor |
 | `realtime.firstAudio` | The same for the time from end of utterance to Grok's first audio | 1.5×, 50 ms floor |
 | `capture.droppedFrames` | More than 0.1% of the captured frames were lost before publishing (dropped buffers, as a share of the frames published plus those lost), or more than 0.1% of the published frames were missed by a slow subscriber (as a share of the frames published: they were published, so they are counted once, in `CaptureStatistics.droppedFrames(frameLength:)`, and kept apart as `subscriberFramesDropped`) | ≤ 0.1% each |
-| `conversation.complete` | A line wasn't transcribed or answered, or a turn ended in the error state. With Parakeet: fewer utterances than 90% of the lines, an utterance not answered, or a failed turn (a model may split a line in two or miss one) | all lines, 0 failed (Parakeet: ≥ 90%, all answered) |
+| `conversation.complete` | A line wasn't transcribed or answered, or a turn ended in the error state. With Parakeet: fewer utterances or replies than 90% of the lines, an utterance still without a reply at the end, or a failed turn (a model may split a line in two or miss one, see below) | all lines, 0 failed (Parakeet: ≥ 90% heard and answered, none left unanswered) |
 | `realtime.rollover` | Fewer renewals than the run's length requires (every session ends by its deadline, so a run lasting `n` deadlines renewed at least `n` times), a renewal without a reseed, or no new connection for it | ≥ expected |
 | `voiceid.background` | A score of the TV's speech didn't reject, a score of the user's didn't accept, the gate kept one of the user's lines from Grok, or the TV never reached voice ID. With Parakeet the TV is transcribed and the gate keeps those utterances back: its discards are counted, and it must pass on at least 90% of the lines | all |
 | `topics.count` | Topic boundaries below half the script's topic changes, or above 1.5× plus one (flapping). With Parakeet the segmenter sees what the model heard, so only the upper bound applies | 0.5× to 1.5× + 1 (Parakeet: ≤ 1.5× + 1) |
@@ -108,8 +108,20 @@ alignment, so every line is exactly one utterance and the checks count lines
 exactly; or `recognized`, Parakeet on synthesized speech, where the three
 conversation checks above loosen as described (`SoakThresholds.minimumRecognizedLineFraction`,
 0.9). The user also stops waiting for "the reply to every earlier line"
-before speaking: with Parakeet they wait until every utterance heard so far
-is answered, so a line the model missed doesn't cost the 20 s timeout.
+before speaking: with Parakeet they wait until no turn is in flight (the
+orchestrator isn't committing, thinking or speaking, no reply audio is
+listed, no final is still on its way, nothing is queued; `SoakRun.awaitsReply`),
+then for the transcript writes to land. Counting replies against utterances
+can't work there: a line the model misses has no reply to wait for, and a
+line it splits with a pause longer than the orchestrator's 400 ms merge
+window abandons the first half's turn as interrupted. When Grok's audio
+hadn't arrived yet, that utterance never gets a reply of its own (the next
+reply answers both), and when it had, the heard part is stored as a reply of
+its own. So replies may end up a little below or above the utterances, and
+`conversation.complete` asks instead for at least 90% of the lines heard and
+answered and for no utterance left without a reply at the end
+(`SoakOutcome.unansweredUtterances`), which is what a stalled conversation
+leaves.
 
 **Parakeet's speech.** The synthetic signal has no words, so Parakeet would
 transcribe nothing like one utterance per line. A Parakeet soak first has the

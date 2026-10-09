@@ -115,6 +115,10 @@ public struct SoakOutcome: Codable, Hashable, Sendable {
     public var userUtterances: Int
     /// Replies received and stored.
     public var agentReplies: Int
+    /// User utterances no reply followed by the end of the run: the
+    /// conversation stalled. (An utterance whose turn the next one
+    /// interrupted before Grok spoke is answered by that next reply.)
+    public var unansweredUtterances: Int
     /// Voice ID scores (the verification gate's checkpoints) of the user's
     /// speech, and how many accepted.
     public var userScores: Int
@@ -154,6 +158,7 @@ public struct SoakOutcome: Codable, Hashable, Sendable {
         reseeds: Int,
         connections: Int,
         failedTurns: Int,
+        unansweredUtterances: Int = 0,
         transcript: SoakTranscriptSource = .scripted
     ) {
         self.transcript = transcript
@@ -174,5 +179,6 @@ public struct SoakOutcome: Codable, Hashable, Sendable {
         self.reseeds = reseeds
         self.connections = connections
         self.failedTurns = failedTurns
+        self.unansweredUtterances = unansweredUtterances
     }
 }

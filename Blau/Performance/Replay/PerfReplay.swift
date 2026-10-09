@@ -383,6 +383,8 @@
         struct Report: Sendable {
             var userUtterances = 0
             var agentReplies = 0
+            /// User utterances no reply followed when the tap finished.
+            var unansweredUtterances = 0
             var topicUnits = 0
             var topicBoundaries = 0
             var memoryChunks = 0
@@ -455,6 +457,7 @@
         /// Ends topic segmentation and returns the counts.
         func finish() async -> Report {
             report.topicBoundaries += await segmenter.finish().filter(\.isConfirmation).count
+            report.unansweredUtterances = pendingUser.count
             return report
         }
 
