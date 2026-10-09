@@ -190,7 +190,7 @@ public struct AppExitCounts: Codable, Sendable, Hashable {
 /// One custom signpost interval as MetricKit aggregated it
 /// (`MXSignpostMetric`). Blau emits these with `mxSignpost` for the
 /// intervals marked `reportsToMetricKit` (see docs/performance.md).
-public struct SignpostMetricSummary: Codable, Sendable, Hashable {
+public struct SignpostMetricSummary: Codable, Sendable, Hashable, Identifiable {
     public var category: String
     public var name: String
     public var totalCount: Int
@@ -216,6 +216,10 @@ public struct SignpostMetricSummary: Codable, Sendable, Hashable {
         self.averageMemoryBytes = averageMemoryBytes
         self.cumulativeLogicalWriteBytes = cumulativeLogicalWriteBytes
     }
+
+    /// Category and name. MetricKit aggregates per pair, so two categories
+    /// can report the same name; the name alone isn't unique.
+    public var id: String { "\(category)\u{1F}\(name)" }
 }
 
 /// The parts of an `MXMetricPayload` the diagnostics screen uses.

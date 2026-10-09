@@ -76,6 +76,22 @@ struct FileDiagnosticsStoreTests {
         #expect(values.isExcludedFromBackup == true)
     }
 
+    @Test func reappliesTheBackupExclusionToAnExistingFolder() throws {
+        defer { cleanUp() }
+        // The folder exists without the flag: restored from a backup, or
+        // created by an earlier build.
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var root = directory
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = false
+        try root.setResourceValues(values)
+
+        try makeStore().save(metrics)
+
+        root.removeAllCachedResourceValues()
+        #expect(try root.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
+    }
+
     @Test func keepsAtMostTheConfiguredNumberPerKind() throws {
         defer { cleanUp() }
         let store = makeStore(retention: DiagnosticsRetention(maxRecordsPerKind: 2, maxAge: .seconds(1_000_000)))
@@ -122,6 +138,59 @@ struct FileDiagnosticsStoreTests {
         try store.removeAll()
         #expect(try store.records().isEmpty)
         try store.removeAll()  // idempotent
+    }
+
+    @Test func deletedPayloadsAreNotStoredAgain() throws {
+        defer { cleanUp() }
+        let store = makeStore()
+        let metricsPayload = metrics
+        let diagnosticsPayload = diagnostics
+        _ = try #require(try store.save(metricsPayload))
+        _ = try #require(try store.save(diagnosticsPayload))
+        try store.removeAll()
+
+        // MetricKit hands the same payloads back through `pastPayloads` at
+        // the next launch, here with a new store instance.
+        clock.advance(by: .seconds(3_600))
+        let relaunched = makeStore()
+        #expect(try relaunched.save(metricsPayload) == nil)
+        #expect(try relaunched.save(diagnosticsPayload) == nil)
+        #expect(try relaunched.records().isEmpty)
+
+        // New payloads are still stored.
+        let next = DiagnosticsSamples.metricPayload(periodEnd: clock.now)
+        #expect(try relaunched.save(next) != nil)
+        #expect(try relaunched.records().count == 1)
+    }
+
+    @Test func prunedPayloadsAreNotStoredAgain() throws {
+        defer { cleanUp() }
+        let store = makeStore(retention: DiagnosticsRetention(maxRecordsPerKind: 1, maxAge: .seconds(1_000_000)))
+        let first = metrics
+        _ = try #require(try store.save(first))
+        clock.advance(by: .seconds(60))
+        let second = DiagnosticsSamples.metricPayload(periodEnd: clock.now)
+        let kept = try #require(try store.save(second))
+        #expect(try store.records() == [kept])
+
+        clock.advance(by: .seconds(60))
+        #expect(try store.save(first) == nil, "pruned by the per-kind limit, then delivered again")
+        #expect(try store.records() == [kept])
+    }
+
+    @Test func tombstonesExpireWithTheRetentionPeriod() throws {
+        defer { cleanUp() }
+        let store = makeStore(retention: DiagnosticsRetention(maxRecordsPerKind: 100, maxAge: .seconds(3_600)))
+        let old = metrics
+        _ = try #require(try store.save(old))
+        try store.removeAll()
+
+        // A later delete, past the retention period, forgets the old
+        // tombstone, so the file doesn't grow forever.
+        clock.advance(by: .seconds(7_200))
+        _ = try #require(try store.save(DiagnosticsSamples.metricPayload(periodEnd: clock.now)))
+        try store.removeAll()
+        #expect(try store.save(old) != nil)
     }
 
     @Test func isSafeToUseFromManyThreads() async throws {

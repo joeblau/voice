@@ -754,7 +754,14 @@ Payloads are written to `Application Support/Diagnostics/MetricKit` as
 `<kind>/<id>.payload.json` (MetricKit's `jsonRepresentation()`, untouched)
 and `<kind>/<id>.record.json` (Blau's summary). They are **local only**: not
 in SwiftData, not synced through CloudKit, and the folder is excluded from
-backups. The store keeps 90 days and at most 120 payloads of each kind.
+backups (the flag is re-applied on every write, in case a restore or an
+older build left the folder without it). The store keeps 90 days and at most
+120 payloads of each kind.
+
+**Delete Stored Payloads**, and retention pruning, leave the deleted IDs in
+`<kind>/tombstones.json` for the same 90 days. MetricKit hands recent
+payloads back through `pastPayloads` at every launch, and without the
+tombstones a deleted payload would be stored again.
 Payloads describe the app and device (versions, device model, call stacks),
 not what the user said; a crash's Objective-C exception message stays in the
 raw payload and only leaves the device in an export the user starts.

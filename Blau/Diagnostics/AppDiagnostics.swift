@@ -17,7 +17,8 @@ final class AppDiagnostics {
     /// What the screen shows. Refreshed with `refresh()`.
     private(set) var records: [DiagnosticsRecord] = []
     private(set) var overview = DiagnosticsOverview()
-    /// Whether the MetricKit subscriber is registered.
+    /// Whether the MetricKit subscriber is registered. Set once
+    /// registration has actually run, not when it is scheduled.
     private(set) var isCollecting = false
     /// The last storage failure, for the screen to show.
     private(set) var lastError: String?
@@ -26,9 +27,15 @@ final class AppDiagnostics {
     /// leaves the app working with diagnostics off.
     @ObservationIgnored let store: (any DiagnosticsStoring)?
     @ObservationIgnored private var subscriber: MetricKitSubscriber?
+    /// Registers the subscriber with MetricKit. A seam for tests.
+    @ObservationIgnored private let startSubscriber: @Sendable (MetricKitSubscriber) -> Void
 
-    init(store: (any DiagnosticsStoring)?) {
+    init(
+        store: (any DiagnosticsStoring)?,
+        startSubscriber: @escaping @Sendable (MetricKitSubscriber) -> Void = { $0.start() }
+    ) {
         self.store = store
+        self.startSubscriber = startSubscriber
     }
 
     /// Diagnostics backed by the default on-device directory.
@@ -43,15 +50,25 @@ final class AppDiagnostics {
 
     /// Subscribes to MetricKit. Registration and the catch-up on payloads
     /// MetricKit delivered before this launch run off the main thread so
-    /// they never delay the first frame.
-    func start() {
-        guard let store, subscriber == nil else { return }
+    /// they never delay the first frame. `isCollecting` turns on once that
+    /// has run.
+    ///
+    /// - Returns: The registration task, or `nil` if there is nothing to
+    ///   start (no storage, or already started).
+    @discardableResult
+    func start() -> Task<Void, Never>? {
+        guard let store, subscriber == nil else { return nil }
         let subscriber = MetricKitSubscriber(store: store)
         self.subscriber = subscriber
-        isCollecting = true
-        Task.detached(priority: .utility) {
-            subscriber.start()
+        let startSubscriber = startSubscriber
+        return Task.detached(priority: .utility) { [weak self] in
+            startSubscriber(subscriber)
+            await self?.markCollecting()
         }
+    }
+
+    private func markCollecting() {
+        isCollecting = true
     }
 
     /// Reloads the stored records and the overview.

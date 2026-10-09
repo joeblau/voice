@@ -9,6 +9,7 @@ struct DiagnosticsOverviewTests {
 
     static func metrics(
         day index: Int,
+        receivedAt: Date? = nil,
         peak: Double? = nil,
         suspended: Double? = nil,
         hangs: DurationHistogram? = nil,
@@ -21,7 +22,7 @@ struct DiagnosticsOverviewTests {
         let end = origin.addingTimeInterval(Double(index) * day)
         return DiagnosticsRecord(
             id: "m\(index)",
-            receivedAt: end.addingTimeInterval(60),
+            receivedAt: receivedAt ?? end.addingTimeInterval(60),
             summary: .metrics(
                 MetricPayloadSummary(
                     periodStart: end.addingTimeInterval(-day),
@@ -44,7 +45,8 @@ struct DiagnosticsOverviewTests {
         crashes: [CrashEvent] = [],
         cpu: Int = 0,
         disk: Int = 0,
-        launches: [Double] = []
+        launches: [Double] = [],
+        version: String? = nil
     ) -> DiagnosticsRecord {
         let end = origin.addingTimeInterval(Double(index) * day)
         return DiagnosticsRecord(
@@ -54,6 +56,7 @@ struct DiagnosticsOverviewTests {
                 DiagnosticPayloadSummary(
                     periodStart: end.addingTimeInterval(-3_600),
                     periodEnd: end,
+                    environment: PayloadEnvironment(appVersion: version),
                     hangs: hangs.map { HangEvent(durationSeconds: $0) },
                     crashes: crashes,
                     cpuExceptions: Array(
@@ -88,13 +91,46 @@ struct DiagnosticsOverviewTests {
         #expect(overview.lastReceivedAt == Self.origin.addingTimeInterval(2 * Self.day + 60))
     }
 
-    @Test func latestVersionComesFromTheNewestDelivery() {
+    @Test func latestVersionComesFromTheNewestPeriod() {
         let overview = DiagnosticsOverview(records: [
             Self.metrics(day: 3, version: "0.3.0"),
             Self.metrics(day: 1, version: "0.1.0"),
             Self.metrics(day: 2, version: "0.2.0"),
         ])
         #expect(overview.latestAppVersion == "0.3.0")
+    }
+
+    @Test func latestValuesFollowThePeriodNotTheDelivery() {
+        // At the first launch after an update, MetricKit hands over past
+        // payloads in one batch, in no guaranteed order: here the newest
+        // period is saved first.
+        let batch = Self.origin.addingTimeInterval(10 * Self.day)
+        let overview = DiagnosticsOverview(records: [
+            Self.metrics(day: 3, receivedAt: batch, peak: 300e6, suspended: 30e6, version: "0.3.0"),
+            Self.metrics(
+                day: 2, receivedAt: batch.addingTimeInterval(0.01), peak: 200e6, suspended: 20e6, version: "0.2.0"),
+            Self.metrics(
+                day: 1, receivedAt: batch.addingTimeInterval(0.02), peak: 100e6, suspended: 10e6, version: "0.1.0"),
+        ])
+        #expect(overview.latestPeakMemoryBytes == 300e6)
+        #expect(overview.latestAverageSuspendedMemoryBytes == 30e6)
+        #expect(overview.latestAppVersion == "0.3.0")
+        #expect(overview.lastReceivedAt == batch.addingTimeInterval(0.02))
+    }
+
+    @Test func latestVersionComesFromTheNewestPeriodAcrossKinds() {
+        // A diagnostic payload for an older period, delivered last, doesn't
+        // override the version of a newer metric payload.
+        let overview = DiagnosticsOverview(records: [
+            Self.metrics(day: 2, version: "0.2.0"),
+            Self.diagnostics(day: 5, version: "0.5.0"),
+        ])
+        #expect(overview.latestAppVersion == "0.5.0")
+        let older = DiagnosticsOverview(records: [
+            Self.metrics(day: 5, receivedAt: Self.origin, version: "0.5.0"),
+            Self.diagnostics(day: 2, version: "0.2.0"),
+        ])
+        #expect(older.latestAppVersion == "0.5.0")
     }
 
     @Test func summarizesMemory() {
@@ -144,6 +180,37 @@ struct DiagnosticsOverviewTests {
         #expect(overview.cpuExceptionCount == 2)
         #expect(overview.diskWriteExceptionCount == 2)
         #expect(overview.slowLaunchReportCount == 1)
+    }
+
+    @Test func slowLaunchReportsAloneCountAsLaunchData() {
+        // A device that has only delivered an MXAppLaunchDiagnostic: no
+        // metric payload, so no time-to-first-draw histogram.
+        let overview = DiagnosticsOverview(records: [Self.diagnostics(day: 1, launches: [4.2])])
+        #expect(overview.timeToFirstDraw == nil)
+        #expect(overview.hasLaunchData)
+    }
+
+    @Test func launchDataNeedsMeasuredLaunchesOrReports() {
+        #expect(!DiagnosticsOverview(records: [Self.metrics(day: 1)]).hasLaunchData)
+        var measured = DiagnosticsOverview()
+        measured.timeToFirstDraw = DurationHistogram(buckets: [.init(start: 0.5, end: 0.6, count: 3)])
+        #expect(measured.hasLaunchData)
+        measured.timeToFirstDraw = DurationHistogram(buckets: [])
+        #expect(!measured.hasLaunchData)
+    }
+
+    @Test func signpostsWithTheSameNameInTwoCategoriesHaveDistinctIDs() {
+        let overview = DiagnosticsOverview(records: [
+            Self.metrics(
+                day: 1,
+                signposts: [
+                    SignpostMetricSummary(category: "asr", name: "chunk", totalCount: 3),
+                    SignpostMetricSummary(category: "vad", name: "chunk", totalCount: 4),
+                ])
+        ])
+        #expect(overview.signposts.count == 2)
+        #expect(Set(overview.signposts.map(\.id)).count == 2)
+        #expect(overview.signposts.map(\.totalCount) == [3, 4])
     }
 
     @Test func mergesSignpostsByCategoryAndName() throws {

@@ -10,9 +10,11 @@ import os
 /// stay local: they are never written to SwiftData or CloudKit, and the
 /// default directory is excluded from iCloud backups.
 public protocol DiagnosticsStoring: Sendable {
-    /// Stores `payload` unless an identical one is already stored.
+    /// Stores `payload` unless an identical one is already stored, or was
+    /// stored and then deleted (by `removeAll()` or retention).
     ///
-    /// - Returns: The stored record, or `nil` if it was a duplicate.
+    /// - Returns: The stored record, or `nil` if it was a duplicate or had
+    ///   been deleted.
     @discardableResult
     func save(_ payload: CapturedPayload) throws -> DiagnosticsRecord?
 
@@ -26,7 +28,9 @@ public protocol DiagnosticsStoring: Sendable {
     /// returns its URL.
     func export(context: DiagnosticsExportContext, to directory: URL) throws -> URL
 
-    /// Deletes every stored payload.
+    /// Deletes every stored payload. Deleted payloads stay deleted: when
+    /// MetricKit hands one back again (`pastPayloads` at the next launch),
+    /// `save` ignores it.
     func removeAll() throws
 }
 
@@ -85,6 +89,12 @@ public enum DiagnosticsStoreError: Error, Equatable, Sendable {
 ///     <directory>/metrics/<id>.record.json        DiagnosticsRecord (summary)
 ///     <directory>/diagnostics/<id>.payload.json
 ///     <directory>/diagnostics/<id>.record.json
+///     <directory>/<kind>/tombstones.json          IDs deleted, and when
+///
+/// Deleting a payload (`removeAll()`, or retention pruning it) leaves its ID
+/// in `tombstones.json`, so a payload MetricKit delivers again at the next
+/// launch isn't stored again. Tombstones are kept as long as records are
+/// (`DiagnosticsRetention.maxAge`).
 ///
 /// Each payload lives in its own files, written atomically, so a crash
 /// mid-write can't corrupt the others and a record that fails to decode is
@@ -106,7 +116,8 @@ public final class FileDiagnosticsStore: DiagnosticsStoring {
     ///   - clock: Timestamps deliveries and drives retention.
     ///   - retention: How many payloads to keep and for how long.
     ///   - excludeFromBackup: Marks `directory` as excluded from iCloud and
-    ///     device backups when it is created.
+    ///     device backups on every write, so a folder that lost the flag
+    ///     (restored, or created by an older build) gets it back.
     public init(
         directory: URL,
         clock: any BlauClock = SystemClock(),
@@ -140,7 +151,9 @@ public final class FileDiagnosticsStore: DiagnosticsStoring {
             let id = Self.recordID(for: payload.json)
             let folder = try folder(for: payload.kind, create: true)
             let recordURL = Self.recordURL(id: id, in: folder)
-            guard !FileManager.default.fileExists(atPath: recordURL.path(percentEncoded: false)) else {
+            guard !FileManager.default.fileExists(atPath: recordURL.path(percentEncoded: false)),
+                loadTombstones(in: folder)[id] == nil
+            else {
                 return nil
             }
 
@@ -197,8 +210,14 @@ public final class FileDiagnosticsStore: DiagnosticsStoring {
         try lock.withLock { _ in
             for kind in DiagnosticsPayloadKind.allCases {
                 let folder = try folder(for: kind, create: false)
-                if FileManager.default.fileExists(atPath: folder.path(percentEncoded: false)) {
-                    try FileManager.default.removeItem(at: folder)
+                guard FileManager.default.fileExists(atPath: folder.path(percentEncoded: false)) else { continue }
+                // Tombstones first, so a failure part-way never lets a
+                // deleted payload come back.
+                let ids = try loadRecords(kind: kind).map(\.id)
+                try addTombstones(ids, in: folder)
+                let names = try FileManager.default.contentsOfDirectory(atPath: folder.path(percentEncoded: false))
+                for name in names where name != Self.tombstonesName {
+                    try FileManager.default.removeItem(at: folder.appending(path: name))
                 }
             }
         }
@@ -208,6 +227,7 @@ public final class FileDiagnosticsStore: DiagnosticsStoring {
 
     private static let recordSuffix = ".record.json"
     private static let payloadSuffix = ".payload.json"
+    private static let tombstonesName = "tombstones.json"
 
     private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
@@ -233,17 +253,55 @@ public final class FileDiagnosticsStore: DiagnosticsStoring {
     /// Call with the lock held.
     private func folder(for kind: DiagnosticsPayloadKind, create: Bool) throws -> URL {
         let folder = directory.appending(path: kind.rawValue, directoryHint: .isDirectory)
-        if create, !FileManager.default.fileExists(atPath: folder.path(percentEncoded: false)) {
-            let rootExisted = FileManager.default.fileExists(atPath: directory.path(percentEncoded: false))
+        guard create else { return folder }
+        if !FileManager.default.fileExists(atPath: folder.path(percentEncoded: false)) {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            if excludeFromBackup, !rootExisted {
-                var root = directory
-                var values = URLResourceValues()
-                values.isExcludedFromBackup = true
-                try root.setResourceValues(values)
-            }
+        }
+        if excludeFromBackup {
+            try excludeRootFromBackup()
         }
         return folder
+    }
+
+    /// Call with the lock held. Sets `isExcludedFromBackup` on `directory`
+    /// unless it is already set, whoever created the folder.
+    private func excludeRootFromBackup() throws {
+        var root = directory
+        root.removeAllCachedResourceValues()
+        guard try root.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup != true else {
+            return
+        }
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try root.setResourceValues(values)
+    }
+
+    private static func tombstonesURL(in folder: URL) -> URL {
+        folder.appending(path: tombstonesName)
+    }
+
+    /// Call with the lock held. Deleted record IDs and when they were
+    /// deleted; empty when there are none or the file doesn't decode.
+    private func loadTombstones(in folder: URL) -> [String: Date] {
+        guard let data = try? Data(contentsOf: Self.tombstonesURL(in: folder)) else { return [:] }
+        do {
+            return try Self.decoder.decode([String: Date].self, from: data)
+        } catch {
+            Log.data.error("Ignoring unreadable diagnostics tombstones: \(error, privacy: .public)")
+            return [:]
+        }
+    }
+
+    /// Call with the lock held. Records `ids` as deleted now, and forgets
+    /// tombstones older than the retention period.
+    private func addTombstones(_ ids: [String], in folder: URL) throws {
+        let now = clock.now
+        let oldestKept = now.addingTimeInterval(-retention.maxAge.timeInterval)
+        var tombstones = loadTombstones(in: folder).filter { $0.value >= oldestKept }
+        for id in ids {
+            tombstones[id] = now
+        }
+        try Self.encoder.encode(tombstones).write(to: Self.tombstonesURL(in: folder), options: .atomic)
     }
 
     /// Call with the lock held. Skips (and logs) records that don't decode.
@@ -272,8 +330,12 @@ public final class FileDiagnosticsStore: DiagnosticsStoring {
         let oldestKept = clock.now.addingTimeInterval(-retention.maxAge.timeInterval)
         let newestFirst = try loadRecords(kind: kind).sorted { ($0.receivedAt, $0.id) > ($1.receivedAt, $1.id) }
 
-        for (index, record) in newestFirst.enumerated()
-        where index >= retention.maxRecordsPerKind || record.receivedAt < oldestKept {
+        let pruned = newestFirst.enumerated()
+            .filter { index, record in index >= retention.maxRecordsPerKind || record.receivedAt < oldestKept }
+            .map(\.element)
+        guard !pruned.isEmpty else { return }
+        try addTombstones(pruned.map(\.id), in: folder)
+        for record in pruned {
             try? FileManager.default.removeItem(at: Self.recordURL(id: record.id, in: folder))
             try? FileManager.default.removeItem(at: Self.payloadURL(id: record.id, in: folder))
         }

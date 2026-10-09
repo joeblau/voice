@@ -19,6 +19,7 @@ struct DiagnosticsView: View {
         static let diagnosticPayloads = "diagnostics.diagnosticPayloads"
         static let hangReports = "diagnostics.hangReports"
         static let peakMemory = "diagnostics.peakMemory"
+        static let slowLaunchReports = "diagnostics.slowLaunchReports"
     }
 
     @Environment(AppDiagnostics.self) private var diagnostics
@@ -52,7 +53,9 @@ struct DiagnosticsView: View {
                 Task { await diagnostics.removeAll() }
             }
         } message: {
-            Text("Export them first if you still need them. MetricKit won't deliver them again.")
+            Text(
+                "Export them first if you still need them. "
+                    + "Deleted payloads aren't stored again, even if MetricKit sends them again.")
         }
     }
 
@@ -152,16 +155,21 @@ struct DiagnosticsView: View {
 
     @ViewBuilder
     private var launchSection: some View {
-        if let launch = overview.timeToFirstDraw, launch.sampleCount > 0 || overview.slowLaunchReportCount > 0 {
+        // Slow-launch reports can arrive before any metric payload, so the
+        // section doesn't depend on the time-to-first-draw histogram.
+        if overview.hasLaunchData {
             Section("Launch") {
-                LabeledContent("Launches measured", value: launch.sampleCount.formatted())
-                if let median = launch.estimatedQuantile(0.5) {
-                    LabeledContent("Time to first draw, median", value: "≤ " + Self.seconds(median))
-                }
-                if let p95 = launch.estimatedQuantile(0.95) {
-                    LabeledContent("Time to first draw, p95", value: "≤ " + Self.seconds(p95))
+                if let launch = overview.timeToFirstDraw {
+                    LabeledContent("Launches measured", value: launch.sampleCount.formatted())
+                    if let median = launch.estimatedQuantile(0.5) {
+                        LabeledContent("Time to first draw, median", value: "≤ " + Self.seconds(median))
+                    }
+                    if let p95 = launch.estimatedQuantile(0.95) {
+                        LabeledContent("Time to first draw, p95", value: "≤ " + Self.seconds(p95))
+                    }
                 }
                 LabeledContent("Slow launch reports", value: overview.slowLaunchReportCount.formatted())
+                    .accessibilityIdentifier(Identifier.slowLaunchReports)
             }
         }
     }
@@ -170,7 +178,9 @@ struct DiagnosticsView: View {
     private var signpostSection: some View {
         if !overview.signposts.isEmpty {
             Section {
-                ForEach(overview.signposts, id: \.name) { signpost in
+                // Identified by category and name: two categories can
+                // report the same name.
+                ForEach(overview.signposts) { signpost in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(signpost.name).font(.body.monospaced())
                         Text(Self.signpostDetail(signpost))
