@@ -465,9 +465,11 @@ interruption path have their own tests (#37).
   `BLAU_PERF_REPLAY_ASR=parakeet` (pending table below). The streaming
   transcriber's own work (onset look-back, chunk feeding, commits) is in the
   CPU and memory numbers either way.
-- *`voiceid.verify`.* The verification gate (#47) isn't built yet. The
-  interval now comes from `VoiceprintScorer.verify(_:config:)`, the scoring
-  and decision step the gate will call; the embeddings are synthetic because
+- *`voiceid.verify`.* The interval comes from
+  `VoiceprintScorer.verify(_:config:)`, the same scoring and decision step
+  the verification gate (#47) runs at every checkpoint (through
+  `VoiceprintMatcher.verify`); the replay scores each segment directly
+  rather than through the gate, and its embeddings are synthetic because
   WeSpeaker needs a model (its cost is `voiceid.embed`, measured by the
   model benchmarks, docs/benchmarks.md).
 - *`memory.search`.* The session runs the real `MemorySearch` (#64). Its
@@ -1069,10 +1071,9 @@ orange (warning) or red (critical), and so does the panel's border.
 | Signposts        | Every canonical interval timed while the HUD shows: last / p50 / p95 and count | |
 
 Rows whose stage isn't running, or isn't built yet, show "–". The voice
-score row fills in once the verification gate (#47) reports to
-`PerformanceGauges.shared`; the gate should call
-`report(.voiceScore, score)` and `report(.voiceThreshold, threshold)` for
-every decision.
+score row is the verification gate's (#47) latest score and its accept
+threshold: `SpeakerVerifier` reports both to `PerformanceGauges.shared` for
+every score, while a voiceprint is enrolled.
 
 ### How it measures
 

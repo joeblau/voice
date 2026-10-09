@@ -79,6 +79,54 @@ public struct VoiceIDDecisionBreakdown: Hashable, Codable, Sendable {
     }
 }
 
+/// What the verification gate (#47) decides for one group of trials, with
+/// the proposed thresholds: each probe treated as one speech segment and
+/// decided as the gate decides it (``VerificationGateRules``).
+public struct VoiceIDGateOutcome: Hashable, Codable, Sendable {
+    /// A condition name, or `all`.
+    public let condition: String
+    public let trials: VoiceIDDecisionBreakdown.TrialKind
+    public let accepted: Int
+    public let uncertain: Int
+    public let rejected: Int
+    /// Probes too short for the gate to score (they inherit a decision in
+    /// a conversation; here they have none).
+    public let unscored: Int
+
+    public init(
+        condition: String, trials: VoiceIDDecisionBreakdown.TrialKind, accepted: Int, uncertain: Int, rejected: Int,
+        unscored: Int
+    ) {
+        self.condition = condition
+        self.trials = trials
+        self.accepted = accepted
+        self.uncertain = uncertain
+        self.rejected = rejected
+        self.unscored = unscored
+    }
+
+    public var total: Int { accepted + uncertain + rejected + unscored }
+
+    private func share(_ count: Int) -> Double {
+        total == 0 ? 0 : Double(count) / Double(total)
+    }
+
+    /// Owner trials: the share rejected outright (never sent, whatever the
+    /// uncertain policy).
+    public var falseRejectRate: Double { share(rejected) }
+
+    /// Owner trials: the share not sent when uncertain speech isn't (outside
+    /// an active turn, or under 2 s): rejected or uncertain.
+    public var falseRejectRateDroppingUncertain: Double { share(rejected + uncertain + unscored) }
+
+    /// Impostor trials: the share accepted (always sent).
+    public var falseAcceptRate: Double { share(accepted) }
+
+    /// Impostor trials: the share sent when uncertain speech is (in an
+    /// active turn, 2 s or longer): accepted or uncertain.
+    public var falseAcceptRateSendingUncertain: Double { share(accepted + uncertain) }
+}
+
 /// Score distributions at one window, binned, with the calibrated
 /// thresholds: the picture behind `T_hi` and `T_lo`.
 public struct VoiceIDScoreHistogram: Hashable, Codable, Sendable {
@@ -151,6 +199,9 @@ public struct VoiceIDEvaluationReport: Hashable, Codable, Sendable {
     public let calibration: Calibration
     public let decisions: [VoiceIDDecisionBreakdown]
     public let histograms: [VoiceIDScoreHistogram]
+    /// The verification gate's decisions at the proposed thresholds (#47);
+    /// `nil` in reports from before the gate.
+    public let gate: [VoiceIDGateOutcome]?
 
     /// The metrics for one slice, if it was measured.
     public func metrics(
@@ -337,6 +388,36 @@ public struct VoiceIDEvaluationReport: Hashable, Codable, Sendable {
                     }
                 )
             }
+        }
+
+        // The gate.
+        if let gate, !gate.isEmpty {
+            lines += [
+                "## The verification gate",
+                "",
+                "Each probe as one speech segment, decided as the gate decides it with the proposed thresholds: "
+                    + "the longest score it fills (the gate's end-of-segment score). Owner FRR counts rejections; "
+                    + "uncertain owner speech is also lost outside an active turn or under 2 s. Impostor FAR counts "
+                    + "accepts; uncertain impostor speech is also sent in an active turn when 2 s or longer.",
+                "",
+            ]
+            table(
+                [
+                    "Condition", "Trials", "Count", "Accept", "Uncertain", "Reject", "FRR / FAR",
+                    "FRR (uncertain dropped) / FAR (uncertain sent)",
+                ],
+                [false, false, true, true, true, true, true, true],
+                gate.map { row in
+                    let isOwner = row.trials == .target
+                    return [
+                        row.condition, isOwner ? "owner" : "impostor", "\(row.total)",
+                        "\(row.accepted)", "\(row.uncertain)", "\(row.rejected)",
+                        Self.percent(isOwner ? row.falseRejectRate : row.falseAcceptRate),
+                        Self.percent(
+                            isOwner ? row.falseRejectRateDroppingUncertain : row.falseAcceptRateSendingUncertain),
+                    ]
+                }
+            )
         }
 
         // Decisions.

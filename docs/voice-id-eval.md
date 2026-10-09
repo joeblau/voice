@@ -148,6 +148,35 @@ Decisions at the shipped thresholds (accept / uncertain / reject):
   recording sessions and probes are degraded; owner scores spread down to
   about 0.2 at 1.5 s (see the histogram), and impostors rarely pass 0.35.
 
+### The verification gate
+
+The harness also replays the gate's decision (#47) on every trial
+(`VoiceIDGateOutcome`, `VerificationGateRules.simulatedDecision`): each
+probe is one speech segment, scored at every window it fills, and the
+longest score (6 s here, standing in for the gate's end-of-segment score)
+decides with the proposed thresholds for its length.
+
+| Condition | Owner accept / uncertain / reject | Impostor accept / uncertain / reject |
+| --- | --- | --- |
+| all | 96.3 / 2.25 / **1.50%** | **0.71** / 6.80 / 92.5% |
+| clean | 97.5 / 1.56 / 0.94% | 0.79 / 7.20 / 92.0% |
+| room-near | 97.2 / 1.88 / 0.94% | 0.75 / 7.00 / 92.2% |
+| room-far | 94.4 / 3.44 / 2.19% | 0.71 / 6.40 / 92.9% |
+| babble | 95.9 / 2.19 / 1.88% | 0.57 / 6.29 / 93.1% |
+| loudspeaker | – | 0.62 / 6.51 / 92.9% |
+| overlap | 96.3 / 2.19 / 1.56% | 0.79 / 7.38 / 91.8% |
+
+- **Owner FRR 1.50%** counting rejections, below the issue's 3%; 3.75% if
+  uncertain owner speech is never sent (outside an active turn or under
+  2 s). Far-field is the weak spot (2.19% rejected, 3.44% uncertain).
+- **Impostor FAR 0.71%**: the long thresholds were calibrated at 3 s
+  (0.50% there) and 6 s embeddings of impostors score a little higher.
+  During an active turn the default uncertain policy also sends the 6.8%
+  uncertain impostor segments of 2 s or more: the uncertain band costs
+  more impostor leaks than it saves owner rejections on this set. The
+  owner set should settle both the end-of-segment thresholds and the
+  policy (`UncertainSpeechPolicy`).
+
 ### Limitations
 
 - **Not the owner.** LibriSpeech is read English audiobook speech recorded
@@ -169,7 +198,8 @@ Decisions at the shipped thresholds (accept / uncertain / reject):
 | Owner set: owner recordings across rooms and distances, other people, TV, podcasts, music with vocals, other languages, overlap ([Datasets/voice-id](../Datasets/voice-id/README.md)) | **Pending**: needs the recordings and consent. Re-run, then update the thresholds and this page |
 | With and without DeepFilterNet3 on the verification path | **Done** (#51) on the calibration set: see [noise-suppression.md](noise-suppression.md#voice-id). `BLAU_VOICEID_EVAL_SUPPRESSORS` runs it again on the owner set |
 | iPhone vs Mac score parity on the same audio | **Pending**: needs a device run |
-| AS-norm with the production cohort (#47) | **Pending**: the harness takes any cohort recordings |
+| AS-norm with the production cohort (#47) | **Pending**: no gain on the public set, so the gate ships raw cosine without a bundled cohort; the harness takes any cohort recordings and the gate (`SpeakerVerifier(cohort:)`) any cohort, so re-test on the owner set |
+| The gate's FRR / FAR on the owner set (#47) | **Pending**: needs the owner set. On the public set: owner FRR 1.50% (3.75% with uncertain dropped), impostor FAR 0.71% (7.5% with uncertain sent), see [The verification gate](#the-verification-gate) |
 
 ## History
 
@@ -181,6 +211,7 @@ committed; keep it with the dataset and re-render it with
 | Date | Dataset | Model | Scoring | EER 1.5 s / 3 s | Short `T_hi` / `T_lo` | Long `T_hi` / `T_lo` | FAR / FRR at 3 s thresholds |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 2026-10-07 | LibriSpeech dev-clean, 40 speakers, 6 conditions | `wespeaker-resnet34-lm@df2625ac` | cosine/centroid | 4.50% / 3.00% | 0.38 / 0.20 | 0.40 / 0.27 | 0.50% / 1.88% |
+| 2026-10-08 | Same; re-run with the gate simulation (#47), identical thresholds and curves | `wespeaker-resnet34-lm@df2625ac` | cosine/centroid | 4.50% / 3.00% | 0.38 / 0.20 | 0.40 / 0.27 | 0.50% / 1.88%; gate: 0.71% / 1.50% |
 
 ## How the harness works
 

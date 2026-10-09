@@ -42,7 +42,7 @@ in SwiftUI previews and UI tests, and on whatever a unit test passes in.
 | `conversationAudio` | `ConversationAudio?` | the controller, capture hub, player and keeper behind `audio`; the `TurnOrchestrator` plays replies on its player and `VoiceLoop` starts it | `nil` |
 | `backgroundInference` | `BackgroundInferenceMonitor` | moves model stages off the Neural Engine off screen ([background.md](background.md)); `VoiceLoop` registers its Silero VAD | same, with no stages |
 | `transcriber` | `any Transcriber` | unavailable; `VoiceLoop` builds a `ParakeetStreamingTranscriber` (#29, [asr.md](asr.md)) over the conversation audio's capture hub and its own VAD for each conversation | `FakeTranscriber` |
-| `voiceGate` | `any VoiceGate` | unavailable until #47 | `FakeVoiceGate` |
+| `voiceGate` | `any VoiceGate` | unavailable; `VoiceLoop` builds a `VerificationGate` (#47, [voice-id.md](voice-id.md#verification-gate-47)) for each conversation when a voiceprint is enrolled (`VoiceIDGateLoader`) | `FakeVoiceGate` |
 | `realtime` | `any RealtimeService` | `TurnOrchestrator` (#36, [realtime.md](realtime.md#turn-orchestration)): the xAI client, session configuration, a `StreamingAudioPlayer` and the SwiftData transcript | `FakeRealtimeService` |
 | `voiceLoop` | `VoiceLoop` | Starts the conversation audio (through its keeper), builds the VAD and Parakeet on `start()` and feeds the orchestrator; Debug menu → Voice Loop, and the Live Activity Stop button stops it | unavailable (no orchestrator) |
 | `conversation` | `any ConversationSession` | `VoiceLoopSession`: the voice loop and its conversation audio, for the record button (#41) | `FakeConversationSession` over the fake `audio` (a 400 ms start in previews) |

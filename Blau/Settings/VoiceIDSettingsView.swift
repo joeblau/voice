@@ -17,6 +17,7 @@ enum VoiceIDSettingsIdentifiers {
     static let sensitivity = "settings.voiceID.sensitivity"
     static let resetSensitivity = "settings.voiceID.sensitivity.reset"
     static let gate = "settings.voiceID.gate"
+    static let conversationGate = "settings.voiceID.conversationGate"
 }
 
 /// Settings → Voice ID: whether a voiceprint is enrolled (it syncs through
@@ -83,6 +84,19 @@ struct VoiceIDSettingsView: View {
             LabeledContent("Only Your Voice Reaches Grok", value: flags.isEnabled(.voiceIDEnabled) ? "On" : "Off")
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier(VoiceIDSettingsIdentifiers.gate)
+            if let status = environment.voiceLoop.voiceIDStatus, let explanation = status.explanation {
+                // Enrolled and on, but the gate couldn't start (#47): this
+                // conversation runs unprotected, so say so.
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(status.summary, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(explanation)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier(VoiceIDSettingsIdentifiers.conversationGate)
+            }
 
             Button(profile == nil ? "Enroll Your Voice" : "Re-enroll") { enroll(.enrollment) }
                 .accessibilityIdentifier(VoiceIDSettingsIdentifiers.enroll)

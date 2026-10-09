@@ -2,6 +2,7 @@ import BlauCore
 import BlauPersistence
 import BlauRealtime
 import BlauTelemetry
+import BlauVoiceID
 import Foundation
 import SwiftData
 import Testing
@@ -120,6 +121,65 @@ struct VoiceLoopTests {
         VoiceLoop(
             conversation: conversation, snapshots: nil, startPipeline: startPipeline,
             releaseAudio: { released.count += 1 }, performance: FixedPerformanceLevel())
+    }
+
+    // MARK: Voice ID (#47)
+
+    private func verdict(_ text: String, _ disposition: GatedUtterance.Disposition) -> GatedUtterance {
+        GatedUtterance(
+            utterance: utterance(text, .user, in: ConversationID(), at: 0),
+            decision: disposition == .rejected ? .reject : disposition == .accepted ? .accept : .uncertain,
+            disposition: disposition, segments: [], delay: .zero)
+    }
+
+    /// The DEBUG "ignored speech" lane lists what the gate kept from Grok,
+    /// and the gate hears when Grok is answering.
+    @Test func ignoredSpeechAndAgentActivityReachTheGate() async {
+        let (snapshots, snapshotFeed) = AsyncStream.makeStream(of: TurnSnapshot.self)
+        let pipeline = FakeLoopPipeline()
+        let loop = VoiceLoop(
+            conversation: FakeLoopConversation(), snapshots: snapshots, startPipeline: { pipeline },
+            performance: FixedPerformanceLevel())
+        await loop.start()
+
+        pipeline.verdictFeed.yield(verdict("Hi Blau", .accepted))
+        pipeline.verdictFeed.yield(verdict("And now the weather", .rejected))
+        pipeline.verdictFeed.yield(verdict("Hm", .uncertainDiscarded))
+        snapshotFeed.yield(TurnSnapshot(state: .agentSpeaking))
+        snapshotFeed.yield(TurnSnapshot(state: .listening))
+        for _ in 0..<100 where loop.ignoredSpeech.count < 2 || pipeline.agentActivity.count < 2 {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(loop.ignoredSpeech.map(\.utterance.text) == ["And now the weather", "Hm"])
+        #expect(pipeline.agentActivity == [true, false])
+        await loop.stop()
+    }
+
+    /// An enrolled user whose gate couldn't start is told: the conversation
+    /// runs unprotected (#47).
+    @Test func theVoiceIDStatusFollowsTheConversation() async {
+        let (snapshots, _) = AsyncStream.makeStream(of: TurnSnapshot.self)
+        let pipeline = FakeLoopPipeline()
+        pipeline.voiceIDStatus = .unavailable(.modelNotInstalled)
+        let loop = VoiceLoop(
+            conversation: FakeLoopConversation(), snapshots: snapshots, startPipeline: { pipeline },
+            performance: FixedPerformanceLevel())
+        #expect(loop.voiceIDStatus == nil)
+
+        await loop.start()
+        #expect(loop.voiceIDStatus == .unavailable(.modelNotInstalled))
+        #expect(loop.voiceIDStatus?.isDegraded == true)
+        #expect(loop.voiceIDStatus?.explanation?.contains("can reach Grok") == true)
+
+        await loop.stop()
+        #expect(loop.voiceIDStatus == nil)
+    }
+
+    @Test(arguments: [VoiceIDGateStatus.on, .off, .notEnrolled])
+    func onlyAGateThatCouldNotStartIsAWarning(status: VoiceIDGateStatus) {
+        #expect(!status.isDegraded)
+        #expect(status.explanation == nil)
     }
 
     @Test func startRunsAndStopEndsEverything() async {
@@ -322,10 +382,21 @@ private final class FakeLoopConversation: VoiceLoopConversation {
 private final class FakeLoopPipeline: VoiceLoopPipeline {
     let transcript: AsyncStream<TranscriptEvent>
     private let continuation: AsyncStream<TranscriptEvent>.Continuation
+    let voiceVerdicts: AsyncStream<GatedUtterance>?
+    let verdictFeed: AsyncStream<GatedUtterance>.Continuation
     private(set) var stops = 0
+    private(set) var agentActivity: [Bool] = []
+    var voiceIDStatus: VoiceIDGateStatus = .off
 
     init() {
         (transcript, continuation) = AsyncStream.makeStream(of: TranscriptEvent.self)
+        let (verdicts, feed) = AsyncStream.makeStream(of: GatedUtterance.self)
+        voiceVerdicts = verdicts
+        verdictFeed = feed
+    }
+
+    func agentActivityChanged(_ isActive: Bool) {
+        agentActivity.append(isActive)
     }
 
     func stopListening() async {

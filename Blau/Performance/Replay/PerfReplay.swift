@@ -120,7 +120,9 @@
     ///   Parakeet itself.
     /// - **Voice ID**: every VAD segment is scored against a voiceprint
     ///   (`voiceid.verify`). The embeddings are synthetic: WeSpeaker needs a
-    ///   model, and the verification gate (#47) isn't built yet.
+    ///   model. The replay scores segments directly rather than through the
+    ///   verification gate (#47), whose own cost is that same interval plus
+    ///   bookkeeping, so the committed baselines stay comparable.
     /// - **Turns**: the real `TurnOrchestrator` and `RealtimeClient`; the
     ///   server answers each line with the script's reply, as streamed
     ///   PCM16 audio and transcript deltas.

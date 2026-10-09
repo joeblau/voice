@@ -37,6 +37,10 @@ public struct VoiceIDEvaluationPlan: Sendable {
     public var reportedFalseAcceptRates: [Double]
     /// Seeds every simulated condition.
     public var seed: UInt64
+    /// The verification gate whose decisions the report simulates (#47):
+    /// each probe is one speech segment, decided by its longest window's
+    /// score as the gate's end-of-segment score would.
+    public var gate: VerificationGateConfiguration
 
     /// The windows the issue asks for: 1, 1.5, 3 and 6 s.
     public static let standardWindows: [SpeakerEmbeddingWindow] = [
@@ -57,7 +61,8 @@ public struct VoiceIDEvaluationPlan: Sendable {
         longWindow: SpeakerEmbeddingWindow = .long,
         reportedFalseRejectRates: [Double] = [0.01, 0.03],
         reportedFalseAcceptRates: [Double] = [0.01, 0.005],
-        seed: UInt64 = 48
+        seed: UInt64 = 48,
+        gate: VerificationGateConfiguration = .standard
     ) {
         precondition(!windows.isEmpty && !scorings.isEmpty && !conditions.isEmpty)
         precondition(maximumEnrollmentClips > 0)
@@ -80,6 +85,7 @@ public struct VoiceIDEvaluationPlan: Sendable {
         self.reportedFalseRejectRates = reportedFalseRejectRates
         self.reportedFalseAcceptRates = reportedFalseAcceptRates
         self.seed = seed
+        self.gate = gate
     }
 
     /// The name of the unprocessed variant in reports.
@@ -124,6 +130,7 @@ public struct VoiceIDEvaluator: Sendable {
         let probe: Int
         let condition: Int
         let window: Int
+        let target: Int
         let isTarget: Bool
         let score: Float
     }
@@ -246,7 +253,7 @@ public struct VoiceIDEvaluator: Sendable {
                                     calibrationTrials.append(
                                         Trial(
                                             probe: probeIndex, condition: conditionIndex, window: windowIndex,
-                                            isTarget: isTarget, score: score))
+                                            target: targetIndex, isTarget: isTarget, score: score))
                                 }
                             }
                         }
@@ -305,6 +312,11 @@ public struct VoiceIDEvaluator: Sendable {
         let decisions = Self.decisionBreakdown(
             calibrationTrials, probes: probes, conditions: conditions,
             windows: [(shortIndex, plan.shortWindow, short.thresholds), (longIndex, plan.longWindow, long.thresholds)])
+        let longest = plan.windows[plan.windows.count - 1].duration + .milliseconds(500)
+        let gate = Self.gateOutcomes(
+            calibrationTrials, windows: plan.windows,
+            speech: probes.map { min($0.audio.duration, longest) }, conditions: conditions, config: config,
+            gate: plan.gate)
         let histograms = [
             VoiceIDScoreHistogram(window: plan.shortWindow, scores: shortScores, thresholds: short.thresholds),
             VoiceIDScoreHistogram(window: plan.longWindow, scores: longScores, thresholds: long.thresholds),
@@ -333,7 +345,8 @@ public struct VoiceIDEvaluator: Sendable {
                 scoring: plan.calibrationScoring, targets: plan.calibrationTargets, short: short, long: long,
                 config: config),
             decisions: decisions,
-            histograms: histograms
+            histograms: histograms,
+            gate: gate
         )
     }
 
@@ -360,6 +373,50 @@ public struct VoiceIDEvaluator: Sendable {
 
     private func prefix(_ audio: AudioFrame, _ duration: Duration) -> AudioFrame {
         SpeakerEmbeddingWindow(duration: duration).prefix(of: audio)
+    }
+
+    /// The verification gate's decision on every trial, simulated: each
+    /// probe is one speech segment of `speech[probe]`, scored at every
+    /// window it fills, and the longest score decides with `config`'s
+    /// thresholds (``VerificationGateRules/simulatedDecision(scores:speechDuration:config:gate:)``).
+    /// By condition, and pooled.
+    private static func gateOutcomes(
+        _ trials: [Trial],
+        windows: [SpeakerEmbeddingWindow],
+        speech: [Duration],
+        conditions: [VoiceIDCondition],
+        config: VoiceIDConfig,
+        gate: VerificationGateConfiguration
+    ) -> [VoiceIDGateOutcome] {
+        struct Key: Hashable {
+            let probe: Int
+            let condition: Int
+            let target: Int
+        }
+        var scores: [Key: (isTarget: Bool, scores: [(audioDuration: Duration, score: Float)])] = [:]
+        for trial in trials {
+            let key = Key(probe: trial.probe, condition: trial.condition, target: trial.target)
+            scores[key, default: (trial.isTarget, [])].scores.append((windows[trial.window].duration, trial.score))
+        }
+        var counts: [String: [Bool: [SpeakerDecision?: Int]]] = [:]
+        for (key, entry) in scores {
+            let decision = VerificationGateRules.simulatedDecision(
+                scores: entry.scores.sorted { $0.audioDuration < $1.audioDuration },
+                speechDuration: speech[key.probe], config: config, gate: gate)
+            for condition in [conditions[key.condition].name, VoiceIDEvaluationPlan.pooled] {
+                counts[condition, default: [:]][entry.isTarget, default: [:]][decision, default: 0] += 1
+            }
+        }
+        let order = [VoiceIDEvaluationPlan.pooled] + conditions.map(\.name)
+        return order.flatMap { condition in
+            [true, false].compactMap { isTarget -> VoiceIDGateOutcome? in
+                guard let decisions = counts[condition]?[isTarget] else { return nil }
+                return VoiceIDGateOutcome(
+                    condition: condition, trials: isTarget ? .target : .nonTarget,
+                    accepted: decisions[.accept, default: 0], uncertain: decisions[.uncertain, default: 0],
+                    rejected: decisions[.reject, default: 0], unscored: decisions[nil, default: 0])
+            }
+        }
     }
 
     /// Accept / uncertain / reject counts at the calibrated thresholds, for
