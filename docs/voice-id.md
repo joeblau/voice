@@ -3,8 +3,9 @@
 Blau only answers the enrolled speaker. `BlauVoiceID` turns speech into
 speaker embeddings, compares them with the enrolled voiceprint and decides
 accept, reject or uncertain per speech segment (issue #5). This document
-covers the embedding extractor (#45), [enrollment](#enrollment-46) (#46)
-and the [verification gate](#verification-gate-47) (#47); threshold
+covers the embedding extractor (#45), [enrollment](#enrollment-46) (#46),
+the [verification gate](#verification-gate-47) (#47) and
+[adaptive voiceprint updates](#adaptive-updates-49) (#49); threshold
 calibration (#48) is in [voice-id-eval.md](voice-id-eval.md).
 
 ## Speaker embeddings
@@ -207,8 +208,10 @@ data; the vectors are CloudKit-encrypted ([data-model.md](data-model.md)).
   one record that way. Duplicates it can't merge are resolved on read the
   same way on every device: the newest profile (`createdAt`, then
   `updatedAt`, then `id`) and the newest set per device model. Each write
-  deletes the losers. Adaptive updates (#49) should write only the current
-  device's set (`saveDeviceSet`), so devices don't churn each other's data.
+  deletes the losers. Adaptive updates (#49) write only the profile's
+  centroid, once per conversation that moved it, and never a device's set:
+  the sets are the enrollment the drift cap is measured from (see
+  [Adaptive updates](#adaptive-updates-49)).
 - **Model version.** `VoiceProfile.embeddingModelVersion` stores the
   embedding model's identifier (`wespeaker-resnet34-lm@df2625ac`). When the
   app's model differs, the status is `needsReenrollment` and Settings shows
@@ -436,6 +439,201 @@ owner set decides the thresholds and the policy.
 | 7 | Delete the voiceprint, talk | Every utterance answered (no gate) | pending |
 | 8 | Instruments, Blau template: `voiceid.embed` and `voiceid.verify` per segment | One `verify` per checkpoint; embed p95 on the iPhone recorded here | pending |
 
+## Adaptive updates (#49)
+
+A voice changes from day to day: a cold, a tired evening, a new case on
+the phone. The voiceprint follows the owner's clearly accepted speech with
+an exponential moving average, never far from where enrollment put it,
+and without letting other voices through more often.
+
+```swift
+import BlauVoiceID
+
+let verifier = try SpeakerVerifier(
+    embedder: embedder, voiceprint: voiceprint, config: { settings.currentConfig() },
+    adaptation: .standard)                                  // scores the adapting voiceprint
+let adapter = verifier.adaptive.map { VoiceprintAdapter(voiceprint: $0, store: store) }
+let gate = VerificationGate(
+    verifier: verifier, history: capture.hub, onScoredSpeech: { segment in adapter?.observe(segment) })
+// ... the conversation ...
+await adapter?.finish()                                     // saves, unless rolled back
+```
+
+`VoiceIDGateLoader` builds exactly this for every conversation, and
+`LiveVoicePipeline.stop()` finishes the adapter.
+
+| Type | Role |
+| --- | --- |
+| `VoiceprintAdaptationPolicy` | The rules below (`.standard`) |
+| `VoiceprintAdaptation` | The pure state machine: EMA, drift cap, rollback snapshot and check, counters |
+| `AdaptiveVoiceprint` | The adapting voiceprint one conversation scores against: the adaptation and a `VoiceprintMatcher` over its centroid, shared by the verifier and the adapter |
+| `VoiceprintAdapter` | Takes the gate's accepted segments (`ScoredSpeechSegment`), measures their level, offers them to the adaptation, logs, and saves at the end (`finish()`) |
+| `ScoredSpeechSegment` | What the gate hands over for each segment accepted on its own score: the deciding `SpeakerScore` (now with its `embedding`), the speech duration and audio |
+| `AdaptedVoiceprintCentroid`, `saveAdaptedCentroid(_:)`, `resetAdaptation(for:at:)` | The store side (`VoiceprintStoring`, both stores) |
+| `VoiceprintAdaptationReplay` | Replays conversations, static and adaptive, for the week simulation (and, later, the owner's recordings) |
+
+### The update
+
+`centroid ← normalize(0.95 · centroid + 0.05 · segment)` for each segment
+that passes every rule:
+
+| Rule | Standard value | Why |
+| --- | --- | --- |
+| Accepted on its own score | Not inherited, not uncertain | Only the gate's own evidence |
+| Segment length | Speech longer than 3 s, embedded over at least 3 s | Short embeddings are noisy (EER 4.5% at 1.5 s, 3.0% at 3 s) |
+| Score | At least `T_hi + 0.10` (after the sensitivity setting) | A bare accept is the gate's best guess, not evidence to learn from |
+| Against the enrollment alone | At least `T_hi` | The adapted centroid can't vouch for speech on its own |
+| Signal to noise | At least 15 dB (`EnrollmentLevelAnalyzer` on the segment's speech), clipping at most 0.5% | A TV or another voice behind the owner leaks into the embedding |
+| Per conversation | At most 20 updates | One long monologue can't move it alone |
+
+Segments are handled on the adapter's own actor, after the gate has
+decided them, so adapting adds nothing to the gate's hold on a final. An
+update applies from the next score on.
+
+### The drift cap
+
+The anchor is the **enrollment centroid**: the mean of every enrollment
+clip, which the synced sets keep (no schema change). An update that would
+take the centroid further than **0.10 cosine distance** from it is pulled
+back onto the cap along the arc towards the anchor, so however many
+segments push one way, the centroid stays inside that cone. A stored
+centroid past the cap (a smaller cap since, or a top-up changed the
+anchor) starts on it.
+
+### The scoring handicap
+
+The week simulation (below) showed that a cap alone isn't enough. Four
+5 s enrollment clips are a noisy estimate of the owner's voice, so the
+first conversations already move the centroid towards the owner's real
+voice, as far as the cap. A centroid closer to the owner also scores
+voices that **resemble** the owner's higher, while the thresholds were
+calibrated on enrollment centroids: with two look-alike housemates, the
+static voiceprint accepted them 2.5% of the time and the adapted one,
+unguarded, 8.0%.
+
+So the adapted centroid pays a handicap
+(`VoiceprintMatcher.adaptedCentroidOffset`): its raw cosine minus
+`0.12 × |c − c₀|`, where `c₀` is the enrollment centroid. The sets (the
+enrollment) are still scored as they were and the matcher keeps the best
+score, so a probe `p` scores higher than without adaptation only by
+`|c − c₀| · (p · m − 0.12)`, where `m` is the direction the centroid moved:
+only speech that lines up with the move by more than 0.12 gains, which is
+the owner's changed voice (it caused the move), not a voice that merely
+resembles theirs. Nothing scores lower than against the enrollment alone.
+The handicap applies whenever the stored centroid differs from the
+enrollment centroid, with or without an adapter.
+
+### The rollback snapshot
+
+- **The snapshot** is the centroid the conversation started with: the
+  last one saved. A conversation's updates stay in memory and are saved
+  once, when it ends (`VoiceprintAdapter.finish()`), so the stored
+  centroid is always the last known good one.
+- **The check.** Every good-quality accepted segment after the first
+  update compares `cos(segment, centroid) − cos(segment, snapshot)`. If,
+  over the last 5, the adapted centroid fits the owner's speech worse than
+  the snapshot by more than 0.02 on average (it was pulled the wrong way:
+  a headset, someone else accepted with a margin), the conversation's
+  updates are **rolled back**, nothing is saved, and adaptation stops until
+  the next conversation.
+- **Back to enrollment.** Once the voiceprint has adapted, Settings →
+  Voice ID shows "Voice Adaptation: Following your recent voice" and
+  **Reset Voice Adaptation**, which puts the centroid back on the
+  enrollment centroid (`resetAdaptation(for:at:)`). Re-enrolling and a
+  top-up (which recomputes the centroid from every clip) also start
+  adaptation over.
+
+### Sync
+
+The adapted centroid is the profile's `centroid` field, which syncs and is
+CloudKit-encrypted like the rest of the voiceprint: one write per
+conversation that changed it. Devices adapting at the same time: last
+writer wins, as for any edit of the record. Before saving, the store
+checks that the voiceprint is still the one the conversation loaded
+(re-enrolled meanwhile: `voiceprintReplaced`) and measures the drift again
+against the sets it holds now (another device's top-up: `driftExceeded`);
+either way the update is dropped and the stored voiceprint stays.
+
+Why not adapt each device's set, as the note in #46 suggested: a set holds
+the clips that anchor the cap, and overwriting them with adapted vectors
+would lose the anchor. Microphone differences are already covered by the
+per-device sets in the best-of-every-reference score.
+
+### The simulated week (acceptance criterion)
+
+`VoiceprintAdaptationSimulationTests` replays a week of conversations
+through the gate's decision with the calibrated thresholds, once with the
+static voiceprint and once with adaptation (`VoiceprintAdaptationReplay`).
+Embeddings are synthetic 256-d vectors shaped like WeSpeaker's on the
+calibration set (owner at 3 s: 0.57 ± 0.07 against the enrollment
+centroid; other voices 0.09 ± 0.10, with a tail past `T_hi` from a few
+similar voices). Each day has three conversations of 40 owner segments
+and 200 segments of other voices (TV, podcasts, other people), 1.5 - 8 s
+long, a quarter of them in a noisy room; five seeds are pooled (600 owner
+and 3,000 other segments a day). FRR is the share of the owner's segments
+**not accepted** (rejected or uncertain); FAR the share of other voices'
+segments accepted.
+
+**The owner's voice changes steadily** (cosine 0.85 between day 6's voice
+and day 0's):
+
+| Day | FRR static | FRR adaptive | FAR static | FAR adaptive | Updates (from others) | Drift |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | 2.00% | 1.33% | 0.07% | 0.07% | 294 (0) | 0.100 |
+| 1 | 1.50% | 1.17% | 0.10% | 0.10% | 300 (0) | 0.100 |
+| 2 | 4.17% | 2.00% | 0.03% | 0.03% | 293 (0) | 0.100 |
+| 3 | 3.67% | 1.50% | 0.07% | 0.07% | 283 (0) | 0.100 |
+| 4 | 4.50% | 2.00% | 0.10% | 0.10% | 297 (0) | 0.100 |
+| 5 | 7.33% | 2.50% | 0.00% | 0.00% | 295 (0) | 0.100 |
+| 6 | 11.67% | 2.50% | 0.07% | 0.07% | 295 (0) | 0.100 |
+| All | 4.98% | 1.86% | 0.06% | 0.06% | 2057 (0) | max 0.100 |
+
+**A cold on days 2 - 4**, then back to normal:
+
+| Days | FRR static | FRR adaptive | FAR static | FAR adaptive |
+| ---: | ---: | ---: | ---: | ---: |
+| 0 - 1 | 1.75% | 1.25% | 0.08% | 0.08% |
+| 2 | 14.17% | 5.50% | 0.03% | 0.03% |
+| 3 | 12.00% | 2.00% | 0.07% | 0.07% |
+| 4 | 11.50% | 2.67% | 0.10% | 0.10% |
+| 5 - 6 | 1.83% | 1.67% | 0.03% | 0.03% |
+| All | 6.40% | 2.29% | 0.06% | 0.06% |
+
+**A steady voice:** FRR 2.14% static, 1.40% adaptive; FAR 0.06% both.
+
+**Look-alike housemates** (two voices at cosine 0.55 with the owner's,
+closer than any voice in the calibration set, talking in every
+conversation while the owner's voice changes as above): FRR 4.83% static,
+1.57% adaptive (day 6: 11.0% against 1.67%); FAR 2.49% static, 2.62%
+adaptive, and 8.0% without the handicap. This is the one case where FAR
+moves at all; a household where someone sounds this close to the owner is
+already far past the calibrated 0.5% FAR and needs a stricter
+sensitivity.
+
+In every scenario, other voices made **no** update, the drift never
+passed the cap (`theDriftCapHolds` takes a voice to cosine 0.6 and the
+centroid stops at 0.100), and no conversation was rolled back.
+
+**What this shows and what it doesn't.** The geometry and the scores are
+synthetic, tuned to the calibration set's score distributions; how real
+voices change over a week, and how close real housemates sound, are not
+measured. The cap (0.10), the handicap (0.12) and the margin (0.10) were
+chosen on this simulation (`swift test --filter VoiceprintAdaptationSimulationTests`
+prints the tables). Replay the owner's recordings across days through
+`VoiceprintAdaptationReplay` once they exist
+([voice-id-eval.md](voice-id-eval.md#pending-results)).
+
+### On-device test plan
+
+| # | Step | Expected | Result |
+| - | ---- | -------- | ------ |
+| 1 | Talk to Blau for 10 minutes in a quiet room, then stop | Log: `Voiceprint adapted (update …)` lines, then `Voiceprint adaptation for this conversation: N update(s) … saved`; Settings → Voice ID shows Voice Adaptation | pending |
+| 2 | Same with a TV on loud | Fewer updates; skipped segments log `noisy` at `debug` | pending |
+| 3 | Over a week of normal use, count the owner's `Utterance accepted` against `uncertain` / `rejected` lines each day | The owner's rejected and uncertain share doesn't grow; the gate's start log shows drift ≤ 0.100 | pending |
+| 4 | With a changed voice (a cold, or several conversations through a headset) | The owner keeps being accepted; drift ≤ 0.100 | pending |
+| 5 | Settings → Voice ID → Reset Voice Adaptation | The row disappears; the next conversation's start log shows drift 0.0000 | pending |
+| 6 | On device B (same iCloud account) after A adapted | B's gate start log shows A's drift; B's conversations adapt and save in turn | pending |
+
 ## Telemetry
 
 Each `embed` call is one `voiceid.embed` signpost interval (category
@@ -453,6 +651,14 @@ Enrollment logs each clip's verdict (prompt, talking time, SNR, or the
 issues) and the total duration on `Log.voiceID`, never audio or vectors.
 Voiceprint saves are `db.save` intervals.
 
+Adaptive updates log on `Log.voiceID`, never audio or vectors: each update
+at `notice` (segment, score, enrollment score, SNR, step, drift, whether
+capped), each skipped segment at `debug` with its reason, a rollback at
+`notice` with the mean gain, and one summary per conversation at `notice`
+(updates, capped, segments, drift, saved or rolled back, skips by reason).
+The gate's start line gives the stored drift. A failed save logs at
+`error`.
+
 ## Testing
 
 | What | How |
@@ -469,6 +675,9 @@ Voiceprint saves are `db.save` intervals.
 | Gate on the real model (opt-in) | `RealModelGateScenarioTests` with `BLAU_SPEAKER_MODEL_DIR`: the owner (CMU ARCTIC `bdl`) close and in a small room, other speakers through a simulated TV loudspeaker and in the room; only the owner is sent. Also measures the hold on a final |
 | Barge-in with voice ID | `VoiceGateBargeInIntegrationTests` (`BlauKitIntegrationTests`): the real `BargeInMonitor` asking the real gate; accepted and uncertain speech interrupt, rejected doesn't |
 | Gate in the app | `VoiceLoopTests` (`BlauTests`): the Ignored Speech lane and Grok's activity reaching the gate |
+| Adaptive updates (hermetic) | `VoiceprintAdaptationTests`, `AdaptiveVoiceprintTests`, `VoiceprintAdapterTests`, `VoiceprintStoreAdaptationTests`, `VerificationGateAdaptationTests`, `VoiceprintMatcherTests`: the EMA step, every skip rule, the session limit, the cap and its projection, the rollback and its absence on the owner's usual voice, the matcher following the centroid, the handicap, the level check, saving at the end and not after a rollback or a re-enrollment, both stores (save, refusals, reset, top-up), the gate handing over only accepted segments, and a conversation through the gate saving an adapted voiceprint |
+| The simulated week (hermetic) | `VoiceprintAdaptationSimulationTests`: the tables above; asserts FRR stays near day 0's while the voice changes, FAR doesn't rise, other voices make no updates and the cap holds |
+| Adaptation in the app | `VoiceEnrollmentAppTests.settingsShowsAndResetsAdaptation` (`BlauTests`): an adapted voiceprint shows in Settings and resets |
 
 ```sh
 cd Packages/BlauKit

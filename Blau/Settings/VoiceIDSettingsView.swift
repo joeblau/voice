@@ -17,6 +17,8 @@ enum VoiceIDSettingsIdentifiers {
     static let sensitivity = "settings.voiceID.sensitivity"
     static let resetSensitivity = "settings.voiceID.sensitivity.reset"
     static let gate = "settings.voiceID.gate"
+    static let adaptation = "settings.voiceID.adaptation"
+    static let resetAdaptation = "settings.voiceID.adaptation.reset"
     static let conversationGate = "settings.voiceID.conversationGate"
 }
 
@@ -80,6 +82,16 @@ struct VoiceIDSettingsView: View {
                 }
                 LabeledContent(
                     "Clips", value: (profile.enrollmentSets ?? []).reduce(0) { $0 + $1.clipCount }.formatted())
+                if Self.isAdapted(profile) {
+                    // Adaptive updates (#49) moved the voiceprint towards
+                    // the owner's recent voice; resetting goes back to what
+                    // enrollment recorded.
+                    LabeledContent("Voice Adaptation", value: String(localized: "Following your recent voice"))
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier(VoiceIDSettingsIdentifiers.adaptation)
+                    Button("Reset Voice Adaptation") { Task { await resetAdaptation() } }
+                        .accessibilityIdentifier(VoiceIDSettingsIdentifiers.resetAdaptation)
+                }
             }
             LabeledContent("Only Your Voice Reaches Grok", value: flags.isEnabled(.voiceIDEnabled) ? "On" : "Off")
                 .accessibilityElement(children: .combine)
@@ -164,6 +176,29 @@ struct VoiceIDSettingsView: View {
         } catch {
             problem = String(localized: "Couldn't delete the voiceprint. Nothing was changed. Try again.")
         }
+    }
+
+    private func resetAdaptation() async {
+        problem = nil
+        if await isConversationRunning() {
+            problem = String(localized: "Stop the conversation first, then reset.")
+            return
+        }
+        do {
+            try await SwiftDataVoiceprintStore(modelContainer: modelContext.container)
+                .resetAdaptation(for: .weSpeakerResNet34LM, at: Date())
+        } catch {
+            problem = String(localized: "Couldn't reset the voice adaptation. Nothing was changed. Try again.")
+        }
+    }
+
+    /// Whether adaptive updates have moved `profile`'s centroid away from
+    /// its enrollment clips (by more than rounding).
+    static func isAdapted(_ profile: VoiceProfile) -> Bool {
+        guard let centroid = profile.centroidVector else { return false }
+        let clips = (profile.enrollmentSets ?? []).compactMap(\.embeddingVectors).flatMap { $0 }
+        guard let drift = VoiceprintAdaptation.drift(of: centroid, enrollmentClips: clips) else { return false }
+        return drift > 1e-4
     }
 
     private func isConversationRunning() async -> Bool {

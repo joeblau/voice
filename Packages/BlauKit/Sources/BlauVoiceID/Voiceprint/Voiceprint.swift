@@ -70,6 +70,27 @@ public struct Voiceprint: Hashable, Sendable {
     public func offersTopUp(onDevice deviceModel: String) -> Bool {
         set(forDevice: deviceModel) == nil
     }
+
+    /// The centroid enrollment gave: the normalized mean of every clip of
+    /// every set. Adaptive updates (#49) move ``centroid`` away from it, at
+    /// most to the drift cap. `nil` without readable sets.
+    public var enrollmentCentroid: SpeakerEmbedding? {
+        SpeakerEmbedding.mean(of: sets.flatMap(\.embeddings))
+    }
+
+    /// How far adaptive updates have moved ``centroid`` from
+    /// ``enrollmentCentroid`` (cosine distance), `nil` without readable
+    /// sets.
+    public var adaptationDrift: Float? {
+        enrollmentCentroid.map { VoiceprintAdaptation.drift(of: centroid, from: $0) }
+    }
+
+    /// This voiceprint with another centroid (an adapted one).
+    public func withCentroid(_ centroid: SpeakerEmbedding, updatedAt: Date? = nil) -> Voiceprint {
+        Voiceprint(
+            id: id, name: name, modelIdentifier: modelIdentifier, centroid: centroid, sets: sets, createdAt: createdAt,
+            updatedAt: updatedAt ?? self.updatedAt)
+    }
 }
 
 /// Where the voiceprint stands for the embedding model the app runs.

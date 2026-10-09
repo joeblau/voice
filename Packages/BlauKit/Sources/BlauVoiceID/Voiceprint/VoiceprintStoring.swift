@@ -30,6 +30,34 @@ public struct VoiceprintDraft: Hashable, Sendable {
     }
 }
 
+/// A centroid adaptive updates (#49) moved, ready to save in place of the
+/// voiceprint's.
+public struct AdaptedVoiceprintCentroid: Hashable, Sendable {
+    /// The voiceprint the conversation loaded (``Voiceprint/id``). If it
+    /// was replaced since (re-enrolled, deleted), the update is dropped.
+    public let voiceprintID: UUID
+    /// The adapted centroid.
+    public let centroid: SpeakerEmbedding
+    /// The drift cap it was adapted under: the store checks it again
+    /// against the enrollment sets it holds now, which another device may
+    /// have changed meanwhile.
+    public let maximumDrift: Float
+    /// When the conversation ended.
+    public let adaptedAt: Date
+
+    public init(voiceprintID: UUID, centroid: SpeakerEmbedding, maximumDrift: Float, adaptedAt: Date) {
+        self.voiceprintID = voiceprintID
+        self.centroid = centroid
+        self.maximumDrift = maximumDrift
+        self.adaptedAt = adaptedAt
+    }
+
+    /// The model the centroid comes from.
+    var model: SpeakerEmbeddingModelInfo {
+        SpeakerEmbeddingModelInfo(identifier: centroid.modelIdentifier, dimension: centroid.dimension)
+    }
+}
+
 /// Why a voiceprint write was refused.
 public enum VoiceprintStoreError: Error, Hashable, Sendable {
     /// A top-up needs an enrolled voiceprint, and there is none (it was
@@ -40,6 +68,13 @@ public enum VoiceprintStoreError: Error, Hashable, Sendable {
     case modelMismatch(stored: String, draft: String)
     /// The embeddings cancel out: no centroid can be computed.
     case invalidEmbeddings
+    /// An adapted centroid belongs to a voiceprint that has been replaced
+    /// (re-enrolled) since the conversation loaded it.
+    case voiceprintReplaced
+    /// An adapted centroid is further from the stored enrollment centroid
+    /// than its drift cap allows (another device changed the enrollment
+    /// sets meanwhile).
+    case driftExceeded(Float)
 }
 
 /// Reads and writes the enrolled voiceprint.
@@ -64,6 +99,28 @@ public protocol VoiceprintStoring: Sendable {
     ///   ``VoiceprintStoreError/modelMismatch(stored:draft:)``.
     @discardableResult
     func saveDeviceSet(_ draft: VoiceprintDraft) async throws -> Voiceprint
+
+    /// Replaces the centroid with one adaptive updates moved (#49), keeping
+    /// every enrollment set: what a conversation saves when it ends. The
+    /// sets keep the enrollment centroid, so the adaptation can always be
+    /// undone (``resetAdaptation(for:at:)``).
+    ///
+    /// - Throws: ``VoiceprintStoreError/notEnrolled``,
+    ///   ``VoiceprintStoreError/voiceprintReplaced``,
+    ///   ``VoiceprintStoreError/modelMismatch(stored:draft:)``,
+    ///   ``VoiceprintStoreError/driftExceeded(_:)`` or
+    ///   ``VoiceprintStoreError/invalidEmbeddings`` (no readable sets).
+    @discardableResult
+    func saveAdaptedCentroid(_ update: AdaptedVoiceprintCentroid) async throws -> Voiceprint
+
+    /// Puts the centroid back on the enrollment centroid (the mean of every
+    /// clip), undoing every adaptive update.
+    ///
+    /// - Throws: ``VoiceprintStoreError/notEnrolled``,
+    ///   ``VoiceprintStoreError/modelMismatch(stored:draft:)`` or
+    ///   ``VoiceprintStoreError/invalidEmbeddings``.
+    @discardableResult
+    func resetAdaptation(for model: SpeakerEmbeddingModelInfo, at date: Date) async throws -> Voiceprint
 
     /// Deletes the voiceprint and every enrollment set, here and (through
     /// iCloud) on every other device.
@@ -151,5 +208,34 @@ struct StoredVoiceprint: Hashable, Sendable {
     static func centroid(of sets: [VoiceprintSet]) throws(VoiceprintStoreError) -> SpeakerEmbedding {
         guard let centroid = SpeakerEmbedding.mean(of: sets.flatMap(\.embeddings)) else { throw .invalidEmbeddings }
         return centroid
+    }
+
+    /// This record with `update`'s centroid, if it may take it.
+    func adapting(_ update: AdaptedVoiceprintCentroid) throws(VoiceprintStoreError) -> StoredVoiceprint {
+        guard id == update.voiceprintID else { throw .voiceprintReplaced }
+        guard modelVersion == update.centroid.modelIdentifier else {
+            throw .modelMismatch(stored: modelVersion, draft: update.centroid.modelIdentifier)
+        }
+        let enrollment = try Self.centroid(of: resolvedSets(model: update.model))
+        let drift = VoiceprintAdaptation.drift(of: update.centroid, from: enrollment)
+        // A little slack for Float rounding on the cap itself.
+        guard drift <= update.maximumDrift + 1e-4 else { throw .driftExceeded(drift) }
+        var record = self
+        record.centroid = update.centroid.vector
+        record.updatedAt = max(updatedAt, update.adaptedAt)
+        return record
+    }
+
+    /// This record with its centroid back on the enrollment centroid.
+    func resettingAdaptation(for model: SpeakerEmbeddingModelInfo, at date: Date) throws(VoiceprintStoreError)
+        -> StoredVoiceprint
+    {
+        guard modelVersion == model.identifier else {
+            throw .modelMismatch(stored: modelVersion, draft: model.identifier)
+        }
+        var record = self
+        record.centroid = try Self.centroid(of: resolvedSets(model: model)).vector
+        record.updatedAt = max(updatedAt, date)
+        return record
     }
 }
