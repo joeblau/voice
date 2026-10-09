@@ -290,13 +290,24 @@ private struct TopicTimelineScrollView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if !isAtBottom {
-                NowButton(action: returnToNow)
+            ZStack {
+                if !isAtBottom {
+                    VStack(spacing: 8) {
+                        // Grok's words stay on screen while its row is out
+                        // of view (#81).
+                        LiveCaption(model: environment.chat, conversationID: timeline.current?.conversationID)
+                        NowButton(action: returnToNow)
+                    }
                     .padding(.bottom, 12)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(Motion.slide(from: .bottom, reduceMotion: reduceMotion))
+                }
             }
+            // Only the floating controls animate, not the timeline's own
+            // layout when `isAtBottom` flips.
+            .animation(reduceMotion ? nil : .snappy, value: isAtBottom)
         }
-        .animation(reduceMotion ? nil : .snappy, value: isAtBottom)
+        // VoiceOver hears when a new topic opens or its title is refined.
+        .announcesTopicChanges(current: timeline.current)
         .accessibilityRotor("Topics") {
             ForEach(timeline.topics) { topic in
                 AccessibilityRotorEntry(Text(verbatim: topic.title), id: topic.id, in: rotor)

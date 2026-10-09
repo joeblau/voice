@@ -111,7 +111,7 @@ struct TopicBullet: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(verbatim: TopicBulletDescription.meta(for: topic, isCurrent: true))
                 .brandTextStyle(.timestamp)
-                .foregroundStyle(isRecording ? Color.brand(.recording) : .secondary)
+                .foregroundStyle(isRecording ? Color.brand(.recording) : .brand(.secondaryText))
             TopicTitle(topic: topic, style: .topicTitle)
                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
         }
@@ -151,7 +151,7 @@ struct TopicBullet: View {
         HStack(spacing: 6) {
             Text(verbatim: TopicBulletDescription.meta(for: topic, isCurrent: false))
                 .brandTextStyle(.timestamp)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.brand(.secondaryText))
                 .lineLimit(1)
             Image(systemName: "chevron.right")
                 .font(.caption2.weight(.semibold))
@@ -303,8 +303,9 @@ struct TimelineConversationHeader: View {
             Image(systemName: "waveform")
         }
         .brandTextStyle(.caption)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
+        .foregroundStyle(Color.brand(.secondaryText))
+        // Wraps rather than truncating at large text sizes (#81).
+        .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, TopicTimelineLayout.textInset)
         .padding(.trailing)

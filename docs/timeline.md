@@ -251,6 +251,11 @@ the first page to the oldest topic.
   what a tap does ("Shows the topic's transcript", "Collapses the topic",
   "Shows the latest line").
 - Day headings have the header trait; transcript rows read as in #42.
+- A new topic and a refined title are announced ("New topic: Pricing",
+  "Topic named Pricing Experiments") without moving focus; `TopicAnnouncer`
+  decides when ([accessibility.md](accessibility.md#voiceover), #81).
+- Scrolled into the history while Grok speaks, a live caption above the Now
+  pill keeps its words on screen ([accessibility.md](accessibility.md#captions)).
 
 ## Where the code is
 

@@ -113,8 +113,7 @@ struct MainScreenScaffold: View {
                             Task { await record.resumeListening() }
                         }
                         .padding()
-                        .transition(
-                            reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+                        .transition(Motion.slide(from: .bottom, reduceMotion: reduceMotion))
                     }
                 }
                 .animation(reduceMotion ? nil : .snappy, value: record.isMutedSpeechHintVisible)
@@ -132,7 +131,7 @@ struct MainScreenScaffold: View {
                     if !models.isReady && models.setupStatus.phase != .checking {
                         SpeechModelSetupView()
                             .padding()
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .transition(Motion.slide(from: .bottom, reduceMotion: reduceMotion))
                     }
                 }
                 .animation(.default, value: models.isReady)

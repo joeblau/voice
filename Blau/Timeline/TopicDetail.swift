@@ -40,7 +40,7 @@ struct TopicDetailHeader: View {
             if let summary = topic.summary?.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty {
                 Text(verbatim: summary)
                     .brandTextStyle(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.brand(.secondaryText))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityLabel(Text("Summary"))
                     .accessibilityValue(Text(verbatim: summary))
@@ -48,7 +48,7 @@ struct TopicDetailHeader: View {
             }
             Text(verbatim: TopicDetailDescription.span(of: topic))
                 .brandTextStyle(.timestamp)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.brand(.secondaryText))
                 .accessibilityLabel(Text(verbatim: TopicDetailDescription.span(of: topic, spelledOut: true)))
                 .accessibilityIdentifier(TopicDetailAccessibility.span)
             actions
@@ -63,8 +63,20 @@ struct TopicDetailHeader: View {
         .onAppear(perform: onAppear)
     }
 
+    /// Side by side when they fit, stacked at large text sizes (#81).
     private var actions: some View {
-        HStack(spacing: 8) {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { actionButtons }
+            VStack(alignment: .leading, spacing: 8) { actionButtons }
+        }
+        .controlSize(.small)
+        .buttonBorderShape(.capsule)
+        .font(.subheadline.weight(.medium))
+    }
+
+    @ViewBuilder
+    private var actionButtons: some View {
+        Group {
             if let onContinue {
                 Button(action: onContinue) {
                     Label("Continue", systemImage: "arrow.uturn.forward")
@@ -98,9 +110,6 @@ struct TopicDetailHeader: View {
                 .accessibilityIdentifier(TopicDetailAccessibility.more)
             }
         }
-        .controlSize(.small)
-        .buttonBorderShape(.capsule)
-        .font(.subheadline.weight(.medium))
     }
 }
 

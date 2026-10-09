@@ -159,6 +159,9 @@ private struct SettingsRootList: View {
                 } footer: {
                     if index == SettingsPane.groups.count - 1 {
                         Text(SettingsSummary.version())
+                            // The footer's system gray is under 4.5:1 on
+                            // the grouped background (#81).
+                            .foregroundStyle(Color.brand(.secondaryText))
                             .frame(maxWidth: .infinity)
                     }
                 }
@@ -184,6 +187,9 @@ private struct SettingsPaneRow: View {
         LabeledContent {
             if let summary {
                 Text(summary)
+                    // The list's own gray is under 4.5:1 on the grouped
+                    // cells (#81).
+                    .foregroundStyle(Color.brand(.secondaryText))
                     .lineLimit(1)
             }
         } label: {

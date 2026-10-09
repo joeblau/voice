@@ -62,6 +62,11 @@ StreamingAudioPlayer ─playedItem(for:)─▶ streaming row (TimelineView, 20 H
   text morphs (`.contentTransition(.interpolate)`), with no animation under
   Reduce Motion.
 
+- **Live caption.** While the user reads the history, the streaming row is
+  out of view, so a caption above the Now pill shows the reply's latest
+  words, revealed the same way (`ChatCaption`, `LiveCaption`; see
+  [accessibility.md](accessibility.md#captions), #81).
+
 All of the rules (merging, ordering, interruptions, revealing, holding a
 partial) are plain functions in BlauKit (`BlauRealtime/Chat`) and tested on
 the Mac with `swift test`; the app target only lays rows out.

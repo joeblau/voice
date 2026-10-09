@@ -142,16 +142,27 @@ struct IssueBannerSlot: View {
 
     @Environment(AppEnvironment.self) private var environment
     @Environment(\.openURL) private var openURL
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let issues = environment.issues.visible
-        if let issue = issues.first {
-            IssueBanner(
-                issue: issue, moreCount: issues.count - 1,
-                onAction: { perform($0) },
-                onDismiss: { environment.issues.dismiss(issue) }
-            )
-            .transition(.move(edge: .top).combined(with: .opacity))
+        Group {
+            if let issue = issues.first {
+                IssueBanner(
+                    issue: issue, moreCount: issues.count - 1,
+                    onAction: { perform($0) },
+                    onDismiss: { environment.issues.dismiss(issue) }
+                )
+                .transition(Motion.slide(from: .top, reduceMotion: reduceMotion))
+            }
+        }
+        // VoiceOver hears about a new problem wherever its focus is (#81):
+        // the banner is at the top, far from the record button. A blocking
+        // problem interrupts; the rest wait their turn.
+        .onChange(of: issues.first?.code) { _, code in
+            guard code != nil, let issue = issues.first else { return }
+            BlauAnnouncement.post(
+                BlauAnnouncement.text(for: issue), urgency: issue.severity == .blocking ? .urgent : .polite)
         }
     }
 

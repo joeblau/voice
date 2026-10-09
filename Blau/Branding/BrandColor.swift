@@ -3,9 +3,9 @@ import SwiftUI
 
 /// Blau's color tokens (#82). Each one is a color set in
 /// `Blau/Resources/Assets.xcassets` with a light and a dark variant; the
-/// accent, the recording tint and the two fills also have increased-contrast
-/// variants. docs/branding.md lists the values and the contrast each one
-/// meets.
+/// accent, the recording tint, the secondary text and the two fills also have
+/// increased-contrast variants. docs/branding.md lists the values and the
+/// contrast each one meets.
 ///
 /// There are two kinds of token. A *tint* (`accent`, `recording`) is drawn on
 /// the background as text or a glyph, so it gets lighter in dark mode and
@@ -33,6 +33,12 @@ enum BrandColor: String, CaseIterable, Sendable {
     /// Recording in progress, behind a white label: the record button while
     /// it stops a conversation.
     case recordingFill = "RecordingFill"
+    /// Secondary text on the background (#81): times, durations,
+    /// conversation headings, summaries, speech in progress and live
+    /// captions' speaker. The system's `.secondary` reaches only about 3.5:1
+    /// on white, under WCAG AA for the small sizes this text uses; this gray
+    /// reaches 4.5:1 or more in every appearance and contrast level.
+    case secondaryText = "SecondaryText"
 
     /// The color set's name in the asset catalog.
     var assetName: String { rawValue }
@@ -42,7 +48,7 @@ enum BrandColor: String, CaseIterable, Sendable {
     /// The fills, drawn behind a white label.
     static let fills: [BrandColor] = [.accentFill, .recordingFill]
     /// The tints, drawn on the background as text or a glyph.
-    static let tints: [BrandColor] = [.accent, .recording]
+    static let tints: [BrandColor] = [.accent, .recording, .secondaryText]
 }
 
 /// The topic timeline's dot colors (#82, used by the timeline in #56): one
