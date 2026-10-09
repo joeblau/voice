@@ -92,8 +92,11 @@ final class PerformanceHUDUITests: XCTestCase {
         XCTAssertFalse(hud(app).exists)
         // The "Blau" title is plain text in the main screen's content, away
         // from every button (the content's centre can be the onboarding
-        // button).
-        let title = app.descendants(matching: .any)["blau.mainScreen.empty"].staticTexts["Blau"]
+        // button). The brand lockup combines its children, and the iOS 26
+        // accessibility tree can list the combined element and its "Blau"
+        // text both as static texts. Take the first (the lockup): it is just
+        // as far from every button.
+        let title = app.descendants(matching: .any)["blau.mainScreen.empty"].staticTexts["Blau"].firstMatch
         XCTAssertTrue(title.waitForExistence(timeout: 5))
         // The speech-model setup card re-centres the empty state when it goes
         // away, which moves the onboarding button to where the title was. Let
