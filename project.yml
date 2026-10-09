@@ -81,6 +81,11 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSRequiresIPhoneOS: true
+        # Export compliance (#83, docs/release.md): Blau only uses the
+        # encryption built into iOS (HTTPS/WSS, the Keychain, CloudKit) and
+        # SHA-256 digests, which is exempt. Without this key every TestFlight
+        # build waits on the "Missing Compliance" question.
+        ITSAppUsesNonExemptEncryption: false
         NSMicrophoneUsageDescription: >-
           Blau listens to your voice so it can transcribe what you say
           and hold a spoken conversation with you.

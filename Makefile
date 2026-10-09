@@ -150,17 +150,35 @@ eval-memory: ## Evaluate memory retrieval and answers on the memory eval set (do
 icon-previews: ## Render the app icon in every appearance into .build/AppIcon (docs/branding.md)
 	scripts/render-app-icon.sh
 
+# TestFlight release pipeline (#83, docs/release.md). Both need TEAM_ID and
+# BUILD_NUMBER; uploading also needs the App Store Connect API key
+# (ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH). The other variables are
+# documented in scripts/release/testflight.sh. CI runs `make testflight` from
+# .github/workflows/release.yml on every v* tag.
+.PHONY: testflight
+testflight: ## Archive (Release), export, verify and upload to TestFlight (TEAM_ID, BUILD_NUMBER, ASC_KEY_*)
+	scripts/release/testflight.sh
+
+.PHONY: release-archive
+release-archive: ## Archive, export and verify a TestFlight IPA into .build/release without uploading
+	UPLOAD=0 scripts/release/testflight.sh
+
+.PHONY: release-notes
+release-notes: ## Print release notes for the pull requests merged since the last v* tag
+	scripts/release/release.py notes
+
 .PHONY: secrets
 secrets: ## Create Config/Secrets.xcconfig from the example (kept if it exists)
 	env -u XAI_DEV_API_KEY scripts/write-secrets-xcconfig.sh
 
 .PHONY: test-scripts
-test-scripts: ## Test the secrets, CI, Instruments template, perf gate and privacy manifest scripts
+test-scripts: ## Test the secrets, CI, Instruments template, perf gate, privacy manifest and release scripts
 	scripts/tests/test-secrets-scripts.sh
 	scripts/tests/test-ci-scripts.sh
 	scripts/tests/test-instruments-template.sh
 	scripts/tests/test-perf-gate.sh
 	scripts/tests/test-privacy-manifest.sh
+	scripts/tests/test-release-scripts.sh
 
 # Privacy manifests (#79, docs/privacy.md). PRIVACY_BUNDLE: a built Blau.app
 # or a Blau .xcarchive to check as well.

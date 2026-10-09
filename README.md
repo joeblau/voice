@@ -53,6 +53,9 @@ configured. See [docs/configuration.md](docs/configuration.md).
 | `make eval-asr`  | Evaluate the ASR engines on the fixtures: a WER, latency and RTF table per engine (downloads models, [docs](docs/asr-eval.md)) |
 | `make eval-memory` | Evaluate memory retrieval (Recall@k, MRR) and LLM-judged answers on the memory eval set, with the regression gate ([docs](docs/memory-eval.md)) |
 | `make icon-previews` | Render the app icon in every appearance into `.build/AppIcon` ([docs](docs/branding.md)) |
+| `make testflight` | Archive in Release, export, verify and upload a TestFlight build (`TEAM_ID`, `BUILD_NUMBER`, App Store Connect key; [docs](docs/release.md)) |
+| `make release-archive` | The same without the upload: archive, export and verify into `.build/release` |
+| `make release-notes` | Print the notes for the pull requests merged since the last `v*` tag |
 | `make secrets`   | Create `Config/Secrets.xcconfig` from the example                |
 | `make test-scripts` | Test the secrets, CI, Instruments template, perf gate and privacy manifest scripts |
 | `make check-privacy` | Validate the privacy manifests and that every required-reason API the sources use is declared (`PRIVACY_BUNDLE=<.app or .xcarchive>` checks a build too, [docs](docs/privacy.md#the-privacy-manifest)) |
@@ -82,6 +85,12 @@ and the performance suite, the ASR evaluation and the memory evaluation
 nightly. Each job calls
 the same `make` targets as above. See [docs/ci.md](docs/ci.md).
 
+Pushing a `v*` tag on `main` builds, verifies and uploads a TestFlight build
+and publishes a GitHub pre-release with notes from the merged pull requests
+(`.github/workflows/release.yml`). How to cut a release, the one-time App
+Store Connect setup and the pre-release checklists are in
+[docs/release.md](docs/release.md).
+
 ## Project layout
 
 | Path             | Contents                                                        |
@@ -98,7 +107,7 @@ the same `make` targets as above. See [docs/ci.md](docs/ci.md).
 | `BlauBenchmarks/` | On-device model benchmarks (XCTest, not hosted in the app; [docs](docs/benchmarks.md)) |
 | `TestPlans/`     | `Blau.xctestplan` (unit + UI, coverage), `BlauPerf.xctestplan` and `BlauBenchmarks.xctestplan` |
 | `Config/`        | xcconfig files; `Secrets.xcconfig` is gitignored ([docs](docs/configuration.md)) |
-| `scripts/`       | `swift-format.sh` (behind `make format` and `make lint`), git hooks, embedded-secrets check, `Secrets.xcconfig` writer, `verify-signposts.sh`, `verify-hud.sh` and the Instruments template scripts (see [`docs/performance.md`](docs/performance.md)), `update-model-manifest.py` (see [`docs/models.md`](docs/models.md)), `make-vad-fixtures.py` (see [`docs/vad.md`](docs/vad.md)), `make-asr-fixtures.py` and `eval-asr.sh` (the ASR evaluation, see [`docs/asr-eval.md`](docs/asr-eval.md)), `eval-memory.sh` (the memory evaluation, see [`docs/memory-eval.md`](docs/memory-eval.md)), `fetch-deepfilternet3.sh` and `eval-noise-suppression.sh` (the noise suppression spike, see [`docs/noise-suppression.md`](docs/noise-suppression.md)), `voice-id-eval-librispeech.py` (the voice ID calibration set, see [`docs/voice-id-eval.md`](docs/voice-id-eval.md)), `embeddings/` (the text-embedding retrieval eval and Core ML conversion, see [`docs/benchmarks.md`](docs/benchmarks.md#text-embedding-model-59); the int8 token table, tokenizer parity and tokenizer fixtures, see [`docs/embeddings.md`](docs/embeddings.md); the memory eval vectors, see [`docs/memory-eval.md`](docs/memory-eval.md#recording-vectors)), the CI helpers in `scripts/ci/` ([`docs/ci.md`](docs/ci.md)), and the performance gates in `scripts/perf/` (`perf-gate.py` for the XCTest suite, `microbench.sh` for the micro-benchmarks; see [`docs/performance.md`](docs/performance.md#performance-suite)) |
+| `scripts/`       | `swift-format.sh` (behind `make format` and `make lint`), git hooks, embedded-secrets check, `Secrets.xcconfig` writer, `verify-signposts.sh`, `verify-hud.sh` and the Instruments template scripts (see [`docs/performance.md`](docs/performance.md)), `update-model-manifest.py` (see [`docs/models.md`](docs/models.md)), `make-vad-fixtures.py` (see [`docs/vad.md`](docs/vad.md)), `make-asr-fixtures.py` and `eval-asr.sh` (the ASR evaluation, see [`docs/asr-eval.md`](docs/asr-eval.md)), `eval-memory.sh` (the memory evaluation, see [`docs/memory-eval.md`](docs/memory-eval.md)), `fetch-deepfilternet3.sh` and `eval-noise-suppression.sh` (the noise suppression spike, see [`docs/noise-suppression.md`](docs/noise-suppression.md)), `voice-id-eval-librispeech.py` (the voice ID calibration set, see [`docs/voice-id-eval.md`](docs/voice-id-eval.md)), `embeddings/` (the text-embedding retrieval eval and Core ML conversion, see [`docs/benchmarks.md`](docs/benchmarks.md#text-embedding-model-59); the int8 token table, tokenizer parity and tokenizer fixtures, see [`docs/embeddings.md`](docs/embeddings.md); the memory eval vectors, see [`docs/memory-eval.md`](docs/memory-eval.md#recording-vectors)), the CI helpers in `scripts/ci/` ([`docs/ci.md`](docs/ci.md)), the TestFlight pipeline in `scripts/release/` ([`docs/release.md`](docs/release.md)), and the performance gates in `scripts/perf/` (`perf-gate.py` for the XCTest suite, `microbench.sh` for the micro-benchmarks; see [`docs/performance.md`](docs/performance.md#performance-suite)) |
 | `Datasets/voice-id/` | The owner's voice ID evaluation recordings, stored with consent in LFS (see its README and [`docs/voice-id-eval.md`](docs/voice-id-eval.md)) |
 | `Datasets/asr/` | The owner's ASR evaluation recordings, stored with consent in LFS (see its README and [`docs/asr-eval.md`](docs/asr-eval.md)) |
 | `Tools/Instruments/` | `Blau.tracetemplate`, the Instruments template for profiling Blau, and the instrument list and options it is generated from |

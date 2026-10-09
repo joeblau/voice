@@ -1,0 +1,248 @@
+# TestFlight release pipeline for Blau (#83). Pushing a v* tag archives the
+# tagged commit in Release, exports and verifies an App Store Connect IPA,
+# uploads it to TestFlight and publishes a GitHub pre-release with notes built
+# from the pull requests merged since the previous tag. See docs/release.md.
+#
+# Run workflow (workflow_dispatch) on any branch or tag is a dry run by
+# default: everything up to and including the IPA verification, no upload.
+# Tick "Upload to TestFlight" on a v* tag to retry a release.
+#
+# Secrets live in the `testflight` environment (Settings > Environments), so
+# only this job can read them; give the environment required reviewers to
+# approve every release. They are mapped into the env of the steps that need
+# them only. Never map XAI_DEV_API_KEY here: release builds must not see it,
+# and scripts/tests/test-release-scripts.sh enforces it.
+#   APP_STORE_CONNECT_API_KEY_ID      App Store Connect API key ID
+#   APP_STORE_CONNECT_API_ISSUER_ID   its issuer ID
+#   APP_STORE_CONNECT_API_KEY_P8      the AuthKey_<id>.p8 contents (PEM or base64)
+#   BLAU_SIGNING_CERTIFICATE_P12      optional: base64 Apple Development .p12
+#   BLAU_SIGNING_CERTIFICATE_PASSWORD optional: its password
+#
+# Variables (environment or repository):
+#   BLAU_TEAM_ID                       Apple Developer team ID (required)
+#   BLAU_CLOUDKIT_PRODUCTION_SCHEMA    schema version deployed to CloudKit Production
+#   BLAU_BUILD_NUMBER_OFFSET           added to the run number (default 0)
+#   BLAU_TESTFLIGHT_INTERNAL_ONLY      "1" marks builds internal-testing only
+#   BLAU_CI_RUNNER, BLAU_CI_XCODE_VERSION  as in ci.yml
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: Upload to TestFlight (only from a v* tag; off = dry run)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# One release at a time per ref, never cancelled half way through an upload.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  XCODE_VERSION: ${{ vars.BLAU_CI_XCODE_VERSION }}
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+  HOMEBREW_NO_ENV_HINTS: "1"
+  NSUnbufferedIO: "YES"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  testflight:
+    name: testflight
+    runs-on: ${{ vars.BLAU_CI_RUNNER || 'xcode-27' }}
+    environment: testflight
+    timeout-minutes: 60
+    outputs:
+      marketing_version: ${{ steps.version.outputs.marketing_version }}
+      build_number: ${{ steps.version.outputs.build_number }}
+      tag: ${{ steps.version.outputs.tag }}
+      uploaded: ${{ steps.mode.outputs.upload }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Every tag and commit: the release notes start at the previous tag,
+          # and the main check needs origin/main.
+          fetch-depth: 0
+
+      - name: Upload or dry run
+        id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+          UPLOAD_INPUT: ${{ inputs.upload }}
+        run: |
+          if [[ "$EVENT" == push || "$UPLOAD_INPUT" == true ]]; then
+            echo "upload=1" >>"$GITHUB_OUTPUT"
+            echo "Mode: upload to TestFlight"
+          else
+            echo "upload=0" >>"$GITHUB_OUTPUT"
+            echo "Mode: dry run (archive, export and verify; no upload)"
+          fi
+
+      - name: Version and build number
+        id: version
+        env:
+          BUILD_OFFSET: ${{ vars.BLAU_BUILD_NUMBER_OFFSET || '0' }}
+        run: |
+          scripts/release/release.py version --ref "$GITHUB_REF" \
+            --run-number "$GITHUB_RUN_NUMBER" --build-offset "$BUILD_OFFSET"
+
+      # Only tagged commits on main reach TestFlight.
+      - name: Check the release commit
+        if: ${{ steps.mode.outputs.upload == '1' }}
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if [[ -z "$TAG" ]]; then
+            echo "::error title=Release::Uploading needs a v* tag; run the workflow on a tag or push one."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error title=Release::$TAG ($GITHUB_SHA) is not on main. Tag a commit on main."
+            exit 1
+          fi
+
+      # The CloudKit Production schema must already have this build's record
+      # types (docs/release.md, "Production schema deploy checklist").
+      - name: CloudKit Production schema
+        env:
+          DEPLOYED: ${{ vars.BLAU_CLOUDKIT_PRODUCTION_SCHEMA }}
+          UPLOAD: ${{ steps.mode.outputs.upload }}
+        run: |
+          flags=()
+          [[ "$UPLOAD" == 1 ]] || flags=(--warn-only)
+          scripts/release/release.py schema --deployed "$DEPLOYED" ${flags[@]+"${flags[@]}"}
+
+      - name: Select Xcode
+        id: xcode
+        run: scripts/ci/select-xcode.sh
+
+      - name: Privacy manifests
+        run: make check-privacy
+
+      - name: Release notes
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.marketing_version }}
+          BUILD: ${{ steps.version.outputs.build_number }}
+        run: |
+          scripts/release/release.py notes --to "${TAG:-$GITHUB_SHA}" --version "$VERSION" --build "$BUILD" \
+            --markdown .build/release/notes/release-notes.md --text .build/release/notes/what-to-test.txt
+          cat .build/release/notes/release-notes.md >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Install XcodeGen
+        run: |
+          command -v xcodegen >/dev/null || brew install xcodegen
+          xcodegen --version
+
+      - name: Generate project
+        run: make generate
+
+      # Restore only: CI on main saves this cache; a tag run never writes one.
+      - name: Restore Swift packages
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build/DerivedData/SourcePackages
+          key: spm-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/BlauKit/Package.swift', 'Packages/BlauKit/Package.resolved') }}
+          restore-keys: |
+            spm-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.build }}-
+
+      - name: Signing certificate
+        env:
+          CERTIFICATE_P12: ${{ secrets.BLAU_SIGNING_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.BLAU_SIGNING_CERTIFICATE_PASSWORD }}
+        run: scripts/release/signing-keychain.sh setup
+
+      # Archive (Release, automatic signing through the API key), export for
+      # App Store Connect, verify the IPA, and upload it unless this is a
+      # dry run. The key is written to a private temporary file for this step
+      # only.
+      - name: Archive, export and upload
+        env:
+          TEAM_ID: ${{ vars.BLAU_TEAM_ID }}
+          BUILD_NUMBER: ${{ steps.version.outputs.build_number }}
+          UPLOAD: ${{ steps.mode.outputs.upload }}
+          INTERNAL_ONLY: ${{ vars.BLAU_TESTFLIGHT_INTERNAL_ONLY || '0' }}
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          SKIP_GENERATE: "1"
+        run: |
+          if [[ -z "$TEAM_ID" ]]; then
+            echo "::error title=Release::Set the BLAU_TEAM_ID variable (docs/release.md, One-time setup)."
+            exit 1
+          fi
+          make testflight
+
+      - name: Remove signing certificate
+        if: ${{ always() }}
+        run: scripts/release/signing-keychain.sh cleanup
+
+      - name: Job summary
+        if: ${{ !cancelled() }}
+        run: |
+          for file in .build/release/summary.md .build/release/verify-report.md; do
+            if [[ -f "$file" ]]; then
+              { echo; cat "$file"; } >>"$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+      # Text only: the notes and the verification report. Never the IPA, the
+      # archive or build logs (this repository is public).
+      - name: Upload release notes
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-notes-${{ github.run_attempt }}
+          path: |
+            .build/release/notes/
+            .build/release/verify-report.md
+            .build/release/summary.md
+          if-no-files-found: warn
+          retention-days: 90
+
+  # The GitHub pre-release for the tag, once the build is on its way to
+  # TestFlight. A separate job so the signing secrets never share a job with
+  # a write token.
+  github-release:
+    name: github-release
+    needs: testflight
+    if: ${{ needs.testflight.outputs.uploaded == '1' && needs.testflight.outputs.tag != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download release notes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-notes-${{ github.run_attempt }}
+          path: notes
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.testflight.outputs.tag }}
+          VERSION: ${{ needs.testflight.outputs.marketing_version }}
+          BUILD: ${{ needs.testflight.outputs.build_number }}
+        run: |
+          notes=notes/notes/release-notes.md
+          [[ -f "$notes" ]] || notes=$(find notes -name release-notes.md | head -n 1)
+          title="Blau $VERSION ($BUILD)"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "$title" --notes-file "$notes"
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
+              --title "$title" --notes-file "$notes"
+          fi
