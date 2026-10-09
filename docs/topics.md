@@ -469,6 +469,14 @@ bullet with this edit menu on a long press. DEBUG builds also list recent
 conversations' topics, with Split Here on each line, in **Debug → Topics**
 (`TopicsDebugView`) until the topic detail (#58) offers it.
 
+### Practice runs
+
+A practice run (#69) is a topic of its own: it opens at the user's request
+to practice, the segmenter's boundaries are ignored while it lasts, a
+labeler never replaces its title or summary (the run's record), and it
+closes when the user speaks after `end_practice` or the conversation ends.
+See [practice.md](practice.md#each-run-is-a-topic).
+
 ### Not covered yet
 
 - A title refined on close and a manual title are both "final"

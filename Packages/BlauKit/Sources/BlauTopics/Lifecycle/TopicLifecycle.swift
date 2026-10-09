@@ -131,10 +131,15 @@ public actor TopicLifecycle: TopicService {
     private let clock: any BlauClock
     let broadcaster = TopicEventBroadcaster()
 
-    private var live: LiveConversation?
+    private(set) var live: LiveConversation?
     /// Conversations whose topics were finished; utterances that still
     /// arrive for them (late transcripts) don't reopen them.
-    private var finished: Set<ConversationID> = []
+    private(set) var finished: Set<ConversationID> = []
+    /// Practice runs (#69) by run id: see `TopicLifecycle+Practice.swift`.
+    var practiceRuns: [UUID: PracticeRunState] = [:]
+    /// The conversation being tracked as of the latest call, before the
+    /// queue gets to it: what a practice run started now belongs to.
+    private(set) var trackedConversation: ConversationID?
     private var tail: Task<Void, Never>?
     private var settleTask: Task<Void, Never>?
     private var settleGeneration = 0
@@ -201,6 +206,7 @@ public actor TopicLifecycle: TopicService {
     /// topic continues instead. Ends the topics of a conversation still
     /// being tracked.
     public func beginConversation(_ id: ConversationID, at date: Date) {
+        trackedConversation = id
         enqueue { lifecycle in
             lifecycle.finished.remove(id)
             await lifecycle.start(id, at: date)
@@ -211,12 +217,18 @@ public actor TopicLifecycle: TopicService {
     /// again under the same `id` (merged, refined, or cut short) updates
     /// the exchange being assembled, and is otherwise ignored.
     public func ingest(_ utterance: Utterance) async {
+        if trackedConversation == nil, !finished.contains(utterance.conversationID) {
+            trackedConversation = utterance.conversationID
+        }
         enqueue { lifecycle in await lifecycle.process(utterance) }
     }
 
     /// Ends `id`: scores the last exchange, takes back a provisional break
     /// that wasn't confirmed, and refines the last topic.
     public func finishConversation(_ id: ConversationID) {
+        if trackedConversation == id {
+            trackedConversation = nil
+        }
         enqueue { lifecycle in
             lifecycle.finished.insert(id)
             guard let live = lifecycle.live, live.id == id else { return }
@@ -300,7 +312,7 @@ public actor TopicLifecycle: TopicService {
 
     // MARK: Queue
 
-    private func enqueue(_ operation: @escaping @Sendable (isolated TopicLifecycle) async -> Void) {
+    func enqueue(_ operation: @escaping @Sendable (isolated TopicLifecycle) async -> Void) {
         let previous = tail
         tail = Task {
             await previous?.value
@@ -367,6 +379,18 @@ public actor TopicLifecycle: TopicService {
         // Already scored: a refined or truncated copy changes nothing the
         // segmenter needs.
         guard conversation.unitOfUtterance[utterance.id] == nil else { return }
+        if utterance.speaker == .user, !utterance.isBlank, !conversation.exchanges.contains(utterance.id) {
+            // A practice run that ended closes when the user speaks next, so
+            // Grok's wrap-up stays in the run's topic (#69).
+            // Only speech after the run ended: the user's "let's stop" can
+            // reach the lifecycle after the tool call it caused.
+            if conversation.practiceTopicID != nil, let ended = conversation.practiceEnded,
+                utterance.startedAt > ended
+            {
+                await closePracticeTopic(in: conversation, at: utterance.startedAt)
+            }
+            conversation.lastUserUtterance = (utterance.id, utterance.startedAt)
+        }
         let repliesDeferred = deferredConversation == conversation.id
         if repliesDeferred, utterance.speaker == .user, !utterance.isBlank {
             conversation.hasUserOnlyExchanges = true
@@ -432,6 +456,7 @@ public actor TopicLifecycle: TopicService {
         } catch {
             Log.topics.error("Couldn't save the final topics: \(String(describing: error), privacy: .public)")
         }
+        closePracticeRuns(of: conversation.id)
         if live === conversation {
             live = nil
         }
@@ -498,6 +523,11 @@ public actor TopicLifecycle: TopicService {
 
     private func handle(_ events: [TopicEvent], in conversation: LiveConversation) async {
         for (offset, event) in events.enumerated() {
+            // A practice run's topic holds every exchange of the run, and its
+            // edges are the run's (#69): the segmenter's boundaries inside
+            // it, or at its edges, are already drawn.
+            if conversation.practiceTopicID != nil { continue }
+            if let fence = conversation.practiceFence, event.boundary.startedAt <= fence { continue }
             switch event {
             case .candidate(let boundary, let label):
                 // A veto arrives in the same batch: nothing to open.
@@ -676,10 +706,15 @@ public actor TopicLifecycle: TopicService {
     ///   - retitle: Re-segmentation merged or split the topic: replace its
     ///     title even if it is final, as long as it is still the title a
     ///     labeler wrote (never one the user typed).
-    private func refine(
+    func refine(
         _ topicID: UUID, in conversationID: ConversationID?, finalizing: Bool, announcesClose: Bool = true,
         retitle: Bool = false
     ) async {
+        if let live, live.practiceTopics.contains(topicID) {
+            // A practice run's title and summary are the run's own (#69).
+            await emit(topicID) { finalizing && announcesClose ? .closed($0) : .updated($0) }
+            return
+        }
         do {
             var previousTitle: String?
             if let conversationID {
@@ -717,7 +752,7 @@ public actor TopicLifecycle: TopicService {
 
     /// Tells the pipeline the current topic's title, so the model doesn't
     /// give the next topic the same one.
-    private func syncPipelineTitle(_ conversation: LiveConversation) async {
+    func syncPipelineTitle(_ conversation: LiveConversation) async {
         var title: String?
         if let topicID = conversation.currentTopicID {
             title = try? await store.topicSnapshot(topicID).meaningfulTitle
@@ -882,6 +917,18 @@ final class LiveConversation {
     /// Some exchanges were scored while replies were deferred (#80): only
     /// the user's side, which re-segmentation's thresholds weren't tuned on.
     var hasUserOnlyExchanges = false
+    /// The user's latest utterance: where a practice run's topic starts.
+    var lastUserUtterance: (id: UUID, startedAt: Date)?
+    /// The topic of the practice run in progress (#69).
+    var practiceTopicID: UUID?
+    /// When the run ended: its topic closes when the user next speaks
+    /// after that.
+    var practiceEnded: Date?
+    /// Every practice run's topic in this conversation: never labeled.
+    var practiceTopics: Set<UUID> = []
+    /// The latest edge of a practice run's topic. The segmenter's boundaries
+    /// up to it are ignored: the run drew them.
+    var practiceFence: Date?
 
     init(id: ConversationID, startedAt: Date, pipeline: TopicPipeline) {
         self.id = id

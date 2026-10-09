@@ -1,3 +1,4 @@
+import BlauCore
 import BlauPersistence
 import BlauTelemetry
 import SwiftData
@@ -114,6 +115,34 @@ enum CollectionSummary {
         count == 1 ? String(localized: "1 question") : String(localized: "\(count) questions")
     }
 
+    /// A collection's practice record at a glance (#69): how many prompts
+    /// were practiced, their average latest score, when the collection was
+    /// last practiced, and the prompt practice mode would ask next.
+    struct Stats: Equatable {
+        var practiced: Int
+        var total: Int
+        var averageScore: Double?
+        var lastPracticedAt: Date?
+        var upNext: String?
+
+        init(items: [CollectionItem], collectionID: UUID, now: Date, scheduler: PracticeScheduler = .standard) {
+            let summary = PracticeStore.summary(id: collectionID, title: "", items: items)
+            practiced = summary.practicedCount
+            total = summary.itemCount
+            averageScore = summary.averageScore
+            lastPracticedAt = summary.lastPracticedAt
+            upNext = scheduler.next(in: items.map { $0.practiceItem(in: collectionID) }, at: now)?.prompt
+        }
+
+        /// "7 of 30".
+        var practicedLine: String { String(localized: "\(practiced) of \(total)") }
+
+        /// "72%", or `nil` before any scored attempt.
+        var averageLine: String? {
+            averageScore.map { $0.formatted(.percent.precision(.fractionLength(0))) }
+        }
+    }
+
     /// "Practiced 3 times · 80%", or `nil` before the first practice.
     static func practice(count: Int, score: Double?) -> String? {
         guard count > 0 else { return nil }
@@ -151,6 +180,10 @@ struct CollectionDetailView: View {
         let collection = copies.first
         let items = Self.unique(storedItems)
         List {
+            PracticeSection(
+                title: collection?.title ?? "",
+                stats: CollectionSummary.Stats(
+                    items: items, collectionID: collectionID, now: environment.clock.now))
             Section {
                 Button("Add Questions…", systemImage: "text.badge.plus") { isAdding = true }
                     .accessibilityIdentifier(KnowledgeBaseIdentifiers.addQuestions)
@@ -247,6 +280,46 @@ struct CollectionDetailView: View {
     }
 }
 
+/// Practice mode for one collection (#69): start a run with Grok, and the
+/// collection's practice record.
+private struct PracticeSection: View {
+    let title: String
+    let stats: CollectionSummary.Stats
+    @Environment(AppEnvironment.self) private var environment
+
+    var body: some View {
+        Section {
+            Button("Practice with Grok", systemImage: "person.wave.2") {
+                environment.practice.practice(collectionTitle: title)
+            }
+            .disabled(stats.total == 0 || title.isEmpty)
+            .accessibilityIdentifier(KnowledgeBaseIdentifiers.practice)
+            if stats.practiced > 0 {
+                LabeledContent("Practiced", value: stats.practicedLine)
+                    .accessibilityIdentifier(KnowledgeBaseIdentifiers.practiceStats)
+                if let average = stats.averageLine {
+                    LabeledContent("Average Score", value: average)
+                }
+                if let last = stats.lastPracticedAt {
+                    LabeledContent("Last Practiced") {
+                        Text(last, format: .relative(presentation: .named))
+                    }
+                }
+            }
+            if let next = stats.upNext {
+                LabeledContent("Up Next") {
+                    Text(next).lineLimit(2)
+                }
+            }
+        } footer: {
+            Text(
+                "Grok asks one question at a time, gives feedback against your reference answers and keeps score, "
+                    + "weakest and least recently practiced first. You can also just say “Let’s practice \(title).”"
+            )
+        }
+    }
+}
+
 private struct CollectionItemRow: View {
     let item: CollectionItem
     let number: Int
@@ -265,9 +338,15 @@ private struct CollectionItemRow: View {
                         .foregroundStyle(.secondary)
                 }
                 if let practice = CollectionSummary.practice(count: item.practiceCount, score: item.score) {
-                    Text(practice)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                    HStack(spacing: 4) {
+                        Text(practice)
+                        if let last = item.lastPracticedAt {
+                            Text("·")
+                            Text(last, format: .relative(presentation: .named))
+                        }
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
                 }
             }
         }

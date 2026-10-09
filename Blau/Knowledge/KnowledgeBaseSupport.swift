@@ -45,6 +45,8 @@ enum KnowledgeBaseIdentifiers {
     static let itemAnswer = "knowledge.item.answer"
     static let saveItem = "knowledge.item.save"
     static let deleteItem = "knowledge.item.delete"
+    static let practice = "knowledge.collection.practice"
+    static let practiceStats = "knowledge.collection.practiceStats"
 }
 
 // MARK: - Reading

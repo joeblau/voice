@@ -24,6 +24,10 @@ Grok ──function call──▶ TurnOrchestrator ─▶ RealtimeToolRunner ─
 | `ChatToolCall`, `ChatToolChip` (rows under the timeline's bullets) | BlauRealtime, app | "Searched memory" in the chat; the full payload in DEBUG |
 | `MemoryTools.service(indexing:textEmbeddings:)`, `.registry(backend:enabled:)` | app | The composition root: the backend over the indexing controller's current store and index, behind the `memoryTools` flag |
 
+Practice mode's tools (`list_collection`, `next_practice_question`,
+`record_practice_result`, `end_practice`, #69) follow the same pattern and
+the same flag; see [practice.md](practice.md).
+
 ## The tools
 
 ### `search_memory(query, after?, before?, kinds?, limit = 8)`

@@ -21,7 +21,12 @@ import Synchronization
 /// | `conversation.item.truncate` / `.delete` | `conversation.item.truncated` / `.deleted` |
 ///
 /// The reply to each turn comes from `reply`, given the text of the user's
-/// latest item. No network.
+/// latest item and the function call outputs sent since the previous
+/// response. A reply can call functions (`Reply.functionCalls`): they follow
+/// its spoken part as `function_call` items with
+/// `response.function_call_arguments.done`, like Grok's tool calls (#38), so
+/// tests can drive whole tool-using sessions (practice mode, #69). No
+/// network.
 ///
 /// ```swift
 /// let server = ScriptedRealtimeServer { request in .init(text: "Sure. \(request.userText)") }
@@ -35,6 +40,31 @@ public final class ScriptedRealtimeServer: RealtimeSocketConnecting {
         public let index: Int
         /// The text of the latest user item, or empty.
         public let userText: String
+        /// The `function_call_output` items the client sent since the
+        /// previous `response.create`, in order: non-empty for the follow-up
+        /// to a reply that called functions.
+        public let functionOutputs: [FunctionOutput]
+
+        /// Whether this response follows up on function call outputs.
+        public var isFollowUp: Bool { !functionOutputs.isEmpty }
+    }
+
+    /// A function call a reply makes.
+    public struct FunctionCall: Sendable, Hashable {
+        public var name: String
+        /// The arguments as a JSON object.
+        public var arguments: String
+
+        public init(name: String, arguments: String) {
+            self.name = name
+            self.arguments = arguments
+        }
+    }
+
+    /// A function call's output, as the client sent it.
+    public struct FunctionOutput: Sendable, Hashable {
+        public var callID: String
+        public var output: String
     }
 
     /// The server's answer to one turn.
@@ -43,10 +73,13 @@ public final class ScriptedRealtimeServer: RealtimeSocketConnecting {
         /// How long the reply's audio plays. `nil` derives it from the text
         /// (`secondsPerWord` per word).
         public var audioDuration: Duration?
+        /// Functions the reply calls after speaking `text`.
+        public var functionCalls: [FunctionCall]
 
-        public init(text: String, audioDuration: Duration? = nil) {
+        public init(text: String, audioDuration: Duration? = nil, functionCalls: [FunctionCall] = []) {
             self.text = text
             self.audioDuration = audioDuration
+            self.functionCalls = functionCalls
         }
     }
 
@@ -118,13 +151,13 @@ public final class ScriptedRealtimeServer: RealtimeSocketConnecting {
     public func connect(to url: URL, subprotocols: [String]) async throws -> any RealtimeSocket {
         try Task.checkCancellation()
         let number = state.withLock { $0.sockets.count + 1 }
-        let socket = ScriptedRealtimeSocket(number: number, pacing: pacing) { [weak self] userText in
+        let socket = ScriptedRealtimeSocket(number: number, pacing: pacing) { [weak self] userText, outputs in
             guard let self else { return (0, Reply(text: "")) }
             let index = self.state.withLock { state in
                 defer { state.responses += 1 }
                 return state.responses
             }
-            return (index, self.reply(ReplyRequest(index: index, userText: userText)))
+            return (index, self.reply(ReplyRequest(index: index, userText: userText, functionOutputs: outputs)))
         }
         state.withLock { $0.sockets.append(socket) }
         return socket
@@ -133,7 +166,10 @@ public final class ScriptedRealtimeServer: RealtimeSocketConnecting {
 
 /// One connection to a ``ScriptedRealtimeServer``.
 public final class ScriptedRealtimeSocket: RealtimeSocket {
-    typealias Replier = @Sendable (_ userText: String) -> (index: Int, reply: ScriptedRealtimeServer.Reply)
+    typealias Replier =
+        @Sendable (_ userText: String, _ outputs: [ScriptedRealtimeServer.FunctionOutput]) -> (
+            index: Int, reply: ScriptedRealtimeServer.Reply
+        )
 
     private struct State {
         var inbox: [RealtimeSocketMessage] = []
@@ -145,6 +181,8 @@ public final class ScriptedRealtimeSocket: RealtimeSocket {
         var nextResponse = 0
         var lastUserItemID: String?
         var lastUserText = ""
+        var functionOutputs: [ScriptedRealtimeServer.FunctionOutput] = []
+        var nextCall = 0
         var current: Task<Void, Never>?
         var currentResponseID: String?
         var receivedEvents = 0
@@ -255,6 +293,11 @@ public final class ScriptedRealtimeSocket: RealtimeSocket {
             item["object"] = "realtime.item"
             item["status"] = "completed"
             let previous: Any = (object["previous_item_id"] as? String) ?? NSNull()
+            if (item["type"] as? String) == "function_call_output" {
+                let output = ScriptedRealtimeServer.FunctionOutput(
+                    callID: item["call_id"] as? String ?? "", output: item["output"] as? String ?? "")
+                state.withLock { $0.functionOutputs.append(output) }
+            }
             if (item["role"] as? String) == "user" {
                 let text = ((item["content"] as? [[String: Any]]) ?? []).compactMap { $0["text"] as? String }
                     .joined(separator: " ")
@@ -284,14 +327,27 @@ public final class ScriptedRealtimeSocket: RealtimeSocket {
     /// Starts streaming the reply to the latest user item. `metadata` is the
     /// request's `response.metadata` as JSON, echoed on the response.
     private func respond(metadata: Data?) {
-        let userText = state.withLock { $0.lastUserText }
-        let (_, reply) = replier(userText)
+        let (userText, outputs) = state.withLock { state in
+            defer { state.functionOutputs = [] }
+            return (state.lastUserText, state.functionOutputs)
+        }
+        let (_, reply) = replier(userText, outputs)
+        let calls = reply.functionCalls.map { call in
+            (
+                call: call, itemID: nextID("item"),
+                callID: state.withLock { state in
+                    state.nextCall += 1
+                    return "call_\(number)_\(state.nextCall)"
+                }
+            )
+        }
         let responseID = nextID("resp")
         let itemID = nextID("item")
         let pacing = pacing
         let task = Task<Void, Never> { [weak self] in
             guard let self else { return }
-            await self.stream(reply, responseID: responseID, itemID: itemID, metadata: metadata, pacing: pacing)
+            await self.stream(
+                reply, calls: calls, responseID: responseID, itemID: itemID, metadata: metadata, pacing: pacing)
         }
         let previous = state.withLock { state -> Task<Void, Never>? in
             defer {
@@ -306,7 +362,9 @@ public final class ScriptedRealtimeSocket: RealtimeSocket {
 
     /// The reply's events, paced.
     private func stream(
-        _ reply: ScriptedRealtimeServer.Reply, responseID: String, itemID: String, metadata: Data?,
+        _ reply: ScriptedRealtimeServer.Reply,
+        calls: [(call: ScriptedRealtimeServer.FunctionCall, itemID: String, callID: String)],
+        responseID: String, itemID: String, metadata: Data?,
         pacing: ScriptedRealtimeServer.Pacing
     ) async {
         var response: [String: Any] = ["id": responseID, "object": "realtime.response", "status": "in_progress"]
@@ -361,14 +419,37 @@ public final class ScriptedRealtimeSocket: RealtimeSocket {
             emit(content("response.output_audio.done"))
             emit(content("response.output_audio_transcript.done", ["transcript": transcript]))
             emit(content("response.content_part.done", ["part": ["type": "audio", "transcript": transcript]]))
-            emit([
-                "type": "response.output_item.done", "response_id": responseID, "output_index": 0,
-                "item": [
-                    "id": itemID, "object": "realtime.item", "type": "message", "role": "assistant",
-                    "status": "completed", "content": [["type": "audio", "transcript": transcript]],
-                ],
-            ])
-            finish(responseID: responseID, response: response, status: "completed", outputTokens: words.count * 2)
+            let message: [String: Any] = [
+                "id": itemID, "object": "realtime.item", "type": "message", "role": "assistant",
+                "status": "completed", "content": [["type": "audio", "transcript": transcript]],
+            ]
+            emit(["type": "response.output_item.done", "response_id": responseID, "output_index": 0, "item": message])
+            var output: [[String: Any]] = [message]
+            for (offset, call) in calls.enumerated() {
+                let index = offset + 1
+                var item: [String: Any] = [
+                    "id": call.itemID, "object": "realtime.item", "type": "function_call", "status": "in_progress",
+                    "call_id": call.callID, "name": call.call.name,
+                ]
+                emit([
+                    "type": "response.output_item.added", "response_id": responseID, "output_index": index,
+                    "item": item,
+                ])
+                emit([
+                    "type": "response.function_call_arguments.done", "response_id": responseID,
+                    "item_id": call.itemID, "output_index": index, "call_id": call.callID, "name": call.call.name,
+                    "arguments": call.call.arguments,
+                ])
+                item["status"] = "completed"
+                item["arguments"] = call.call.arguments
+                emit([
+                    "type": "response.output_item.done", "response_id": responseID, "output_index": index, "item": item,
+                ])
+                output.append(item)
+            }
+            var done = response
+            if !calls.isEmpty { done["output"] = output }
+            finish(responseID: responseID, response: done, status: "completed", outputTokens: words.count * 2)
         } catch {
             // Cancelled by `response.cancel`, a newer response or a close.
             guard state.withLock({ $0.closedWith == nil }) else { return }
