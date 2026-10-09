@@ -11,7 +11,7 @@ enum DeveloperSettingsIdentifiers {
 }
 
 /// Settings → Developer: the performance HUD, feature flags, MetricKit
-/// diagnostics and a log export.
+/// diagnostics, the latency budget (#74) and a log export.
 ///
 /// The HUD toggle is `PerformanceHUDToggle` (#71), available in every
 /// build; it applies at once: the HUD appears over the main screen as soon
@@ -58,6 +58,13 @@ struct DeveloperSettingsView: View {
                     Label("Diagnostics", systemImage: "waveform.path.ecg")
                 }
                 .accessibilityIdentifier(DiagnosticsView.Identifier.open)
+
+                NavigationLink {
+                    LatencyBudgetView()
+                } label: {
+                    Label("Latency Budget", systemImage: "stopwatch")
+                }
+                .accessibilityIdentifier(LatencyBudgetView.Identifier.open)
 
                 if let logExport {
                     ShareLink(

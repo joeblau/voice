@@ -57,12 +57,20 @@ public struct PlayedItem: Sendable, Hashable {
     public var receivedFrames: Int64
     /// The stream's sample rate.
     public var sampleRate: Int
+    /// When the item's first frame was rendered for the output, on the
+    /// player's clock (`BlauClock.uptime`); `nil` until it has been. The end
+    /// of the latency budget's "first buffer" hop (#74).
+    public var firstRenderedAt: Duration?
 
-    public init(id: PlaybackItemID, playedFrames: Int64, receivedFrames: Int64, sampleRate: Int) {
+    public init(
+        id: PlaybackItemID, playedFrames: Int64, receivedFrames: Int64, sampleRate: Int,
+        firstRenderedAt: Duration? = nil
+    ) {
         self.id = id
         self.playedFrames = playedFrames
         self.receivedFrames = receivedFrames
         self.sampleRate = sampleRate
+        self.firstRenderedAt = firstRenderedAt
     }
 
     /// The audio the user heard from this item.

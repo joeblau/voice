@@ -3,8 +3,8 @@
 Blau measures itself from the first commit. Every subsystem logs through one
 set of `Logger` categories and marks its pipeline stages with `OSSignposter`
 intervals, all from the `BlauTelemetry` module. Instruments, the XCTest
-performance suite (#73), the latency budget (#74) and the debug HUD (#71)
-all build on the names defined here.
+performance suite (#73), the [latency budget](#latency-budget) (#74) and the
+debug HUD (#71) all build on the names defined here.
 
 This document is the naming reference. A unit test
 (`PipelineIntervalTests.performanceDocListsEveryInterval`) fails if the
@@ -136,6 +136,7 @@ case step.
 | `model.warmUp`        | `asr`      | `.modelWarmUp`        | `ModelManager` loads an installed model for the first time on this OS | Core ML finished loading (and compiling) every bundle |
 | `voiceid.embed`       | `voiceid`  | `.voiceIDEmbed`       | A speech segment is handed to the embedding model   | The 256-d embedding is out                      |
 | `voiceid.verify`      | `voiceid`  | `.voiceIDVerify`      | Scoring of a segment against the voiceprint starts  | Accept / reject / uncertain is decided          |
+| `voiceid.gate`        | `voiceid`  | `.voiceIDGate`        | A final utterance reaches the verification gate (#47) | The gate passes it on or drops it; the end message is the disposition |
 | `realtime.turn`       | `realtime` | `.realtimeTurn`       | A verified utterance's text is committed to Grok    | `response.done`, or the response is cancelled by barge-in |
 | `realtime.firstAudio` | `realtime` | `.realtimeFirstAudio` | Same commit as `realtime.turn`                      | The first `response.output_audio.delta` arrives |
 | `realtime.connect`    | `realtime` | `.realtimeConnect`    | `RealtimeClient` starts a connection attempt (token, then WebSocket upgrade) | The socket is open, or the attempt failed |
@@ -805,6 +806,7 @@ and the code in sync.
 | --------------------- | ---------- | --------------------------------------------------- |
 | `asr.eou`             | `asr`      | End-of-utterance delay, part of every turn's latency |
 | `voiceid.verify`      | `voiceid`  | Gate decision time, once per speech segment         |
+| `voiceid.gate`        | `voiceid`  | The gate's hold on each final: a latency budget hop |
 | `realtime.turn`       | `realtime` | Full turn duration                                  |
 | `realtime.firstAudio` | `realtime` | The latency the user hears                          |
 | `topics.label`        | `topics`   | On-device Foundation Models call, rare but slow     |
@@ -813,9 +815,14 @@ and the code in sync.
 Per-chunk and per-frame intervals (`capture.frame`, `vad.chunk`,
 `asr.chunk`, `realtime.event`) and the frequent `voiceid.embed`,
 `topics.segment`, `memory.embed` and `db.save` stay out: they would swamp
-MetricKit's signpost budget. `playback.firstBuffer` also stays out: it
-starts where `realtime.firstAudio` ends and only times local jitter-buffer
-priming, so the `audio` category stays Instruments-only. `realtime.connect`
+MetricKit's signpost budget. `playback.firstBuffer` also stays out, although
+it is a [latency budget](#latency-budget) hop: it ends on the audio render
+thread, and every `mxSignpost` takes a resource snapshot, which has no place
+in a real-time callback. The budget's first-buffer hop reaches the field
+through the latency report instead, so the `audio` category stays
+Instruments-only. The budget's end-to-end total has no interval at all (its
+start, the end of speech, is only known in hindsight); MetricKit aggregates
+each hop on its own and the latency report has the total. `realtime.connect`
 runs once per session, before any turn, and stays Instruments-only for now,
 like `session.start` (tap Record → listening, #41).
 `asr.secondPass` runs once per utterance off the turn's critical path (it
@@ -1069,6 +1076,7 @@ orange (warning) or red (critical), and so does the panel's border.
 | Tokens, Cost     | `response.done` usage; the cost estimate is reply audio minutes × $0.08 plus text inputs × $0.004 (`RealtimePricing.grokVoice`) | |
 | Barge-in         | Barge-ins this conversation, and the last one's onset → playback flushed and VAD delay (#37) | |
 | Topic depth      | The segmenter's depth score at the newest gap and its threshold (`PerformanceGauges`) | |
+| Latency budget   | Each [latency budget](#latency-budget) hop over the conversation's turns: p50 / p95 against its p50 target, orange when the p50 is over, red when it is over by half again (#74) | "Speech → audio" (the total) |
 | Signposts        | Every canonical interval timed while the HUD shows: last / p50 / p95 and count | |
 
 Rows whose stage isn't running, or isn't built yet, show "–". The voice
@@ -1208,9 +1216,166 @@ running there:
 | Latencies match | Record the Blau template during 20 turns; compare the os_signpost summary's average for `asr.chunk`, `realtime.firstAudio` and `realtime.turn` with the HUD's Signposts section | pending (needs a device and xAI credentials) |
 | Thermal state | Run a long session until **Thermal State** reports *fair* or *serious*; the Thermal row should change at the same moment | pending (needs a device) |
 
+## Latency budget
+
+Conversational latency is a tracked, budgeted number (#74): the time from
+the end of what the user said to the first sound of Grok's reply. Every
+turn that gets reply audio is measured hop by hop, the HUD shows it live,
+Settings → Developer → Latency Budget collects it and exports it, and the
+table at the end of this section records it for every release.
+
+### The budget
+
+```
+end of speech ─▶ end of utterance ─▶ commit ─▶ first audio delta ─▶ first frame rendered
+   (mic)          (ASR decides)      (to Grok)   (from xAI)           (to the speaker)
+     │ endOfUtterance │  voiceGate   │ firstAudio │   firstBuffer      │
+     └───────────────────────────── total ───────────────────────────┘
+```
+
+| Hop (`LatencyHop`) | From → to | Target p50 | Instruments interval | HUD row |
+| ------------------ | --------- | ---------- | -------------------- | ------- |
+| `endOfUtterance`   | Last speech sample captured → the end-of-utterance decision (the final is emitted) | 300–800 ms (the debounce) | `asr.eou`, from VAD's end of speech only (see below) | Speech → EOU |
+| `voiceGate`        | End-of-utterance decision → the utterance committed to Grok | ≤ 100 ms | `voiceid.gate` | Voice gate |
+| `firstAudio`       | Commit → the first `response.output_audio.delta` (network and model) | ≤ 700 ms | `realtime.firstAudio` | Commit → audio |
+| `firstBuffer`      | First audio delta → its first frame rendered for the output (jitter-buffer preroll) | ≤ 50 ms | `playback.firstBuffer` | First buffer |
+| `total`            | End of speech → the reply's first frame rendered | **≤ 1.5 s** | none (see below) | Speech → audio |
+
+The targets are medians over a session of real turns (`LatencyBudget.standard`).
+A release is **within budget** when every hop's p50 is at or below its
+target; p95 is tracked next to it. The hop targets add up to more than
+1.5 s on purpose: the end-of-utterance hop is a range set by the
+debounce (Parakeet's 640 ms end-of-utterance debounce, or the transcriber's
+900 ms silence fallback when the model doesn't decide), so a turn that
+needs the full 800 ms there has 700 ms left for everything else.
+
+### How each moment is measured
+
+Every moment is a reading of the same monotonic clock (`SystemClock.uptime`),
+taken by the stage that sees it, and the hops are the differences:
+
+| Moment | Taken by | How |
+| ------ | -------- | --- |
+| End of speech | `ParakeetStreamingTranscriber` | The final's end on the audio timeline (VAD's end of speech, or the end of the last word when the model ends the utterance first), placed on the uptime timeline from the capture's host time (`AudioFrame.hostTime`, `HostClock`): when that sample came off the microphone's I/O cycle, not when VAD noticed it 300 ms later |
+| End of utterance | `ParakeetStreamingTranscriber` | Just before it emits the final. Both marks go to `LatencyMarks.shared` under the utterance's id |
+| Commit | `TurnOrchestrator` | When it receives the final through the voice gate and sends it; it takes the marks back by id |
+| First audio delta | `TurnOrchestrator` | The first `response.output_audio.delta` of the turn |
+| First frame rendered | `PlaybackRenderer` | On the render thread, the moment the first frame of the reply's first item is copied into an output buffer (`PlayedItem.firstRenderedAt`) |
+
+The sample (`TurnLatencySample`) is taken once the reply has played, or
+when it is cut (barge-in, a new utterance, stop). Only turns that went out
+at once and got audio count, like `realtime.firstAudio`: a turn that waited
+for the connection measures the outage. Utterances from Apple's
+`SpeechTranscriber` fallback carry no end-of-speech marks, so their turns
+measure only the hops from the commit on.
+
+Two things no signpost can show:
+
+- **`asr.eou` is shorter than the first hop.** It begins at VAD's
+  end-of-speech decision, VAD's 300 ms hangover after the speech really
+  ended, and doesn't run at all when the model's end of utterance comes
+  first. The budget's hop starts at the speech itself.
+- **The total has no interval.** An `os_signpost` (or `mxSignpost`) interval
+  starts when it is emitted, and the end of speech is only known after the
+  fact. The total is the difference of the readings above, and only the
+  HUD, the log and the latency report have it.
+
+### Hardware latency
+
+The capture timestamps and the rendered frame are the edges of what the
+app can see. The audio hardware adds its own time on both sides, which the
+budget's total doesn't include: `AVAudioSession.inputLatency` (microphone →
+capture timestamp) and `outputLatency` (rendered frame → speaker), plus
+the `ioBufferDuration` of each I/O cycle, which the rendered frame already
+waits for. Every sample records them for the route it ran on
+(`SystemAudioSession.hardwareLatency()`, set on `LatencyBudgetTracker.shared`
+at launch), and the report adds them to the total as **+ hardware I/O**:
+end of speech at the microphone → the first sound at the speaker. They
+change with the route: AirPods add far more output latency than the built-in
+speaker, so a release is measured on the built-in route and the route is
+part of every row below.
+
+### Where to see it
+
+- **Log.** One `Log.realtime` line per turn:
+  `Turn 7 latency: end of speech → EOU 642 · gate 11 · first audio 598 · first buffer 41 · total 1292 ms`,
+  with "(over the 1500 ms budget)" and a `realtime.overBudget` signpost event
+  when the total is over.
+- **HUD.** The "Latency budget" section has each hop's p50 / p95 against
+  its target over the conversation's turns; the compact HUD shows the total.
+- **Settings → Developer → Latency Budget.** Every turn since launch (the
+  newest 500, in memory only: timings and port kinds, never what was said),
+  with the hardware latency, a reset, **Export Report** (JSON,
+  `Blau-Latency-<yyyyMMdd-HHmmss>.json`, format
+  `com.joeblau.blau.latency.v1`) and **Copy Table Row**, the Markdown row for
+  the table below. It is in every build, TestFlight included.
+- **MetricKit.** `asr.eou`, `voiceid.gate` and `realtime.firstAudio` are
+  reported from the field ([Intervals reported to MetricKit](#intervals-reported-to-metrickit)).
+- **Instruments.** `voiceid.gate`, `realtime.firstAudio` and
+  `playback.firstBuffer` in the os_signpost track of the Blau template.
+
+### Measuring a release
+
+Measure every release candidate on two devices, an older and a current
+iPhone (for example an iPhone 15 Pro and an iPhone 17), with a Release
+build:
+
+1. Install the build signed for development (**Product > Profile** in
+   Xcode, or the TestFlight build when only the report is needed). Wi-Fi,
+   room temperature, every model installed, voice ID enrolled, the built-in
+   microphone and speaker (no headphones), thermal state nominal (the
+   [thermal policy](#thermal-and-power-adaptation) must stay at `normal`).
+2. Start recording with the [Blau template](#instruments-template)
+   (`make trace TRACE_DEVICE=<device>` while the app runs, or Record in
+   Instruments).
+3. Settings → Developer → Latency Budget → **Reset**.
+4. Hold a conversation of at least 25 turns: questions of a few words and
+   of a few sentences, normal pauses, no barge-in.
+5. Latency Budget → **Copy Table Row** and paste it into the table below;
+   **Export Report** and attach the JSON to the release's PR or issue.
+6. Cross-check in Instruments: the os_signpost summary's averages for
+   `voiceid.gate`, `realtime.firstAudio` and `playback.firstBuffer` should be
+   close to the report's means for those hops (they are the same spans), and
+   `asr.eou` should be about 300 ms below the end-of-utterance hop on turns
+   VAD ended.
+7. Optionally check the acoustic total by ear-to-mouth recording: film the
+   phone with a second device, and measure from the end of the speech to the
+   start of the reply in the recording's waveform. It should match the
+   report's "+ hardware I/O" within a few tens of milliseconds.
+
+A row over budget names the hops that are; open an issue before the release
+ships with the report attached.
+
+### Per-release results
+
+`LatencyBudgetReport.markdownHeader` and `markdownRow` produce this table's
+header and rows (milliseconds, p50 / p95). Measuring needs a physical iPhone
+and real xAI credentials, so the first rows are still pending:
+
+| Release | Device | OS | Route | Turns | EOU p50 / p95 | Gate p50 / p95 | First audio p50 / p95 | First buffer p50 / p95 | Total p50 / p95 | + hardware I/O p50 / p95 | Budget | Date |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0.1.0 | iPhone 15 Pro | 26.x | `builtInMic -> builtInSpeaker` | pending | pending | pending | pending | pending | pending | pending | pending | pending |
+| 0.1.0 | iPhone 17 | 26.x | `builtInMic -> builtInSpeaker` | pending | pending | pending | pending | pending | pending | pending | pending | pending |
+
+### Code and tests
+
+| Where | What |
+| --- | --- |
+| `BlauTelemetry/Latency` | `LatencyHop`, `LatencyBudget`, `TurnLatencyTimeline`, `TurnLatencySample`, `AudioHardwareLatency`, `LatencyMarks`, `LatencyBudgetTracker`, `LatencyBudgetReport` |
+| `BlauCore/HostClock.swift` | Host time (`mach_absolute_time`) ages, to place capture timestamps on the uptime timeline |
+| `ParakeetStreamingTranscriber` | The end-of-speech and end-of-utterance marks |
+| `VerificationGate` | The `voiceid.gate` interval |
+| `PlaybackRenderer` | `PlayedItem.firstRenderedAt` |
+| `TurnOrchestrator`, `TurnLatencyStatistics` | The per-turn sample, the HUD windows, the log line |
+| `SystemAudioSession.hardwareLatency()` | `AVAudioSession` input and output latency for the route |
+| `Blau/Diagnostics/LatencyBudgetView.swift` | Settings → Developer → Latency Budget |
+| `BlauTelemetryTests/Latency/` | The budget, timelines and samples, the marks, the tracker, the report, its JSON and table row |
+| `BlauRealtimeTests/Turns/TurnOrchestratorLatencyTests.swift` | A turn measured end to end from the marks to the first rendered frame, barge-in, queued and text-only turns |
+| `BlauTranscriptionTests`, `BlauVoiceIDTests`, `BlauAudioTests` | The marks, the `voiceid.gate` interval, the first rendered frame |
+
 ## What comes next
 
-The rest of the performance epic (#11) builds on these names: the end-to-end
-latency budget (#74) and the soak test (#76). The XCTest performance suite
-and its CI baselines (#73) and thermal and power adaptation (#75) are
-described above, and the performance HUD above shows the same intervals live.
+The rest of the performance epic (#11) builds on these names: the soak test
+(#76). The XCTest performance suite and its CI baselines (#73), thermal and
+power adaptation (#75) and the latency budget (#74) are described above,
+and the performance HUD above shows the same intervals live.

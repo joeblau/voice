@@ -1,5 +1,6 @@
 import BlauAudio
 import BlauCore
+import BlauTelemetry
 import Foundation
 import Testing
 
@@ -322,6 +323,23 @@ struct VerificationGateTests {
         #expect(gated.decision == .accept)
         #expect(gated.delay < .milliseconds(100))
         #expect(gate.statistics.longestDelay == gated.delay)
+    }
+
+    /// Every hold is a `voiceid.gate` interval, the latency budget's gate
+    /// hop in Instruments and MetricKit (#74), ended with the disposition.
+    @Test func everyHoldIsAGateIntervalEndedWithItsDisposition() async throws {
+        let backend = RecordingSignpostBackend()
+        let verifier = ScriptedVerifier(SpeakerTimeline([(0, 3, .owner), (5, 9, .other)]))
+        let gate = VerificationGate(verifier: verifier, signposter: Signposter(category: .voiceID, backend: backend))
+        await gate.feed(SpeechScript.segment(0, from: 0, to: 2.5))
+        await gate.feed(SpeechScript.segment(1, from: 5, to: 8))
+
+        _ = await gate.decide(finalUtterance("What's on today?", from: 0, to: 2.5))
+        _ = await gate.decide(finalUtterance("And now the news", from: 5, to: 8))
+
+        #expect(backend.completedIntervals == ["voiceid.gate", "voiceid.gate"])
+        #expect(backend.endMessages(of: "voiceid.gate") == ["accepted", "rejected"])
+        #expect(backend.openIntervals.isEmpty)
     }
 
     // MARK: The transcript filter

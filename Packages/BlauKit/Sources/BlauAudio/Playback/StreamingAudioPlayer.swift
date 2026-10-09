@@ -70,7 +70,8 @@ public final class StreamingAudioPlayer: AudioGraphComponent {
 
     /// - Parameters:
     ///   - configuration: Stream format and jitter-buffer settings.
-    ///   - clock: Paces `updates(every:)`.
+    ///   - clock: Paces `updates(every:)` and stamps each item's first
+    ///     rendered frame (`PlayedItem.firstRenderedAt`).
     ///   - signposter: Where `playback.firstBuffer` goes.
     public init(
         configuration: PlaybackConfiguration = .realtime,
@@ -79,7 +80,7 @@ public final class StreamingAudioPlayer: AudioGraphComponent {
     ) {
         self.configuration = configuration
         self.clock = clock
-        renderer = PlaybackRenderer(configuration: configuration, signposter: signposter)
+        renderer = PlaybackRenderer(configuration: configuration, signposter: signposter, clock: clock)
     }
 
     // MARK: Feeding audio

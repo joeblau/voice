@@ -45,7 +45,9 @@ public struct PerformanceHUDReadout: Sendable, Hashable {
     /// The placeholder for a value that isn't available.
     public static let placeholder = "–"
 
-    public init(_ snapshot: PerformanceHUDSnapshot) {
+    /// - Parameter budget: The latency budget the "Latency budget" rows are
+    ///   checked against (#74).
+    public init(_ snapshot: PerformanceHUDSnapshot, budget: LatencyBudget = .standard) {
         let fps = Self.frameRateRow(snapshot.frameRate)
         let cpu = Self.cpuRow(snapshot.cpuPercent)
         let memory = Self.memoryRow(snapshot.memory)
@@ -55,6 +57,7 @@ public struct PerformanceHUDReadout: Sendable, Hashable {
         compact = [
             fps, cpu, memory, thermal,
             Row(label: "EOU → audio", value: pipeline.firstAudio.map(Self.percentiles) ?? Self.placeholder),
+            Self.budgetRow(.total, pipeline.latencyHops[.total], budget: budget, compact: true),
         ]
 
         let device = [
@@ -98,6 +101,10 @@ public struct PerformanceHUDReadout: Sendable, Hashable {
         }
         realtime.append(Row(label: "Barge-in", value: pipeline.bargeIn ?? Self.placeholder))
 
+        let latencyBudget = LatencyHop.allCases.map { hop in
+            Self.budgetRow(hop, pipeline.latencyHops[hop], budget: budget, compact: false)
+        }
+
         let topics = [
             Row(label: "Topic depth", value: Self.score(snapshot.topicDepth, threshold: snapshot.topicThreshold))
         ]
@@ -111,6 +118,7 @@ public struct PerformanceHUDReadout: Sendable, Hashable {
             Section(title: "Audio", rows: audio),
             Section(title: "Speech", rows: speech),
             Section(title: "Grok", rows: realtime),
+            Section(title: "Latency budget", rows: latencyBudget),
             Section(title: "Topics", rows: topics),
             Section(
                 title: "Signposts",
@@ -205,6 +213,21 @@ public struct PerformanceHUDReadout: Sendable, Hashable {
         guard let overhead else { return Row(label: "HUD cost", value: placeholder) }
         return Row(
             label: "HUD cost", value: "\(percent(overhead)) CPU", level: overhead >= 0.01 ? .warning : .normal)
+    }
+
+    /// `p50 1240 · p95 1710 / 1500 ms (n=12)`: one hop of the latency
+    /// budget (#74) against its p50 target. Warning when the p50 is over
+    /// budget, critical when it is over by half again.
+    static func budgetRow(_ hop: LatencyHop, _ stats: LatencyStats?, budget: LatencyBudget, compact: Bool) -> Row {
+        let target = budget[hop].p50Milliseconds
+        guard let stats else { return Row(label: hop.shortTitle, value: placeholder) }
+        let level: Level =
+            stats.p50 > target * 1.5 ? .critical : stats.p50 > target ? .warning : .normal
+        var value = "p50 \(milliseconds(stats.p50)) · p95 \(milliseconds(stats.p95)) / \(milliseconds(target)) ms"
+        if !compact {
+            value += " (n=\(stats.totalCount))"
+        }
+        return Row(label: hop.shortTitle, value: value, level: level)
     }
 
     static func captureRow(_ drops: PipelineReadings.CaptureDrops?) -> Row {

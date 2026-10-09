@@ -142,7 +142,8 @@ struct MetricKitSignpostTests {
     @Test func reportsOnlyLowFrequencyUserFacingIntervals() {
         #expect(
             PipelineInterval.allCases.filter(\.reportsToMetricKit).map(\.name.description) == [
-                "asr.eou", "voiceid.verify", "realtime.turn", "realtime.firstAudio", "topics.label", "memory.search",
+                "asr.eou", "voiceid.verify", "voiceid.gate", "realtime.turn", "realtime.firstAudio", "topics.label",
+                "memory.search",
             ])
     }
 

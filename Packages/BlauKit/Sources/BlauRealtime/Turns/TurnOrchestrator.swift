@@ -78,6 +78,15 @@ import os
 /// audio delta (docs/performance.md). ``TurnSnapshot/latency`` keeps the
 /// same two as rolling last / p50 / p95 values for the HUD.
 ///
+/// **Latency budget (#74).** Each turn that got a reply's audio is also
+/// measured hop by hop, from the end of the user's speech to the reply's
+/// first frame rendered: the transcriber's `LatencyMarks` (end of speech,
+/// end of utterance), the commit, the first audio delta and the player's
+/// `PlayedItem/firstRenderedAt`. The sample is taken when the reply has
+/// played (or was cut), logged, added to ``TurnSnapshot/latency`` and
+/// recorded in the `LatencyBudgetTracker` (Settings → Developer → Latency
+/// Budget).
+///
 /// **Concurrency.** Every decision is made synchronously on the actor; the
 /// WebSocket sends and the transcript writes run in two serial queues, so
 /// neither a slow send nor a slow save reorders anything.
@@ -186,6 +195,10 @@ public actor TurnOrchestrator: RealtimeService {
     let reseedContext: any RealtimeReseedContextProviding
     let clock: any BlauClock
     let signposter: Signposter
+    /// Where the transcriber left each final's end of speech (#74).
+    private let latencyMarks: LatencyMarks?
+    /// Where each turn's latency sample goes (#74).
+    private let latencyTracker: LatencyBudgetTracker?
     private let broadcaster: SnapshotBroadcaster
     let outbox = SerialWorkQueue(priority: .userInitiated)
     private let recorder = SerialWorkQueue(priority: .utility)
@@ -331,6 +344,10 @@ public actor TurnOrchestrator: RealtimeService {
     ///     and response timeouts and the session's age.
     ///   - signposter: Where `realtime.turn`, `realtime.firstAudio` and
     ///     `realtime.toolCall` go.
+    ///   - latencyMarks: The transcriber's end-of-speech marks, taken on
+    ///     commit for the latency budget (#74). `nil` measures from the
+    ///     commit only.
+    ///   - latencyTracker: Records each turn's latency sample (#74).
     ///   - configuration: Merge window, timeouts and session continuity.
     public init(
         client: RealtimeClient,
@@ -341,6 +358,8 @@ public actor TurnOrchestrator: RealtimeService {
         tools: RealtimeToolRegistry = RealtimeToolRegistry(),
         clock: any BlauClock = SystemClock(),
         signposter: Signposter = Signposts.realtime,
+        latencyMarks: LatencyMarks? = .shared,
+        latencyTracker: LatencyBudgetTracker? = .shared,
         configuration: Configuration = .standard
     ) {
         self.client = client
@@ -350,6 +369,8 @@ public actor TurnOrchestrator: RealtimeService {
         self.reseedContext = reseedContext
         self.clock = clock
         self.signposter = signposter
+        self.latencyMarks = latencyMarks
+        self.latencyTracker = latencyTracker
         self.configuration = configuration
         let latency = TurnLatencyStatistics(capacity: configuration.latencyWindow)
         self.latency = latency
@@ -796,6 +817,8 @@ public actor TurnOrchestrator: RealtimeService {
 
     private func commit(_ incoming: Utterance, endOfUtterance: Duration) throws(OrchestratorError) {
         guard let conversationID else { throw .notRunning }
+        // The transcriber's marks for this final, whatever happens to it.
+        let marks = latencyMarks?.take(incoming.id)
         // The utterance in progress ended, whatever happens to it.
         userPartial = nil
         let ignored: Bool
@@ -842,14 +865,17 @@ public actor TurnOrchestrator: RealtimeService {
                 recordUser(merged, adding: utterance)
                 signposter.event("realtime.turnMerged")
                 Log.realtime.notice("Turn \(turn.number, privacy: .public) continued by a rapid follow-up")
-                begin(user: merged, texts: [utterance.text], endOfUtterance: endOfUtterance, isMeasured: true)
+                begin(
+                    user: merged, texts: [utterance.text], endOfUtterance: endOfUtterance, isMeasured: true,
+                    marks: marks)
                 return
             }
             abandon(turn, reason: .interrupted)
             signposter.event("realtime.turnInterrupted")
         }
         recordUser(utterance, adding: utterance)
-        begin(user: utterance, texts: [utterance.text], endOfUtterance: endOfUtterance, isMeasured: true)
+        begin(
+            user: utterance, texts: [utterance.text], endOfUtterance: endOfUtterance, isMeasured: true, marks: marks)
     }
 
     /// Whether `next` continues `previous`: it starts within the merge
@@ -868,8 +894,11 @@ public actor TurnOrchestrator: RealtimeService {
     }
 
     /// Starts turn `number`: begins the signposts, sends the text items and
-    /// `response.create`.
-    private func begin(user: Utterance, texts: [String], endOfUtterance: Duration, isMeasured: Bool) {
+    /// `response.create`. `marks` are the transcriber's for the latest
+    /// final, for the latency budget.
+    private func begin(
+        user: Utterance, texts: [String], endOfUtterance: Duration, isMeasured: Bool, marks: LatencyMarks.Marks? = nil
+    ) {
         let number = nextTurnNumber
         nextTurnNumber += 1
         current = Turn(
@@ -879,7 +908,9 @@ public actor TurnOrchestrator: RealtimeService {
             endOfUtterance: endOfUtterance,
             isMeasured: isMeasured,
             turnInterval: signposter.beginInterval(.realtimeTurn),
-            firstAudioInterval: signposter.beginInterval(.realtimeFirstAudio)
+            firstAudioInterval: signposter.beginInterval(.realtimeFirstAudio),
+            timeline: TurnLatencyTimeline(
+                endOfSpeech: marks?.endOfSpeech, endOfUtterance: marks?.endOfUtterance, committed: endOfUtterance)
         )
         setState(.committing)
         Log.realtime.notice(
@@ -1337,6 +1368,8 @@ public actor TurnOrchestrator: RealtimeService {
             guard turn.firstAudioAt == nil else { return }
             let now = self.clock.uptime
             turn.firstAudioAt = now
+            turn.timeline.firstAudio = now
+            turn.firstAudioItem = item.playbackID
             turn.firstAudioInterval?.end()
             turn.firstAudioInterval = nil
             let latency = now - turn.endOfUtterance
@@ -1537,6 +1570,7 @@ public actor TurnOrchestrator: RealtimeService {
     /// Ends a turn whose tool round won't be followed up: what was said is
     /// stored already; the conversation goes back to listening.
     private func endToolTurn(_ turn: Turn, message: String) {
+        recordLatency(of: turn, played: turn.firstAudioItem.flatMap { audio.playedItem(for: $0) })
         endIntervals(of: turn, message: message)
         current = nil
         cancelTimers()
@@ -1690,6 +1724,7 @@ public actor TurnOrchestrator: RealtimeService {
 
     private func playbackFinished(turn number: Int) {
         guard let turn = current, turn.number == number, turn.isResponseDone else { return }
+        recordLatency(of: turn, played: turn.firstAudioItem.flatMap { audio.playedItem(for: $0) })
         current = nil
         drainTask = nil
         setState(userPartial == nil ? .listening : .userSpeaking)
@@ -1739,6 +1774,10 @@ public actor TurnOrchestrator: RealtimeService {
         // Silence first: everything else can wait a few microseconds.
         let flushed = audio.flush()
         let flushedAt = clock.uptime
+        if let first = turn.firstAudioItem {
+            recordLatency(
+                of: turn, played: flushed.interrupted.first { $0.id == first } ?? audio.playedItem(for: first))
+        }
         var events: [RealtimeClientEvent] = []
         // A turn whose `response.create` is still held back has no response
         // to cancel.
@@ -2029,6 +2068,30 @@ public actor TurnOrchestrator: RealtimeService {
         resetContinuity()
     }
 
+    /// Takes `turn`'s latency sample (#74), once its reply's first frame has
+    /// had its chance to play: `played` is the first audio item's playback,
+    /// whose first rendered frame ends the timeline. Only turns that went
+    /// out straight away and got audio count.
+    private func recordLatency(of turn: Turn, played: PlayedItem?) {
+        guard turn.isMeasured, turn.firstAudioAt != nil else { return }
+        var timeline = turn.timeline
+        timeline.firstBuffer = played?.firstRenderedAt
+        let sample = TurnLatencySample(
+            turn: turn.number, recordedAt: clock.now, timeline: timeline,
+            hardware: latencyTracker?.currentHardwareLatency())
+        latency.record(sample)
+        latencyTracker?.record(sample)
+        let budget = latencyTracker?.budget ?? .standard
+        let overBudget = sample.totalMilliseconds.map { !budget.isWithinBudget(.total, p50Milliseconds: $0) } ?? false
+        if overBudget {
+            signposter.event("realtime.overBudget")
+        }
+        let note = overBudget ? " (over the \(Int(budget.total.p50Milliseconds)) ms budget)" : ""
+        Log.realtime.notice(
+            "Turn \(turn.number, privacy: .public) latency: \(sample.summary, privacy: .public)\(note, privacy: .public)"
+        )
+    }
+
     func endIntervals(of turn: Turn, message: String) {
         turn.turnInterval.end(message: message)
         turn.firstAudioInterval?.end(message: message)
@@ -2091,6 +2154,11 @@ extension TurnOrchestrator {
         let isMeasured: Bool
         let turnInterval: SignpostInterval
         var firstAudioInterval: SignpostInterval?
+        /// The hops measured so far, for the latency budget (#74).
+        var timeline: TurnLatencyTimeline
+        /// The reply's first audio item: its first rendered frame ends the
+        /// latency timeline.
+        var firstAudioItem: PlaybackItemID?
         var responseID: String?
         var firstAudioAt: Duration?
         var agentItems: [AgentItem] = []
@@ -2121,7 +2189,7 @@ extension TurnOrchestrator {
 
         init(
             number: Int, user: Utterance, texts: [String], endOfUtterance: Duration, isMeasured: Bool,
-            turnInterval: SignpostInterval, firstAudioInterval: SignpostInterval?
+            turnInterval: SignpostInterval, firstAudioInterval: SignpostInterval?, timeline: TurnLatencyTimeline
         ) {
             self.number = number
             self.user = user
@@ -2130,6 +2198,7 @@ extension TurnOrchestrator {
             self.isMeasured = isMeasured
             self.turnInterval = turnInterval
             self.firstAudioInterval = firstAudioInterval
+            self.timeline = timeline
         }
     }
 

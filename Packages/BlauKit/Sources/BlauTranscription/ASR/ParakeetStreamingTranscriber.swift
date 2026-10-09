@@ -63,6 +63,7 @@ public actor ParakeetStreamingTranscriber: Transcriber {
     private let signposter: Signposter
     private let clock: any BlauClock
     private let inferenceObserver: (any InferenceObserver)?
+    private let latencyMarks: LatencyMarks?
     private let logger = Log.asr
     private let shared = Mutex(StreamingTranscriberStatistics())
 
@@ -77,6 +78,11 @@ public actor ParakeetStreamingTranscriber: Transcriber {
     private var currentFrame: AudioFrame?
     /// A recent stream position and the wall-clock time it was captured.
     private var wallAnchor: (offset: Int64, date: Date)?
+    /// A recent stream position and when it was captured on the clock's
+    /// uptime timeline: from the frame's host time when it has one, else
+    /// the frame's arrival here. Places an utterance's end of speech for
+    /// the latency budget (#74).
+    private var uptimeAnchor: (offset: Int64, uptime: Duration)?
     /// Whether VAD has a speech segment open, from its events.
     private var isSpeechActive = false
     /// Audio before this offset belongs to committed utterances: where the
@@ -129,6 +135,9 @@ public actor ParakeetStreamingTranscriber: Transcriber {
     ///     the error), as the `"asr"` stage: `BackgroundInferenceMonitor`
     ///     (#26) moves speech-to-text to Apple's engine when Parakeet keeps
     ///     failing or falling behind off screen.
+    ///   - latencyMarks: Where each final's end of speech and end of
+    ///     utterance go, for the turn orchestrator's latency budget (#74).
+    ///     `nil` records none.
     public init(
         recognizer: any StreamingSpeechRecognizer,
         audio: any CaptureFrameSource,
@@ -139,7 +148,8 @@ public actor ParakeetStreamingTranscriber: Transcriber {
         recognizerProvider: RecognizerProvider? = nil,
         signposter: Signposter = Signposts.asr,
         clock: any BlauClock = SystemClock(),
-        inferenceObserver: (any InferenceObserver)? = nil
+        inferenceObserver: (any InferenceObserver)? = nil,
+        latencyMarks: LatencyMarks? = .shared
     ) {
         self.recognizer = recognizer
         self.audio = audio
@@ -151,6 +161,7 @@ public actor ParakeetStreamingTranscriber: Transcriber {
         self.signposter = signposter
         self.clock = clock
         self.inferenceObserver = inferenceObserver
+        self.latencyMarks = latencyMarks
         (events, continuation) = AsyncStream.makeStream(of: TranscriptEvent.self, bufferingPolicy: .unbounded)
     }
 
@@ -326,6 +337,11 @@ public actor ParakeetStreamingTranscriber: Transcriber {
     private func handle(_ frame: AudioFrame) async {
         guard frame.sampleRate == AudioFrame.captureSampleRate, !frame.isEmpty else { return }
         wallAnchor = (frame.nextSampleOffset, clock.now)
+        if let hostTime = frame.hostTime, hostTime > 0 {
+            uptimeAnchor = (frame.sampleOffset, clock.uptime - HostClock.elapsed(since: hostTime))
+        } else {
+            uptimeAnchor = (frame.nextSampleOffset, clock.uptime)
+        }
         currentFrame = frame
         receivedEnd = max(receivedEnd ?? frame.nextSampleOffset, frame.nextSampleOffset)
         await pump()
@@ -510,6 +526,12 @@ public actor ParakeetStreamingTranscriber: Transcriber {
                 "Utterance \(open.number, privacy: .public) had no words (\(reason.rawValue, privacy: .public))")
         } else {
             let utterance = makeUtterance(open, text: text, position: position)
+            if reason == .endOfUtterance || reason == .silence {
+                // Before the final goes out, so the orchestrator finds them.
+                latencyMarks?.record(
+                    .init(endOfSpeech: uptime(at: utterance.timeRange.end), endOfUtterance: clock.uptime),
+                    for: utterance.id)
+            }
             continuation.yield(.final(utterance))
             record { $0.utterancesCommitted += 1 }
             logger.info(
@@ -612,6 +634,14 @@ public actor ParakeetStreamingTranscriber: Transcriber {
         guard let anchor = wallAnchor else { return clock.now }
         let samples = anchor.offset - offset
         return anchor.date.addingTimeInterval(-Double(samples) / Double(AudioFrame.captureSampleRate))
+    }
+
+    /// When the sample at `position` on the audio timeline was captured,
+    /// on the clock's uptime timeline, from the latest live frame.
+    private func uptime(at position: Duration) -> Duration? {
+        guard let anchor = uptimeAnchor else { return nil }
+        let samples = position.sampleCount(sampleRate: AudioFrame.captureSampleRate) - anchor.offset
+        return anchor.uptime + .seconds(Double(samples) / Double(AudioFrame.captureSampleRate))
     }
 
     private func record(_ body: (inout StreamingTranscriberStatistics) -> Void) {

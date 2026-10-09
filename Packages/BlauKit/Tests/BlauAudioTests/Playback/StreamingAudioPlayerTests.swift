@@ -344,6 +344,41 @@ struct StreamingAudioPlayerTests {
         #expect(harness.signposts.openIntervals.isEmpty)
     }
 
+    /// The latency budget's first-buffer hop ends at the item's first
+    /// rendered frame, on the player's clock (#74).
+    @Test func eachItemRemembersWhenItsFirstFrameWasRendered() {
+        let harness = Harness()
+        harness.clock.advance(by: .seconds(10))
+        harness.player.enqueue(samples: Harness.audio(milliseconds: 60), item: Self.itemA)
+        harness.render()  // still buffering: nothing rendered yet
+        #expect(harness.player.playedItem(for: Self.itemA)?.firstRenderedAt == nil)
+
+        harness.clock.advance(by: .milliseconds(45))
+        harness.player.enqueue(samples: Harness.audio(milliseconds: 80), item: Self.itemA)
+        harness.render()
+        #expect(harness.player.playedItem(for: Self.itemA)?.firstRenderedAt == .milliseconds(10_045))
+
+        // Later cycles don't move it; the next item gets its own.
+        harness.clock.advance(by: .milliseconds(20))
+        harness.player.finish(Self.itemA)
+        harness.player.enqueue(samples: Harness.audio(milliseconds: 40), item: Self.itemB)
+        harness.player.finish(Self.itemB)
+        for _ in 0..<12 { harness.render() }
+        #expect(harness.player.playedItem(for: Self.itemA)?.firstRenderedAt == .milliseconds(10_045))
+        #expect(harness.player.playedItem(for: Self.itemB)?.firstRenderedAt == .milliseconds(10_065))
+    }
+
+    @Test func aFlushReportsWhetherTheInterruptedItemWasHeard() {
+        let harness = Harness()
+        harness.player.enqueue(samples: Harness.audio(milliseconds: 200), item: Self.itemA)
+        harness.clock.advance(by: .milliseconds(5))
+        harness.render()
+        harness.player.enqueue(samples: Harness.audio(milliseconds: 200), item: Self.itemB)
+        let flushed = harness.player.flush()
+        #expect(flushed.interrupted.map(\.id) == [Self.itemA, Self.itemB])
+        #expect(flushed.interrupted.map(\.firstRenderedAt) == [.milliseconds(5), nil])
+    }
+
     @Test func firstBufferSignpostEndsWhenFlushedBeforePlaying() {
         let harness = Harness()
         harness.player.enqueue(samples: Harness.audio(milliseconds: 60), item: Self.itemA)

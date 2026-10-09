@@ -335,6 +335,81 @@ struct ParakeetStreamingTranscriberTests {
         #expect(backend.endMessages(of: "asr.eou") == ["resumed", "silence", "silence"])
     }
 
+    /// The latency budget's first hop (#74): each final leaves its end of
+    /// speech and end-of-utterance moments for the turn orchestrator.
+    @Test func eachEndOfUtteranceLeavesItsLatencyMarks() async throws {
+        let scenario = Scenario(seconds: 9)
+            .speech("hello there how are you", from: 0.5, to: 2.5, endsUtterance: true)
+            .speech("so I was thinking that", from: 4.0, to: 5.0, endsUtterance: false)
+        let recognizer = SimulatedEouRecognizer(words: scenario.words, debounce: .milliseconds(320))
+        let source = FixtureAudioSource(block: scenario.samples)
+        let marks = LatencyMarks()
+        let clock = ManualClock(uptime: .seconds(100))
+        let transcriber = makeTranscriber(recognizer, source: source, clock: clock, latencyMarks: marks)
+
+        let replay = await TranscriptionReplay.run(transcriber, source: source, vadEvents: scenario.events)
+
+        #expect(replay.finalEmissions.count == 2)
+        for (final, position) in replay.finalEmissions {
+            let mark = try #require(marks.take(final.id))
+            #expect(mark.endOfUtterance == .seconds(100))
+            // The clock stood still while the audio replayed, so the hop is
+            // the audio between the end of speech and the decision (to the
+            // frame: a commit on VAD's event comes before that frame).
+            let endOfSpeech = try #require(mark.endOfSpeech)
+            let hop = (mark.endOfUtterance - endOfSpeech).timeInterval
+            let audio = Double(position - final.timeRange.end.sampleCount(sampleRate: 16_000)) / 16_000
+            #expect(abs(hop - audio) <= 0.021, "\(hop) vs \(audio)")
+            #expect(hop > 0.3 && hop < 1.0, "\(hop)")
+        }
+        #expect(marks.count == 0)
+    }
+
+    @Test func aCaptureHostTimePlacesTheEndOfSpeech() async throws {
+        let scenario = Scenario(seconds: 4).speech("hello there", from: 0.5, to: 1.5, endsUtterance: true)
+        let recognizer = SimulatedEouRecognizer(words: scenario.words, debounce: .milliseconds(320))
+        let source = FixtureAudioSource(block: scenario.samples)
+        let marks = LatencyMarks()
+        let transcriber = makeTranscriber(recognizer, source: source, clock: SystemClock(), latencyMarks: marks)
+        let events = transcriber.events
+        let collector = Task {
+            var finals: [Utterance] = []
+            for await case .final(let utterance) in events { finals.append(utterance) }
+            return finals
+        }
+
+        // Live frames stamped with the host time they were captured at: the
+        // whole stream lies in the past, so the transcriber's frame arrival
+        // (now) is not when the speech ended.
+        let streamStart = HostClock.now - HostClock.ticks(for: .seconds(4))
+        var pending = scenario.events.sorted { $0.detectedAt < $1.detectedAt }[...]
+        var offset: Int64 = 0
+        while offset < source.totalSamples {
+            let frame = source.frame(at: offset, length: 320)
+            var due: [VoiceActivityEvent] = []
+            while let next = pending.first, next.detectedAt <= frame.sampleOffset {
+                due.append(next)
+                pending.removeFirst()
+            }
+            source.position = frame.nextSampleOffset
+            let hostTime = streamStart + HostClock.ticks(for: .samples(offset, sampleRate: 16_000))
+            await transcriber.ingest(
+                due, frame: AudioFrame(samples: frame.samples, sampleOffset: frame.sampleOffset, hostTime: hostTime))
+            offset = frame.nextSampleOffset
+        }
+        await transcriber.finish()
+
+        let final = try #require(await collector.value.first)
+        let mark = try #require(marks.take(final.id))
+        let endOfSpeech = try #require(mark.endOfSpeech)
+        let capturedAt = streamStart + HostClock.ticks(for: final.timeRange.end)
+        let expected = SystemClock().uptime - HostClock.elapsed(since: capturedAt)
+        #expect(abs((endOfSpeech - expected).timeInterval) < 0.01, "\(endOfSpeech) vs \(expected)")
+        // The replay took an instant, so the decision came about 2.5 s after
+        // the speech was captured, not one frame after its arrival.
+        #expect((mark.endOfUtterance - endOfSpeech).timeInterval > 2)
+    }
+
     // MARK: Lifecycle
 
     @Test func startFollowsTheCaptureAndVADStreamsAndStopCommits() async throws {
@@ -535,11 +610,12 @@ struct ParakeetStreamingTranscriberTests {
         voiceActivity: any VoiceActivitySource = ScriptedVoiceActivity(),
         configuration: StreamingTranscriberConfiguration = .standard,
         signposter: Signposter = .disabled(.asr),
-        clock: any BlauClock = ManualClock()
+        clock: any BlauClock = ManualClock(),
+        latencyMarks: LatencyMarks? = nil
     ) -> ParakeetStreamingTranscriber {
         ParakeetStreamingTranscriber(
             recognizer: recognizer, audio: source, voiceActivity: voiceActivity, configuration: configuration,
-            signposter: signposter, clock: clock)
+            signposter: signposter, clock: clock, latencyMarks: latencyMarks)
     }
 }
 

@@ -9,9 +9,12 @@ import Testing
 struct PerformanceHUDReadoutTests {
     @Test func anEmptySnapshotShowsPlaceholders() {
         let readout = PerformanceHUDReadout(PerformanceHUDSnapshot())
-        #expect(readout.compact.map(\.label) == ["FPS", "CPU", "Memory", "Thermal", "EOU → audio"])
+        #expect(readout.compact.map(\.label) == ["FPS", "CPU", "Memory", "Thermal", "EOU → audio", "Speech → audio"])
         #expect(readout.compact.allSatisfy { $0.value == "–" })
-        #expect(readout.sections.map(\.title) == ["Device", "Audio", "Speech", "Grok", "Topics", "Signposts"])
+        #expect(
+            readout.sections.map(\.title) == [
+                "Device", "Audio", "Speech", "Grok", "Latency budget", "Topics", "Signposts",
+            ])
         #expect(readout.row("Voice score")?.value == "–")
         #expect(readout.row("Intervals")?.value == "–")
         #expect(readout.level == .normal)
@@ -62,7 +65,7 @@ struct PerformanceHUDReadoutTests {
         #expect(readout.row("Voice score")?.value == "0.71 (thr 0.55)")
         #expect(readout.row("Turn")?.value == "listening")
         #expect(readout.row("EOU → audio")?.value == "last 640 · p50 610 · p95 900 ms (n=12)")
-        #expect(readout.compact.last?.value == "p50 610 · p95 900 ms")
+        #expect(readout.compact.first { $0.label == "EOU → audio" }?.value == "p50 610 · p95 900 ms")
         #expect(readout.row("Turn time")?.value == "–")
         #expect(readout.row("Tokens")?.value == "4120 in · 960 out · 12 resp")
         #expect(readout.row("Cost")?.value == "$0.42 est.")

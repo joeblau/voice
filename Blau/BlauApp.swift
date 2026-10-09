@@ -1,3 +1,5 @@
+import BlauAudio
+import BlauTelemetry
 import SwiftUI
 
 /// App entry point. Builds the composition root (`AppEnvironment`) once,
@@ -26,6 +28,9 @@ struct BlauApp: App {
         }
         let diagnostics = AppDiagnostics.live()
         diagnostics.start()
+        // Every turn's latency sample carries the audio route's hardware
+        // latency (#74, docs/performance.md "Latency budget").
+        LatencyBudgetTracker.shared.setHardwareLatencyProvider { SystemAudioSession.hardwareLatency() }
         _diagnostics = State(initialValue: diagnostics)
     }
 

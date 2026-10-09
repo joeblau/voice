@@ -50,6 +50,11 @@ extension TurnSnapshot {
             totalCount: latency.firstAudio.totalCount)
         readings.turnTime = LatencyStats(
             last: latency.turn.last, samples: latency.turn.samples, totalCount: latency.turn.totalCount)
+        for hop in LatencyHop.allCases {
+            let window = latency.window(for: hop)
+            readings.latencyHops[hop] = LatencyStats(
+                last: window.last, samples: window.samples, totalCount: window.totalCount)
+        }
         readings.usage = PipelineReadings.Usage(
             inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, responses: usage.responses,
             estimatedCostUSD: pricing.estimatedCost(of: usage))

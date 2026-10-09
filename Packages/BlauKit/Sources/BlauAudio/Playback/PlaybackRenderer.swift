@@ -45,6 +45,8 @@ final class PlaybackRenderer: Sendable {
         /// No more audio will come: `finish` was called or it was flushed.
         var isFinished = false
         var hasStartedPlaying = false
+        /// When the first frame was rendered (the clock's uptime).
+        var firstRenderedAt: Duration?
         /// `playback.firstBuffer`, from the first enqueue to the first
         /// rendered frame. Ended by the render thread; released by
         /// producers when the slot is reused.
@@ -100,11 +102,18 @@ final class PlaybackRenderer: Sendable {
 
     let configuration: PlaybackConfiguration
     private let signposter: Signposter
+    /// Stamps each item's first rendered frame. Read on the render thread:
+    /// `SystemClock.uptime` is a clock read, no allocation and no lock.
+    private let clock: any BlauClock
     private let state: Mutex<State>
 
-    init(configuration: PlaybackConfiguration, signposter: Signposter) {
+    init(configuration: PlaybackConfiguration, signposter: Signposter, clock: any BlauClock = SystemClock()) {
         self.configuration = configuration
         self.signposter = signposter
+        self.clock = clock
+        // Initializes the clock's origin here rather than on the render
+        // thread's first read.
+        _ = clock.uptime
         state = Mutex(
             State(
                 items: Array(repeating: ItemRecord(), count: configuration.itemHistoryCapacity),
@@ -364,6 +373,7 @@ final class PlaybackRenderer: Sendable {
                 state.items[slot].queuedFrames -= n
                 if !state.items[slot].hasStartedPlaying {
                     state.items[slot].hasStartedPlaying = true
+                    state.items[slot].firstRenderedAt = clock.uptime
                     state.items[slot].firstBuffer?.end()
                 }
             }
@@ -433,7 +443,8 @@ final class PlaybackRenderer: Sendable {
             id: record.id ?? PlaybackItemID(itemID: ""),
             playedFrames: record.playedFrames,
             receivedFrames: record.receivedFrames,
-            sampleRate: configuration.sampleRate
+            sampleRate: configuration.sampleRate,
+            firstRenderedAt: record.firstRenderedAt
         )
     }
 }
