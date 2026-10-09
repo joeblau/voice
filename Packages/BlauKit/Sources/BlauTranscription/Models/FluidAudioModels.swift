@@ -1,5 +1,6 @@
 import FluidAudio
 import Foundation
+import Synchronization
 
 /// How Blau's model store lines up with FluidAudio 0.17.5.
 ///
@@ -22,8 +23,67 @@ public enum FluidAudioModels {
     /// .networkDisabled` instead of touching the network, so nothing but
     /// `ModelManager` downloads models. Call once at launch, before any
     /// FluidAudio API is used.
+    ///
+    /// Inside a ``withImplicitDownloads(isolation:_:)`` scope the flag stays
+    /// off until the outermost scope ends, which then turns it on.
     public static func disableImplicitDownloads() {
-        ModelHub.offlineMode = true
+        implicitDownloadScopes.withLock { scopes in
+            if scopes.depth > 0 {
+                scopes.restoredOfflineMode = true
+            } else {
+                ModelHub.offlineMode = true
+            }
+        }
+    }
+
+    /// Whether FluidAudio's own download paths may currently touch the
+    /// network (`ModelHub.offlineMode` is off).
+    public static var implicitDownloadsAllowed: Bool { !ModelHub.offlineMode }
+
+    /// Runs `body` with FluidAudio's own downloads allowed, then puts
+    /// `ModelHub.offlineMode` back the way it was.
+    ///
+    /// For the debug benchmark screen and background probe only (#22): their
+    /// cases fetch models through FluidAudio's loaders (including variants
+    /// the pinned manifest doesn't have, like EOU 160 ms and CAM++), but the
+    /// app turns offline mode on at launch, so without this every download
+    /// throws `networkDisabled` / `modelMissing`. Production code never
+    /// calls it: it loads from ``ModelManager/directory(for:)`` with
+    /// FluidAudio's local-directory APIs, which don't read the flag.
+    ///
+    /// Scopes may overlap (each one counts); offline mode returns when the
+    /// last one ends.
+    public static func withImplicitDownloads<T, Failure: Error>(
+        isolation: isolated (any Actor)? = #isolation,
+        _ body: () async throws(Failure) -> T
+    ) async throws(Failure) -> T {
+        beginImplicitDownloads()
+        defer { endImplicitDownloads() }
+        return try await body()
+    }
+
+    private struct ImplicitDownloadScopes {
+        /// Open ``withImplicitDownloads(isolation:_:)`` scopes.
+        var depth = 0
+        /// `ModelHub.offlineMode` to restore when the last scope ends.
+        var restoredOfflineMode = false
+    }
+
+    private static let implicitDownloadScopes = Mutex(ImplicitDownloadScopes())
+
+    private static func beginImplicitDownloads() {
+        implicitDownloadScopes.withLock { scopes in
+            if scopes.depth == 0 { scopes.restoredOfflineMode = ModelHub.offlineMode }
+            scopes.depth += 1
+            ModelHub.offlineMode = false
+        }
+    }
+
+    private static func endImplicitDownloads() {
+        implicitDownloadScopes.withLock { scopes in
+            scopes.depth -= 1
+            if scopes.depth == 0 { ModelHub.offlineMode = scopes.restoredOfflineMode }
+        }
     }
 
     /// The Silero VAD bundle FluidAudio's `VadManager` expects.

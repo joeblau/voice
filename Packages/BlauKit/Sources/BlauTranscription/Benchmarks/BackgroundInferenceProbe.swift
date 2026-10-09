@@ -172,6 +172,13 @@ public struct BackgroundInferenceProbe: Sendable {
 
         var step = 0
         while context.clock.uptime - start < configuration.duration {
+            // Skip the hops that are already past instead of replaying them
+            // back to back, the way a live microphone loses the audio while
+            // the process is frozen. Replaying them would fill a suspension
+            // the app resumed from off screen with burst samples, hiding the
+            // gap from the coverage check and timing those windows unpaced.
+            let due = Int((context.clock.uptime - start) / hop)
+            if due > step { step = due }
             do {
                 let wait = (start + hop * step) - context.clock.uptime
                 if wait > .zero { try await context.clock.sleep(for: wait) }

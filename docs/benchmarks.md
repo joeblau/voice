@@ -84,6 +84,14 @@ xcodebuild build -scheme Blau -configuration Release -destination 'id=<identifie
 The screen exists mainly for the background probe, which needs a person to
 lock the device.
 
+The app turns FluidAudio's offline mode on at launch, so that only
+`ModelManager` downloads models (#99). The screen's cases and the probe
+still fetch their models with FluidAudio's own loaders, into FluidAudio's
+cache (some variants, like EOU 160 ms and CAM++, aren't in the pinned
+manifest), so a suite or probe run lifts offline mode for its duration with
+`FluidAudioModels.withImplicitDownloads` and turns it back on when it ends.
+The first run on a device needs network access.
+
 ### The background Neural Engine probe
 
 On the benchmark screen, under **Background Neural Engine probe**:
@@ -101,6 +109,12 @@ On the benchmark screen, under **Background Neural Engine probe**:
 4. Leave it locked for most of the run, then unlock and return to Blau. The
    verdict, the recommended mitigation and a JSON report with every sample
    appear when the run ends (or tap **Stop and analyse**).
+
+The live run feeds one hop of audio per hop duration. If the process is
+frozen and later resumes (locked or not), the hops that passed meanwhile
+are skipped, the way a live microphone loses that audio, rather than
+replayed back to back; the gap they leave is what the coverage check
+reads as a suspension.
 
 Run it on iOS 27 (the restriction is new there) and, for comparison, on
 iOS 26.
