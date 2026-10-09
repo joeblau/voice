@@ -14,14 +14,21 @@ public struct TopicMembership: Sendable {
     /// The conversation's topics, by start.
     private let topics: [(id: UUID, startedAt: Date)]
     private let ids: Set<UUID>
+    private let isPartial: Bool
 
-    /// - Parameter topics: The topics of one conversation, in any order.
-    public init(topics: [TimelineTopic]) {
+    /// - Parameters:
+    ///   - topics: The topics of one conversation, in any order.
+    ///   - isPartial: Only the conversation's later topics are loaded: the
+    ///     timeline's window cuts through it (#57,
+    ///     ``TopicTimeline/partialConversationIDs``). Lines of the earlier
+    ///     topics then belong to none of these.
+    public init(topics: [TimelineTopic], isPartial: Bool = false) {
         let ordered = topics.sorted { lhs, rhs in
             lhs.startedAt != rhs.startedAt ? lhs.startedAt < rhs.startedAt : lhs.ordinal < rhs.ordinal
         }
         self.topics = ordered.map { ($0.id, $0.startedAt) }
         self.ids = Set(ordered.map(\.id))
+        self.isPartial = isPartial
     }
 
     /// The topic a line belongs to.
@@ -30,10 +37,16 @@ public struct TopicMembership: Sendable {
     ///   - startedAt: When the line started.
     ///   - assignedTopicID: The topic the store linked the line to, if any.
     ///     Used when it is one of this conversation's topics.
-    /// - Returns: `nil` only when the conversation has no topics.
+    /// - Returns: `nil` when the conversation has no topics, or, when only
+    ///   its later topics are loaded, for a line of an earlier one: linked
+    ///   to a topic that isn't loaded, or older than every loaded topic.
     public func topicID(forLineStartedAt startedAt: Date, assignedTopicID: UUID?) -> UUID? {
         if let assignedTopicID, ids.contains(assignedTopicID) {
             return assignedTopicID
+        }
+        if isPartial {
+            if assignedTopicID != nil { return nil }
+            if let first = topics.first, startedAt < first.startedAt { return nil }
         }
         // The last topic that started at or before the line.
         var low = 0

@@ -27,7 +27,7 @@ Today
 | Opens the app | The screen is anchored to the latest line of the **current topic**: the open topic of the running conversation, or else of the most recent one (else that conversation's last topic). Its bullet is a pinned section header, so it stays on screen however long the transcript gets, and older bullets fill the space above it |
 | Swipes down | Scrolls up into the history: compressed bullets on a continuous rail, oldest at the top, grouped by day ("Today", "Yesterday", "Tuesday, October 6") and by conversation. Each day heading appears once, in order: the focus conversation always comes last, so a running conversation that began before midnight, after which another device synced one that began after it, sits under the later day's heading |
 | Taps a compressed bullet | Expands it in place, in under 100 ms: its detail (summary, span, actions, [below](#topic-detail)) and transcript open below the bullet, which doesn't move. Tapping again compresses it. Several can be open at once |
-| Swipes back, taps **Now** or taps the current bullet | Returns to the latest line with a spring (a short ease under Reduce Motion). The Now pill shows whenever the latest line is out of view |
+| Swipes back, taps **Now** or taps the current bullet | Returns to the latest line with a spring (a short ease under Reduce Motion). The Now pill shows whenever the latest line is out of view. From deep in a long history the lazy stack measures rows on the way down and the spring can stop short, so Now finishes the trip on the `UIScrollView` until the latest line is in view |
 | Long-presses a bullet | Continue This Topic and Share as Markdown (#58), Rename and Merge with Previous (#54) |
 | Long-presses a line of a topic | Copy, Share and "Split Topic Here" (#54), except on the topic's first line |
 
@@ -132,12 +132,114 @@ fetches that one conversation's utterances.
   (`containerSize` leaves out the bar insets on iOS 26, so the visible rect
   is the reliable measure.)
 - `scrollPosition($position)` drives Now (`scrollTo(edge: .bottom)`) and is
-  keyed by `TopicTimeline.ItemID`, ready for #57's paging.
-- The timeline loads the 500 most recent topics
-  (`TopicTimeline.recentTopics()`). When the cap cuts through a
-  conversation, the lines of its unloaded earlier topics are counted in its
-  first loaded topic until #57 pages them in. Paging older history in as the user
-  scrolls up, and the iOS 27 prepend regression (FB24968838), are #57.
+  keyed by `TopicTimeline.ItemID`.
+
+## Paging history (#57)
+
+The timeline never loads the whole history up front. Thousands of topics
+load a page at a time as the user scrolls up, without the rows on screen
+moving.
+
+**The window.** `TopicHistoryPaging` holds a **cutoff** date: the
+timeline's `@Query` fetches every topic that started at or after it
+(`windowDescriptor`), and a second one-row query tells whether anything is
+older (`olderDescriptor`, live, so a sync that brings older topics shows the
+spinner again).
+
+- On launch the cutoff isn't known: the window is the 200 most recent
+  topics (`TopicTimeline.recentTopics()`). As soon as that fills, the cutoff
+  settles on the start of the day of its oldest topic, which completes that
+  day. This happens at launch, at the latest line, so nothing on screen
+  moves.
+- Near the top (within three screen heights of the loaded content's top,
+  `TopicHistoryPaging.isNearTop`), the next page moves the cutoff back to
+  the start of the day of the 200th older topic (`pageBoundary`, a one-row
+  fetch with an offset), or to the beginning of time when fewer are left.
+  A page that lands while the top is still near asks for the next.
+- **Whole sections.** Cutoffs are always the start of a day, so a page adds
+  whole days (heading, conversations, bullets) above everything on screen
+  and never inserts rows inside a section that is already laid out. A
+  conversation that started before the cutoff and runs past it (two devices
+  recording at once, or a conversation over midnight) is left out until the
+  next page brings it whole (`TopicTimeline.wholeConversations`), unless it
+  is the focus conversation or the only one, which show their loaded topics
+  (`partialConversationIDs`): their lines of unloaded topics stay out of the
+  loaded ones (`TopicMembership(isPartial:)`).
+- **A date, not a count.** A topic opening at the bottom never pushes the
+  oldest loaded one out of the window while the user reads it.
+- While older history is still to load, the rail runs up off the first
+  bullet into an "Earlier topics" row with a spinner at the top
+  (`TopicTimeline.ItemID.earlier`). The next page usually lands before it
+  scrolls into view.
+
+**Keeping the rows in place.** A scroll view that grows above the visible
+area has to move its content offset down by the growth, or the rows on
+screen jump down by the page's height. Lazy stacks don't preserve the
+position when content is prepended (FB24968838,
+[forum thread](https://developer.apple.com/forums/thread/848608)), and once
+they lay out the rows they had estimated, they shift the content again.
+Measured on the simulators with the 2,000-topic history: a 200-topic page
+landed about 10,800 pt above the rows on screen without the offset moving
+at all, on iOS 27.0 and on iOS 26.5 alike, with the `scrollPosition`
+binding keyed by item ID and the size-change anchor at the bottom. So the
+timeline doesn't trust the scroll view:
+
+1. **Whole sections at once**, above everything on screen, in one `@Query`
+   update (above).
+2. **Only at rest.** Pages load when the top is near *and* the scroll view
+   is idle (`onScrollPhaseChange`), and only after the user has scrolled
+   (the geometry passes through the top while the screen opens). Reading
+   history, the scroll view comes to rest often, well before the top: the
+   next page lands then. A fling that reaches the top first stops at the
+   "Earlier topics" row, and the page lands there.
+3. **Hold a row.** Before it asks for the page, the timeline picks a row
+   on screen (`onScrollTargetVisibilityChange`; a day or conversation
+   heading or a compressed bullet, never a pinned section header) and has
+   it report its top in the window (`onGeometryChange`). If no row on
+   screen can be held, the page waits (`PrependScrollAnchor.request`
+   returns `.wait`): a long expanded topic can fill the screen with only
+   its pinned bullet reported, since its transcript's lines aren't
+   timeline rows. A page landing then would jump the rows by its height,
+   so the timeline asks again at the next rest, or when the rows on screen
+   change (a bullet compressed), once a heading or compressed bullet shows.
+   The "Earlier topics" row covers the wait. Only the first window's
+   cutoff, settled at launch at the latest line under the bottom anchor,
+   loads without a held row.
+   `PrependScrollAnchor` pins that position, then asks for the page; until
+   the layout has been still for 300 ms (2 s at most), whenever the row
+   strays, the content offset moves by as much. The scroll view is at
+   rest, so the row only moves because of layout, and the correction is
+   exact, whether SwiftUI moved the offset itself, partly or not at all.
+4. **In the same frame.** The correction sets `contentOffset` on the
+   `UIScrollView` behind the `ScrollView` (`EnclosingScrollView`), from the
+   row's geometry callback, so it lands before the frame is drawn.
+   There is no fallback: if the scroll view isn't found (a future SwiftUI
+   that hosts the content differently), the page lands uncorrected and
+   logs `Timeline page landed uncorrected` as an error, which the paging
+   UI test would catch as a jump. Each correction emits the signpost
+   event `timeline.prependCorrected`, and each page logs `Timeline page held
+   in place: <n> corrections, <pt> pt`.
+
+If the user touches the screen while a page is held, the hold ends: the
+finger moves the rows from then on. While a page lands, size changes anchor
+to the bottom, so whatever SwiftUI does on its own already goes the right
+way.
+
+The issue proposed `scrollPosition(id:)` anchoring first, then adjusting
+the `UIScrollView` offset through SwiftUIIntrospect behind
+`#available(iOS 27, *)`. The ID-keyed `scrollPosition` didn't hold the
+rows on either OS (above), so the timeline goes straight to the offset,
+found without a third-party dependency (a zero-size view inside the
+content walks up to its `UIScrollView`), and on every OS version: iOS 26.5
+needed the same correction, and the hold only moves the offset when the
+row demonstrably strayed, so where SwiftUI gets it right it costs nothing.
+
+**Memory.** Memory grows with the topics loaded, never with their
+transcripts: a compressed bullet is a plain `TimelineTopic` value (a
+fetched `Topic` with its conversation prefetched), only an expanded topic
+queries its lines, and the lazy stack builds only the rows on screen. The
+2,000-topic UI test checks the app's footprint grows less than 60 MB from
+the first page to the oldest topic.
 
 ## VoiceOver
 
@@ -157,7 +259,9 @@ fetches that one conversation's utterances.
 | Order, groups, current topic, rail, fetch (`TopicTimeline`, `TimelineTopic`) | `Packages/BlauKit/Sources/BlauTopics/Timeline/` |
 | Which lines belong to a topic (`TopicMembership`): the store's link, else by time | same |
 | Expansion rules (`TopicExpansion`), times and durations (`TopicTimelineFormat`), the expand timer (`TopicExpansionTimer`) | same |
-| The scroll view, Now pill, rotor (`TopicTimelineView`) | `Blau/Timeline/TopicTimelineView.swift` |
+| The window, its cutoff and pages (`TopicHistoryPaging`); the row held in place while a page lands (`PrependScrollAnchor`) | same |
+| The scroll view, paging trigger, Now pill, rotor (`TopicTimelineView`) | `Blau/Timeline/TopicTimelineView.swift` |
+| The `UIScrollView` behind it, for same-frame corrections (`EnclosingScrollView`) | `Blau/Timeline/EnclosingScrollView.swift` |
 | Bullets, rail, dot, headings, VoiceOver text (`TopicBullet`, `TopicBulletDescription`) | `Blau/Timeline/TopicBullet.swift` |
 | A topic's transcript rows (`TopicTranscriptRows`) | `Blau/Timeline/TopicTranscriptRows.swift` |
 | The detail: summary, span, actions (`TopicDetailHeader`, `TopicDetailDescription`) | `Blau/Timeline/TopicDetail.swift` |
@@ -185,6 +289,8 @@ its whole transcript, titled with the conversation's title.
 | `TopicDetailTests`, `VoiceLoopTests` (BlauTests) | the detail's span text; Continue and Share reading the store; the voice loop opening a conversation with the topic |
 | `TopicDetailUITests` | the detail under the bullet (summary, span, Continue, Share, More, then the lines) and its accessibility audit; tap → expanded under 100 ms over five expansions, as the app measured it; Continue starting a conversation; Share opening the share sheet; Rename from More; Split Topic Here on a line |
 | `TopicTimelineUITests` | opening on the current topic with bullets above the fold, only it expanded, compressed rows of one height; swiping into history and back by Now, swiping and tapping the current bullet; tapping to expand and compress in place; refined titles not moving the history; the VoiceOver labels and an accessibility audit of the timeline's elements; the largest text size |
+| `TopicHistoryPagingTests`, `TopicTimelinePagingTests`, `PrependScrollAnchorTests` (BlauKit) | #57: the first window and its cutoff; pages of whole days through a 2,000-topic store, each a pure prepend of the rows shown before; a new topic not pushing the oldest out; conversations the window cuts through; the rail into unloaded history; choosing the held row, waiting when none on screen can be held (a long expanded topic), pinning it and putting it back |
+| `TopicTimelinePagingUITests` | #57: from the current topic to the oldest of 2,000 with slow held drags, each moving the rows by the finger's travel within the pan's slop and a small fling (a page landing without its offset moves them thousands of points, a page's rows being measured hundreds); the whole history loads; the footprint grows less than 60 MB (about 15 minutes for this test). Flinging to the oldest topic and one tap on Now returning to the latest line |
 
 UI tests seed a canned history with `-BlauTimelineFixture <topics>` on a
 `ui-test` launch (12 topics over three conversations: two days ago,
@@ -192,9 +298,29 @@ yesterday and today, the last topic open; every third title starts as
 "Draft <n>"), and `-BlauTimelineRelabelAfter <seconds>` refines every
 provisional title from a separate `ModelContext` that long after seeding,
 the way the topic lifecycle's store does. Previews use the same fixture.
+`-BlauTimelineHistory <topics>` seeds a long history instead: conversations
+of five topics, two a day going back from today, titled "<title> <n>" with
+n counting from the oldest (the "Timeline, long history" preview seeds
+2,000).
+
+The paging UI tests take about 25 minutes together (the scroll through
+2,000 topics alone about 15), more than CI's `app-tests` job
+allows, so they skip unless `BLAU_LONG_UI_TESTS=1` (xcodebuild passes
+`TEST_RUNNER_`-prefixed variables to the test runner). Run them on an iOS 26
+and an iOS 27 simulator before changing the timeline's scrolling:
+
+```sh
+TEST_RUNNER_BLAU_LONG_UI_TESTS=1 xcodebuild test -scheme Blau -destination 'id=<iOS 26 simulator>' \
+  -derivedDataPath .build/DerivedData CODE_SIGNING_ALLOWED=NO \
+  -only-testing:BlauUITests/TopicTimelinePagingUITests
+# and again with an iOS 27 simulator
+```
 
 Still to check by hand on a device: the pulse and the spring feel,
 VoiceOver navigation with the rotor (the UI tests check the labels, values
 and traits, not the spoken output), the expand latency on an iPhone
-(Instruments, `timeline.expand`), and Continue against Grok with a real
-key ([realtime.md](realtime.md#manual-verification)).
+(Instruments, `timeline.expand`), Continue against Grok with a real
+key ([realtime.md](realtime.md#manual-verification)), and flinging through a long history at
+120 Hz on an iOS 27 iPhone (the UI test's drags are slow by design; a fling
+that lands a page mid-deceleration is where a correction would show as a
+hitch).
