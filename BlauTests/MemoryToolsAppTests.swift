@@ -27,14 +27,15 @@ struct MemoryToolsAppTests {
     @Test func theLiveSessionDeclaresAndRunsTheMemoryTools() async throws {
         let (environment, defaults, suite) = try live(memoryTools: nil)
         defer { defaults.removePersistentDomain(forName: suite) }
-        #expect(environment.realtimeSession.toolRegistry.names == MemoryTools.names)
+        // #69: the practice tools follow the memory tools, on the same flag.
+        #expect(environment.realtimeSession.toolRegistry.names == MemoryTools.names + PracticeTools.names)
         let declared = await environment.realtimeSession.configurator.currentSession().tools ?? []
         #expect(declared.contains(SearchMemoryTool.definition))
         #expect(declared.contains(ForgetTool.definition))
         // The orchestrator owns the runner over the same tools.
         let orchestrator = try #require(environment.realtime as? TurnOrchestrator)
         let runner = try #require(orchestrator.toolRunner)
-        #expect(await runner.registry.names == MemoryTools.names)
+        #expect(await runner.registry.names == MemoryTools.names + PracticeTools.names)
         #expect(orchestrator.configuration.keepsToolPayloads == AppConfig.isDebugBuild)
     }
 

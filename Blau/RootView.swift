@@ -188,6 +188,43 @@ struct MainScreenScaffold: View {
                 isShowingKeyOnboarding = false
             }
         }
+        // #69: "Practice with Grok" on a collection closes Settings, starts
+        // a conversation if needed and asks Grok to drill the collection.
+        .onChange(of: environment.practice.request?.id) { _, id in
+            guard let id, let request = environment.practice.take(id) else { return }
+            isShowingSettings = false
+            Task { await startPractice(request) }
+        }
+        .alert(
+            "Couldn't Start Practice",
+            isPresented: Binding(
+                get: { environment.practice.failureMessage != nil },
+                set: { if !$0 { environment.practice.failureMessage = nil } }
+            ),
+            presenting: environment.practice.failureMessage
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { message in
+            Text(message)
+        }
+    }
+
+    /// Starts a conversation unless one is running (through the record
+    /// button, so a failed start shows its usual alert), then sends the
+    /// practice request as the user's turn.
+    private func startPractice(_ request: PracticeRequest) async {
+        if !environment.conversation.status.isRunning {
+            await record.tap()
+        }
+        guard environment.conversation.status.isRunning else { return }
+        if environment.kind != .live, !(await environment.realtime.isConnected) {
+            // Previews and UI tests: the fake conversation doesn't connect
+            // the fake realtime service on its own.
+            try? await environment.realtime.connect()
+        }
+        await environment.practice.send(
+            request, conversation: environment.conversation, realtime: environment.realtime,
+            clock: environment.clock)
     }
 }
 

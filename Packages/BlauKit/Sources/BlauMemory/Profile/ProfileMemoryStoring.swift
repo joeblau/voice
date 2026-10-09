@@ -1,3 +1,4 @@
+import BlauCore
 import BlauPersistence
 import Foundation
 
@@ -132,8 +133,14 @@ public struct ProfileTopic: Identifiable, Hashable, Sendable {
         self.conversationEnded = conversationEnded
     }
 
-    /// Whether consolidation may write a new summary.
-    public var acceptsSummary: Bool { endedAt != nil && conversationEnded }
+    /// Whether this is a practice run's topic (#69). Its summary is the
+    /// run's record, one line per question with its score and note, and is
+    /// kept nowhere else.
+    public var isPracticeRun: Bool { PracticeRunTopic.isPracticeRun(title: title, summary: summary) }
+
+    /// Whether consolidation may write a new summary. Never a practice
+    /// run's: a one-sentence rewrite would lose its scores and notes.
+    public var acceptsSummary: Bool { endedAt != nil && conversationEnded && !isPracticeRun }
 }
 
 /// What writing a profile block did.

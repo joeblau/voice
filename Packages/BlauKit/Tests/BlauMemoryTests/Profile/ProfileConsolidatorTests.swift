@@ -215,6 +215,73 @@ struct ProfileConsolidatorTests {
         #expect(try fixture.topicSummary(topic.topicID) == "Sam joins.")
     }
 
+    /// A practice run's topic (#69) keeps its summary: it is the run's
+    /// record, one line per question with its score and note, and is kept
+    /// nowhere else. That holds after the user renamed the topic too.
+    @Test func neverRewritesAPracticeRunsRecord() async throws {
+        let fixture = try ProfileFixture()
+        let conversations = fixture.topics.conversations
+        let conversation = ConversationID()
+        let start = Support.t0.addingTimeInterval(86_400)
+        try await conversations.startConversation(id: conversation, at: start)
+        let record = """
+            Practiced 2 of 11 questions in YC interview questions, average 55%.
+            - What are you building? 70%. Lead with the customer.
+            - Who are your users? 40%. Name one real user.
+            """
+        let run = try await conversations.openTopic(
+            at: start, title: PracticeRunTopic.title(for: "YC interview questions"))
+        try await conversations.closeTopic(
+            run, title: PracticeRunTopic.title(for: "YC interview questions"), summary: record,
+            at: start.addingTimeInterval(60))
+        // The user renamed this run's topic: its record still marks it.
+        let renamed = try await conversations.openTopic(at: start.addingTimeInterval(120), title: "My YC drill")
+        try await conversations.closeTopic(
+            renamed, title: "My YC drill", summary: record, at: start.addingTimeInterval(180))
+        let hiring = try await conversations.openTopic(at: start.addingTimeInterval(240), title: "Hiring")
+        try await conversations.closeTopic(
+            hiring, title: "Hiring", summary: "They talk hiring.", at: start.addingTimeInterval(300))
+        try await conversations.endConversation(conversation, at: start.addingTimeInterval(600))
+        try await conversations.flush()
+
+        let generator = ScriptedTextGenerator(replies: [
+            ProfileFixture.reply(
+                profile: "Goals: The user is preparing for the YC interview.",
+                topics: [
+                    "T1": "Joe and Dana plan hiring.", "T2": "The user practiced two YC questions.",
+                    "T3": "The user rehearsed YC answers.",
+                ])
+        ])
+        let outcome = await makeConsolidator(fixture, generator: generator).consolidate()
+
+        guard case .consolidated(let consolidation) = outcome else {
+            Issue.record("Expected a consolidation, got \(outcome)")
+            return
+        }
+        // The runs are still shown for context, newest first.
+        let shown = try #require(generator.requests.first?.prompt)
+        #expect(shown.contains("T2"))
+        #expect(shown.contains("T3"))
+        #expect(consolidation.topicChanges.map(\.topicID) == [hiring])
+        #expect(try fixture.topicSummary(hiring) == "Joe and Dana plan hiring.")
+        #expect(try fixture.topicSummary(run) == record)
+        #expect(try fixture.topicSummary(renamed) == record)
+    }
+
+    @Test func aPracticeRunsTopicNeverAcceptsASummary() {
+        func topic(_ title: String, _ summary: String?) -> ProfileTopic {
+            ProfileTopic(
+                id: UUID(), title: title, summary: summary, startedAt: Support.t0,
+                endedAt: Support.t0.addingTimeInterval(60), conversationEnded: true)
+        }
+        #expect(topic("Hiring", "They talk hiring.").acceptsSummary)
+        #expect(topic("Hiring", nil).acceptsSummary)
+        #expect(!topic("Practice: YC interview questions", nil).acceptsSummary)
+        #expect(topic("Practice: YC interview questions", "Practiced 0 of 11 questions in YC.").isPracticeRun)
+        #expect(!topic("My drill", "Practiced 3 of 11 questions in YC interview questions.").acceptsSummary)
+        #expect(topic("Gym", "Practiced squats and deadlifts.").acceptsSummary)
+    }
+
     // MARK: Concurrency with other devices
 
     @Test func aBlockChangedMeanwhileIsNotOverwritten() async throws {

@@ -177,6 +177,9 @@ The complete list of declared edges:
   `get_entity`, `remember`, `forget`): the BlauCore contract, the backend,
   the token budget, the spoken confirmation, tool rounds inside a turn and
   the chat's chips.
+- [practice.md](practice.md): practice mode (#69): drilling a collection
+  by voice with Grok as the interviewer, the practice tools, spaced
+  repetition, each run as a topic, and the synced practice record.
 - [memory-profile.md](memory-profile.md): the pinned profile and its
   sleep-time consolidation (token budget, the user's own words kept
   verbatim, the background task, the diff view, session instructions).

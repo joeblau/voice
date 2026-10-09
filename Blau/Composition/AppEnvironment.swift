@@ -81,6 +81,11 @@ final class AppEnvironment {
     /// store is open (`KnowledgeBaseStore`, docs/knowledge-base.md).
     let knowledgeBase: any KnowledgeBaseEditing
 
+    /// Practice mode started from the Collections screen (#69): the main
+    /// screen picks the request up, starts a conversation and asks Grok to
+    /// drill the collection (docs/practice.md).
+    let practice = PracticeLauncher()
+
     /// xAI access (#33): the key store, the REST client, on-device realtime
     /// token minting and the `XAIAccount` the key entry views bind to. The
     /// live app uses the Keychain and the network; every other kind runs on
@@ -493,13 +498,19 @@ extension AppEnvironment {
         let profileMemory = ProfileMemory.live(
             pinned: pinnedMemory, xai: xai, transcript: transcript, persistence: persistence,
             learning: memoryLearning, performance: performance)
+        let topics = TopicLifecycle.app(
+            transcript: transcript, labeling: .app(xai: xai), textEmbeddings: textEmbeddings)
         // A fact the `forget` tool forgets leaves the pinned profile too (#67).
+        // #69: the practice tools ride on the same flag; each run is a topic.
+        let memoryToolsEnabled = flags.isEnabled(.memoryTools)
         let realtimeSession = RealtimeSessionServices.make(
             memory: ProfileMemory.realtimeContext(pinnedMemory),
             tools: MemoryTools.registry(
-                backend: profileMemory.reportingRemovals(of: memory), enabled: flags.isEnabled(.memoryTools)))
-        let topics = TopicLifecycle.app(
-            transcript: transcript, labeling: .app(xai: xai), textEmbeddings: textEmbeddings)
+                backend: profileMemory.reportingRemovals(of: memory), enabled: memoryToolsEnabled
+            ).adding(
+                memoryToolsEnabled
+                    ? PracticeTools.all(
+                        coordinator: PracticeTools.coordinator(persistence: persistence, topics: topics)) : []))
         let transcriptFeed = TranscriptFeed()
         return AppEnvironment(
             kind: .live,

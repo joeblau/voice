@@ -437,6 +437,24 @@ struct ConversationStoreTopicEditTests {
         }
     }
 
+    /// A practice run's topic (#69) is never rewritten: its summary is the
+    /// run's record, scores and notes per question, kept nowhere else. It is
+    /// recognized by its title or, once renamed, by the record itself.
+    @Test func aPracticeRunsRecordIsNeverReplaced() async throws {
+        let fixture = try StoreFixture()
+        let store = fixture.store
+        let (id, topic, _) = try await conversation(fixture, utterancesAt: [1])
+        let record = "Practiced 1 of 11 questions in YC interview questions, average 70%.\n- Why now? 70%. Be specific."
+        try await store.renameTopic(topic, to: PracticeRunTopic.title(for: "YC interview questions"))
+        _ = try await store.applyTopicLabel(topic, title: nil, summary: record, finalizesTitle: false)
+        try await store.endConversation(id, at: storeT0 + 60)
+
+        #expect(try await store.replaceTopicSummary(topic, expected: record, with: "The user practiced.") == false)
+        try await store.renameTopic(topic, to: "My YC drill")
+        #expect(try await store.replaceTopicSummary(topic, expected: record, with: "The user practiced.") == false)
+        #expect(try fixture.saved(Topic.self).first?.summary == record)
+    }
+
     // MARK: Reading
 
     @Test func topicUtterancesComeBackInOrderOnTheConversationTimeline() async throws {

@@ -134,7 +134,9 @@ it.
 
 A collection's prompts are listed in order with their reference answers and
 practice record (`practiceCount`, `score`, `lastPracticedAt`, written by
-practice mode, #69). Tap one to edit its prompt or answer, or delete it;
+practice mode, #69, [practice.md](practice.md)), under **Practice with
+Grok** and the collection's record (practiced, average score, last
+practiced, up next). Tap one to edit its prompt or answer, or delete it;
 Edit reorders (`reorderItems` renumbers `ordinal` 0, 1, 2…, writing only
 items that moved; items another device added meanwhile keep their order
 after them); Rename changes the collection's title, which the index carries
