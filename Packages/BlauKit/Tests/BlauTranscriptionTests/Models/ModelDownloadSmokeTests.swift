@@ -112,6 +112,12 @@ struct ModelDownloadSmokeTests {
             _ = try MLModel(
                 contentsOf: directory.appending(path: FluidAudioModels.speakerEmbeddingBundle),
                 configuration: configuration)
+        case .languageID:
+            // BlauVoiceID's VoxLinguaLanguageIdentifier loads it; here, just
+            // Core ML (BlauVoiceIDTests runs it on speech).
+            _ = try MLModel(
+                contentsOf: directory.appending(path: "SpeechBrainECAPAVoxLingua107.mlmodelc"),
+                configuration: configuration)
         case .textEmbedding:
             // Blau's own model (BlauMemory's TextEmbeddingModel loads it with
             // its tokenizer and token table); here, just Core ML.

@@ -58,3 +58,39 @@ subject to the pretty light restrictions detailed below.
 
 The CMU ARCTIC databases were built by John Kominek and Alan W Black at the
 Language Technologies Institute, Carnegie Mellon University.
+
+## `LanguageID/`: the language filter fixtures (#50)
+
+100 clips listed in `LanguageID/manifest.json` (language, source, speaker,
+text, and whether the filter should let the clip through), made by
+`scripts/make-language-id-fixtures.py`. The audio is in Git LFS (`git lfs
+pull`); only the opt-in real-model tests (`RealModelLanguageIDTests`) read
+it. 16 kHz, mono, 16-bit PCM, 3 s each.
+
+| Category | Clips | Source |
+| --- | --- | --- |
+| `foreign` | 28 | Real read speech in Dutch, French, German, Italian, Polish, Portuguese and Spanish, four speakers per language, from the test split of [Multilingual LibriSpeech](https://www.openslr.org/94/) |
+| `foreign` | 38 | One sentence each in 34 languages, read by that language's macOS voice (`say`) |
+| `english` | 10 | English read by US, UK, Irish, Australian, Indian and South African macOS voices |
+| `english` | 12 | The CMU ARCTIC clips in `Speakers/` (listed, not copied) |
+| `accented` | 12 | English read by other languages' macOS voices (a strong foreign accent) |
+
+**Multilingual LibriSpeech** (Pratap, Xu, Sriram, Synnaeve and Collobert,
+"MLS: A Large-Scale Multilingual Dataset for Speech Research", Interspeech
+2020) is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+and built from LibriVox's public-domain audiobooks. The clips were fetched
+through the Hugging Face dataset viewer (`facebook/multilingual_librispeech`).
+**Modifications**: decoded from Opus to 16 kHz mono PCM, trimmed of leading
+silence (10 ms frames below 3% of the clip's peak frame level, keeping
+50 ms), cut to 3 s and peak-normalized to -3 dBFS. The manifest keeps each
+clip's MLS id, speaker and transcript.
+
+The synthesized clips were generated with the macOS text-to-speech voices
+for testing only, as the ASR fixtures were.
+
+## `LanguageIDFrontend.json`
+
+Reference log-mel features for `LanguageIDFeatureExtractorTests`, written by
+`scripts/language-id-frontend-reference.py` from a synthetic signal with the
+front end published with the Core ML export of SpeechBrain's VoxLingua107
+model (Apache-2.0).

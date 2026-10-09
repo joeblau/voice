@@ -17,6 +17,7 @@ the rest of the app's life.
 | `.parakeetTDTv3` | Parakeet TDT 0.6B v3 (int8 encoder) | 483 MB | no | Second pass (#30, [asr.md](asr.md#second-pass-punctuation-and-accuracy)) |
 | `.textEmbedding` | EmbeddingGemma-300M, Core ML, int8 weights and int8 token table, 128 tokens | about 300 MB | no | Shared text embeddings for memory and topics (#60, [embeddings.md](embeddings.md)). **Not pinned yet** (below) |
 | `.parakeetRealtimeEOU1280` | Parakeet realtime EOU 120M, 1280 ms chunks | 225 MB | no | Streaming ASR below the `normal` performance level (#75, [performance.md](performance.md#thermal-and-power-adaptation)) |
+| `.languageID` | SpeechBrain ECAPA-TDNN VoxLingua107 (107 languages), Core ML export `aufklarer/SpeechBrain-ECAPA-VoxLingua107-21M-CoreML` (Apache-2.0) | 43 MB | no | The language filter (#50, [voice-id.md](voice-id.md#language-filter-50)) |
 
 Required models download first, during onboarding. The optional second-pass
 model and the 1280 ms streaming export follow when **Download Extra Speech
@@ -27,6 +28,9 @@ text embedding model is optional too
 (Blau listens without it, and topics fall back to Apple's contextual
 embedding), but it doesn't follow that setting: it downloads after the
 required models either way (`ModelID.followsOptionalModelsPreference`).
+So does the language filter's model: without it speech in any language
+goes through, and Settings → Voice ID → Languages says it is still
+downloading.
 
 ### The text embedding model is not pinned yet
 
@@ -128,7 +132,8 @@ Application Support/Blau/Models/          isExcludedFromBackup = true
 The first Core ML load of a model on a device compiles it for that device's
 Neural Engine (about 3 to 4 s for Parakeet). After a model is installed,
 `ModelManager` loads every bundle once (`CoreMLModelWarmer`, with the compute
-units FluidAudio uses: Neural Engine plus CPU, the TDT preprocessor on CPU)
+units FluidAudio uses: Neural Engine plus CPU, the TDT preprocessor on CPU;
+the language ID model on the CPU, where BlauVoiceID runs it)
 and records the OS version in the receipt. Core ML caches the compiled
 result, so later launches on the same OS skip the warm-up and go straight to
 `ready` with no loading. An OS update invalidates Core ML's cache and
@@ -170,6 +175,7 @@ APIs; never with its downloading convenience loaders.
 | `.parakeetTDTv3` | `AsrModels.loadLocal(from: directory, version: .v3)` |
 | `.speakerEmbedding` | `MLModel(contentsOf: directory/FluidAudioModels.speakerEmbeddingBundle)`; Blau wraps it as `WeSpeakerEmbedder.load(modelDirectory: directory)` ([voice-id.md](voice-id.md)) |
 | `.textEmbedding` | Not FluidAudio: `TextEmbeddingModel.load(bundle: TextEmbeddingBundle(directory: directory))` in BlauMemory, through `TextEmbeddingService` ([embeddings.md](embeddings.md)) |
+| `.languageID` | Not FluidAudio: `VoxLinguaLanguageIdentifier.load(modelDirectory: directory)` in BlauVoiceID, which checks `labels.json` and runs `SpeechBrainECAPAVoxLingua107.mlmodelc` on the CPU ([voice-id.md](voice-id.md#language-filter-50)) |
 
 `ModelDownloadSmokeTests` runs exactly these calls against real downloads.
 

@@ -119,6 +119,9 @@ public struct GatedUtterance: Hashable, Sendable, Identifiable {
         case uncertainDiscarded
         /// Rejected: someone or something else. Never sent.
         case rejected
+        /// Voice ID let it through, but it is in a language the user hasn't
+        /// allowed (the language filter, #50). Never sent.
+        case otherLanguage
 
         /// Whether the utterance reached Grok.
         public var isCommitted: Bool { self == .accepted || self == .uncertainCommitted }
@@ -135,16 +138,20 @@ public struct GatedUtterance: Hashable, Sendable, Identifiable {
     /// How long the gate held the final: from receiving it to passing it
     /// on (or dropping it). The gate's latency beyond end of utterance.
     public let delay: Duration
+    /// What the language filter (#50) decided, when it ran: only for
+    /// utterances voice ID would send, and only with a filter.
+    public let language: UtteranceLanguageCheck?
 
     public init(
         utterance: Utterance, decision: SpeakerDecision, disposition: Disposition, segments: [SegmentVerdict],
-        delay: Duration
+        delay: Duration, language: UtteranceLanguageCheck? = nil
     ) {
         self.utterance = utterance
         self.decision = decision
         self.disposition = disposition
         self.segments = segments
         self.delay = delay
+        self.language = language
     }
 
     public var id: UUID { utterance.id }
@@ -181,6 +188,19 @@ public struct VerificationGateStatistics: Hashable, Sendable {
     /// them).
     public var gapSamplesFromHistory = 0
     public var gapSamplesSilenced = 0
+    /// Language checks (#50) run on segments, and those that failed.
+    public var languageChecks = 0
+    public var languageFailures = 0
+    /// Utterances voice ID would have sent that the language filter
+    /// dropped.
+    public var otherLanguageUtterances = 0
+    /// Segments voice ID accepted that adaptive voiceprint updates (#49)
+    /// didn't see because the language filter found another language.
+    public var otherLanguageAdaptationsSkipped = 0
+    /// The language filter's share of the hold on finals: the last and the
+    /// longest.
+    public var lastLanguageDelay: Duration = .zero
+    public var longestLanguageDelay: Duration = .zero
     /// Barge-ins that asked for a verdict, and those that gave up waiting.
     public var bargeInQueries = 0
     public var bargeInTimeouts = 0

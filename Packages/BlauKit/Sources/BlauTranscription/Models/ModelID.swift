@@ -25,6 +25,11 @@ public enum ModelID: String, CaseIterable, Codable, Hashable, Sendable {
     /// switches to it while the device is hot, in Low Power Mode or low on
     /// battery (#75). Optional; without it ASR stays at 320 ms.
     case parakeetRealtimeEOU1280
+    /// SpeechBrain's ECAPA-TDNN VoxLingua107 spoken language identification
+    /// (107 languages, Core ML) for the language filter (#50), loaded by
+    /// BlauVoiceID's `VoxLinguaLanguageIdentifier`. Optional: without it
+    /// speech in any language goes through.
+    case languageID
 
     /// Short name for Settings and onboarding.
     public var displayName: String {
@@ -35,6 +40,7 @@ public enum ModelID: String, CaseIterable, Codable, Hashable, Sendable {
         case .parakeetTDTv3: "High-accuracy transcription"
         case .textEmbedding: "Memory search"
         case .parakeetRealtimeEOU1280: "Low-power transcription"
+        case .languageID: "Language filter"
         }
     }
 
@@ -48,6 +54,7 @@ public enum ModelID: String, CaseIterable, Codable, Hashable, Sendable {
         case .textEmbedding: "Finds what you talked about before and notices topic changes (EmbeddingGemma)."
         case .parakeetRealtimeEOU1280:
             "Keeps transcribing with less work when your iPhone is hot or low on battery (Parakeet realtime)."
+        case .languageID: "Recognizes the language spoken so Blau ignores languages you don't use (VoxLingua107)."
         }
     }
 
@@ -56,7 +63,7 @@ public enum ModelID: String, CaseIterable, Codable, Hashable, Sendable {
     public var isRequired: Bool {
         switch self {
         case .sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU: true
-        case .parakeetTDTv3, .textEmbedding, .parakeetRealtimeEOU1280: false
+        case .parakeetTDTv3, .textEmbedding, .parakeetRealtimeEOU1280, .languageID: false
         }
     }
 
@@ -79,6 +86,8 @@ public enum ModelID: String, CaseIterable, Codable, Hashable, Sendable {
             "Blau can't search past conversations until it downloads again."
         case .parakeetRealtimeEOU1280:
             "Blau keeps transcribing at full rate when your iPhone is hot or low on battery until you download it again."
+        case .languageID:
+            "Blau answers speech in any language, a foreign-language TV included, until it downloads again."
         }
     }
 }

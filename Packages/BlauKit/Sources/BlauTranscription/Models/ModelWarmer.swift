@@ -30,10 +30,12 @@ public struct CoreMLModelWarmer: ModelWarmer {
     /// Where each bundle runs, matching FluidAudio's own loaders: everything
     /// on the Neural Engine (with CPU fallback, which keeps background
     /// execution allowed), except Parakeet TDT's preprocessor, which
-    /// FluidAudio pins to the CPU.
+    /// FluidAudio pins to the CPU, and the language ID model (#50), which
+    /// BlauVoiceID runs on the CPU: its flexible input length makes the
+    /// Neural Engine slower than the CPU (docs/voice-id.md#language-filter-50).
     public static func computeUnits(for id: ModelID, bundle: String) -> ModelComputeUnits {
         switch (id, bundle) {
-        case (.parakeetTDTv3, "Preprocessor.mlmodelc"): .cpuOnly
+        case (.parakeetTDTv3, "Preprocessor.mlmodelc"), (.languageID, _): .cpuOnly
         default: .cpuAndNeuralEngine
         }
     }

@@ -32,8 +32,8 @@ public enum FluidAudioModels {
     /// The WeSpeaker embedding bundle FluidAudio's diarizer uses.
     public static let speakerEmbeddingBundle = ModelNames.Diarizer.embeddingFile
 
-    /// The models FluidAudio loads. (`.textEmbedding` is Blau's own Core
-    /// ML model, loaded by BlauMemory.)
+    /// The models FluidAudio loads. (`.textEmbedding` and `.languageID` are
+    /// Core ML models Blau loads itself, in BlauMemory and BlauVoiceID.)
     public static let models: [ModelID] = [
         .sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU, .parakeetTDTv3, .parakeetRealtimeEOU1280,
     ]
@@ -51,7 +51,7 @@ public enum FluidAudioModels {
             ModelNames.ASR.requiredModelsV3(precision: .int8).union([ModelNames.ASR.vocabularyFile])
         case .speakerEmbedding:
             [ModelNames.Diarizer.embeddingFile]
-        case .textEmbedding:
+        case .textEmbedding, .languageID:
             []
         }
     }
@@ -67,7 +67,7 @@ public enum FluidAudioModels {
         case .parakeetRealtimeEOU1280: repo = .parakeetEou1280
         case .parakeetTDTv3: repo = .parakeetV3
         case .speakerEmbedding: repo = .diarizer
-        case .textEmbedding: return nil
+        case .textEmbedding, .languageID: return nil
         }
         return (repo.remotePath, repo.subPath ?? "", repo.revision)
     }

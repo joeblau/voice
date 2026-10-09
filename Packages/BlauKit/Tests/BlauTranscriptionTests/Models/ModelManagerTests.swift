@@ -89,7 +89,7 @@ struct ModelManagerTests {
         #expect(
             harness.warmer.warmed == [
                 .sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU, .parakeetTDTv3, .textEmbedding,
-                .parakeetRealtimeEOU1280,
+                .parakeetRealtimeEOU1280, .languageID,
             ])
         #expect(manager.directory(for: .parakeetRealtimeEOU) == harness.store.directory(for: descriptor))
         #expect(manager.diskUsage[.parakeetRealtimeEOU, default: 0] >= descriptor.totalBytes)

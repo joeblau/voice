@@ -15,3 +15,7 @@ Datasets/asr/**/*.wav filter=lfs diff=lfs merge=lfs -text
 Datasets/asr/**/*.m4a filter=lfs diff=lfs merge=lfs -text
 Datasets/asr/**/*.caf filter=lfs diff=lfs merge=lfs -text
 Datasets/asr/**/*.flac filter=lfs diff=lfs merge=lfs -text
+# Language ID fixtures (#50): Multilingual LibriSpeech clips and synthesised
+# speech, see scripts/make-language-id-fixtures.py. Only the opt-in real-model
+# tests read them; without `git lfs pull` those tests are skipped.
+Packages/BlauKit/Tests/BlauVoiceIDTests/Fixtures/LanguageID/*.wav filter=lfs diff=lfs merge=lfs -text

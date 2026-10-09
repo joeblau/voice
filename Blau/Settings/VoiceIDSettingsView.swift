@@ -49,6 +49,7 @@ struct VoiceIDSettingsView: View {
                 devicesSection
             }
             sensitivitySection
+            LanguageFilterSection(settings: settings.languageFilter)
         }
         .navigationTitle("Voice ID")
         .fullScreenCover(item: $enrolling) { request in
@@ -333,10 +334,12 @@ extension VoiceIDSettings {
     static func make() -> VoiceIDSettings {
         #if DEBUG
             if XAIUITestStub.current != nil {
-                return VoiceIDSettings(store: UserDefaultsVoiceIDSensitivityStore(suiteName: "blau.uitests"))
+                return VoiceIDSettings(
+                    store: UserDefaultsVoiceIDSensitivityStore(suiteName: "blau.uitests"),
+                    languageFilter: .make(suiteName: "blau.uitests"))
             }
         #endif
-        return VoiceIDSettings(store: UserDefaultsVoiceIDSensitivityStore())
+        return VoiceIDSettings(store: UserDefaultsVoiceIDSensitivityStore(), languageFilter: .make(suiteName: nil))
     }
 }
 

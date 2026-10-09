@@ -113,7 +113,9 @@
             } header: {
                 Text("Ignored Speech")
             } footer: {
-                Text("Speech voice ID didn't send to Grok: someone else, or uncertain and dropped by the policy.")
+                Text(
+                    "Speech voice ID didn't send to Grok: someone else, uncertain and dropped by the policy, or in "
+                        + "another language.")
             }
             .accessibilityIdentifier(VoiceLoopDebugView.ignoredSpeechIdentifier)
         }
@@ -124,9 +126,14 @@
                 switch verdict.disposition {
                 case .rejected: "Rejected"
                 case .uncertainDiscarded: "Uncertain, dropped"
+                case .otherLanguage: "Other language"
                 case .accepted, .uncertainCommitted: "Sent"
                 }
-            return "\(reason) · score \(score) · \(verdict.segments.count) segment(s)"
+            // The language filter's call (#50): "es 0.97".
+            let language =
+                verdict.language?.language.map { " · \($0.language.code) " + String(format: "%.2f", $0.probability) }
+                ?? ""
+            return "\(reason) · score \(score)\(language) · \(verdict.segments.count) segment(s)"
         }
     }
 #endif

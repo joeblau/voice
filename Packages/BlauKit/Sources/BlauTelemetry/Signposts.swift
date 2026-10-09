@@ -34,6 +34,9 @@ public enum PipelineInterval: CaseIterable, Sendable {
     /// The voice ID gate holding a final utterance until its decision is
     /// made (#47): the gate's share of the latency budget (#74).
     case voiceIDGate
+    /// Identifying the language of one speech segment (its first 2 s) for
+    /// the language filter (#50): features and the model run.
+    case voiceIDLanguage
     /// One full turn: committing the user's text to Grok until the
     /// response is done (or cancelled by barge-in).
     case realtimeTurn
@@ -87,6 +90,7 @@ public enum PipelineInterval: CaseIterable, Sendable {
         case .voiceIDEmbed: "voiceid.embed"
         case .voiceIDVerify: "voiceid.verify"
         case .voiceIDGate: "voiceid.gate"
+        case .voiceIDLanguage: "voiceid.language"
         case .realtimeTurn: "realtime.turn"
         case .realtimeFirstAudio: "realtime.firstAudio"
         case .realtimeConnect: "realtime.connect"
@@ -109,7 +113,7 @@ public enum PipelineInterval: CaseIterable, Sendable {
         switch self {
         case .captureFrame, .playbackFirstBuffer: .audio
         case .vadChunk, .asrChunk, .asrEndOfUtterance, .asrSecondPass, .modelDownload, .modelWarmUp: .asr
-        case .voiceIDEmbed, .voiceIDVerify, .voiceIDGate: .voiceID
+        case .voiceIDEmbed, .voiceIDVerify, .voiceIDGate, .voiceIDLanguage: .voiceID
         case .realtimeTurn, .realtimeFirstAudio, .realtimeConnect, .realtimeEvent: .realtime
         case .topicsSegment, .topicsLabel: .topics
         case .memoryEmbed, .memorySearch, .memoryExtract, .memoryConsolidate: .memory

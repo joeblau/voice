@@ -365,5 +365,39 @@ extension ModelManifest {
                 ),
             ]
         ),
+        // aufklarer/SpeechBrain-ECAPA-VoxLingua107-21M-CoreML@2aa4d715a79e: 5 files, 42,760,312 bytes
+        ModelDescriptor(
+            id: .languageID,
+            repository: "aufklarer/SpeechBrain-ECAPA-VoxLingua107-21M-CoreML",
+            revision: "2aa4d715a79e410d5f9aa32bd7a4fc9225bf9eb0",
+            remoteDirectory: "",
+            files: [
+                ModelFile(
+                    path: "SpeechBrainECAPAVoxLingua107.mlmodelc/analytics/coremldata.bin",
+                    size: 243,
+                    sha256: "9e092f41490e5313e38cb6bcc10ce9fe1ed0bdf5ce33c7c3143dfdc47141c8b7"
+                ),
+                ModelFile(
+                    path: "SpeechBrainECAPAVoxLingua107.mlmodelc/coremldata.bin",
+                    size: 843,
+                    sha256: "546fd351966c937770a8eb64d86764cd87a65d1f58c74627bb47584eeb20413e"
+                ),
+                ModelFile(
+                    path: "SpeechBrainECAPAVoxLingua107.mlmodelc/model.mil",
+                    size: 162080,
+                    sha256: "32a6a3fcb77aae3b32123514e83e0c16e4427e986dc2d23cfdde2a4dba1b81c2"
+                ),
+                ModelFile(
+                    path: "SpeechBrainECAPAVoxLingua107.mlmodelc/weights/weight.bin",
+                    size: 42_586_390,
+                    sha256: "81fbb61f6706c50e924a2ee2a4fc04e6408276df948117a1c6ac7675c23aac67"
+                ),
+                ModelFile(
+                    path: "labels.json",
+                    size: 10756,
+                    sha256: "f13f0331965a4a402f4308ed80de662f2d55167d77e163406712ba170b92eb35"
+                ),
+            ]
+        ),
     ])
 }

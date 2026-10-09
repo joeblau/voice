@@ -101,6 +101,17 @@ MODELS = [
         # `ModelNames.Diarizer.embeddingFile`: WeSpeaker ResNet34, 256-d.
         "entries": ["wespeaker_v2.mlmodelc"],
     },
+    {
+        "id": "languageID",
+        "repo": "aufklarer/SpeechBrain-ECAPA-VoxLingua107-21M-CoreML",
+        "revision": "2aa4d715a79e410d5f9aa32bd7a4fc9225bf9eb0",
+        "directory": "",
+        # The language filter (#50), loaded by BlauVoiceID's
+        # `VoxLinguaLanguageIdentifier` (not FluidAudio), which checks the
+        # label order in labels.json. Apache-2.0, converted from
+        # speechbrain/lang-id-voxlingua107-ecapa.
+        "entries": ["SpeechBrainECAPAVoxLingua107.mlmodelc", "labels.json"],
+    },
     # The shared text embedding model (#59, #60): the `hosting/` folder
     # `scripts/embeddings/convert_coreml.py` writes, loaded by BlauMemory's
     # `TextEmbeddingBundle` (not FluidAudio). Uncomment once the converted

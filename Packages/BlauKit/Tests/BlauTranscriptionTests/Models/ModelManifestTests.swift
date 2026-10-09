@@ -11,9 +11,10 @@ struct ModelManifestTests {
         #expect(
             manifest.models.map(\.id) == [
                 .sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU, .parakeetTDTv3, .parakeetRealtimeEOU1280,
+                .languageID,
             ])
         #expect(manifest.required.map(\.id) == [.sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU])
-        #expect(manifest.optional.map(\.id) == [.parakeetTDTv3, .parakeetRealtimeEOU1280])
+        #expect(manifest.optional.map(\.id) == [.parakeetTDTv3, .parakeetRealtimeEOU1280, .languageID])
     }
 
     @Test(arguments: ModelManifest.pinned.models)
@@ -82,6 +83,7 @@ struct ModelManifestTests {
         #expect(try (430...530).contains(megabytes(.parakeetTDTv3)))
         #expect(try (1...10).contains(megabytes(.sileroVAD)))
         #expect(try (1...40).contains(megabytes(.speakerEmbedding)))
+        #expect(try (40...45).contains(megabytes(.languageID)))
     }
 
     @Test func buildsResolveURLsAtThePinnedRevision() throws {
@@ -104,7 +106,7 @@ struct ModelManifestTests {
         #expect(
             shuffled.models.map(\.id) == [
                 .sileroVAD, .speakerEmbedding, .parakeetRealtimeEOU, .parakeetTDTv3, .textEmbedding,
-                .parakeetRealtimeEOU1280,
+                .parakeetRealtimeEOU1280, .languageID,
             ])
     }
 
@@ -139,6 +141,23 @@ struct ModelManifestTests {
         #expect(FluidAudioModels.upstream(for: .textEmbedding) == nil)
         #expect(FluidAudioModels.requiredEntries(for: .textEmbedding).isEmpty)
         #expect(Set(FluidAudioModels.models).isSubset(of: Set(manifest.models.map(\.id))))
+    }
+
+    /// The language filter's model (#50) is BlauVoiceID's own Core ML
+    /// model: pinned here with the label list its loader checks, never
+    /// loaded by FluidAudio, and optional (Blau listens without it).
+    @Test func theLanguageIDModelIsPinnedWithItsLabels() throws {
+        #expect(!FluidAudioModels.models.contains(.languageID))
+        #expect(FluidAudioModels.upstream(for: .languageID) == nil)
+        let descriptor = try #require(manifest[.languageID])
+        #expect(descriptor.bundles == ["SpeechBrainECAPAVoxLingua107.mlmodelc"])
+        #expect(descriptor.files.contains { $0.path == "labels.json" })
+        #expect(!ModelID.languageID.isRequired)
+        #expect(!ModelID.languageID.followsOptionalModelsPreference)
+        // Warmed up for the CPU, where BlauVoiceID runs it.
+        #expect(
+            CoreMLModelWarmer.computeUnits(for: .languageID, bundle: "SpeechBrainECAPAVoxLingua107.mlmodelc")
+                == .cpuOnly)
     }
 
     /// Each streaming chunk size Blau can switch to has its own export,

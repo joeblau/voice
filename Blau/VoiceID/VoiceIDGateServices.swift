@@ -146,7 +146,11 @@ struct VoiceIDGateLoader: Sendable {
                     adapter = created
                     onScoredSpeech = { segment in created.observe(segment) }
                 }
-                let gate = VerificationGate(verifier: verifier, history: history, onScoredSpeech: onScoredSpeech)
+                // Other-language segments the filter (#50) catches are
+                // never handed to the adapter.
+                let filter = await Self.languageFilter(models: models, settings: settings.languageFilter)
+                let gate = VerificationGate(
+                    verifier: verifier, history: history, languageFilter: filter, onScoredSpeech: onScoredSpeech)
                 let adaptation = adapter == nil ? "off" : "on"
                 let drift = Double(voiceprint.adaptationDrift ?? 0)
                 Log.voiceID.notice(
@@ -158,6 +162,34 @@ struct VoiceIDGateLoader: Sendable {
                     "The voice ID gate couldn't start: \(String(describing: error), privacy: .public)")
                 return .without(.unavailable(.modelFailed))
             }
+        }
+    }
+
+    /// The language filter (#50) for the conversation's gate, or `nil`:
+    /// when it is off in Settings (turning it on applies from the next
+    /// conversation), or its model isn't installed or doesn't load. Without
+    /// it the gate still checks the speaker; only the language check is
+    /// skipped. The allowed languages are read for every segment, so
+    /// changing them (or turning the filter off) applies at once.
+    @MainActor
+    static func languageFilter(models: ModelManager, settings: LanguageFilterSettings) async -> LanguageFilter? {
+        guard settings.isEnabled else {
+            Log.voiceID.notice("The language filter is off: speech in any language is sent")
+            return nil
+        }
+        guard let directory = models.directory(for: .languageID) else {
+            Log.voiceID.notice("The language filter's model isn't installed yet: speech in any language is sent")
+            return nil
+        }
+        do {
+            let identifier = try await VoxLinguaLanguageIdentifier.load(modelDirectory: directory)
+            let allowed = settings.allowedLanguages.map(\.code).sorted().joined(separator: ", ")
+            Log.voiceID.notice("Language filter on: \(allowed, privacy: .public)")
+            return LanguageFilter(identifier: identifier, allowedLanguages: { settings.currentAllowedLanguages() })
+        } catch {
+            Log.voiceID.error(
+                "The language filter couldn't start: \(String(describing: error), privacy: .public)")
+            return nil
         }
     }
 }

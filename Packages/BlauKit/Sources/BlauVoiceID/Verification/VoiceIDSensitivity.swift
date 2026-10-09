@@ -140,11 +140,20 @@ public final class VoiceIDSettings {
     /// The saved sensitivity.
     public private(set) var sensitivity: VoiceIDSensitivity
 
+    /// Settings → Voice ID → Languages: which languages Blau answers (#50).
+    @ObservationIgnored public let languageFilter: LanguageFilterSettings
+
     @ObservationIgnored private let store: any VoiceIDSensitivityStore
     @ObservationIgnored private nonisolated let current: Snapshot
 
-    public init(store: any VoiceIDSensitivityStore) {
+    /// - Parameters:
+    ///   - store: Where the sensitivity lives.
+    ///   - languageFilter: The language filter's settings; in memory, with
+    ///     the device's languages, by default.
+    public init(store: any VoiceIDSensitivityStore, languageFilter: LanguageFilterSettings? = nil) {
         self.store = store
+        self.languageFilter =
+            languageFilter ?? LanguageFilterSettings(store: InMemoryLanguageFilterPreferencesStore())
         let loaded = store.load()
         sensitivity = loaded
         current = Snapshot(loaded)
