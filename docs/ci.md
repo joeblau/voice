@@ -146,6 +146,13 @@ and GitHub does not mask secrets inside artifacts, so never map
 `ci.yml` references a secret or the key, or uses an action that is not pinned
 to a full commit SHA.
 
+The release workflow, [`release.yml`](../.github/workflows/release.yml), is
+the one exception: it runs only for `v*` tags (and on demand), reads the App
+Store Connect key and signing secrets from the `testflight` environment, maps
+them into the single step that signs and uploads, and never uploads the IPA
+or build logs. `make test-scripts` checks those rules for `release.yml` too.
+See [release.md](release.md).
+
 ## Required checks
 
 To block merging on red CI, add `lint`, `package-tests`, `app-tests` and
