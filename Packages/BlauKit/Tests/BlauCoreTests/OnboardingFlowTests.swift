@@ -225,8 +225,12 @@ struct OnboardingResumeTests {
         #expect(second.mode == .setup)
         #expect(second.step == .microphone)
         #expect(!second.canGoBack)
+        // The page indicator carries on from "Step 3", not "Step 1".
+        #expect(second.completedCount == 2)
+        #expect(second.completedCount + second.remainingSteps.count == OnboardingStep.allCases.count)
         second.advance()
         #expect(second.step == .speechModels)
+        #expect(second.completedCount == 3)
     }
 
     @Test func aResumedStepIsShownEvenIfItIsNowDone() {
@@ -381,13 +385,70 @@ struct OnboardingRecoveryTests {
     @Test func recoveryDoesNotTouchTheSavedProgress() {
         let conditions = Conditions()
         conditions.current = .satisfied
+        conditions.current.microphone = .missing
         conditions.current.speechModels = .missing
         let finished = OnboardingProgress(visited: Set(OnboardingStep.allCases), finishedAt: Date())
         let store = InMemoryOnboardingProgressStore(finished)
         let flow = makeFlow(conditions, store: store)
         flow.presentRecoveryIfNeeded()
-        #expect(walk(flow) == [.speechModels])
+        // Moving between two recovery steps saves nothing either.
+        flow.advance()
+        #expect(flow.step == .speechModels)
         #expect(store.load() == finished)
+        #expect(flow.progress == finished)
+        flow.advance()
+        #expect(!flow.isPresented)
+        #expect(store.load() == finished)
+        #expect(flow.progress == finished)
+    }
+
+    @Test func aRequirementBeforeTheCurrentStepIsStillAskedFor() {
+        // At launch the microphone is read at once but the key only once
+        // the Keychain has been read: recovery opens on the microphone, and
+        // the key turns out to be missing afterwards.
+        let conditions = Conditions()
+        conditions.current = .satisfied
+        conditions.current.microphone = .missing
+        conditions.current.xaiAccount = .unknown
+        let flow = finishedFlow(conditions)
+        #expect(flow.presentRecoveryIfNeeded())
+        #expect(flow.step == .microphone)
+        #expect(flow.remainingSteps == [.microphone])
+
+        conditions.current.xaiAccount = .missing
+        conditions.current.microphone = .satisfied
+        #expect(flow.remainingSteps == [.microphone, .xaiAccount])
+        flow.advance()
+        #expect(flow.step == .xaiAccount)
+        #expect(flow.completedCount == 1)
+        // "Not Now" on the key: nothing else is missing, so recovery ends
+        // instead of going back to the microphone.
+        flow.advance()
+        #expect(!flow.isPresented)
+        #expect(flow.postponed == [.xaiAccount])
+    }
+
+    @Test func recoveryDoesNotShowAStepTwiceInOnePresentation() {
+        let conditions = Conditions()
+        conditions.current = .satisfied
+        conditions.current.xaiAccount = .missing
+        conditions.current.microphone = .missing
+        let flow = finishedFlow(conditions)
+        flow.presentRecoveryIfNeeded()
+        #expect(flow.remainingSteps == [.xaiAccount, .microphone])
+        // The key is fixed and then, before the microphone page is done,
+        // goes missing again (removed on another device): it isn't asked for
+        // again in this presentation, so recovery can't loop.
+        conditions.current.xaiAccount = .satisfied
+        flow.advance()
+        #expect(flow.step == .microphone)
+        conditions.current.xaiAccount = .missing
+        #expect(flow.remainingSteps == [.microphone])
+        flow.advance()
+        #expect(!flow.isPresented)
+        // The next check picks it up.
+        #expect(flow.presentRecoveryIfNeeded())
+        #expect(flow.step == .xaiAccount)
     }
 
     @Test func aPresentedFlowIsLeftAlone() {

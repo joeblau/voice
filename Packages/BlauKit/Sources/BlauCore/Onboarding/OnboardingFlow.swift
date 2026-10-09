@@ -99,37 +99,62 @@ public final class OnboardingFlow {
         guard let step else { return [] }
         let current = prerequisites()
         var steps = [step]
-        var cursor = step
-        while let next = Self.firstStep(
-            after: cursor, mode: mode, progress: progress, postponed: postponed, current)
+        while let next = Self.nextStep(
+            after: history + steps, mode: mode, progress: progress, postponed: postponed, current)
         {
             steps.append(next)
-            cursor = next
         }
         return steps
     }
 
-    /// How many steps this presentation has shown before the current one.
-    public var completedCount: Int { history.count }
+    /// How many steps were shown before the current one, for the page
+    /// indicator. During setup it counts the saved progress, so after setup
+    /// resumes in a new launch the indicator carries on where it was rather
+    /// than starting over at "Step 1". In recovery, the steps of this
+    /// presentation.
+    public var completedCount: Int {
+        guard let step else { return 0 }
+        switch mode {
+        case .setup:
+            let all = OnboardingStep.allCases
+            guard let index = all.firstIndex(of: step) else { return history.count }
+            return all[..<index].filter { progress.visited.contains($0) }.count
+        case .recovery:
+            return history.count
+        }
+    }
 
     // MARK: Moving through the steps
 
     /// The user is done with the current step: they finished it or chose to
     /// skip it. Moves to the next step that still needs them, or finishes.
+    ///
+    /// Setup moves forward through the steps in order. Recovery picks the
+    /// next missing requirement from all of them, so a requirement before
+    /// the step on screen, or one only found missing after recovery opened
+    /// (the key read after the microphone at launch), is still asked for.
+    /// Recovery never changes the saved progress.
     public func advance() {
         guard let current = step else { return }
-        progress.visited.insert(current)
-        if mode == .recovery, prerequisites()[current] == .missing {
-            // "Not Now": don't ask again until the next launch.
-            postponed.insert(current)
+        let prerequisites = prerequisites()
+        switch mode {
+        case .setup:
+            progress.visited.insert(current)
+        case .recovery:
+            if prerequisites[current] == .missing {
+                // "Not Now": don't ask again until the next launch.
+                postponed.insert(current)
+            }
         }
-        if let next = Self.firstStep(
-            after: current, mode: mode, progress: progress, postponed: postponed, prerequisites())
+        if let next = Self.nextStep(
+            after: history + [current], mode: mode, progress: progress, postponed: postponed, prerequisites)
         {
             history.append(current)
             step = next
-            progress.current = next
-            store.save(progress)
+            if mode == .setup {
+                progress.current = next
+                store.save(progress)
+            }
         } else {
             finish()
         }
@@ -195,12 +220,38 @@ public final class OnboardingFlow {
     private func finish() {
         if mode == .setup {
             progress.finishedAt = now()
+            progress.current = nil
+            store.save(progress)
         }
-        progress.current = nil
-        store.save(progress)
         mode = .recovery
         step = nil
         history = []
+    }
+
+    /// The step to show after `shown`: the steps of this presentation so
+    /// far, the current one last.
+    ///
+    /// Setup: the first step after the current one, in order. Recovery: the
+    /// first missing requirement, in order, that this presentation hasn't
+    /// shown and the user hasn't postponed, wherever it sits relative to the
+    /// current step.
+    private static func nextStep(
+        after shown: [OnboardingStep],
+        mode: Mode,
+        progress: OnboardingProgress,
+        postponed: Set<OnboardingStep>,
+        _ prerequisites: OnboardingPrerequisites
+    ) -> OnboardingStep? {
+        switch mode {
+        case .setup:
+            guard let current = shown.last else { return nil }
+            return firstStep(after: current, mode: mode, progress: progress, postponed: postponed, prerequisites)
+        case .recovery:
+            return OnboardingStep.allCases.first {
+                !shown.contains($0)
+                    && shouldShow($0, mode: mode, progress: progress, postponed: postponed, prerequisites)
+            }
+        }
     }
 
     /// The first step after `step` that should be shown.

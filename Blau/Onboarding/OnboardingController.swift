@@ -34,7 +34,7 @@ final class OnboardingController {
     /// Whether a microphone prompt is on screen.
     private(set) var isRequestingMicrophone = false
 
-    @ObservationIgnored private let sources: OnboardingSources
+    @ObservationIgnored let sources: OnboardingSources
     @ObservationIgnored private let permission: any MicrophonePermissionProvider
     @ObservationIgnored private let isConversationRunning: @MainActor () -> Bool
 
@@ -78,10 +78,18 @@ final class OnboardingController {
 
     // MARK: Lifecycle
 
+    /// Whether launch has read the key and the installed models
+    /// (`checkPrerequisites()` ran from `AppEnvironment.start()`). Until
+    /// then the key and the models are `unknown`, so a check would build
+    /// recovery from half the picture.
+    private(set) var hasStarted = false
+
     /// Launch, once the key and the installed models have been read: shows
     /// onboarding again if a requirement went missing since setup.
     func checkPrerequisites() {
+        hasStarted = true
         refreshMicrophone()
+        sources.refreshStore()
         guard isEnabled else { return }
         let wasPresented = flow.isPresented
         if flow.presentRecoveryIfNeeded(isConversationRunning: isConversationRunning()), !wasPresented {
@@ -93,7 +101,15 @@ final class OnboardingController {
 
     /// A return to the foreground: re-reads the microphone permission (the
     /// user may have changed it in the Settings app) and checks again.
+    ///
+    /// The app's first activation arrives while `start()` is still reading
+    /// the key and the models; that one only re-reads the microphone, and
+    /// `start()` checks once it is done.
     func didBecomeActive() {
+        guard hasStarted else {
+            refreshMicrophone()
+            return
+        }
         checkPrerequisites()
     }
 
@@ -122,6 +138,9 @@ final class OnboardingController {
     /// Done with the step on screen (finished or skipped).
     func advance() {
         let from = flow.step
+        // The page may have changed the store (About You saves the profile
+        // document), or a voiceprint may have synced meanwhile.
+        sources.refreshStore()
         flow.advance()
         Log.ui.notice(
             "Onboarding \(from?.rawValue ?? "-", privacy: .public) → \(self.flow.step?.rawValue ?? "done", privacy: .public)"
@@ -137,6 +156,7 @@ final class OnboardingController {
     /// Starts setup over (the DEBUG menu).
     func restart() {
         Log.ui.notice("Onboarding restarted")
+        sources.refreshStore()
         flow.restart()
     }
 }
@@ -162,16 +182,56 @@ final class OnboardingSources {
         self.microphone = microphone
     }
 
+    /// What the store says about the voiceprint and the profile document,
+    /// read once per store and kept until `refreshStore()`. The flow asks
+    /// for the prerequisites several times per render (the page indicator
+    /// walks the remaining steps, the Ready page lists what is missing), so
+    /// reading the store each time would run two SwiftData fetches, and log
+    /// any fetch error, on every body evaluation.
+    private struct StoreState {
+        let container: ObjectIdentifier
+        let voiceEnrollment: OnboardingRequirement
+        let aboutYou: OnboardingRequirement
+    }
+
+    @ObservationIgnored private var storeState: StoreState?
+
+    /// How many times the store has been read, for tests.
+    @ObservationIgnored private(set) var storeReads = 0
+
     func prerequisites() -> OnboardingPrerequisites {
-        let context = persistence.stack?.container.mainContext
+        let store = self.store()
         return OnboardingPrerequisites(
             xaiAccount: account.status.onboardingRequirement,
             microphone: microphone.onboardingRequirement,
             speechModels: models.setupStatus.onboardingRequirement,
             iCloud: persistence.syncState.onboardingRequirement,
-            voiceEnrollment: context.map(Self.voiceEnrollment(in:)) ?? .unknown,
-            aboutYou: context.map(Self.aboutYou(in:)) ?? .unknown
+            voiceEnrollment: store?.voiceEnrollment ?? .unknown,
+            aboutYou: store?.aboutYou ?? .unknown
         )
+    }
+
+    /// Forgets what was read from the store, so the next
+    /// `prerequisites()` reads it again: when a step is done (About You
+    /// saves the profile document), at launch and on each return to the
+    /// foreground (a voiceprint may have synced from another device).
+    func refreshStore() {
+        storeState = nil
+    }
+
+    /// The cached store state, read again when there is none or the
+    /// container changed (a new iCloud account replaces it). `nil` while
+    /// the store isn't open.
+    private func store() -> StoreState? {
+        guard let container = persistence.stack?.container else { return nil }
+        let id = ObjectIdentifier(container)
+        if let storeState, storeState.container == id { return storeState }
+        let context = container.mainContext
+        storeReads += 1
+        let state = StoreState(
+            container: id, voiceEnrollment: Self.voiceEnrollment(in: context), aboutYou: Self.aboutYou(in: context))
+        storeState = state
+        return state
     }
 
     /// Done when a voiceprint for the current embedding model is stored
