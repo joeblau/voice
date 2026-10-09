@@ -12,12 +12,18 @@ extension TranscriberRouter.EngineProvider {
     ///   - voiceActivity: The Silero VAD segmenter running on the hub.
     ///   - inferenceObserver: `BackgroundInferenceMonitor`, told about every
     ///     model chunk.
+    ///   - chunkSizePolicy: The thermal and power policy's chunk size (#75).
+    ///   - recognizerProvider: Loads the other chunk size's export.
+    ///   - built: Told about each transcriber built, for the HUD's counters.
     public static func parakeet(
         models: ModelManager,
         audio: any CaptureFrameSource,
         voiceActivity: any VoiceActivitySource,
         configuration: StreamingTranscriberConfiguration = .standard,
-        inferenceObserver: (any InferenceObserver)? = nil
+        inferenceObserver: (any InferenceObserver)? = nil,
+        chunkSizePolicy: (any ASRChunkSizePolicy)? = nil,
+        recognizerProvider: RecognizerProvider? = nil,
+        built: (@Sendable (ParakeetStreamingTranscriber) -> Void)? = nil
     ) -> Self {
         Self(
             isAvailable: { await models.directory(for: .parakeetRealtimeEOU) != nil },
@@ -25,9 +31,12 @@ extension TranscriberRouter.EngineProvider {
                 guard let directory = await models.directory(for: .parakeetRealtimeEOU) else {
                     throw TranscriberRouterError.noEngineAvailable
                 }
-                return try await ParakeetStreamingTranscriber.load(
+                let transcriber = try await ParakeetStreamingTranscriber.load(
                     modelDirectory: directory, audio: audio, voiceActivity: voiceActivity,
-                    configuration: configuration, inferenceObserver: inferenceObserver)
+                    configuration: configuration, chunkSizePolicy: chunkSizePolicy,
+                    recognizerProvider: recognizerProvider, inferenceObserver: inferenceObserver)
+                built?(transcriber)
+                return transcriber
             }
         )
     }

@@ -64,6 +64,10 @@ public actor ParakeetStreamingTranscriber: Transcriber {
     private let clock: any BlauClock
     private let inferenceObserver: (any InferenceObserver)?
     private let latencyMarks: LatencyMarks?
+    /// Whether `finish()` unloads the recognizer: only when the transcriber
+    /// owns it (`load(modelDirectory:...)`), never for one the caller may
+    /// share with other transcribers.
+    private let unloadsRecognizerOnFinish: Bool
     private let logger = Log.asr
     private let shared = Mutex(StreamingTranscriberStatistics())
 
@@ -138,6 +142,12 @@ public actor ParakeetStreamingTranscriber: Transcriber {
     ///   - latencyMarks: Where each final's end of speech and end of
     ///     utterance go, for the turn orchestrator's latency budget (#74).
     ///     `nil` records none.
+    ///   - unloadsRecognizerOnFinish: Whether `finish()` releases the
+    ///     recognizer's model (`StreamingSpeechRecognizer.unload()`). Pass
+    ///     `true` only when this transcriber owns the recognizer, as
+    ///     `load(modelDirectory:...)` does; a recognizer shared across
+    ///     transcribers (the evaluation engine's, the soak run's) must stay
+    ///     loaded for the next one.
     public init(
         recognizer: any StreamingSpeechRecognizer,
         audio: any CaptureFrameSource,
@@ -149,7 +159,8 @@ public actor ParakeetStreamingTranscriber: Transcriber {
         signposter: Signposter = Signposts.asr,
         clock: any BlauClock = SystemClock(),
         inferenceObserver: (any InferenceObserver)? = nil,
-        latencyMarks: LatencyMarks? = .shared
+        latencyMarks: LatencyMarks? = .shared,
+        unloadsRecognizerOnFinish: Bool = false
     ) {
         self.recognizer = recognizer
         self.audio = audio
@@ -162,6 +173,7 @@ public actor ParakeetStreamingTranscriber: Transcriber {
         self.clock = clock
         self.inferenceObserver = inferenceObserver
         self.latencyMarks = latencyMarks
+        self.unloadsRecognizerOnFinish = unloadsRecognizerOnFinish
         (events, continuation) = AsyncStream.makeStream(of: TranscriptEvent.self, bufferingPolicy: .unbounded)
     }
 
@@ -199,6 +211,9 @@ public actor ParakeetStreamingTranscriber: Transcriber {
     public func start() async throws {
         guard driver == nil, !isFinished else { return }
         await applyChunkSizePolicy()
+        // `finish()` (which may unload the recognizer) or another `start()`
+        // may have run while the policy loaded a recognizer.
+        guard driver == nil, !isFinished else { return }
 
         let inbox = EventInbox()
         let vadEvents = voiceActivity.events()
@@ -252,11 +267,21 @@ public actor ParakeetStreamingTranscriber: Transcriber {
         }
     }
 
-    /// Stops and ends `events` for good.
+    /// Stops and ends `events` for good. A transcriber that owns its
+    /// recognizer (`unloadsRecognizerOnFinish`, set by
+    /// `load(modelDirectory:...)`) also releases the recognizer's model
+    /// (`StreamingSpeechRecognizer.unload()`), so the memory is freed when
+    /// `TranscriberRouter` switches away from Parakeet, whoever still holds
+    /// the transcriber. A recognizer passed in by the caller stays loaded:
+    /// it may serve other transcribers.
     public func finish() async {
         await stop()
+        guard !isFinished else { return }
         isFinished = true
         continuation.finish()
+        if unloadsRecognizerOnFinish {
+            await recognizer.unload()
+        }
     }
 
     // MARK: Input
@@ -678,7 +703,7 @@ extension ParakeetStreamingTranscriber {
         return ParakeetStreamingTranscriber(
             recognizer: recognizer, audio: audio, voiceActivity: voiceActivity, configuration: configuration,
             conversationID: conversationID, chunkSizePolicy: chunkSizePolicy, recognizerProvider: recognizerProvider,
-            inferenceObserver: inferenceObserver)
+            inferenceObserver: inferenceObserver, unloadsRecognizerOnFinish: true)
     }
 }
 

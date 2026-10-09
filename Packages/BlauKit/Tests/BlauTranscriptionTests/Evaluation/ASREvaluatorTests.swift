@@ -198,6 +198,29 @@ struct ASREvaluationEngineTests {
         #expect(again.events.map(\.audioPosition) == a.events.map(\.audioPosition))
     }
 
+    @Test func theStreamingEngineKeepsASharedRecognizerLoadedAcrossFixtures() async throws {
+        // `parakeetRealtimeEOU` hands the same loaded recognizer to every
+        // fixture (and to `prepare()`'s warm-up). Finishing each fixture's
+        // transcriber must not unload it, or every later chunk throws
+        // `ASRError.notInitialized` (make eval-asr, the nightly gate).
+        let first = syntheticFixture(id: "a", seconds: 5, utterances: [("shared recognizer words", 1, 2.5)])
+        let second = syntheticFixture(id: "b", seconds: 5, utterances: [("shared recognizer words", 1, 2.5)])
+        let recognizer = SimulatedEouRecognizer(words: scriptedWords(for: first))
+        let engine = StreamingASREvaluationEngine(
+            descriptor: ASREngineDescriptor(id: "shared", title: "Shared simulated recognizer", kind: .streaming),
+            recognizer: { _ in recognizer },
+            speechModel: LevelSpeechProbabilityModel())
+
+        try await engine.prepare()
+        let a = try await engine.transcribe(first)
+        let b = try await engine.transcribe(second)
+
+        #expect(a.hypothesis == "shared recognizer words")
+        #expect(b.hypothesis == "shared recognizer words")
+        #expect(await recognizer.unloads == 0)
+        #expect(await recognizer.callsAfterUnload == 0)
+    }
+
     @Test func theOfflineEngineTranscribesEachUtteranceWithPadding() async throws {
         let fixture = syntheticFixture(
             id: "two", seconds: 6, utterances: [("hello there", 0.1, 2), ("bye", 2.1, 3)])

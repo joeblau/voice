@@ -942,11 +942,12 @@ views (`PerformanceStatus`).
 
 The live streaming ASR follows it today: `AppEnvironment` hands
 `performance` to the `VoiceLoop` (#36), and `LiveVoicePipeline.start`
-builds the transcriber with it on every conversation:
+builds Parakeet with it on every conversation (the router's Parakeet
+provider, [apple-asr.md](apple-asr.md)):
 
 ```swift
-let transcriber = try await ParakeetStreamingTranscriber.load(
-    modelDirectory: asrDirectory, audio: hub, voiceActivity: vad,
+let parakeet: TranscriberRouter.EngineProvider = .parakeet(
+    models: models, audio: hub, voiceActivity: vad, inferenceObserver: backgroundInference,
     chunkSizePolicy: PerformanceASRChunkSizePolicy(performance),
     recognizerProvider: ParakeetEouRecognizer.provider(modelManager: models))
 ```

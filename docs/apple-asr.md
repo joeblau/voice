@@ -34,14 +34,22 @@ try await transcriber.start()
 for await event in transcriber.events { ... }   // .partial / .final / .refined, whichever engine runs
 ```
 
-The live app doesn't compose the router yet: like `ParakeetStreamingTranscriber`
-it needs the capture hub and the VAD segmenter, which are wired into
-`AppEnvironment.live()` with the live audio pipeline. The Settings toggle and
-`AppEnvironment.transcriptionSettings` are already live, and so is the
-background inference monitor, so the router only has to follow them. The
-router is an `AppLifecycleParticipant`; put it (or the second pass wrapping
-it) in the transcriber slot so the running engine hears scene phase
-changes.
+In the app, `LiveVoicePipeline.start` (`Blau/VoiceLoop/VoiceLoop.swift`)
+builds the router for each conversation with
+`TranscriberRouter.conversation(parakeet:apple:settings:memoryPressure:backgroundInference:)`,
+which does the three steps above: it starts on
+`transcriptionSettings.effectiveEnginePreference`, follows
+`preferenceChanges()` and `MemoryPressureMonitor.levels()`, and registers the
+router as the monitor's `"asr"` stage (unregistered when the conversation
+stops). So turning "Use Apple Speech Recognition" on mid-conversation
+switches engines at the next utterance boundary. Parakeet is preloaded
+alongside the audio when it is the engine to start on, and a missing
+Parakeet model no longer blocks a conversation: Apple's engine stands in
+(only Silero is required, for barge-in and voice ID). Not wired yet: the
+second pass around the router, memory's vocabulary for Apple's engine, and
+scene phase changes reaching the running engine (the router is an
+`AppLifecycleParticipant`, but the transcriber slot is still
+`UnavailableService`).
 
 ## Verified against the SDK
 
@@ -145,7 +153,15 @@ the first word) to VAD's end of speech (or the last word).
 3. **`BackgroundInferenceMonitor` moved speech-to-text to `systemSpeech`**
    → Apple (`background`). See below.
 4. **Critical memory pressure** → Apple (`memoryPressure`): its model runs
-   in a system process, not in Blau's.
+   in a system process, not in Blau's. Switching away from Parakeet frees
+   its Core ML models: the router drops the transcriber, and
+   `ParakeetStreamingTranscriber.finish()` unloads the recognizer it owns
+   (`StreamingSpeechRecognizer.unload()`; `ParakeetStreamingTranscriber.load`
+   sets `unloadsRecognizerOnFinish`). A recognizer the caller passes in,
+   such as the one the ASR evaluation engine and the soak run share across
+   fixtures, stays loaded. The performance HUD reaches
+   Parakeet's chunk counters through `ParakeetHandoff`, which holds the
+   transcriber weakly so it doesn't keep the model alive.
 5. Otherwise Parakeet (`primary`).
 
 When the chosen engine isn't available the other runs (`fallback`), and
@@ -287,6 +303,7 @@ in audio time (finals the end of the fixture committed are left out).
 | `Tests/BlauTranscriptionTests/Apple/AppleTranscriberTests.swift` | Every commit rule on a scripted engine: pauses, sentences across a short pause, finalization request and timeout, stale results, maximum length, VAD pauses and splitting, `start`/`stop`/stream end, resume, session failure and restart, vocabulary, timestamps | `swift test` |
 | `Tests/BlauTranscriptionTests/Apple/SystemSpeechEngineTests.swift` | Audio conversion to the analyzer's format, the analyzer timeline | `swift test` |
 | `Tests/BlauTranscriptionTests/Routing/TranscriberRouterTests.swift` | The policy table, switching at a boundary, the settle delay, forced switches, the background monitor driving the router (with the real `BackgroundInferenceMonitor`), memory pressure, model availability, build and start failures, the Settings model | `swift test` |
+| `Tests/BlauTranscriptionTests/Routing/ParakeetHandoffTests.swift` | Switching to Apple's engine frees Parakeet: its recognizer is unloaded, and the HUD's handoff (weak) and preload (until taken) don't keep it alive | `swift test` |
 | `Tests/BlauTranscriptionTests/ASR/ParakeetResumeTests.swift` | Parakeet taking over at a resume position | `swift test` |
 | `Tests/BlauTranscriptionTests/ASR/ParakeetInferenceObserverTests.swift` | Parakeet reporting its chunks to the monitor | `swift test` |
 | `Tests/BlauPersistenceTests/MemoryEntityVocabularyTests.swift` | The vocabulary from memory | `swift test` |

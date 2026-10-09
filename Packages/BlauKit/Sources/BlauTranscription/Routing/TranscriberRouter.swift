@@ -138,8 +138,12 @@ public actor TranscriberRouter: Transcriber {
     /// Whether an input changed while an activation or a switch was in
     /// progress, so it must re-decide when it ends.
     private var reevaluationDeferred = false
-    /// Callers of `start()` waiting for an activation in progress to end.
-    private var activationWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Whether `stop()` is waiting for a switch in progress to end before
+    /// it stops the engine that switch leaves running.
+    private var isStopping = false
+    /// Callers of `start()` waiting for an activation, a switch or a
+    /// `stop()` in progress to end.
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
     /// Engines on their way out (`release()`): what their `stop()` commits
     /// is still forwarded.
     private var drainingIDs: Set<Int> = []
@@ -224,10 +228,13 @@ public actor TranscriberRouter: Transcriber {
     // MARK: Transcriber
 
     public func start() async throws {
-        // A `stop()` during an earlier `start()` lets that one finish
-        // building its engine; this start then reuses it.
-        while isActivating {
-            await withCheckedContinuation { activationWaiters.append($0) }
+        // A `stop()` during an earlier `start()` or a switch lets that one
+        // finish building its engine; this start then reuses it. Waiting
+        // for a `stop()` in progress too keeps it from stopping the engine
+        // this start brings up, and keeps this start from building a second
+        // engine next to the one a switch is still building.
+        while isActivating || isSwitching || isStopping {
+            await withCheckedContinuation { startWaiters.append($0) }
         }
         guard !isRunning, !isFinished else { return }
         isRunning = true
@@ -251,11 +258,23 @@ public actor TranscriberRouter: Transcriber {
     }
 
     public func stop() async {
-        guard isRunning else { return }
+        guard isRunning, !isStopping else { return }
         isRunning = false
+        isStopping = true
+        publishStatus()
+        defer {
+            isStopping = false
+            resumeStartWaiters()
+        }
         await cancelPendingSwitch()
+        // A switch in progress stops the engine it leaves running itself
+        // when it sees the router isn't running any more.
         await switchTask?.value
+        // Re-checked after every await: only stop an engine nobody has
+        // started again meanwhile.
+        guard !isRunning else { return }
         await active?.transcriber.stop()
+        guard !isRunning else { return }
         publishStatus()
         logger.notice("Transcriber router stopped")
     }
@@ -263,12 +282,14 @@ public actor TranscriberRouter: Transcriber {
     /// Stops, releases the engines and ends `events` for good.
     public func finish() async {
         await stop()
+        // Marked before releasing, so a `start()` that was waiting for the
+        // stop can't bring an engine up behind the release.
+        isFinished = true
         preferenceFeed?.cancel()
         preferenceFeed = nil
         memoryPressureFeed?.cancel()
         memoryPressureFeed = nil
         await release()
-        isFinished = true
         continuation.finish()
         resumeSettleWaiters(force: true)
     }
@@ -547,6 +568,7 @@ public actor TranscriberRouter: Transcriber {
         isSwitching = false
         reevaluationDeferred = false
         publishStatus()
+        resumeStartWaiters()
         if isFinished {
             await release()
         } else if !isRunning {
@@ -576,13 +598,18 @@ public actor TranscriberRouter: Transcriber {
         reevaluationDeferred = false
         isActivating = false
         publishStatus()
-        let waiters = activationWaiters
-        activationWaiters.removeAll()
-        for waiter in waiters {
-            waiter.resume()
-        }
+        resumeStartWaiters()
         if again {
             await reevaluate()
+        }
+    }
+
+    /// Lets callers of `start()` re-check whether they can go on.
+    private func resumeStartWaiters() {
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
         }
     }
 

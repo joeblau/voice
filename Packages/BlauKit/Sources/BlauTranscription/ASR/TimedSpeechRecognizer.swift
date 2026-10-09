@@ -38,6 +38,10 @@ public struct TimedSpeechRecognizer: StreamingSpeechRecognizer {
         await recognizer.reset()
     }
 
+    public func unload() async {
+        await recognizer.unload()
+    }
+
     private func timed(_ output: RecognizerOutput, since started: Duration) -> RecognizerOutput {
         guard output.chunks > 0, output.modelTime == .zero else { return output }
         var output = output

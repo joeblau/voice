@@ -145,6 +145,12 @@ actor SimulatedEouRecognizer: StreamingSpeechRecognizer {
     private(set) var chunksRun = 0
     private(set) var resets = 0
     private(set) var finishes = 0
+    /// `unload()` calls: `ParakeetStreamingTranscriber.finish()` releases
+    /// the model of a recognizer it owns (`unloadsRecognizerOnFinish`).
+    private(set) var unloads = 0
+    /// Calls to `append`, `finish` or `reset` after `unload()`, which a
+    /// real recognizer can't serve.
+    private(set) var callsAfterUnload = 0
     private(set) var maximumHistory = 0
     /// Words "re-decoded" for partials in total (the cost FluidAudio pays).
     private(set) var wordsRedecoded = 0
@@ -173,6 +179,7 @@ actor SimulatedEouRecognizer: StreamingSpeechRecognizer {
     }
 
     func append(_ frame: AudioFrame) throws -> RecognizerOutput {
+        if unloads > 0 { callsAfterUnload += 1 }
         if let expectedNext, expectedNext != frame.sampleOffset {
             discontinuities += 1
         }
@@ -230,6 +237,7 @@ actor SimulatedEouRecognizer: StreamingSpeechRecognizer {
     /// the words that end by the cutoff. Each padded chunk decodes only its
     /// output span (`shiftSamples`), as in FluidAudio.
     func finish(keepingTokensThrough cutoff: Int64?) -> RecognizerOutput {
+        if unloads > 0 { callsAfterUnload += 1 }
         finishes += 1
         var output = RecognizerOutput()
         let before = transcript
@@ -262,6 +270,7 @@ actor SimulatedEouRecognizer: StreamingSpeechRecognizer {
     }
 
     func reset() {
+        if unloads > 0 { callsAfterUnload += 1 }
         resets += 1
         streamStart = nil
         buffered = 0
@@ -270,6 +279,10 @@ actor SimulatedEouRecognizer: StreamingSpeechRecognizer {
         eouAnchor = nil
         eouConfirmed = false
         expectedNext = nil
+    }
+
+    func unload() {
+        unloads += 1
     }
 
     private var transcript: String {
