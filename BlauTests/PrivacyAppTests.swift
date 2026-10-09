@@ -1,8 +1,10 @@
 import BlauCore
 import BlauMemory
 import BlauPersistence
+import BlauTopics
 import Foundation
 import SwiftData
+import Synchronization
 import Testing
 
 @testable import Blau
@@ -96,6 +98,33 @@ struct PrivacyAppTests {
         #expect(text.contains("memory searches"))
         #expect(text.contains("Learn From Conversations"))
         #expect(text.contains("Grok's reply as audio"))
+    }
+
+    /// With Markdown copies in iCloud Drive (#78), deleting conversations
+    /// says they stay (#149 review).
+    @Test func deletingConversationsMentionsTheMarkdownCopies() {
+        let without = PrivacySettingsView.confirmationMessage(.conversations, count: 3)
+        #expect(!without.contains("Markdown"))
+        let with = PrivacySettingsView.confirmationMessage(.conversations, count: 3, keepsMarkdownCopies: true)
+        #expect(
+            with
+                == "This deletes 3 conversations from this iPhone, iCloud and your other devices. "
+                + "The Markdown copies in iCloud Drive → Blau aren't deleted; remove them in Files.")
+        #expect(
+            PrivacySettingsView.confirmationMessage(.everything, count: 0, keepsMarkdownCopies: true)
+                .contains("Markdown copies"))
+        // Nothing about Markdown where no conversation is deleted.
+        #expect(
+            !PrivacySettingsView.confirmationMessage(.learnedFacts, count: 2, keepsMarkdownCopies: true)
+                .contains("Markdown"))
+    }
+
+    @Test func aDeleteSaysWhatItIsWaitingFor() {
+        #expect(PrivacySettingsView.progressMessage(.conversations) == "Deleting…")
+        #expect(PrivacySettingsView.progressMessage(.voiceprint) == "Deleting…")
+        for scope in [DataEraseScope.learnedFacts, .knowledge, .everything] {
+            #expect(PrivacySettingsView.progressMessage(scope) == "Finishing Blau's memory update, then deleting…")
+        }
     }
 
     @Test func exportSummary() {
@@ -200,11 +229,45 @@ struct PrivacyAppTests {
         #expect(first.pathExtension == "zip")
         #expect(FileManager.default.fileExists(atPath: first.path(percentEncoded: false)))
         let second = try DataExportFiles.write(export)
+        // The zip keeps its readable name, in a folder of its own.
+        #expect(second.lastPathComponent == first.lastPathComponent)
         #expect(
             try FileManager.default.contentsOfDirectory(atPath: DataExportFiles.directory.path(percentEncoded: false))
-                == [second.lastPathComponent])
+                == [second.deletingLastPathComponent().lastPathComponent])
+        #expect(!FileManager.default.fileExists(atPath: first.path(percentEncoded: false)))
         DataExportFiles.removeAll()
         #expect(!FileManager.default.fileExists(atPath: DataExportFiles.directory.path(percentEncoded: false)))
+    }
+
+    /// `remove(_:)` takes one export's folder; a later export stays.
+    @Test func removingOneExportLeavesALaterOne() throws {
+        let export = DataExport(exportedAt: Self.t0, schemaVersion: "2.0.0")
+        let first = try DataExportFiles.write(export)
+        // A later export replaced it; removing the first again is harmless.
+        let second = try DataExportFiles.write(export)
+        DataExportFiles.remove(first)
+        #expect(FileManager.default.fileExists(atPath: second.path(percentEncoded: false)))
+        DataExportFiles.remove(second)
+        #expect(
+            try FileManager.default.contentsOfDirectory(atPath: DataExportFiles.directory.path(percentEncoded: false))
+                .isEmpty)
+        DataExportFiles.removeAll()
+    }
+
+    /// Leaving Privacy & Data drops its export model; the zip it offered
+    /// goes with it, not at the next export or launch (#149 review).
+    @Test func leavingPrivacyRemovesTheExportItOffered() async throws {
+        let fixture = try await makeFixture()
+        var exports: DataExportModel? = DataExportModel()
+        await exports?.prepare(DataExportModel.writer(for: fixture.context.container, app: "test"))
+        let url = try #require(exports?.export?.url)
+        #expect(FileManager.default.fileExists(atPath: url.path(percentEncoded: false)))
+
+        exports = nil
+
+        try await waitFor { !FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) }
+        #expect(
+            !FileManager.default.fileExists(atPath: url.deletingLastPathComponent().path(percentEncoded: false)))
     }
 
     /// After a delete, Share Export no longer offers the zip the delete
@@ -262,6 +325,154 @@ struct PrivacyAppTests {
                 atPath: DataExportFiles.directory.path(percentEncoded: false))) ?? []
         #expect(files.isEmpty)
     }
+}
+
+// MARK: - An extraction during a delete
+
+/// Delete Learned Facts while fact extraction (#66) is talking to xAI: the
+/// request is cancelled and nothing it would have learned, neither facts
+/// nor a note for the profile, appears after the delete (#149 review).
+@Suite("Privacy: extraction during a delete", .serialized)
+@MainActor
+struct PrivacyExtractionAppTests {
+    private static let t0 = Date(timeIntervalSinceReferenceDate: 800_000_000)
+
+    nonisolated private static let lisbonReply = #"""
+        {"entities":[{"name":"Lisbon","type":"place","aliases":[],"summary":""}],
+         "facts":[{"subject":"user","predicate":"lives in","object":"Lisbon","confidence":0.9,"source":1,"replaces":[]}],
+         "summary":"The user moved to Lisbon."}
+        """#
+
+    /// The first request takes a minute unless it is cancelled, like an
+    /// xAI request on URLSession; later ones answer at once.
+    private final class SlowFirstRequest: TextGenerator {
+        let requests = Mutex(0)
+        let cancelled = Mutex(false)
+
+        func isAvailable() async -> Bool { true }
+
+        func generate(_ request: TextGenerationRequest) async throws -> String {
+            let index = requests.withLock { count in
+                count += 1
+                return count
+            }
+            if index == 1 {
+                do {
+                    try await Task.sleep(for: .seconds(60))
+                } catch {
+                    cancelled.withLock { $0 = true }
+                    throw error
+                }
+            }
+            return PrivacyExtractionAppTests.lisbonReply
+        }
+    }
+
+    private struct Harness {
+        let persistence: PersistenceController
+        let container: ModelContainer
+        let generator: SlowFirstRequest
+        let pipeline: FactExtractionPipeline
+        let notes: InMemoryProfileConsolidationNoteStore
+        let profile: ProfileMemory
+    }
+
+    /// Records a conversation whose topic closes and goes to extraction,
+    /// and returns once its request is in flight.
+    private func extractionInFlight() async throws -> Harness {
+        let persistence = PersistenceController.inMemory()
+        await persistence.start()
+        let container = try #require(persistence.stack?.container)
+        let recorder = PersistenceTranscriptRecorder(persistence: persistence)
+        let topics = TopicLifecycle.offline(transcript: recorder)
+        let transcript = TopicTrackingTranscript(base: recorder, topics: topics)
+
+        let preference = InMemoryMemoryLearningPreferenceStore()
+        let facts = DeferredMemoryFactStore { @MainActor [weak persistence] in persistence?.stack?.container }
+        let generator = SlowFirstRequest()
+        let pipeline = FactExtractionPipeline(
+            generator: generator,
+            transcripts: DeferredTopicTranscriptSource { try await recorder.conversationStore() },
+            store: facts, isEnabled: { preference.load() }, signposter: .disabled(.memory))
+        let learning = MemoryLearning(
+            settings: MemoryLearningSettings(store: preference), pipeline: pipeline, facts: facts)
+
+        let store = DeferredProfileMemoryStore { @MainActor [weak persistence] in persistence?.stack?.container }
+        let notes = InMemoryProfileConsolidationNoteStore()
+        let profile = ProfileMemory(
+            consolidator: ProfileConsolidator(
+                generator: NeverCalledGenerator(), store: store, notes: notes, signposter: .disabled(.memory)),
+            pinned: PinnedMemoryProvider(store: store), schedulesBackgroundWork: false)
+        learning.start(following: topics)
+        profile.start(learning: learning)
+
+        let conversation = ConversationID()
+        try await transcript.beginConversation(conversation, at: Self.t0)
+        try await transcript.record(
+            BlauCore.Utterance(
+                conversationID: conversation, speaker: .user, text: "I moved to Lisbon last month.",
+                timeRange: TimeRange(start: .zero, duration: .seconds(3)), startedAt: Self.t0,
+                speakerDecision: .accept))
+        try await transcript.finishConversation(conversation, at: Self.t0.addingTimeInterval(30))
+        await topics.waitUntilIdle()
+        try await waitFor { generator.requests.withLock { $0 } == 1 }
+        return Harness(
+            persistence: persistence, container: container, generator: generator, pipeline: pipeline, notes: notes,
+            profile: profile)
+    }
+
+    @Test func anExtractionRunningDuringTheDeleteLeavesNothingBehind() async throws {
+        let harness = try await extractionInFlight()
+        let clock = ContinuousClock()
+        let started = clock.now
+
+        let summary = try await PrivacyDataEraser.erase(
+            .learnedFacts, in: harness.container.mainContext, profileMemory: harness.profile, exports: nil,
+            isConversationRunning: false)
+
+        // The minute-long request was cancelled, not waited out.
+        #expect(clock.now - started < .seconds(30))
+        #expect(harness.generator.cancelled.withLock { $0 })
+        #expect(summary.facts == 0)
+        // The topic closed before the delete isn't learned again.
+        await harness.pipeline.waitUntilIdle()
+        #expect(await harness.pipeline.pendingTopicIDs.isEmpty)
+        #expect(!(await harness.pipeline.isSuspended))
+        #expect(harness.generator.requests.withLock { $0 } == 1)
+        #expect(try ModelContext(harness.container).fetchCount(FetchDescriptor<Fact>()) == 0)
+        #expect(harness.notes.load().isEmpty)
+        #expect(await harness.profile.consolidator.pendingNotes().isEmpty)
+    }
+
+    /// A delete that never happened leaves extraction where it was: the
+    /// topic runs again and is learned.
+    @Test func aFailedDeleteLetsExtractionCarryOn() async throws {
+        let harness = try await extractionInFlight()
+        await harness.profile.prepareToErase()
+        #expect(await harness.pipeline.isSuspended)
+        #expect(await harness.pipeline.pendingTopicIDs.count == 1)
+
+        await harness.profile.eraseFailed()
+
+        try await waitFor {
+            await harness.pipeline.waitUntilIdle()
+            return (try? ModelContext(harness.container).fetchCount(FetchDescriptor<Fact>())) == 1
+        }
+        #expect(harness.generator.requests.withLock { $0 } == 2)
+        try await waitFor { await harness.profile.consolidator.pendingNotes().count == 1 }
+    }
+}
+
+/// Polls `condition` for up to five seconds of real time.
+@MainActor
+private func waitFor(_ condition: () async throws -> Bool, sourceLocation: SourceLocation = #_sourceLocation)
+    async throws
+{
+    for _ in 0..<500 {
+        if (try? await condition()) == true { return }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    Issue.record("Timed out waiting for condition", sourceLocation: sourceLocation)
 }
 
 /// A text model the tests never reach: nothing here consolidates.

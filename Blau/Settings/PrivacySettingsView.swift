@@ -10,6 +10,7 @@ enum PrivacySettingsIdentifiers {
     static func delete(_ scope: DataEraseScope) -> String { "settings.privacy.delete.\(scope.rawValue)" }
     static let confirm = "settings.privacy.confirm"
     static let result = "settings.privacy.result"
+    static let progress = "settings.privacy.progress"
     static let sentToXAI = "settings.privacy.xai"
     static let exportPrepare = "settings.privacy.export.prepare"
     static let exportShare = "settings.privacy.export.share"
@@ -28,7 +29,9 @@ struct PrivacySettingsView: View {
 
     @State private var pending: DataEraseScope?
     @State private var pendingCount = 0
-    @State private var isErasing = false
+    /// The delete running now. It can wait for a memory update to finish
+    /// first, so the pane says what it is doing.
+    @State private var erasing: DataEraseScope?
     @State private var result: String?
     @State private var problem: String?
     /// The export lives here, not in its section, so a delete can withdraw
@@ -52,7 +55,7 @@ struct PrivacySettingsView: View {
 
             SentToXAISection()
 
-            DataExportSection(model: exports, isErasing: isErasing)
+            DataExportSection(model: exports, isErasing: erasing != nil)
 
             Section {
                 ForEach(DataEraseScope.allCases, id: \.self) { scope in
@@ -61,8 +64,18 @@ struct PrivacySettingsView: View {
                     }
                     // An export still being written would hold what is about
                     // to be deleted, so the two never overlap.
-                    .disabled(isErasing || exports.isPreparing)
+                    .disabled(erasing != nil || exports.isPreparing)
                     .accessibilityIdentifier(PrivacySettingsIdentifiers.delete(scope))
+                }
+                if let erasing {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text(Self.progressMessage(erasing))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier(PrivacySettingsIdentifiers.progress)
                 }
                 if let result {
                     Text(result)
@@ -97,7 +110,8 @@ struct PrivacySettingsView: View {
             }
             .accessibilityIdentifier(PrivacySettingsIdentifiers.confirm)
         } message: { scope in
-            Text(Self.confirmationMessage(scope, count: pendingCount))
+            let keepsMarkdownCopies = Self.hasMarkdownCopies(environment.markdownExport)
+            Text(Self.confirmationMessage(scope, count: pendingCount, keepsMarkdownCopies: keepsMarkdownCopies))
         }
     }
 
@@ -109,8 +123,8 @@ struct PrivacySettingsView: View {
     }
 
     private func erase(_ scope: DataEraseScope) async {
-        isErasing = true
-        defer { isErasing = false }
+        erasing = scope
+        defer { erasing = nil }
         let isConversationRunning = await environment.audio.isCapturing || environment.voiceLoop.phase.isActive
         do {
             let summary = try await PrivacyDataEraser.erase(
@@ -146,7 +160,11 @@ struct PrivacySettingsView: View {
         }
     }
 
-    static func confirmationMessage(_ scope: DataEraseScope, count: Int) -> String {
+    /// - Parameter keepsMarkdownCopies: Conversations were exported to
+    ///   iCloud Drive → Blau (#78); those files are the user's and stay.
+    static func confirmationMessage(_ scope: DataEraseScope, count: Int, keepsMarkdownCopies: Bool = false)
+        -> String
+    {
         let what: String =
             switch scope {
             case .conversations:
@@ -166,7 +184,27 @@ struct PrivacySettingsView: View {
         if scope == .voiceprint || scope == .everything {
             message += " " + String(localized: "You'll need to enroll again for Voice ID.")
         }
+        if keepsMarkdownCopies, scope.components.contains(.conversations) {
+            message +=
+                " "
+                + String(
+                    localized: "The Markdown copies in iCloud Drive → Blau aren't deleted; remove them in Files.")
+        }
         return message
+    }
+
+    /// Whether Markdown copies of the conversations may be in iCloud Drive
+    /// → Blau: an export ran, or runs automatically.
+    static func hasMarkdownCopies(_ export: MarkdownExportController) -> Bool {
+        export.isAutoExportEnabled || export.lastExportedAt != nil
+    }
+
+    /// What the pane shows while a delete runs. Deleting what Blau learned
+    /// first lets a memory update already talking to xAI finish.
+    static func progressMessage(_ scope: DataEraseScope) -> String {
+        scope.erasesLearnedFacts
+            ? String(localized: "Finishing Blau's memory update, then deleting…")
+            : String(localized: "Deleting…")
     }
 
     static func resultMessage(_ scope: DataEraseScope, summary: DataEraseSummary) -> String {
@@ -198,24 +236,38 @@ enum PrivacyDataEraser {
     }
 
     /// Deletes `scope` everywhere (`DataEraser`), then this device's copies:
-    /// the share sheet's exports (withdrawn from `exports`, so Share Export
-    /// no longer offers the removed zip), and for the learned facts and the
-    /// knowledge base the consolidation log, its notes and the pinned
-    /// memory cache. A consolidation already running finishes first, so it
-    /// can't write a profile from facts that are about to go.
+    /// the share sheet's exports (withdrawn from `exports`, when the pane
+    /// has one, so Share Export no longer offers the removed zip), and for
+    /// the learned facts and the knowledge base the consolidation log, its
+    /// notes and the pinned memory cache.
+    ///
+    /// Before the learned facts go, fact extraction is suspended (the
+    /// request in flight is cancelled) and a consolidation already running
+    /// finishes, so neither writes facts or a profile from what was read
+    /// before the delete (`ProfileMemory.prepareToErase()`).
+    @discardableResult
     static func erase(
-        _ scope: DataEraseScope, in context: ModelContext, profileMemory: ProfileMemory, exports: DataExportModel,
+        _ scope: DataEraseScope, in context: ModelContext, profileMemory: ProfileMemory, exports: DataExportModel?,
         isConversationRunning: Bool
     ) async throws -> DataEraseSummary {
         guard !isConversationRunning else { throw Refusal.conversationRunning }
         if scope.erasesLearnedFacts {
             await profileMemory.prepareToErase()
         }
-        let summary = try DataEraser.erase(scope, in: context)
+        let summary: DataEraseSummary
+        do {
+            summary = try DataEraser.erase(scope, in: context)
+        } catch {
+            if scope.erasesLearnedFacts {
+                // Nothing was deleted: extraction carries on where it was.
+                await profileMemory.eraseFailed()
+            }
+            throw error
+        }
         // The share sheet's copies hold what was just deleted; they go with
         // it.
         DataExportFiles.removeAll()
-        exports.dataErased()
+        exports?.dataErased()
         if scope.components.contains(.conversations) {
             ConversationExportFiles.removeAll()
         }
@@ -304,27 +356,46 @@ struct SentToXAISection: View {
 
 /// The share sheet's copy of everything: one zip in the app's temporary
 /// directory. It holds all the user's data, so it never outlives what it
-/// copies for long: each export replaces the last, and every delete in
-/// Privacy & Data removes it (`removeAll()`).
+/// copies for long: each export replaces the last, every delete in
+/// Privacy & Data removes it (`removeAll()`), leaving Privacy & Data
+/// removes the one it offered (`DataExportModel`'s deinit), and launch
+/// removes any an earlier run left (`AppEnvironment.start()`).
 enum DataExportFiles {
     static var directory: URL {
         URL.temporaryDirectory.appending(path: "DataExport", directoryHint: .isDirectory)
     }
 
-    /// Writes `export` as a zip, replacing earlier exports. Runs off the main
+    /// Writes `export` as a zip in a folder of its own, replacing earlier
+    /// exports. The zip keeps its readable name for the share sheet; the
+    /// folder lets `remove(_:)` take exactly this export. Runs off the main
     /// actor: a long history takes a while to format and compress.
     static func write(_ export: DataExport) throws -> URL {
         removeAll()
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return try DataExporter().writeArchive(export, in: directory)
+        let folder = directory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return try DataExporter().writeArchive(export, in: folder)
+    }
+
+    /// Removes one export `write(_:)` made, with its folder; a later export
+    /// stays.
+    static func remove(_ archive: URL) {
+        let folder = archive.deletingLastPathComponent()
+        let isOwnFolder =
+            folder.deletingLastPathComponent().standardizedFileURL.path(percentEncoded: false)
+            == directory.standardizedFileURL.path(percentEncoded: false)
+        removeItem(at: isOwnFolder ? folder : archive)
     }
 
     /// Removes every exported file.
     static func removeAll() {
+        removeItem(at: directory)
+    }
+
+    private static func removeItem(at url: URL) {
         do {
-            try FileManager.default.removeItem(at: directory)
+            try FileManager.default.removeItem(at: url)
         } catch CocoaError.fileNoSuchFile {
-            // Nothing was exported.
+            // Nothing was exported, or a delete already removed it.
         } catch {
             Log.ui.error("Couldn't remove the data export: \(String(describing: error), privacy: .public)")
         }
@@ -352,6 +423,14 @@ final class DataExportModel {
     /// deleted data, so it is thrown away when it finishes.
     private(set) var erasures = 0
 
+    /// Leaving Privacy & Data drops this model, and nothing can offer its
+    /// export again: the zip goes now, not at the next export or launch.
+    isolated deinit {
+        if let export {
+            DataExportFiles.remove(export.url)
+        }
+    }
+
     /// Prepares an export with `write`, replacing the last one.
     func prepare(_ write: Writer) async {
         guard !isPreparing else { return }
@@ -364,7 +443,7 @@ final class DataExportModel {
             guard erasures == started else {
                 // Data was deleted while this was being written: the zip
                 // holds it, so it goes too.
-                Self.remove(url)
+                DataExportFiles.remove(url)
                 return
             }
             export = Export(url: url, counts: counts)
@@ -392,16 +471,6 @@ final class DataExportModel {
                 let snapshot = try DataExport.snapshot(in: ModelContext(container), exportedAt: Date(), app: app)
                 return (try DataExportFiles.write(snapshot), snapshot.counts)
             }.value
-        }
-    }
-
-    private static func remove(_ url: URL) {
-        do {
-            try FileManager.default.removeItem(at: url)
-        } catch CocoaError.fileNoSuchFile {
-            // A delete already removed it.
-        } catch {
-            Log.ui.error("Couldn't remove a stale data export: \(String(describing: error), privacy: .public)")
         }
     }
 }

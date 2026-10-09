@@ -162,7 +162,14 @@ under `Log.memory` with counts only. Observers get `events()`: queued,
 started, finished (with the `FactExtractionOutcome`, including the model's
 summary, which the app keeps as a note for the next profile consolidation,
 [memory-profile.md](memory-profile.md)), failed, waiting for the text
-model, and discarded.
+model, discarded, and suspended.
+
+`suspend()` / `endSuspension()` hold the queue while Settings → Privacy &
+Data deletes the learned facts (#79): the request in flight is cancelled,
+its topic stays queued without counting an attempt, `resume()` and new
+topics don't restart the worker, and `.suspended` is yielded once it has
+stopped, after every event of earlier work. See
+[privacy.md](privacy.md#deleting).
 
 ## Privacy
 

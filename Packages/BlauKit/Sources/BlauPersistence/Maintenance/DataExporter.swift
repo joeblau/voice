@@ -325,6 +325,14 @@ public enum DataExportArchiver {
                 // The coordinator deletes its temporary archive when the
                 // accessor returns, so copy it out now.
                 try fileManager.copyItem(at: zipped, to: destination)
+                #if os(iOS)
+                    // The copy gets the default protection class; the zip
+                    // holds everything, so it is unreadable while the
+                    // iPhone is locked, like the files it was made from.
+                    try fileManager.setAttributes(
+                        [.protectionKey: FileProtectionType.complete],
+                        ofItemAtPath: destination.path(percentEncoded: false))
+                #endif
                 produced = true
             } catch {
                 copyError = error

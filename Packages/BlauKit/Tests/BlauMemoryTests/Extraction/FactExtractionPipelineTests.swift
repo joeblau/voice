@@ -383,6 +383,87 @@ struct FactExtractionPipelineTests {
         await pipeline.waitUntilIdle()
         #expect(generator.requests.count == 1)
     }
+
+    // MARK: Suspending (#79)
+
+    /// Settings → Privacy & Data suspends extraction while it deletes the
+    /// learned facts: the request in flight is cancelled, nothing it would
+    /// have learned is written, and the topic waits, without losing an
+    /// attempt, until the suspension ends.
+    @Test func suspendingCancelsTheExtractionInFlightAndKeepsTheTopic() async throws {
+        let fixture = try TopicFixture()
+        let generator = ScriptedTextGenerator { _, index in
+            if index == 0 {
+                // An xAI request that would take a minute; cancellation
+                // ends it, like URLSession's.
+                try await Task.sleep(for: .seconds(60))
+            }
+            return Support.reply(facts: [Support.fact("user", "lives in", "Lisbon", source: 1)])
+        }
+        let pipeline = makePipeline(
+            fixture, generator: generator, configuration: .init(maximumAttempts: 1, retryDelay: .zero))
+        let events = pipeline.events()
+        let topic = try await fixture.recordTopic([(.user, "I live in Lisbon.", 1)])
+        await pipeline.topicClosed(topic.topicID)
+        try await eventually { generator.requests.count == 1 }
+
+        let clock = ContinuousClock()
+        let started = clock.now
+        await pipeline.suspend()
+        #expect(clock.now - started < .seconds(30))
+        #expect(await pipeline.isSuspended)
+        #expect(!(await pipeline.isRunning))
+        #expect(try fixture.storedFacts().isEmpty)
+        #expect(await pipeline.pendingTopicIDs == [topic.topicID])
+        var seen: [FactExtractionEvent] = []
+        for await event in events {
+            seen.append(event)
+            if event == .suspended { break }
+        }
+        #expect(seen.last == .suspended)
+        #expect(seen.contains(.failed(topicID: topic.topicID, reason: "suspended", willRetry: true)))
+        #expect(!seen.contains { if case .finished = $0 { true } else { false } })
+
+        // Nothing restarts it while suspended.
+        await pipeline.resume()
+        await pipeline.waitUntilIdle()
+        #expect(generator.requests.count == 1)
+
+        await pipeline.endSuspension()
+        await pipeline.waitUntilIdle()
+        #expect(!(await pipeline.isSuspended))
+        #expect(generator.requests.count == 2)
+        #expect(try fixture.storedFacts().map(\.objectText) == ["Lisbon"])
+        #expect(await pipeline.pendingTopicIDs.isEmpty)
+    }
+
+    @Test func topicsClosedWhileSuspendedWaitForTheLastSuspensionToEnd() async throws {
+        let fixture = try TopicFixture()
+        let generator = ScriptedTextGenerator(replies: [
+            Support.reply(facts: [Support.fact("user", "lives in", "Lisbon", source: 1)])
+        ])
+        let pipeline = makePipeline(fixture, generator: generator)
+        let events = pipeline.events()
+        await pipeline.suspend()
+        await pipeline.suspend()
+        for await event in events where event == .suspended { break }
+
+        let topic = try await fixture.recordTopic([(.user, "I live in Lisbon.", 1)])
+        await pipeline.topicClosed(topic.topicID)
+        #expect(!(await pipeline.isRunning))
+        await pipeline.endSuspension()
+        await pipeline.waitUntilIdle()
+        #expect(generator.requests.isEmpty)
+        #expect(await pipeline.pendingTopicIDs == [topic.topicID])
+
+        await pipeline.endSuspension()
+        await pipeline.waitUntilIdle()
+        #expect(generator.requests.count == 1)
+        #expect(await pipeline.pendingTopicIDs.isEmpty)
+        // An extra end is ignored.
+        await pipeline.endSuspension()
+        #expect(!(await pipeline.isSuspended))
+    }
 }
 
 @Suite("Fact extraction: settings and persistence")

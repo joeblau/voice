@@ -338,6 +338,8 @@ final class AppEnvironment {
         memoryLearning.start(following: topicLifecycle)
         // #67: extraction notes and fresh facts for the pinned profile.
         profileMemory.start(learning: memoryLearning)
+        // #79: a data export an earlier run left in tmp; nothing offers it.
+        Task.detached(priority: .utility) { DataExportFiles.removeAll() }
         // Previews and UI tests only: a canned conversation (#42).
         async let fixture: Void = ChatTranscriptFixture.seedIfRequested(in: self)
         startMarkdownExport()

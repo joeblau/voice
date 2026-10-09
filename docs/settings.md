@@ -91,7 +91,8 @@ time, background noise and consistency with the others. Re-enroll replaces
 the voiceprint on every device once the new one is saved. When the synced
 voiceprint has no set from this device model, **Add This iPhone's
 Microphone** records a 15 s top-up. **Delete Voiceprint** asks first and
-deletes through `DataEraser`, like Privacy & Data. Enrolling and deleting
+deletes through `PrivacyDataEraser`, like Privacy & Data, so a data export
+in tmp goes too. Enrolling and deleting
 are refused while a conversation is running. A voiceprint from another
 embedding model shows "Re-enroll needed".
 
@@ -124,8 +125,10 @@ action asks first, with a count. Nothing is deleted while a conversation is
 recording. **Delete Learned Facts** removes every fact, the people and
 things they are about and the profile summary, and keeps the user's own
 pages; with the knowledge base it also clears this device's consolidation
-log and notes and the pinned-memory cache (`PrivacyDataEraser`). See
-[privacy.md](privacy.md#deleting).
+log and notes and the pinned-memory cache (`PrivacyDataEraser`), first
+suspending fact extraction (the request in flight is cancelled) and
+dropping the topics waiting for it. A progress row shows while a delete
+runs. See [privacy.md](privacy.md#deleting).
 
 **Export All Data** (`DataExport`, `DataExporter`, BlauPersistence) zips
 `blau-data.json` (every record), `Conversations.md`, `Knowledge.md` and a

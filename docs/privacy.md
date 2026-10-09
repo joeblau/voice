@@ -14,7 +14,8 @@ user-facing side is Settings → Privacy & Data (`Blau/Settings/PrivacySettingsV
 | Voiceprint (`VoiceProfile`, `VoiceEnrollmentSet`); vectors are CloudKit-encrypted fields | Same | Yes ([product decision 2 in #1](voice-id.md)) | Delete Voiceprint (here or in Voice ID), Delete All Data |
 | Memory search index (FTS5 + int8 vectors) | Application Support, this device | No, rebuilt from the store | Follows the store: the incremental indexer drops deleted records from SwiftData history ([memory-indexer.md](memory-indexer.md)) |
 | Profile consolidation log (profile text before/after each run) and extraction notes | Application Support / `UserDefaults`, this device | No | Delete Learned Facts, Delete Knowledge Base, Delete All Data (`ProfileConsolidator.eraseLocalHistory()`) |
-| Share-sheet exports (Export Conversations, Export All Data) | The app's temporary directory | No | Replaced by the next export; removed by every delete |
+| Fact extraction queue (ids of closed topics waiting to be learned from) | `UserDefaults`, this device | No | Dropped by Delete Learned Facts, Delete Knowledge Base, Delete All Data |
+| Share-sheet exports (Export Conversations, Export All Data) | The app's temporary directory | No | Replaced by the next export; removed by every delete (including Delete Voiceprint in Voice ID); Export All Data's zip also goes when the user leaves Privacy & Data and at launch |
 | Markdown copies in iCloud Drive → Blau (#78, [export.md](export.md)) | The user's iCloud Drive | Yes (iCloud Drive) | Not by Blau: they are the user's files, deleted in Files |
 | xAI API key | Keychain, iCloud Keychain ([xai-auth.md](xai-auth.md)) | Yes | Settings → xAI Account → Remove Key |
 | Settings and preferences | `UserDefaults`, this device | No | Deleting the app |
@@ -71,24 +72,49 @@ Blau Export 2026-10-08.zip
   and clip embeddings are not. They are a biometric template only Blau's
   speaker model can use, and an export is a file that gets shared and kept;
   the user loses nothing they could read or take elsewhere.
-- The zip lives in the app's temporary directory (`DataExportFiles`). On
-  iOS the files are written with complete file protection. Each export
-  replaces the last, and every delete in Privacy & Data removes it and
-  withdraws it from the pane (`DataExportModel.dataErased()`), so Share
-  Export never offers a removed file. The Delete buttons are disabled while
-  an export is being prepared, and an export that still finishes after a
-  delete is discarded with its zip: it would hold the deleted data.
+- The zip lives in the app's temporary directory (`DataExportFiles`), in a
+  folder of its own so it keeps its readable name. On iOS the staged files
+  and the zip itself have complete file protection (`DataExportArchiver`
+  sets it on the copy it takes from `NSFileCoordinator`, which would
+  otherwise get the default class). Each export replaces the last, and
+  every delete in Privacy & Data (and Delete Voiceprint in Voice ID)
+  removes it and withdraws it from the pane (`DataExportModel.dataErased()`),
+  so Share Export never offers a removed file. The Delete buttons are
+  disabled while an export is being prepared, and an export that still
+  finishes after a delete is discarded with its zip: it would hold the
+  deleted data.
+- The zip doesn't wait in tmp for the next export: leaving Privacy & Data
+  releases `DataExportModel`, whose deinit removes the export it offered,
+  and `AppEnvironment.start()` removes any export an earlier run left.
+  `ShareLink` reports no completion, so the zip stays while the pane is
+  open and can be shared again.
 
 ## Deleting
 
 Each **Delete** button asks first, with a count, and is refused while a
 conversation is recording (the pipeline writes to the same store) or an
-export is being prepared.
+export is being prepared. When conversations were exported to iCloud
+Drive → Blau (an export ran, or Export Automatically is on), the
+confirmation for Delete All Conversations and Delete All Data says those
+Markdown copies aren't deleted. While a delete runs the pane shows a
+progress row ("Finishing Blau's memory update, then deleting" for the
+learned facts, which can wait for a consolidation request).
 `PrivacyDataEraser.erase` runs:
 
-1. For the learned facts or the knowledge base, waits for a consolidation
-   that is already running (`ProfileConsolidator.waitUntilIdle()`), so it
-   can't write a new profile summary from facts that are about to go.
+1. For the learned facts or the knowledge base
+   (`ProfileMemory.prepareToErase()`):
+   - suspends fact extraction (`FactExtractionPipeline.suspend()`). The
+     request in flight is cancelled, its topic stays queued without
+     counting an attempt, and nothing starts until the suspension ends.
+     The pipeline yields `.suspended` once its worker has stopped, and
+     `prepareToErase()` returns only after `ProfileMemory`'s follower has
+     seen it, so every extraction outcome from before the delete has been
+     recorded and the next step erases its note. Without this an
+     extraction that read the store before the delete (up to 90 s per
+     request) could write facts and a consolidation note after it;
+   - waits for a consolidation that is already running
+     (`ProfileConsolidator.waitUntilIdle()`), so it can't write a new
+     profile summary from facts that are about to go.
 2. `DataEraser.erase(scope, in:)` (BlauPersistence) fetches and deletes
    every record of the scope's models **one by one** and saves. Each
    deletion lands in the persistent history, and `NSPersistentCloudKitContainer`
@@ -98,7 +124,11 @@ export is being prepared.
 3. Removes the share-sheet exports (and withdraws Share Export), and for the learned facts or the
    knowledge base drops this device's consolidation log, its notes and the
    pinned-memory cache (`ProfileMemory.memoryErased()`), so the next session's
-   instructions no longer carry what was deleted.
+   instructions no longer carry what was deleted. The topics still waiting
+   for extraction were closed before the delete, so they are dropped rather
+   than learned again; then the suspension ends and conversations from now
+   on are learned from as usual. If the delete fails, nothing was deleted
+   and extraction resumes with its queue (`ProfileMemory.eraseFailed()`).
 
 | Scope (`DataEraseScope`) | Records |
 | ------------------------ | ------- |
@@ -190,7 +220,8 @@ stale one left by a killed run is ended at launch.
 | `DataMaintenanceTests` (BlauPersistence) | Every scope, including `learnedFacts` keeping the user's pages; counts; deletions saved to the store |
 | `DataExportTests` (BlauPersistence) | The snapshot holds every record; JSON round trip with millisecond dates; the voiceprint's vectors are left out; deterministic output; both Markdown files; the README; the folder; the zip unzips (with `ditto` on macOS) to the same files |
 | `ProfileConsolidatorTests` (BlauMemory) | `eraseLocalHistory()` drops records and notes and keeps the schedule; `waitUntilIdle()` waits for a running consolidation |
-| `PrivacyAppTests` (BlauTests) | The app's and the extension's manifests are bundled with the declared reasons; the pane's wording; deleting learned facts clears the pinned cache, the log, the notes and the exports; a delete withdraws an earlier export, and an export finishing after a delete is discarded; deleting is refused during a conversation; export files are replaced and removed |
+| `FactExtractionPipelineTests` (BlauMemory) | `suspend()` cancels the extraction in flight, keeps the topic without counting an attempt, yields `.suspended` last and holds the queue (even against `resume()`) until the last `endSuspension()` |
+| `PrivacyAppTests` (BlauTests) | The app's and the extension's manifests are bundled with the declared reasons; the pane's wording; deleting learned facts clears the pinned cache, the log, the notes and the exports; a delete withdraws an earlier export, and an export finishing after a delete is discarded; leaving the pane removes its export; deleting is refused during a conversation; export files are replaced and removed, one at a time; the Markdown-copies and progress wording; an extraction in flight during Delete Learned Facts is cancelled and leaves no fact or note, and a failed delete lets it carry on |
 | `SettingsUITests` | Export All Data opens the share sheet; deleting learned facts and conversations asks first |
 | `test-privacy-manifest.sh` | The checker accepts the repository's manifests and rejects bad reasons, categories, data types, missing keys, undeclared APIs and bundles without manifests |
 

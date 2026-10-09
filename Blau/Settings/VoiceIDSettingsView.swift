@@ -157,8 +157,12 @@ struct VoiceIDSettingsView: View {
             return
         }
         do {
-            // Record by record, so the deletion syncs to every device.
-            try DataEraser.erase(.voiceprint, in: modelContext)
+            // Record by record, so the deletion syncs to every device; the
+            // share sheet's data exports describe the voiceprint, so they
+            // go too, as with every delete in Privacy & Data (#79).
+            try await PrivacyDataEraser.erase(
+                .voiceprint, in: modelContext, profileMemory: environment.profileMemory, exports: nil,
+                isConversationRunning: false)
         } catch {
             problem = String(localized: "Couldn't delete the voiceprint. Nothing was changed. Try again.")
         }
