@@ -90,7 +90,7 @@ if [[ -n "$ASC_KEY_ID" || -n "$ASC_ISSUER_ID" || -n "$ASC_KEY_PATH" || -n "$ASC_
         if [[ -n "$ASC_KEY_PATH" ]]; then
             [[ -f "$ASC_KEY_PATH" ]] || die "ASC_KEY_PATH: no such file"
             cp "$ASC_KEY_PATH" "$key_file"
-        elif grep -q -- '-----BEGIN PRIVATE KEY-----' <<<"$ASC_KEY_P8"; then
+        elif [[ "$ASC_KEY_P8" == *"-----BEGIN PRIVATE KEY-----"* ]]; then
             printf '%s\n' "$ASC_KEY_P8" >"$key_file"
         else
             printf '%s' "$ASC_KEY_P8" | tr -d ' \r\n' | base64 -D >"$key_file" 2>/dev/null ||

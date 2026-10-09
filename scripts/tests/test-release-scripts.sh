@@ -525,6 +525,23 @@ if grep -q 'make testflight' "$work/workflow-config"; then
 else
     fail "release.yml runs the same make target as a local release"
 fi
+# "Re-run failed jobs" reuses a successful testflight job (and the artifact it
+# uploaded under its own attempt number) while github.run_attempt goes up, so
+# github-release must find the notes through testflight's output, never
+# through its own run_attempt.
+notes_output=$(awk '/^  testflight:/{job=1} /^  github-release:/{job=0} job && /^    outputs:/{o=1; next} job && o && /^    [a-z]/{o=0} job && o && /^      notes_artifact:/{sub(/^      notes_artifact: */, ""); print}' "$work/workflow-config")
+notes_upload=$(awk '/^  testflight:/{job=1} /^  github-release:/{job=0} job && /upload-artifact@/{u=1} job && u && /^          name:/{sub(/^          name: */, ""); print; exit}' "$work/workflow-config")
+if [ -n "$notes_output" ] && [ "$notes_output" = "$notes_upload" ]; then
+    pass "release.yml publishes the notes artifact name as a testflight output"
+else
+    fail "release.yml publishes the notes artifact name as a testflight output (output '$notes_output', upload '$notes_upload')"
+fi
+if awk '/^  github-release:/{job=1} job && /github\.run_attempt/{found=1} END{exit found}' "$work/workflow-config" &&
+    awk '/^  github-release:/{job=1} job && /download-artifact@/{d=1} job && d && /^          name: \$\{\{ needs\.testflight\.outputs\.notes_artifact \}\}$/{ok=1} END{exit !ok}' "$work/workflow-config"; then
+    pass "release.yml downloads the notes by testflight's output, so re-running github-release works"
+else
+    fail "release.yml downloads the notes by testflight's output, so re-running github-release works"
+fi
 if command -v actionlint >/dev/null 2>&1; then
     if actionlint "$workflow" >"$work/actionlint" 2>&1; then
         pass "release.yml passes actionlint"

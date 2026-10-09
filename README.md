@@ -57,7 +57,7 @@ configured. See [docs/configuration.md](docs/configuration.md).
 | `make release-archive` | The same without the upload: archive, export and verify into `.build/release` |
 | `make release-notes` | Print the notes for the pull requests merged since the last `v*` tag |
 | `make secrets`   | Create `Config/Secrets.xcconfig` from the example                |
-| `make test-scripts` | Test the secrets, CI, Instruments template, perf gate and privacy manifest scripts |
+| `make test-scripts` | Test the secrets, CI, Instruments template, perf gate, privacy manifest and release scripts |
 | `make check-privacy` | Validate the privacy manifests and that every required-reason API the sources use is declared (`PRIVACY_BUNDLE=<.app or .xcarchive>` checks a build too, [docs](docs/privacy.md#the-privacy-manifest)) |
 | `make install-instruments-template` | Add the Blau template to Instruments' chooser ([docs](docs/performance.md#instruments-template)) |
 | `make trace`     | Record Blau on `TRACE_DEVICE` with the Blau Instruments template |

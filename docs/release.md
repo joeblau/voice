@@ -75,7 +75,10 @@ the archive or build logs: the repository is public.
 GitHub pre-release for the tag, titled `Blau <version> (<build>)`, with the
 Markdown notes. It is a separate job so the only job with a write token never
 sees the signing secrets. Re-running it updates the release instead of
-failing. Promote the release from pre-release when the build goes to the App
+failing. It finds the notes artifact through the `testflight` job's
+`notes_artifact` output, never through its own attempt number, so "Re-run
+failed jobs" still finds the artifact the reused `testflight` attempt
+uploaded. Promote the release from pre-release when the build goes to the App
 Store.
 
 Both jobs run one at a time per tag and are never cancelled half way through
