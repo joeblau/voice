@@ -184,6 +184,31 @@ Practiced 10 of 30 questions in YC interview questions, average 68%.
 conversation finished; without a recorder (no topic lifecycle), after 30
 minutes untouched.
 
+**Calls of one reply.** The tool runner starts the calls of one reply in
+parallel, and every coordinator operation suspends (store reads and
+writes, the recorder). Left to the actor alone they would interleave: an
+`end_practice` could close the run while the same reply's
+`record_practice_result` waited on the store, dropping that answer from
+the wrap-up and its note from the record for good, and two
+`next_practice_question` calls could each start a run. So `nextQuestion`,
+`record` and `endRun` run one at a time, in the order they reach the
+coordinator (an operation tail, like `TopicLifecycle`'s queue). The runner
+starts each call in a detached task, so a result can still reach the
+coordinator just after the `end_practice` of its own reply. A result for
+the run that ended within the last 10 seconds
+(`PracticeToolSettings.lateResultWindow`) therefore still joins that run's
+record, and its topic's summary is refreshed with it.
+
+**Consolidation leaves the record alone.** Profile consolidation (#67)
+rewrites the summaries of closed topics in ended conversations as one
+short sentence. A run's summary is its only record of the notes, so
+`PracticeRunTopic` (BlauCore) marks a run's topic by its title prefix
+("Practice: ") or, once the user renames it, by the record's headline
+("Practiced N of M questions in …"). `ProfileTopic.acceptsSummary` is
+false for such a topic, and `ConversationStore.replaceTopicSummary`
+refuses to rewrite one too. The runs are still shown to consolidation, as
+context.
+
 ## The practice record and iCloud
 
 The record lives on `CollectionItem` in schema v2: `practiceCount`, `score`
@@ -232,9 +257,10 @@ Prompts, answers, notes and scores are never logged.
 
 | What | Where |
 | --- | --- |
-| Scheduling: never practiced first, worse and older first, intervals, no repeats in a run, ties; collection name matching | `BlauCoreTests/PracticeSchedulerTests` |
+| Scheduling: never practiced first, worse and older first, intervals, no repeats in a run, ties; collection name matching; what marks a run's topic | `BlauCoreTests/PracticeSchedulerTests` |
 | The store: collections and their record, item order and answers, attempts and clamping, CloudKit copies, one history transaction per attempt on the synced store, the deferred store following the container | `BlauPersistenceTests/Knowledge/PracticeStoreTests` |
-| The tools over fakes: a full ten-question run (order, answers, scores, the topic's summaries), the next run's order, switching collections, runs ending, scores and ids, listing and the budget, failures, the instructions | `BlauRealtimeTests/Tools/PracticeToolsTests` |
+| The tools over fakes: a full ten-question run (order, answers, scores, the topic's summaries), the next run's order, switching collections, runs ending, calls of one reply (a result and the end, two next questions, a result just after the end), scores and ids, listing and the budget, failures, the instructions | `BlauRealtimeTests/Tools/PracticeToolsTests` |
+| Consolidation never rewriting a run's record, renamed or not | `BlauMemoryTests/Profile/ProfileConsolidatorTests`, `BlauPersistenceTests/ConversationStoreTopicEditTests` |
 | Function calls from the scripted server (`ScriptedRealtimeServer.Reply.functionCalls`) | used by the integration test |
 | Topics: a run from the request to the next thing the user says, no topics inside it, labels never replacing its title or summary, the first topic taken, a finished conversation, a second run | `BlauTopicsTests/Lifecycle/PracticeTopicTests` |
 | End to end: a full run of ten questions by voice through the real client, orchestrator, tool runner, tools, SwiftData store and topic lifecycle, with a scripted Grok interviewing | `BlauKitIntegrationTests/PracticeModeIntegrationTests` |

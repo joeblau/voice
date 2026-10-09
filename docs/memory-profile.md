@@ -112,7 +112,9 @@ instructions never cut a budgeted profile.
    transcript's single writer, only for a topic of an **ended**
    conversation (the lifecycle and offline re-segmentation, #55, may still
    revise the others) and only while its summary is still the one the
-   model saw. Titles are never touched.
+   model saw. Titles are never touched. A practice run's topic (#69,
+   `PracticeRunTopic`) is never rewritten: its summary is the run's record
+   of scores and notes, which nothing else keeps.
 6. **Log** the change (`ProfileConsolidationRecord`: before, after, the
    topic summary changes, what the model saw) in this device's log,
    `Application Support/Memory/profile-consolidations.json` (newest 30,
@@ -219,7 +221,7 @@ in-memory SwiftData store, a manual clock):
 | Suite | Covers |
 | --- | --- |
 | `ProfileComposerTests` | **The budget** for any user text and any reply (multi-byte included), verbatim user words, boundary cuts |
-| `ProfileConsolidatorTests` | **Budget with an overlong reply**, the logged diff, user facts first, invalidated facts hidden, notes used once, topic summaries only for ended conversations and only while unchanged, the cross-device conflict, duplicate blocks, empty replies, model errors, the toggle and missing key, scheduling, the retry backoff after failures and skips, old topics alone not making a run due, no background check while learning is off, notes replaced mid-run, the log's backward-compatible decoding, one shared run, the signpost |
+| `ProfileConsolidatorTests` | **Budget with an overlong reply**, the logged diff, user facts first, invalidated facts hidden, notes used once, topic summaries only for ended conversations and only while unchanged, never a practice run's record (#69), the cross-device conflict, duplicate blocks, empty replies, model errors, the toggle and missing key, scheduling, the retry backoff after failures and skips, old topics alone not making a run due, no background check while learning is off, notes replaced mid-run, the log's backward-compatible decoding, one shared run, the signpost |
 | `ProfileConsolidationPromptTests` | Rendering, the removed-fact count, the strict schema, lenient parsing and Markdown cleanup |
 | `ProfileConsolidationScheduleTests` | First run, weekly, fact threshold, a removal due on its own, minimum spacing, the retry backoff |
 | `ProfileFactRemovalTests` | **A deleted fact**: due after the spacing and taken out of the summary, the pinned cache dropped on delete, the `forget` tool reporting a removal, a removal mid-run waiting for the next, a failed run keeping it, nothing pinned dropping it |

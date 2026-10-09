@@ -279,3 +279,34 @@ public enum PracticeCollectionMatcher {
         return String(word.dropLast())
     }
 }
+
+/// How a practice run's topic is named and recognized (#69).
+///
+/// A run's topic summary is the run's record: a headline, then one line per
+/// answered question with its score and note. Nothing else keeps those
+/// notes, so other writers of topic summaries (profile consolidation, #67)
+/// must leave a run's topic alone. They recognize one by its title prefix
+/// or, when the user renamed the topic, by the record's headline.
+public enum PracticeRunTopic {
+    /// The prefix of a run's topic title: "Practice: YC interview questions".
+    public static let titlePrefix = "Practice: "
+
+    /// The run's topic title.
+    public static func title(for collectionTitle: String) -> String {
+        "\(titlePrefix)\(collectionTitle)"
+    }
+
+    /// The start of the record's headline, before the average:
+    /// "Practiced 3 of 11 questions in YC interview questions".
+    public static func headline(answered: Int, total: Int, collection: String) -> String {
+        "Practiced \(answered) of \(total) questions in \(collection)"
+    }
+
+    /// Whether a topic is a practice run's, so its summary (the run's
+    /// record) must never be rewritten.
+    public static func isPracticeRun(title: String, summary: String?) -> Bool {
+        if title.hasPrefix(titlePrefix) { return true }
+        guard let summary else { return false }
+        return summary.prefixMatch(of: #/Practiced \d+ of \d+ questions in /#) != nil
+    }
+}

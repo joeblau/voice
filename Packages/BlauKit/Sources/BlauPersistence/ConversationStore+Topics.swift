@@ -403,7 +403,9 @@ extension ConversationStore {
     /// consolidation (#67), which rewrites recent summaries from a snapshot
     /// read earlier and must never overwrite one that changed meanwhile
     /// (re-segmentation, a merge, another device). Saved at once, since it
-    /// runs in a background task that can be suspended right after.
+    /// runs in a background task that can be suspended right after. A
+    /// practice run's topic (#69) is never rewritten: its summary is the
+    /// run's record (`PracticeRunTopic`).
     ///
     /// - Parameter summary: Trimmed of surrounding whitespace; blank is
     ///   ignored.
@@ -413,7 +415,9 @@ extension ConversationStore {
     public func replaceTopicSummary(_ topicID: UUID, expected: String?, with summary: String) throws -> Bool {
         let topic = try topic(topicID)
         let summary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !summary.isEmpty, topic.endedAt != nil, topic.summary == expected, topic.summary != summary else {
+        guard !summary.isEmpty, topic.endedAt != nil, topic.summary == expected, topic.summary != summary,
+            !PracticeRunTopic.isPracticeRun(title: topic.title, summary: topic.summary)
+        else {
             return false
         }
         topic.summary = summary

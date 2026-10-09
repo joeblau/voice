@@ -22,6 +22,11 @@ public struct PracticeToolSettings: Sendable {
     /// Without a topic to follow (no conversation recorder), a run left
     /// alone this long is over, and the next question starts a new one.
     public var idleRunLifetime: Duration
+    /// A result for a run that ended this recently still joins that run's
+    /// record. The tool runner starts the calls of one reply in parallel,
+    /// so `record_practice_result` can reach the coordinator just after the
+    /// `end_practice` of the same reply.
+    public var lateResultWindow: Duration
     /// Picks the next prompt: least recently and worst practiced first.
     public var scheduler: PracticeScheduler
 
@@ -33,6 +38,7 @@ public struct PracticeToolSettings: Sendable {
         maximumPromptCharacters: Int = 240,
         maximumNoteCharacters: Int = 240,
         idleRunLifetime: Duration = .seconds(30 * 60),
+        lateResultWindow: Duration = .seconds(10),
         scheduler: PracticeScheduler = .standard
     ) {
         self.clock = clock
@@ -42,6 +48,7 @@ public struct PracticeToolSettings: Sendable {
         self.maximumPromptCharacters = maximumPromptCharacters
         self.maximumNoteCharacters = maximumNoteCharacters
         self.idleRunLifetime = idleRunLifetime
+        self.lateResultWindow = lateResultWindow
         self.scheduler = scheduler
     }
 
@@ -69,6 +76,16 @@ public struct PracticeToolSettings: Sendable {
 /// One coordinator serves the app's sessions: a run whose topic is no
 /// longer open (the conversation finished), or, without a topic, one left
 /// alone for ``PracticeToolSettings/idleRunLifetime``, is over.
+///
+/// **Order.** The tool runner starts the calls of one reply in parallel,
+/// and each operation suspends (store reads and writes, the recorder), so
+/// on the actor alone they would interleave: an `end_practice` could close
+/// the run while a `record_practice_result` of the same reply waited on the
+/// store, or two `next_practice_question` calls could each start a run.
+/// ``nextQuestion(collectionNamed:)``, ``record(item:score:note:)`` and
+/// ``endRun()`` therefore run one at a time, in the order they reach the
+/// coordinator. A result that arrives just after its run ended (within
+/// ``PracticeToolSettings/lateResultWindow``) still joins that run's record.
 public actor PracticeCoordinator {
     /// One prompt's outcome in the current run.
     public struct Attempt: Hashable, Sendable {
@@ -126,6 +143,10 @@ public actor PracticeCoordinator {
     public nonisolated let runs: any PracticeRunRecording
     public nonisolated let settings: PracticeToolSettings
     private var run: Run?
+    /// The run that ended last and when (uptime), for late results.
+    private var ended: (run: Run, at: Duration)?
+    /// The last operation queued; the next one waits for it.
+    private var tail: Task<Void, Never>?
 
     public init(
         backend: any PracticeBackend, runs: any PracticeRunRecording = NoPracticeRunRecording(),
@@ -181,6 +202,10 @@ public actor PracticeCoordinator {
     /// The next prompt of the collection `name` means, starting a run (and
     /// its topic) unless one is going on for it.
     public func nextQuestion(collectionNamed name: String) async throws -> NextQuestion {
+        try await serialized { coordinator in try await coordinator.performNextQuestion(collectionNamed: name) }
+    }
+
+    private func performNextQuestion(collectionNamed name: String) async throws -> NextQuestion {
         let collection = try await collection(named: name)
         let items = try await items(of: collection)
         guard !items.isEmpty else {
@@ -195,7 +220,7 @@ public actor PracticeCoordinator {
             await endRun(reason: "a new run started")
             started = true
             let recordingID = await runs.beginPracticeRun(
-                title: Self.topicTitle(collection.title), at: settings.clock.now)
+                title: PracticeRunTopic.title(for: collection.title), at: settings.clock.now)
             run = Run(
                 collectionID: collection.id, title: collection.title, itemCount: items.count, recordingID: recordingID,
                 lastActivity: settings.clock.uptime)
@@ -207,13 +232,9 @@ public actor PracticeCoordinator {
             // The recorder had no conversation when the run started (it was
             // still opening): give the run its topic from here on.
             let recordingID = await runs.beginPracticeRun(
-                title: Self.topicTitle(collection.title), at: settings.clock.now)
-            if run?.collectionID == current.collectionID, run?.recordingID == nil {
-                run?.recordingID = recordingID
-            }
+                title: PracticeRunTopic.title(for: collection.title), at: settings.clock.now)
+            run?.recordingID = recordingID
         }
-        // From here to `run = current` nothing suspends, so a call running
-        // alongside (record_practice_result in the same reply) can't be lost.
         guard var current = run else { throw RealtimeToolError.failed("The practice run couldn't start.") }
         current.lastActivity = settings.clock.uptime
         current.itemCount = items.count
@@ -232,6 +253,12 @@ public actor PracticeCoordinator {
     /// Records an attempt at the prompt `itemID` names: its id, or its
     /// 1-based number in the current run's collection.
     public func record(item reference: String, score: Double?, note: String?) async throws -> Recorded {
+        try await serialized { coordinator in
+            try await coordinator.performRecord(item: reference, score: score, note: note)
+        }
+    }
+
+    private func performRecord(item reference: String, score: Double?, note: String?) async throws -> Recorded {
         let itemID = try await resolveItem(reference)
         let previous = try await previousScore(of: itemID)
         guard
@@ -241,37 +268,43 @@ public actor PracticeCoordinator {
         else {
             throw RealtimeToolError.failed("No question has that id. Use the id next_practice_question returned.")
         }
-        guard let snapshot = run, snapshot.collectionID == item.collectionID, await isLive(snapshot) else {
-            return Recorded(item: item, previousScore: previous, run: nil)
-        }
-        // Read again after the suspension: next_practice_question may have
-        // run alongside. Nothing suspends from here to `run = current`.
-        guard var current = run, current.collectionID == item.collectionID else {
-            return Recorded(item: item, previousScore: previous, run: nil)
-        }
         let note = note.map { MemoryToolText.clipped($0, to: settings.maximumNoteCharacters) }.flatMap(\.nonBlank)
         let attempt = Attempt(itemID: item.id, prompt: item.prompt, score: score, note: note)
-        if let index = current.attempts.firstIndex(where: { $0.itemID == item.id }) {
-            current.attempts[index] = attempt
-        } else {
-            current.attempts.append(attempt)
+        if var current = run, current.collectionID == item.collectionID, await isLive(current) {
+            add(attempt, to: &current)
+            current.lastActivity = settings.clock.uptime
+            run = current
+            if let recordingID = current.recordingID {
+                await runs.updatePracticeRun(recordingID, summary: Self.summary(of: current))
+            }
+            return Recorded(item: item, previousScore: previous, run: current)
         }
-        if !current.asked.contains(item.id) {
-            current.asked.append(item.id)
+        if var late = ended, late.run.collectionID == item.collectionID,
+            settings.clock.uptime - late.at < settings.lateResultWindow
+        {
+            // The run ended just before (end_practice of the same reply):
+            // the attempt still belongs to its record, and its topic, closed
+            // or not, gets the summary with it.
+            add(attempt, to: &late.run)
+            ended = late
+            if let recordingID = late.run.recordingID {
+                await runs.updatePracticeRun(recordingID, summary: Self.summary(of: late.run))
+            }
+            Log.realtime.notice("A practice result arrived just after its run ended; added to the run's record")
+            return Recorded(item: item, previousScore: previous, run: late.run)
         }
-        current.prompts[item.id] = item.prompt
-        current.lastActivity = settings.clock.uptime
-        run = current
-        if let recordingID = current.recordingID {
-            await runs.updatePracticeRun(recordingID, summary: Self.summary(of: current))
-        }
-        return Recorded(item: item, previousScore: previous, run: current)
+        return Recorded(item: item, previousScore: previous, run: nil)
     }
 
     /// Ends the run in progress, closing its topic. Returns it, or `nil` if
     /// none was going on.
     @discardableResult
     public func endRun() async -> Run? {
+        let ended = try? await serialized { coordinator in await coordinator.performEndRun() }
+        return ended ?? nil
+    }
+
+    private func performEndRun() async -> Run? {
         guard let current = run, await isLive(current) else {
             run = nil
             return nil
@@ -282,9 +315,39 @@ public actor PracticeCoordinator {
 
     // MARK: Helpers
 
+    /// Runs `operation` after every operation queued before it, so the
+    /// coordinator's operations never interleave at their suspension
+    /// points (see the type's documentation). Like `TopicLifecycle`'s queue.
+    private func serialized<T: Sendable>(
+        _ operation: @escaping @Sendable (isolated PracticeCoordinator) async throws -> T
+    ) async throws -> T {
+        let previous = tail
+        let task = Task<T, any Error> {
+            await previous?.value
+            return try await operation(self)
+        }
+        tail = Task { _ = try? await task.value }
+        return try await task.value
+    }
+
+    /// Adds `attempt` to `run`, replacing an earlier attempt at the same
+    /// prompt (a retake).
+    private func add(_ attempt: Attempt, to run: inout Run) {
+        if let index = run.attempts.firstIndex(where: { $0.itemID == attempt.itemID }) {
+            run.attempts[index] = attempt
+        } else {
+            run.attempts.append(attempt)
+        }
+        if !run.asked.contains(attempt.itemID) {
+            run.asked.append(attempt.itemID)
+        }
+        run.prompts[attempt.itemID] = attempt.prompt
+    }
+
     private func endRun(reason: String) async {
         guard let current = run else { return }
         run = nil
+        ended = (current, settings.clock.uptime)
         if let recordingID = current.recordingID, await runs.isPracticeRunOpen(recordingID) {
             await runs.updatePracticeRun(recordingID, summary: Self.summary(of: current))
             await runs.endPracticeRun(recordingID, at: settings.clock.now)
@@ -306,7 +369,7 @@ public actor PracticeCoordinator {
         let text = reference.trimmingCharacters(in: .whitespacesAndNewlines)
         if let id = UUID(uuidString: text) { return id }
         let digits = text.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
-        if let number = Int(digits), let current = run {
+        if let number = Int(digits), let current = run ?? ended?.run {
             let collectionID = current.collectionID
             let items = try await Self.run { [backend] in try await backend.practiceItems(inCollection: collectionID) }
             if items.indices.contains(number - 1) { return items[number - 1].id }
@@ -315,7 +378,7 @@ public actor PracticeCoordinator {
     }
 
     private func previousScore(of itemID: UUID) async throws -> Double? {
-        guard let current = run else { return nil }
+        guard let current = run ?? ended?.run else { return nil }
         let items = try? await backend.practiceItems(inCollection: current.collectionID)
         return items?.first { $0.id == itemID }?.score
     }
@@ -331,13 +394,16 @@ public actor PracticeCoordinator {
 
     /// The run's topic title: "Practice: YC interview questions".
     public static func topicTitle(_ collectionTitle: String) -> String {
-        "Practice: \(collectionTitle)"
+        PracticeRunTopic.title(for: collectionTitle)
     }
 
     /// The run's topic summary: a headline, then one line per answered
     /// prompt with its score and note, in the order they were answered.
+    /// The headline marks the topic as a run's (`PracticeRunTopic`), so
+    /// profile consolidation never rewrites it.
     public static func summary(of run: Run) -> String {
-        var headline = "Practiced \(run.attempts.count) of \(run.itemCount) questions in \(run.title)"
+        var headline = PracticeRunTopic.headline(
+            answered: run.attempts.count, total: run.itemCount, collection: run.title)
         if let average = run.averageScore {
             headline += ", average \(percent(average))"
         }

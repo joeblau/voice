@@ -122,3 +122,25 @@ struct PracticeCollectionMatcherTests {
         #expect(PracticeCollectionMatcher.best("YC", in: Self.all + [short])?.id == short.id)
     }
 }
+
+@Suite("Practice run topics")
+struct PracticeRunTopicTests {
+    @Test func theTitleAndHeadlineMarkARun() {
+        let title = PracticeRunTopic.title(for: "YC interview questions")
+        #expect(title == "Practice: YC interview questions")
+        #expect(PracticeRunTopic.isPracticeRun(title: title, summary: nil))
+        let headline = PracticeRunTopic.headline(answered: 3, total: 11, collection: "YC interview questions")
+        #expect(headline == "Practiced 3 of 11 questions in YC interview questions")
+        // Renamed by the user: the record still marks it.
+        #expect(
+            PracticeRunTopic.isPracticeRun(title: "My drill", summary: headline + ", average 60%.\n- Why now? 60%."))
+    }
+
+    @Test func otherTopicsAreNotRuns() {
+        #expect(!PracticeRunTopic.isPracticeRun(title: "Hiring", summary: "They talk hiring."))
+        #expect(!PracticeRunTopic.isPracticeRun(title: "Practice", summary: nil))
+        #expect(!PracticeRunTopic.isPracticeRun(title: "Gym", summary: "Practiced squats and deadlifts."))
+        #expect(
+            !PracticeRunTopic.isPracticeRun(title: "Notes", summary: "They said: Practiced 2 of 3 questions in X."))
+    }
+}

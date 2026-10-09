@@ -21,9 +21,13 @@ final class FakePracticeBackend: PracticeBackend {
 
     private let state = Mutex(State())
     let failure: MemoryToolFailure?
+    /// When set, `recordPractice` waits at this gate's "record" key, so a
+    /// test can run another call while a result is being written.
+    let recordGate: Gate?
 
-    init(failure: MemoryToolFailure? = nil) {
+    init(failure: MemoryToolFailure? = nil, recordGate: Gate? = nil) {
         self.failure = failure
+        self.recordGate = recordGate
     }
 
     /// Adds a collection of `prompts`, each with the reference answer
@@ -73,6 +77,7 @@ final class FakePracticeBackend: PracticeBackend {
 
     func recordPractice(itemID: UUID, score: Double?, at date: Date) async throws -> PracticeItem? {
         if let failure { throw failure }
+        await recordGate?.wait("record")
         return state.withLock { state in
             for (collectionID, items) in state.items {
                 guard let index = items.firstIndex(where: { $0.id == itemID }) else { continue }
@@ -160,13 +165,17 @@ struct PracticeToolsTests {
     ]
 
     struct Harness {
-        let backend = FakePracticeBackend()
+        let backend: FakePracticeBackend
         let recorder: FakePracticeRunRecorder
         let clock = ManualClock(now: PracticeToolsTests.now)
         let coordinator: PracticeCoordinator
         let tools: RealtimeToolRegistry
 
-        init(recorder: FakePracticeRunRecorder = FakePracticeRunRecorder(), tokens: Int = 1_500) throws {
+        init(
+            recorder: FakePracticeRunRecorder = FakePracticeRunRecorder(), tokens: Int = 1_500,
+            backend: FakePracticeBackend = FakePracticeBackend()
+        ) throws {
+            self.backend = backend
             self.recorder = recorder
             coordinator = PracticeCoordinator(
                 backend: backend, runs: recorder,
@@ -352,6 +361,104 @@ struct PracticeToolsTests {
         #expect(try Self.question(try await harness.next())["prompt"] as? String == "B?")
         #expect(await harness.coordinator.currentRun()?.recordingID != nil)
         #expect(recorder.calls == [.begin(title: "Practice: YC interview questions")])
+    }
+
+    // MARK: Calls of one reply
+
+    /// The tool runner starts the calls of one reply in parallel. An
+    /// `end_practice` that arrives while the reply's
+    /// `record_practice_result` is still writing waits for it: the answer is
+    /// in the wrap-up and in the run's record, note included.
+    @Test func anEndWaitsForTheResultBeforeIt() async throws {
+        let gate = Gate()
+        let harness = try Harness(backend: FakePracticeBackend(recordGate: gate))
+        harness.backend.add("YC interview questions", prompts: Self.ycPrompts)
+        let id = try #require(try Self.question(try await harness.next())["id"] as? String)
+
+        async let recorded = harness.record(id, score: 0.4, notes: "Lead with the customer.")
+        // The result is being written (suspended in the store) ...
+        while !gate.arrivals.contains("record") { await Task.yield() }
+        // ... when the end arrives.
+        async let ended = harness.call("end_practice", "{}")
+        for _ in 0..<50 { await Task.yield() }
+        gate.open("record")
+
+        let run = try #require(try await recorded["run"] as? [String: Any])
+        #expect(run["answered"] as? Int == 1)
+        let summary = try #require(try await ended["ended"] as? [String: Any])
+        #expect(summary["answered"] as? Int == 1)
+        let toWorkOn = try #require(summary["to_work_on"] as? [[String: Any]])
+        #expect(toWorkOn.first?["note"] as? String == "Lead with the customer.")
+
+        let last = try #require(harness.recorder.summaries.last)
+        #expect(last.hasPrefix("Practiced 1 of 11 questions in YC interview questions, average 40%."))
+        #expect(last.contains("- What are you building? 40%. Lead with the customer."))
+        if case .end = harness.recorder.calls.last {} else { Issue.record("The run's topic wasn't closed") }
+    }
+
+    /// Fired together, in whichever order they reach the coordinator, a
+    /// result and the end keep the answer and its note in the run's record.
+    @Test(arguments: 0..<20)
+    func aResultAndTheEndInOneReplyKeepTheAnswer(_ attempt: Int) async throws {
+        let harness = try Harness()
+        harness.backend.add("YC interview questions", prompts: Self.ycPrompts)
+        let id = try #require(try Self.question(try await harness.next())["id"] as? String)
+
+        async let recorded = harness.record(id, score: 0.4, notes: "Lead with the customer.")
+        async let ended = harness.call("end_practice", "{}")
+        _ = try await (recorded, ended)
+
+        #expect(harness.backend.attempts.count == 1)
+        let last = try #require(harness.recorder.summaries.last)
+        #expect(last.hasPrefix("Practiced 1 of 11 questions in YC interview questions"))
+        #expect(last.contains("Lead with the customer."))
+        #expect(await harness.coordinator.currentRun() == nil)
+    }
+
+    /// A result that arrives just after its run ended (the end of the same
+    /// reply got there first) still joins the run's record; one that comes
+    /// much later doesn't.
+    @Test func aResultJustAfterTheEndJoinsTheRunsRecord() async throws {
+        let harness = try Harness()
+        harness.backend.add("YC interview questions", prompts: Self.ycPrompts)
+        let first = try #require(try Self.question(try await harness.next())["id"] as? String)
+        let second = try #require(try Self.question(try await harness.next())["id"] as? String)
+        _ = try await harness.record(first, score: 0.9, notes: "Crisp.")
+        _ = try await harness.call("end_practice", "{}")
+        let updates = harness.recorder.summaries.count
+
+        let late = try await harness.record(second, score: 0.3, notes: "Name the user.")
+        let run = try #require(late["run"] as? [String: Any])
+        #expect(run["answered"] as? Int == 2)
+        #expect(harness.recorder.summaries.count == updates + 1)
+        let record = try #require(harness.recorder.summaries.last)
+        #expect(record.hasPrefix("Practiced 2 of 11 questions in YC interview questions, average 60%."))
+        #expect(record.contains("- Who are your users? 30%. Name the user."))
+        #expect(await harness.coordinator.currentRun() == nil)
+
+        harness.clock.advance(by: .seconds(60))
+        let much = try await harness.record(second, score: 0.5, notes: "Later.")
+        #expect(much["run"] == nil)
+        #expect(harness.recorder.summaries.count == updates + 1)
+        #expect(harness.backend.attempts.count == 3)
+    }
+
+    /// Two `next_practice_question` calls in one reply start one run and ask
+    /// two different questions.
+    @Test(arguments: 0..<20)
+    func twoQuestionsInOneReplyStartOneRun(_ attempt: Int) async throws {
+        let harness = try Harness()
+        harness.backend.add("YC interview questions", prompts: Self.ycPrompts)
+
+        async let first = harness.next()
+        async let second = harness.next()
+        let outputs = try await [first, second]
+
+        let prompts = try outputs.map { try #require(try Self.question($0)["prompt"] as? String) }
+        #expect(Set(prompts) == ["What are you building?", "Who are your users?"])
+        #expect(outputs.filter { $0["started"] as? Bool == true }.count == 1)
+        #expect(harness.recorder.calls == [.begin(title: "Practice: YC interview questions")])
+        #expect(await harness.coordinator.currentRun()?.asked.count == 2)
     }
 
     // MARK: Recording
