@@ -54,8 +54,8 @@ public struct TemporalExpression: Hashable, Sendable {
 /// to the past, and `NSDataDetector` handles what the grammar doesn't know:
 /// numeric dates ("3/14", "2026-03-14") and other absolute forms. Only its
 /// matches that write out a calendar date (a month name or a numeric date)
-/// count, so clock times ("5pm") and future offsets ("in 2 weeks") don't,
-/// and its result is re-anchored: only the calendar day is kept (and the
+/// count, so clock times ("5pm", "5.30pm"), time ranges ("9-10 tomorrow")
+/// and future offsets ("in 2 weeks") don't, and its result is re-anchored: only the calendar day is kept (and the
 /// year when the query wrote one), resolved against `now` like the grammar.
 ///
 /// Grammar (case and diacritics ignored, first expression in the query
@@ -545,8 +545,8 @@ public struct TemporalQueryParser: Sendable {
     ///
     /// Only matches that spell out that calendar day are used (see
     /// `spellsOutDate`). The detector also matches clock times ("5pm",
-    /// "10:30") and future offsets ("in 2 weeks"), which it resolves against
-    /// the wall clock; keeping just their month and day would name an
+    /// "10:30", "8.10pm"), time ranges ("from 9-10 tomorrow") and future
+    /// offsets ("in 2 weeks"), which it resolves against the wall clock; keeping just their month and day would name an
     /// unrelated day, usually a year in the past.
     func detectedDate(in query: String, context: Context) -> TemporalExpression? {
         guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue) else {
@@ -580,15 +580,70 @@ public struct TemporalQueryParser: Sendable {
 
     /// Whether a phrase the detector read as `month`/`day` writes that day
     /// out: it names the month ("Mar 3 at 5pm"), or it has a numeric date
-    /// (numbers joined by `/`, `.` or `-`: "3/14", "2026-03-14",
-    /// "14.03.2026") whose numbers include both the month and the day. Clock
-    /// times ("5pm", "10:30", "5.30pm": the detector reads today), future
-    /// offsets ("in 2 weeks") and bare ordinals ("the 3rd") don't.
+    /// with the month and the day in a date's order: "3/14" or "14/3",
+    /// "2026-03-14", "14.03.2026", "12/24/2025".
+    ///
+    /// Clock times ("5pm", "10:30", "5.30pm": the detector reads today),
+    /// time ranges ("9-10", "3-4pm", "10:30-11:30"), future offsets ("in 2
+    /// weeks"), bare ordinals ("the 3rd") and days said relative to today
+    /// ("9-10 tomorrow") don't, even when their digits happen to be the
+    /// detected month and day. So a numeric date needs `/` when it has two
+    /// parts ("9-10" and "8.10" are a range and a time far more often than
+    /// a date), and isn't one when a time follows it directly ("pm", "h",
+    /// "o'clock", ":") or it is part of a longer run of numbers.
     static func spellsOutDate(_ phrase: String, month: Int, day: Int) -> Bool {
-        if tokens(in: phrase).contains(where: { Self.month($0.text, inContext: true) == month }) { return true }
-        return phrase.matches(of: /\d{1,4}(?:[\/.\-]\d{1,4}){1,2}/).contains { match in
-            let numbers = match.output.split { !$0.isNumber }.compactMap { Int($0) }
-            return numbers.contains(month) && numbers.contains(day)
+        let words = tokens(in: phrase)
+        // The detector resolved "tomorrow" (or "today"...) against the wall
+        // clock: the day it reports isn't one the phrase writes.
+        if words.contains(where: { relativeDayWords.contains($0.text) }) { return false }
+        if words.contains(where: { Self.month($0.text, inContext: true) == month }) { return true }
+        return numericDates(in: phrase).contains { numbers in
+            switch numbers.count {
+            case 2:
+                return (numbers[0] == month && numbers[1] == day) || (numbers[0] == day && numbers[1] == month)
+            case 3:
+                // year-month-day, month/day/year or day.month.year
+                return (numbers[1] == month && numbers[2] == day) || (numbers[0] == month && numbers[1] == day)
+                    || (numbers[0] == day && numbers[1] == month)
+            default:
+                return false
+            }
+        }
+    }
+
+    /// Words for a day relative to today, which the detector resolves
+    /// against the wall clock.
+    static let relativeDayWords: Set<String> = ["today", "tonight", "tomorrow", "yesterday"]
+
+    /// The numbers of each run in `phrase` that is written like a date:
+    /// two numbers joined by `/`, or three joined by one of `/`, `.` or `-`,
+    /// not part of a longer run of digits and separators ("10:30-11:30"),
+    /// and not followed by a time ("5.30pm", "9-10 o'clock", "3/4h").
+    static func numericDates(in phrase: String) -> [[Int]] {
+        let separators: Set<Character> = ["/", ".", "-", ":"]
+        return phrase.matches(of: /\d{1,4}(?:[\/.\-]\d{1,4}){1,2}/).compactMap { match in
+            let run = match.output
+            let separatorsInRun = Set(run.filter { !$0.isNumber })
+            let numbers = run.split { !$0.isNumber }.compactMap { Int($0) }
+            guard separatorsInRun.count == 1, let separator = separatorsInRun.first,
+                numbers.count == 3 || (numbers.count == 2 && separator == "/")
+            else { return nil }
+            if match.range.lowerBound > phrase.startIndex {
+                let before = phrase[phrase.index(before: match.range.lowerBound)]
+                if before.isNumber || separators.contains(before) { return nil }
+            }
+            let rest = phrase[match.range.upperBound...]
+            // Attached to more: "3/4pm", "9-10-11:30", "1/2/3/4". A full
+            // stop that ends the sentence ("on 3/14.") is fine.
+            if let next = rest.first, next.isNumber || next.isLetter || separators.contains(next) {
+                let endsSentence = next == "." && rest.dropFirst().first?.isNumber != true
+                if !endsSentence { return nil }
+            }
+            let following = rest.drop { $0 == " " }
+            if following.prefixMatch(of: /(?i)(?:[ap]\.?m\b|h\b|hrs?\b|hours?\b|o['’]?clock\b)/) != nil {
+                return nil
+            }
+            return numbers
         }
     }
 }
