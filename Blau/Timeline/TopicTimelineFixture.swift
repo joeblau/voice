@@ -14,11 +14,20 @@ import SwiftData
 /// every provisional title refined that long after seeding, the way the
 /// topic lifecycle refines them from another context. The live app never
 /// seeds anything.
+///
+/// `-BlauTimelineHistory <topic count>` seeds a long history instead, for
+/// paging (#57): see ``seedLongHistory(topicCount:into:now:)``.
 enum TopicTimelineFixture {
     /// The launch argument (`UserDefaults` key) holding the topic count.
     static let launchArgument = "BlauTimelineFixture"
     /// The launch argument holding the delay before titles are refined.
     static let relabelArgument = "BlauTimelineRelabelAfter"
+    /// The launch argument holding the topic count of a long history.
+    static let historyArgument = "BlauTimelineHistory"
+    /// Topics per conversation in a long history.
+    static let historyTopicsPerConversation = 5
+    /// Lines per topic in a long history.
+    static let historyLinesPerTopic = 2
     /// Lines per topic: user and Grok taking turns.
     static let linesPerTopic = 4
     /// Every third older topic starts with a provisional title.
@@ -47,6 +56,11 @@ enum TopicTimelineFixture {
     @MainActor
     static func seedIfRequested(in environment: AppEnvironment, defaults: UserDefaults = .standard) async {
         guard environment.kind != .live else { return }
+        let history = defaults.integer(forKey: historyArgument)
+        if history > 0 {
+            await seedLongHistory(topicCount: history, into: environment.persistence)
+            return
+        }
         let count = defaults.integer(forKey: launchArgument)
         guard count > 0 else { return }
         await seed(topicCount: count, into: environment.persistence)
@@ -141,6 +155,83 @@ enum TopicTimelineFixture {
 
     /// How long each topic lasts.
     static let topicLength: TimeInterval = 8 * 60
+
+    // MARK: Long history (#57)
+
+    /// The title of topic `index` (oldest first) in a long history: unique,
+    /// so tests can find a bullet by its title. "Pricing Experiments 1234".
+    static func historyTitle(for index: Int) -> String {
+        "\(title(for: index)) \(index + 1)"
+    }
+
+    /// Writes a long history ending now: `topicCount` topics in
+    /// conversations of five, two conversations a day (6 PM and 9 AM)
+    /// going back from yesterday, and today's conversation last with its
+    /// last topic open. Each topic has two lines. Titles are
+    /// ``historyTitle(for:)``, oldest first, and none is provisional.
+    @MainActor
+    static func seedLongHistory(topicCount: Int, into persistence: PersistenceController, now: Date = Date()) async {
+        await persistence.start()
+        guard let container = persistence.stack?.container else {
+            Log.ui.error("Couldn't seed the long timeline fixture: no store")
+            return
+        }
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: now)
+        let perConversation = historyTopicsPerConversation
+        let conversations = (topicCount + perConversation - 1) / perConversation
+        // Two lines a topic, cycled from the chat fixture's.
+        let script = ChatTranscriptFixture.lines(count: 2 * historyLinesPerTopic * 12, endingAt: now)
+        var index = 0
+        do {
+            for conversationIndex in 0..<conversations where index < topicCount {
+                // Counted back from the newest: 0 is today's.
+                let back = conversations - 1 - conversationIndex
+                let count = min(perConversation, topicCount - index)
+                let start: Date
+                if back == 0 {
+                    start = now.addingTimeInterval(-Double(count) * topicLength - 60)
+                } else {
+                    let day = calendar.date(byAdding: .day, value: -((back + 1) / 2), to: today)!
+                    start = day.addingTimeInterval(back.isMultiple(of: 2) ? 9 * 3600 : 18 * 3600)
+                }
+                let conversation = Conversation(
+                    startedAt: start, endedAt: back == 0 ? nil : start.addingTimeInterval(Double(count) * topicLength))
+                context.insert(conversation)
+                for ordinal in 0..<count {
+                    let topicStart = start.addingTimeInterval(Double(ordinal) * topicLength)
+                    let isOpen = back == 0 && ordinal == count - 1
+                    let topic = Topic(
+                        startedAt: topicStart,
+                        endedAt: isOpen ? nil : topicStart.addingTimeInterval(topicLength),
+                        title: historyTitle(for: index),
+                        titleIsProvisional: false,
+                        summary: isOpen ? nil : "Talked through \(title(for: index).lowercased()).",
+                        ordinal: ordinal)
+                    context.insert(topic)
+                    topic.conversation = conversation
+                    for offset in 0..<historyLinesPerTopic {
+                        let line = script[(index * historyLinesPerTopic + offset) % script.count]
+                        let startedAt = topicStart.addingTimeInterval(Double(offset) * 60 + 5)
+                        context.insert(
+                            StoredUtterance(
+                                id: UUID(), conversation: conversation, topic: topic, role: line.role,
+                                text: line.text, startedAt: startedAt, endedAt: startedAt.addingTimeInterval(20),
+                                isFinal: true, source: line.role == .agent ? .grok : .parakeet))
+                    }
+                    index += 1
+                }
+            }
+            // One save, so the timeline first sees the whole history (a
+            // partial one would settle its first window too early).
+            try context.save()
+            Log.ui.notice("Seeded the long timeline fixture: \(topicCount, privacy: .public) topics")
+        } catch {
+            Log.ui.error("Couldn't seed the long timeline fixture: \(String(describing: error), privacy: .public)")
+        }
+    }
 
     /// Topic `index`'s lines, a minute apart from `start`.
     static func lines(for index: Int, startingAt start: Date) -> [ChatLine] {

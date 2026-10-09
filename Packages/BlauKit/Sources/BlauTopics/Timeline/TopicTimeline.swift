@@ -21,10 +21,20 @@ import SwiftData
 /// conversation (a running conversation that began before midnight, and one
 /// synced from another device that began after), it joins the latest day's
 /// group instead of going back to its own day.
+///
+/// **Paging (#57).** The timeline shows a window of the most recent topics
+/// (``TopicHistoryPaging``) that starts at the beginning of a day. While
+/// older topics may exist, a conversation the window cuts through (one
+/// that started before the cutoff) is left out until a later page brings
+/// it whole, so each page adds whole days above the ones on screen and
+/// never inserts rows inside one (see
+/// ``init(topics:focus:hasOlderHistory:cutoff:calendar:)``).
 public struct TopicTimeline: Equatable, Sendable {
     /// Identifies an item across rebuilds, for the lazy stack and for
     /// `scrollPosition(id:)`.
     public enum ItemID: Hashable, Sendable {
+        /// The row at the top that stands for the history not loaded yet.
+        case earlier
         case day(Date)
         case conversation(UUID)
         case topic(UUID)
@@ -54,8 +64,8 @@ public struct TopicTimeline: Equatable, Sendable {
         /// The topic the screen opens on. It is expanded, with its live
         /// transcript below its bullet.
         public var isCurrent: Bool
-        /// A topic comes before this one: the rail runs into the dot from
-        /// above.
+        /// A topic comes before this one, loaded or not: the rail runs into
+        /// the dot from above.
         public var railAbove: Bool
         /// A topic comes after this one: the rail runs on below the dot
         /// (and through the topic's transcript when it is expanded).
@@ -78,6 +88,14 @@ public struct TopicTimeline: Equatable, Sendable {
     public private(set) var topics: [TimelineTopic]
     /// The topic the screen opens on, or `nil` when there are no topics.
     public private(set) var current: TimelineTopic?
+    /// Whether topics older than the ones shown may exist: scrolling up to
+    /// the top loads the next page.
+    public private(set) var hasOlderHistory: Bool
+    /// Conversations shown without all of their topics: the window cuts
+    /// through them, and they stay because they are the focus or the only
+    /// older conversation. Their unloaded topics' lines aren't shown under
+    /// the loaded ones (``TopicMembership/init(topics:isPartial:)``).
+    public private(set) var partialConversationIDs: Set<UUID>
 
     /// The current topic's id.
     public var currentTopicID: UUID? { current?.id }
@@ -89,10 +107,27 @@ public struct TopicTimeline: Equatable, Sendable {
     ///     devices creating the same record) are shown once.
     ///   - focus: The running conversation, or else the most recent one.
     ///     Its topics come last, and the current topic is one of them.
+    ///   - hasOlderHistory: `topics` is a window of the most recent topics
+    ///     that leaves older ones out
+    ///     (``TopicHistoryPaging/hasOlder(fetchedCount:olderCount:)``).
+    ///     The conversations it may cut through are then shown partially or
+    ///     left out (``wholeConversations(_:cutoff:focus:)``).
+    ///   - cutoff: The window's cutoff (``TopicHistoryPaging/cutoff``):
+    ///     it holds every topic that started at or after it. `nil` when the
+    ///     window is the most recent topics by count.
     ///   - calendar: Groups conversations by day.
-    public init(topics: [TimelineTopic], focus: TimelineConversation? = nil, calendar: Calendar = .current) {
+    public init(
+        topics: [TimelineTopic], focus: TimelineConversation? = nil, hasOlderHistory: Bool = false,
+        cutoff: Date? = nil, calendar: Calendar = .current
+    ) {
         var seen = Set<UUID>()
         var unique = topics.filter { seen.insert($0.id).inserted }
+        var partial = Set<UUID>()
+        if hasOlderHistory {
+            (unique, partial) = Self.wholeConversations(unique, cutoff: cutoff, focus: focus?.id)
+        }
+        self.hasOlderHistory = hasOlderHistory
+        self.partialConversationIDs = partial
         if let focus, !unique.contains(where: { $0.conversationID == focus.id }) {
             unique.append(.synthetic(for: focus))
         }
@@ -113,7 +148,8 @@ public struct TopicTimeline: Equatable, Sendable {
         // that went back in time would repeat an `ItemID`.
         var lastDay: Date?
         for (index, topic) in unique.enumerated() {
-            let rail = previous != nil
+            // With history still to load, the rail runs on up into it.
+            let rail = previous != nil || hasOlderHistory
             if previous?.conversationID != topic.conversationID {
                 let day = calendar.startOfDay(for: topic.conversationStartedAt)
                 if lastDay.map({ day > $0 }) ?? true {
@@ -133,12 +169,47 @@ public struct TopicTimeline: Equatable, Sendable {
                     topic,
                     Placement(
                         isCurrent: topic.id == current?.id,
-                        railAbove: index > 0,
+                        railAbove: index > 0 || hasOlderHistory,
                         railBelow: index < unique.count - 1,
                         canMerge: !topic.isSynthetic && !isFirstInConversation)))
             previous = topic
         }
         self.items = items
+    }
+
+    /// The conversations a window of the most recent topics may cut
+    /// through, which can have older topics that weren't fetched: those
+    /// that started before the cutoff, or, for a window by count, at or
+    /// before its oldest topic. (A topic starts with its first line, never
+    /// before its conversation, so a conversation that started after the
+    /// boundary is whole.)
+    ///
+    /// - With a cutoff they are left out: they only overlap the window (two
+    ///   devices recording at once) and the next page brings them whole.
+    ///   The focus conversation always stays, and so do the cut ones when
+    ///   leaving them out would leave nothing above the focus.
+    /// - A window by count shows them partially: it is the first window,
+    ///   and settling its cutoff completes them right away
+    ///   (``TopicHistoryPaging/settleCutoff(oldestLoaded:)``), so leaving
+    ///   them out would only make them blink.
+    ///
+    /// - Returns: The topics to show, and the conversations among them that
+    ///   may be missing topics.
+    static func wholeConversations(
+        _ topics: [TimelineTopic], cutoff: Date?, focus: UUID?
+    ) -> (topics: [TimelineTopic], partial: Set<UUID>) {
+        guard let cutoff else {
+            guard let oldest = topics.lazy.map(\.startedAt).min() else { return (topics, []) }
+            return (topics, Set(topics.lazy.filter { $0.conversationStartedAt <= oldest }.map(\.conversationID)))
+        }
+        let cut = Set(topics.lazy.filter { $0.conversationStartedAt < cutoff }.map(\.conversationID))
+        guard !cut.isEmpty else { return (topics, []) }
+        let kept = topics.filter { !cut.contains($0.conversationID) || $0.conversationID == focus }
+        if kept.contains(where: { $0.conversationID != focus }) {
+            return (kept, focus.map { cut.contains($0) ? [$0] : [] } ?? [])
+        }
+        // Nothing older than the focus would be left: show what there is.
+        return (topics, cut)
     }
 
     /// Timeline order: by conversation (the focus conversation last), then
@@ -164,15 +235,22 @@ public struct TopicTimeline: Equatable, Sendable {
         topics.filter { $0.conversationID == conversationID }
     }
 
+    /// Which loaded topic each line of a conversation belongs to.
+    public func membership(in conversationID: UUID) -> TopicMembership {
+        TopicMembership(
+            topics: topics(in: conversationID), isPartial: partialConversationIDs.contains(conversationID))
+    }
+
     // MARK: Fetching
 
-    /// How many of the most recent topics the timeline loads. Paging in
-    /// older history as the user scrolls up is #57.
-    public static let defaultTopicLimit = 500
+    /// How many of the most recent topics the timeline loads at first.
+    /// Older pages load as the user scrolls up (``TopicHistoryPaging``).
+    public static let defaultTopicLimit = TopicHistoryPaging.defaultPageSize
 
-    /// The most recent topics, newest first: what the timeline's `@Query`
-    /// fetches. Their conversations are prefetched, since every bullet
-    /// reads its conversation's id and start.
+    /// The most recent topics, newest first: the timeline's first window
+    /// (``TopicHistoryPaging/windowDescriptor``). Their conversations are
+    /// prefetched, since every bullet reads its conversation's id and
+    /// start.
     public static func recentTopics(limit: Int = defaultTopicLimit) -> FetchDescriptor<Topic> {
         var descriptor = FetchDescriptor<Topic>(sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
         descriptor.fetchLimit = limit

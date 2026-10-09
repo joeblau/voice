@@ -46,6 +46,24 @@ struct TopicMembershipTests {
     @Test func noTopicsNoMembership() {
         #expect(TopicMembership(topics: []).topicID(forLineStartedAt: origin, assignedTopicID: nil) == nil)
     }
+
+    /// #57: a conversation the timeline's window cuts through shows only
+    /// its later topics; lines of the earlier ones stay out of them.
+    @Test func linesOfUnloadedTopicsBelongToNoneWhenPartial() {
+        let loaded = [topic(at: 20, ordinal: 2), topic(at: 30, ordinal: 3)]
+        let membership = TopicMembership(topics: loaded, isPartial: true)
+        func owner(atMinute minute: Double, assigned: UUID? = nil) -> UUID? {
+            membership.topicID(forLineStartedAt: origin.addingTimeInterval(minute * 60), assignedTopicID: assigned)
+        }
+        #expect(owner(atMinute: 5) == nil, "older than every loaded topic")
+        #expect(owner(atMinute: 25, assigned: UUID()) == nil, "linked to an unloaded topic")
+        #expect(owner(atMinute: 25) == loaded[0].id, "unlinked lines still go by time")
+        #expect(owner(atMinute: 35, assigned: loaded[0].id) == loaded[0].id)
+        // A whole conversation keeps the first topic as the catch-all.
+        #expect(
+            TopicMembership(topics: loaded).topicID(
+                forLineStartedAt: origin.addingTimeInterval(300), assignedTopicID: nil) == loaded[0].id)
+    }
 }
 
 @Suite("TopicExpansion")

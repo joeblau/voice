@@ -137,4 +137,27 @@ struct TopicTimelineViewTests {
         await TopicTimelineFixture.seedIfRequested(in: environment, defaults: defaults)
         #expect(try ModelContext(container).fetchCount(FetchDescriptor<Topic>()) == 6)
     }
+
+    /// #57: the long history the paging UI test scrolls through.
+    @Test func theLongHistorySeedsWholeConversationsOldestFirst() async throws {
+        let persistence = PersistenceController.inMemory()
+        await TopicTimelineFixture.seedLongHistory(topicCount: 23, into: persistence, now: Self.now)
+        let container = try #require(persistence.stack?.container)
+        let context = ModelContext(container)
+        let stored = try context.fetch(FetchDescriptor<Topic>(sortBy: [SortDescriptor(\.startedAt)]))
+        #expect(stored.count == 23)
+        #expect(try context.fetchCount(FetchDescriptor<Conversation>()) == 5, "five topics a conversation")
+        #expect(
+            try context.fetchCount(FetchDescriptor<StoredUtterance>())
+                == 23 * TopicTimelineFixture.historyLinesPerTopic)
+        // Titles count up from the oldest; only the newest topic is open.
+        #expect(stored.map(\.title) == (0..<23).map(TopicTimelineFixture.historyTitle(for:)))
+        #expect(stored.first?.title == "Seed Round Planning 1")
+        #expect(stored.filter(\.isOpen).map(\.title) == [TopicTimelineFixture.historyTitle(for: 22)])
+        #expect(stored.allSatisfy { !$0.titleIsProvisional })
+        // Today's conversation is last and still running.
+        let latest = try #require(try context.fetch(ChatTranscript.latestConversation).first)
+        #expect(latest.endedAt == nil)
+        #expect(latest.topics?.count == 3)
+    }
 }
