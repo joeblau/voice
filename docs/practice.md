@@ -177,7 +177,15 @@ Practiced 10 of 30 questions in YC interview questions, average 68%.
   next topic into the run's, or splitting the run's own topic, leaves the
   run's part with its record; a new part split off is labeled as usual).
   The guard is in `refine`, not `ConversationStore.applyTopicLabel`, since
-  the run's own updates write through that.
+  the run's own updates write through that. The other direction, "Merge
+  with Previous" on the run's own topic, is refused with
+  `TopicLifecycle.EditError.practiceRun` ("A practice run keeps its own
+  topic. Merge the next topic into it instead."): the store would delete
+  the run's topic and keep the earlier one's title, so the record would be
+  lost, and during a live run the lifecycle would go on recording to the
+  deleted topic. `TopicLifecycle.merge` checks the live run state (which
+  also covers a run renamed before its first answer) and the stored topic
+  (`PracticeRunTopic`, for runs after the conversation or a relaunch).
 - **Summary.** Rewritten after every recorded answer, so a run cut short
   (the conversation ends, the app is killed) still has its record.
 - **Closing.** After `end_practice` the topic stays current until the user

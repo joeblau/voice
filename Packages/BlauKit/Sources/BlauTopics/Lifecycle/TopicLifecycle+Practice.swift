@@ -30,7 +30,9 @@ struct PracticeRunState: Sendable {
 ///   summary is never replaced by a labeler; re-segmentation leaves it
 ///   alone. That holds after the conversation too: `refine` (reached from
 ///   a user's merge or split, even after a relaunch) also skips a stored
-///   topic `PracticeRunTopic` recognizes, not just the live run's.
+///   topic `PracticeRunTopic` recognizes, not just the live run's. Merging
+///   the run's own topic into the one before it is refused
+///   (`EditError.practiceRun`): that would delete the run's topic.
 /// - **Closing.** After `end_practice` the topic stays current until the
 ///   user speaks again, so Grok's summary stays with the run; then a new
 ///   topic opens at that utterance. A conversation that finishes during a

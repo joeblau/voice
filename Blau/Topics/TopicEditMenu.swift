@@ -218,6 +218,8 @@ enum TopicEditFailure {
             "This topic no longer exists."
         case TopicLifecycle.EditError.splitAtFirstUtterance:
             "A topic can't be split at its first line."
+        case TopicLifecycle.EditError.practiceRun:
+            "A practice run keeps its own topic. Merge the next topic into it instead."
         default:
             "The topic couldn't be changed."
         }
