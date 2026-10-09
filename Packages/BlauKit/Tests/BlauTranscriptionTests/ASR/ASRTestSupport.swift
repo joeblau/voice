@@ -146,7 +146,7 @@ actor SimulatedEouRecognizer: StreamingSpeechRecognizer {
     private(set) var resets = 0
     private(set) var finishes = 0
     /// `unload()` calls: `ParakeetStreamingTranscriber.finish()` releases
-    /// the model.
+    /// the model of a recognizer it owns (`unloadsRecognizerOnFinish`).
     private(set) var unloads = 0
     /// Calls to `append`, `finish` or `reset` after `unload()`, which a
     /// real recognizer can't serve.

@@ -95,12 +95,13 @@ struct ParakeetHandoffTests {
     }
 }
 
-/// A Parakeet transcriber on the simulated recognizer (no model).
+/// A Parakeet transcriber on the simulated recognizer (no model), owning
+/// it as `ParakeetStreamingTranscriber.load` does.
 private func makeParakeet(_ recognizer: SimulatedEouRecognizer) -> ParakeetStreamingTranscriber {
     ParakeetStreamingTranscriber(
         recognizer: recognizer, audio: FixtureAudioSource(block: [Float](repeating: 0, count: 1_600)),
         voiceActivity: ScriptedVoiceActivity(), signposter: .disabled(.asr), clock: ManualClock(),
-        latencyMarks: nil)
+        latencyMarks: nil, unloadsRecognizerOnFinish: true)
 }
 
 /// The Parakeet transcribers a provider built, held weakly, and their

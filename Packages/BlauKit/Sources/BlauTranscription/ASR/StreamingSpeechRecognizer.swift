@@ -47,9 +47,11 @@ public protocol StreamingSpeechRecognizer: Sendable {
 
     /// Releases the model (`ParakeetEouRecognizer`: its Core ML models).
     /// The recognizer can't be used afterwards.
-    /// `ParakeetStreamingTranscriber.finish()` calls it, so a transcriber
-    /// switched away from frees its model even if something still holds the
-    /// transcriber.
+    /// `ParakeetStreamingTranscriber.finish()` calls it when the transcriber
+    /// owns the recognizer (`ParakeetStreamingTranscriber.load`), so a
+    /// transcriber switched away from frees its model even if something
+    /// still holds the transcriber. A recognizer shared across transcribers
+    /// is never unloaded by them.
     func unload() async
 }
 

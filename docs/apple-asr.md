@@ -155,8 +155,11 @@ the first word) to VAD's end of speech (or the last word).
 4. **Critical memory pressure** → Apple (`memoryPressure`): its model runs
    in a system process, not in Blau's. Switching away from Parakeet frees
    its Core ML models: the router drops the transcriber, and
-   `ParakeetStreamingTranscriber.finish()` unloads its recognizer
-   (`StreamingSpeechRecognizer.unload()`). The performance HUD reaches
+   `ParakeetStreamingTranscriber.finish()` unloads the recognizer it owns
+   (`StreamingSpeechRecognizer.unload()`; `ParakeetStreamingTranscriber.load`
+   sets `unloadsRecognizerOnFinish`). A recognizer the caller passes in,
+   such as the one the ASR evaluation engine and the soak run share across
+   fixtures, stays loaded. The performance HUD reaches
    Parakeet's chunk counters through `ParakeetHandoff`, which holds the
    transcriber weakly so it doesn't keep the model alive.
 5. Otherwise Parakeet (`primary`).
