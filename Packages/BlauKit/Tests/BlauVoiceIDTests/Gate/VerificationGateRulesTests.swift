@@ -255,7 +255,7 @@ struct SpeakerVerifierTests {
         #expect(gauges.reading(.voiceScore)?.value == Double(other.score))
         #expect(gauges.reading(.voiceThreshold)?.value == Double(VoiceIDConfig.calibrated.short.accept))
         #expect(try await verifier.evaluate(EnrollmentAudio.clip(.owner, duration: .seconds(2))) == .accept)
-        #expect(await verifier.isEnrolled)
+        #expect(verifier.isEnrolled)
     }
 
     @Test func followsTheSensitivityForEveryScore() async throws {

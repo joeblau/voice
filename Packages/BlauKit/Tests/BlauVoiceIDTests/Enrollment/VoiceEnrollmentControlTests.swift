@@ -104,7 +104,7 @@ actor GatedVoiceprintStore: VoiceprintStoring {
     }
 
     func deleteVoiceprint() async throws {
-        try await inner.deleteVoiceprint()
+        await inner.deleteVoiceprint()
     }
 }
 

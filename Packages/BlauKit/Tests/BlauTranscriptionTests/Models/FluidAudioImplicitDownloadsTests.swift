@@ -19,7 +19,7 @@ struct FluidAudioImplicitDownloadsTests {
     @Test func offlineModeStopsTheBenchmarkModelPathAtPrepare() async throws {
         // What the screen hit before the scope existed: with no models on
         // disk, the EOU case's `prepare` throws before touching the network.
-        try await preservingOfflineMode {
+        await preservingOfflineMode {
             FluidAudioModels.disableImplicitDownloads()
             let root = FileManager.default.temporaryDirectory.appending(
                 path: "blau-implicit-downloads-\(UUID().uuidString)", directoryHint: .isDirectory)

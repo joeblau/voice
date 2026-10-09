@@ -118,16 +118,16 @@ struct TopicTimelineTests {
         #expect(timeline.current?.title == "New topic")
     }
 
-    @Test func aConversationWithoutTopicsGetsAStandInBullet() {
+    @Test func aConversationWithoutTopicsGetsAStandInBullet() throws {
         let history = History()
         let live = TimelineConversation(id: UUID(), startedAt: Self.tuesday.addingTimeInterval(7200), title: nil)
         let timeline = TopicTimeline(topics: history.topics, focus: live, calendar: Self.calendar)
-        let current = try? #require(timeline.current)
-        #expect(current?.isSynthetic == true)
-        #expect(current?.conversationID == live.id)
-        #expect(current?.title == Topic.placeholderTitle)
-        #expect(current?.titleIsProvisional == true)
-        #expect(timeline.topics.last?.id == current?.id)
+        let current = try #require(timeline.current)
+        #expect(current.isSynthetic == true)
+        #expect(current.conversationID == live.id)
+        #expect(current.title == Topic.placeholderTitle)
+        #expect(current.titleIsProvisional == true)
+        #expect(timeline.topics.last?.id == current.id)
 
         // Titled conversations lend the bullet their title.
         let titled = TopicTimeline(

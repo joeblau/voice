@@ -232,7 +232,7 @@ struct RecordButtonModelTests {
         let session = FakeConversationSession(audio: audio, clock: clock, startDelay: .milliseconds(400))
         let model = makeModel(session)
 
-        try await whileRunning(model) {
+        await whileRunning(model) {
             let start = Task { await model.tap() }
             await clock.waitForSleepers()
             #expect(model.phase == .starting)
