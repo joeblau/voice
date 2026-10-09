@@ -325,14 +325,18 @@ voice voice ID can't place (the transcriber keeps one utterance open across
 the pause) is uncertain, not accepted, so it is neither sent outside an
 active turn nor counted as the owner's speech that keeps a turn active.
 The owner's 2 s with a 0.5 s uncertain tail (80%) still accepts, and so
-does exactly two thirds. Only evidence of uncertainty counts: a short
-segment that is uncertain just because it had nothing recent to inherit
-(basis `noRecentDecision`) says nothing about who spoke, so it is left out
-of the shares. Otherwise the owner's "Okay, so… [pause] what about
-tomorrow?" (a 0.7 s opener, then 1.3 s scored and accepted) would be
-dropped whenever their last scored speech was more than 5 s earlier: the
-first utterance of a conversation, or any reply after Grok spoke for more
-than 5 s. An utterance made only of such segments is still uncertain. Past that,
+does exactly two thirds. A short segment that is uncertain just because
+it had nothing recent to inherit (basis `noRecentDecision`) says nothing
+about who spoke, so up to one short segment's worth of such speech (the
+1 s minimum scored speech) is left out of the shares. Otherwise the
+owner's "Okay, so… [pause] what about tomorrow?" (a 0.7 s opener, then
+1.3 s scored and accepted) would be dropped whenever their last scored
+speech was more than 5 s earlier: the first utterance of a conversation,
+or any reply after Grok spoke for more than 5 s. Past that allowance it
+counts as uncertain, so a TV's run of short lines ("Yeah." "Right."
+"Sure.", 2.7 s with nothing to inherit) followed by the owner's 1.1 s is
+uncertain, not accepted, and isn't sent outside an active turn. An
+utterance made only of such segments is still uncertain. Past that,
 accepted and no rejected parts accept, rejected and no accepted parts
 reject; a mix goes to the larger share unless the smaller is a third or
 more, which makes it uncertain (the text can't be split by speaker).

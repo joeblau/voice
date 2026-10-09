@@ -39,8 +39,8 @@ import os
 /// decision: its final one if the segment has ended, otherwise a score of
 /// the speech up to the utterance's end (reusing the last score when it
 /// covers nearly all of it). The decisions combine by speech share
-/// (``VerificationGateRules/combine(_:minorityShare:)``), and the
-/// result's ``GatedUtterance/Disposition`` decides:
+/// (``VerificationGateRules/combine(_:minorityShare:unattributedAllowance:)``),
+/// and the result's ``GatedUtterance/Disposition`` decides:
 ///
 /// | Decision | What happens |
 /// | --- | --- |
@@ -760,7 +760,9 @@ public actor VerificationGate {
                 verdicts.append(verdict)
             }
         }
-        let decision = VerificationGateRules.combine(verdicts, minorityShare: configuration.mixedSpeechMinorityShare)
+        let decision = VerificationGateRules.combine(
+            verdicts, minorityShare: configuration.mixedSpeechMinorityShare,
+            unattributedAllowance: configuration.minimumScoredSpeech)
         var disposition = VerificationGateRules.disposition(
             for: decision, duration: utterance.duration, isTurnActive: turnActivity.isActive,
             policy: configuration.uncertainPolicy)

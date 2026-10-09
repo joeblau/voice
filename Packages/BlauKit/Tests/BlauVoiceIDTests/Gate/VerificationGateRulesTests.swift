@@ -68,10 +68,10 @@ struct VerificationGateRulesTests {
     }
 
     /// A short segment that is uncertain only because it had nothing recent
-    /// to inherit carries no evidence about who spoke, so it doesn't count
-    /// against the scored speech: the owner's "Okay, so… [pause] what about
-    /// tomorrow?" accepts. Scored, inherited, unscored and timed-out
-    /// uncertain parts still count.
+    /// to inherit carries no evidence about who spoke, so (up to one short
+    /// segment's worth) it doesn't count against the scored speech: the
+    /// owner's "Okay, so… [pause] what about tomorrow?" accepts. Scored,
+    /// inherited, unscored and timed-out uncertain parts still count.
     @Test func aShortOpenerWithNothingToInheritDoesNotCount() {
         let combine = { (parts: [(SpeakerDecision, Double, SegmentVerdict.Basis)]) in
             VerificationGateRules.combine(
@@ -80,10 +80,11 @@ struct VerificationGateRulesTests {
         #expect(combine([(.uncertain, 0.7, .noRecentDecision), (.accept, 1.3, .scored)]) == .accept)
         #expect(combine([(.uncertain, 0.65, .noRecentDecision), (.accept, 1.1, .scored)]) == .accept)
         #expect(combine([(.uncertain, 0.9, .noRecentDecision), (.reject, 1.1, .scored)]) == .reject)
-        // Several short unattributed parts around a scored one.
+        // A short unattributed opener around a scored part and what inherits
+        // from it (in the gate, a short part after a scored one inherits).
         #expect(
             combine([
-                (.uncertain, 0.8, .noRecentDecision), (.accept, 1.2, .scored), (.uncertain, 0.9, .noRecentDecision),
+                (.uncertain, 0.8, .noRecentDecision), (.accept, 1.2, .scored), (.accept, 0.9, .inherited(from: 1)),
             ]) == .accept)
         // Nothing but unattributed short parts: still uncertain.
         #expect(combine([(.uncertain, 0.7, .noRecentDecision), (.uncertain, 0.6, .noRecentDecision)]) == .uncertain)
@@ -92,6 +93,37 @@ struct VerificationGateRulesTests {
         for basis: SegmentVerdict.Basis in [.scored, .inherited(from: 3), .unscored, .timedOut] {
             #expect(combine([(.uncertain, 0.7, basis), (.accept, 1.3, .scored)]) == .uncertain)
         }
+    }
+
+    /// Only one short segment's worth of unattributed speech is left out:
+    /// past the allowance it counts as uncertain, so a TV's run of short
+    /// lines ("Yeah." "Right." "Sure.") doesn't ride along on a few
+    /// accepted words.
+    @Test func unattributedSpeechPastTheAllowanceCounts() {
+        let combine = { (parts: [(SpeakerDecision, Double, SegmentVerdict.Basis)], allowance: Double) in
+            VerificationGateRules.combine(
+                parts.map { Self.verdict($0.0, seconds: $0.1, basis: $0.2) }, minorityShare: 1.0 / 3,
+                unattributedAllowance: .seconds(allowance))
+        }
+        let tvThenOwner: [(SpeakerDecision, Double, SegmentVerdict.Basis)] = [
+            (.uncertain, 0.9, .noRecentDecision), (.uncertain, 0.9, .noRecentDecision),
+            (.uncertain, 0.9, .noRecentDecision), (.accept, 1.1, .scored),
+        ]
+        // 2.7 s unattributed, 1 s allowed: 1.7 s uncertain against 1.1 s.
+        #expect(combine(tvThenOwner, 1) == .uncertain)
+        // The default allowance is the gate's 1 s minimum scored speech.
+        #expect(
+            VerificationGateRules.combine(
+                tvThenOwner.map { Self.verdict($0.0, seconds: $0.1, basis: $0.2) }, minorityShare: 1.0 / 3)
+                == .uncertain)
+        // Exactly the allowance is left out entirely.
+        #expect(combine([(.uncertain, 1, .noRecentDecision), (.accept, 1.1, .scored)], 1) == .accept)
+        // The excess counts like any uncertain part: 0.5 s of 3.5 s (14%).
+        #expect(combine([(.uncertain, 1.5, .noRecentDecision), (.accept, 3, .scored)], 1) == .accept)
+        // With no allowance it all counts.
+        #expect(combine([(.uncertain, 0.7, .noRecentDecision), (.accept, 1.3, .scored)], 0) == .uncertain)
+        // The same holds against rejected speech.
+        #expect(combine([(.uncertain, 2.7, .noRecentDecision), (.reject, 1.1, .scored)], 1) == .uncertain)
     }
 
     @Test func aConflictGoesToTheMajorityUnlessItIsClose() {
