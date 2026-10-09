@@ -168,6 +168,15 @@ struct PracticeTopicTests {
         return (fixture, topics)
     }
 
+    /// A relaunch: a new lifecycle over the fixture's store. It tracks none
+    /// of the first lifecycle's runs, so only the stored topic can say it
+    /// is one.
+    static func relaunched(_ fixture: LifecycleFixture) -> TopicLifecycle {
+        TopicLifecycle(store: fixture.store, labeling: .test([fixture.labeler]), clock: fixture.clock) {
+            StreamingTopicSegmenter(embedder: LexicalTextEmbedder(), signposter: .disabled(.topics))
+        }
+    }
+
     /// The lifecycle no longer tracks the run once the conversation
     /// finished, so the guard must come from the stored topic: a merge
     /// relabels the survivor, and the record is kept nowhere else.
@@ -216,8 +225,9 @@ struct PracticeTopicTests {
 
     /// "Merge with Previous" on the run's own topic would delete it and
     /// leave the previous topic, relabeled, as the survivor: the record
-    /// would be lost. The lifecycle refuses it, also after the conversation
-    /// finished, when only the stored topic says it is a run.
+    /// would be lost. The lifecycle refuses it after the conversation
+    /// finished (it still remembers the run) and after a relaunch, when
+    /// only the stored topic says it is a run.
     @Test func mergingARunIntoThePreviousTopicAfterTheConversationIsRefused() async throws {
         let (fixture, topics) = try await Self.finishedRun()
 
@@ -225,6 +235,17 @@ struct PracticeTopicTests {
             try await fixture.lifecycle.mergeWithPrevious(topics[1].id)
         }
         await fixture.lifecycle.waitUntilIdle()
+        try await Self.expectUnmerged(fixture, topics)
+
+        let relaunched = Self.relaunched(fixture)
+        await #expect(throws: TopicLifecycle.EditError.practiceRun) {
+            try await relaunched.mergeWithPrevious(topics[1].id)
+        }
+        await relaunched.waitUntilIdle()
+        try await Self.expectUnmerged(fixture, topics)
+    }
+
+    static func expectUnmerged(_ fixture: LifecycleFixture, _ topics: [TopicSnapshot]) async throws {
         let after = try await fixture.topics()
         #expect(after.map(\.id) == topics.map(\.id))
         #expect(after[0].title == topics[0].title)
@@ -234,15 +255,18 @@ struct PracticeTopicTests {
         #expect(try await fixture.topicOfExchange(3) == topics[1].id)
     }
 
+    /// Renamed, the run's topic loses the title prefix: after a relaunch,
+    /// only its record says it is a run.
     @Test func aRenamedRunIsRecognizedByItsRecordAndNotMergedAway() async throws {
         let (fixture, topics) = try await Self.finishedRun()
         try await fixture.lifecycle.rename(topics[1].id, to: "Mock interview")
         await fixture.lifecycle.waitUntilIdle()
 
+        let relaunched = Self.relaunched(fixture)
         await #expect(throws: TopicLifecycle.EditError.practiceRun) {
-            try await fixture.lifecycle.mergeWithPrevious(topics[1].id)
+            try await relaunched.mergeWithPrevious(topics[1].id)
         }
-        await fixture.lifecycle.waitUntilIdle()
+        await relaunched.waitUntilIdle()
         let after = try await fixture.topics()
         #expect(after.map(\.id) == topics.map(\.id))
         #expect(after[1].title == "Mock interview")
