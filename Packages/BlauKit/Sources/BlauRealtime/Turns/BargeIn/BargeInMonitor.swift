@@ -19,11 +19,14 @@ import Foundation
 /// **Trigger.** A confirmed VAD onset (`VoiceActivityEvent.speechStarted`,
 /// #28) on the echo-cancelled microphone while the orchestrator is
 /// `agentSpeaking`. Speech that is already under way when Grok starts
-/// speaking (its onset came while Grok was listening or thinking, and its
-/// segment is still open) is judged when Grok starts
-/// (``BargeInTarget/agentSpeakingChanges()``), as speech that began in the
-/// grace period; speech that ends before then is left to the final
-/// utterance, which interrupts the same way (#36). A continuation onset
+/// speaking (it began after Grok last stopped speaking, while Grok was
+/// listening or thinking, and its segment is still open) is judged when
+/// Grok starts (``BargeInTarget/agentSpeakingChanges()``), as speech that
+/// began in the grace period; speech that ends before then is left to the
+/// final utterance, which interrupts the same way (#36). Speech that began
+/// while Grok was still speaking, and that VAD confirmed only after Grok
+/// stopped (a tool round's filler), is never carried over: it may be
+/// Grok's own leak, and Grok would barge in on itself. A continuation onset
 /// (VAD splitting a segment over its maximum duration) is the same speech
 /// carrying on, not a new onset, and never barges in by itself.
 ///
@@ -72,11 +75,20 @@ public actor BargeInMonitor {
     /// Speech held back by the grace period.
     private var pending: Pending?
     private var nextHoldID: UInt64 = 0
-    /// The latest onset that came while Grok wasn't speaking, until its
-    /// segment ends: judged if Grok starts speaking over it.
-    private var unjudged: (onset: SpeechOnset, receivedAt: Duration)?
+    /// The latest onset that came while Grok wasn't speaking and whose
+    /// speech began after Grok last stopped, until its segment ends: judged
+    /// if Grok starts speaking over it. `began` is when its speech began
+    /// (the clock's uptime); for a continuation, when the speech it carries
+    /// on began.
+    private var unjudged: (onset: SpeechOnset, receivedAt: Duration, began: Duration)?
+    /// When the latest stretch of speech began (the clock's uptime): the
+    /// start of the last onset that wasn't a continuation.
+    private var speechBegan: Duration?
     /// The last ``agentSpeakingChanged(_:)`` value.
     private var agentSpeaking = false
+    /// When Grok last stopped speaking (the clock's uptime), as
+    /// ``agentSpeakingChanged(_:)`` was told.
+    private var stoppedSpeakingAt: Duration?
     public private(set) var statistics = BargeInStatistics()
 
     private struct Pending {
@@ -159,6 +171,7 @@ public actor BargeInMonitor {
         pending?.task.cancel()
         pending = nil
         unjudged = nil
+        speechBegan = nil
         openSegments.removeAll()
     }
 
@@ -198,16 +211,20 @@ public actor BargeInMonitor {
         // starts over it.
         let receivedAt = clock.uptime
         if onset.isContinuation {
+            // The speech it carries on began when its real onset did.
+            let began = speechBegan ?? Self.began(onset, receivedAt: receivedAt)
             if !(await target.isAgentSpeaking) {
-                unjudged = (onset, receivedAt)
+                carryOver(onset, receivedAt: receivedAt, began: began)
             }
             return .continuation
         }
+        let began = Self.began(onset, receivedAt: receivedAt)
+        speechBegan = began
         pending?.task.cancel()
         pending = nil
         unjudged = nil
         guard await target.isAgentSpeaking else {
-            unjudged = (onset, receivedAt)
+            carryOver(onset, receivedAt: receivedAt, began: began)
             return .agentNotSpeaking
         }
         statistics.onsetsWhileSpeaking += 1
@@ -233,12 +250,37 @@ public actor BargeInMonitor {
             startedAt: receivedAt)
     }
 
+    /// When the speech of `onset`, received at `receivedAt`, began: VAD
+    /// decided at `detectedAt`, which is (near enough) when the onset
+    /// reached the monitor.
+    private static func began(_ onset: SpeechOnset, receivedAt: Duration) -> Duration {
+        receivedAt - onset.detectionLatency
+    }
+
+    /// Notes `onset`, which came while Grok wasn't speaking, to be judged if
+    /// Grok starts speaking over it, unless its speech began before Grok
+    /// last stopped. Such speech may be Grok's own leak (a filler, or the
+    /// end of a reply, that VAD confirmed only once the player went idle);
+    /// carried over, the leak would stand for "the user's own level before
+    /// Grok spoke", and the next audio's leak, never `echoMargin` under it,
+    /// would barge in on Grok.
+    private func carryOver(_ onset: SpeechOnset, receivedAt: Duration, began: Duration) {
+        if let stoppedSpeakingAt, began < stoppedSpeakingAt {
+            unjudged = nil
+            Log.realtime.info(
+                "Segment \(onset.segmentID, privacy: .public) began while Grok was speaking; not carrying it over")
+            return
+        }
+        unjudged = (onset, receivedAt, began)
+    }
+
     /// Tells the monitor whether Grok is speaking; ``run(_:)`` calls it for
     /// each of the target's ``BargeInTarget/agentSpeakingChanges()``.
     ///
     /// When Grok starts speaking while the segment of an onset that came
     /// before is still open (the user carried on talking through Grok's
-    /// thinking), that speech is judged as if it began in the grace period:
+    /// thinking), and that speech began after Grok last stopped speaking,
+    /// it is judged as if it began in the grace period:
     /// it barges in once ``BargeInConfiguration/speechAfterGrace`` of it has
     /// been heard after the grace period with the segment still open, it is
     /// loud enough, and it is within ``BargeInConfiguration/echoMargin`` of
@@ -248,6 +290,16 @@ public actor BargeInMonitor {
     @discardableResult
     public func agentSpeakingChanged(_ isSpeaking: Bool) async -> BargeInOutcome? {
         let started = isSpeaking && !agentSpeaking
+        if !isSpeaking, agentSpeaking {
+            // Speech that began before now may be Grok's own leak. This
+            // change can reach the monitor after VAD's onset did, so an
+            // onset already noted is dropped here too.
+            let now = clock.uptime
+            stoppedSpeakingAt = now
+            if let carried = unjudged, carried.began < now {
+                unjudged = nil
+            }
+        }
         agentSpeaking = isSpeaking
         guard started, let carried = unjudged, openSegments.contains(carried.onset.segmentID) else { return nil }
         unjudged = nil
@@ -386,8 +438,9 @@ public actor BargeInMonitor {
         guard let margin = configuration.echoMargin else { return nil }
         let window = configuration.referenceWindow.sampleCount(sampleRate: onset.sampleRate)
         if let carriedOverAt = candidate.carriedOverAt {
-            // The speech was under way before Grok spoke, so it isn't
-            // Grok's echo; the question is whether the user is still
+            // The speech began after Grok last stopped speaking
+            // (`carryOver`) and was under way before Grok spoke again, so
+            // it isn't Grok's echo; the question is whether the user is still
             // talking, or only the leak holds the segment open. The user's
             // own level before Grok spoke tells: the leak sits well under it.
             let start = max(onset.startOffset, carriedOverAt - window)

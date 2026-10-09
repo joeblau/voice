@@ -534,6 +534,120 @@ struct BargeInMonitorTests {
         await running.value
     }
 
+    // MARK: Speech that began while Grok spoke
+
+    // In these tests the clock's uptime matches the capture timeline: it
+    // reads 1.0 s when the capture is at 1.0 s.
+
+    /// PR #167 review: a tool round's filler leaks through, and VAD confirms
+    /// the leak's onset only after the player went idle (`fillerPlayed`
+    /// moved the state to `agentThinking`). The follow-up's first audio
+    /// arrives before VAD's 300 ms of silence closes that segment. Carried
+    /// over, the filler's leak became "the user's own level before Grok
+    /// spoke", the follow-up's leak was never `echoMargin` under it, and
+    /// Grok barged in on itself, cancelling the tool answer.
+    @Test func fillerLeakCarriedIntoTheFollowUpDoesNotBargeIn() async throws {
+        let mic = MicSignal.floor(seconds: 1.0) + MicSignal.leak(syllable: -40, pause: -65, seconds: 4)
+        let setup = Setup(audible: nil, microphone: mic)
+        // The filler plays from 1.0 s.
+        setup.clock.advance(by: .seconds(1))
+        #expect(await setup.monitor.agentSpeakingChanged(true) == nil)
+        // The player goes idle at 1.4 s: thinking, waiting for the tool.
+        setup.clock.advance(by: .milliseconds(400))
+        setup.target.setSpeaking(false)
+        #expect(await setup.monitor.agentSpeakingChanged(false) == nil)
+        // VAD confirms at 1.5 s the leak's onset at 1.2 s, during the filler.
+        setup.clock.advance(by: .milliseconds(100))
+        #expect(await setup.monitor.handle(.speechStarted(.at(1.2, detected: 1.5, segment: 7))) == .agentNotSpeaking)
+        #expect(await setup.monitor.unjudgedSegment == nil)
+        // The follow-up starts at 1.7 s, with segment 7 still open.
+        setup.clock.advance(by: .milliseconds(200))
+        setup.target.setSpeaking(true)
+        #expect(await setup.monitor.agentSpeakingChanged(true) == nil)
+        // Past the grace period and the speech after it: nothing was held
+        // to judge then.
+        for _ in 0..<50 { await Task.yield() }
+        #expect(setup.clock.sleeperCount == 0)
+        setup.clock.advance(by: .seconds(1))
+        for _ in 0..<50 { await Task.yield() }
+        #expect(setup.target.triggers.isEmpty)
+        #expect(await setup.monitor.statistics.onsetsWhileSpeaking == 0)
+    }
+
+    /// The same, when the orchestrator's change to `agentThinking` reaches
+    /// the monitor only after VAD's onset did: the onset noted in between is
+    /// dropped when the change arrives.
+    @Test func aStopArrivingAfterTheOnsetStillDropsTheLeak() async throws {
+        let mic = MicSignal.floor(seconds: 1.0) + MicSignal.leak(syllable: -40, pause: -65, seconds: 4)
+        let setup = Setup(audible: nil, microphone: mic)
+        setup.clock.advance(by: .seconds(1))
+        #expect(await setup.monitor.agentSpeakingChanged(true) == nil)
+        setup.clock.advance(by: .milliseconds(400))
+        setup.target.setSpeaking(false)
+        setup.clock.advance(by: .milliseconds(100))
+        #expect(await setup.monitor.handle(.speechStarted(.at(1.2, detected: 1.5, segment: 7))) == .agentNotSpeaking)
+        #expect(await setup.monitor.unjudgedSegment == 7)
+        #expect(await setup.monitor.agentSpeakingChanged(false) == nil)
+        #expect(await setup.monitor.unjudgedSegment == nil)
+        setup.clock.advance(by: .milliseconds(200))
+        setup.target.setSpeaking(true)
+        #expect(await setup.monitor.agentSpeakingChanged(true) == nil)
+        #expect(setup.target.triggers.isEmpty)
+    }
+
+    /// Speech that began after Grok stopped is still the user's, carried
+    /// over and judged when Grok starts again.
+    @Test func speechThatBeganAfterGrokStoppedIsStillCarriedOver() async throws {
+        let mic = MicSignal.floor(seconds: 1.5) + MicSignal.tone(-24, seconds: 3)
+        let setup = Setup(audible: nil, microphone: mic)
+        setup.clock.advance(by: .seconds(1))
+        #expect(await setup.monitor.agentSpeakingChanged(true) == nil)
+        setup.clock.advance(by: .milliseconds(200))
+        setup.target.setSpeaking(false)
+        #expect(await setup.monitor.agentSpeakingChanged(false) == nil)
+        // The user starts at 1.5 s; VAD confirms at 1.8 s.
+        setup.clock.advance(by: .milliseconds(600))
+        #expect(await setup.monitor.handle(.speechStarted(.at(1.5, detected: 1.8, segment: 5))) == .agentNotSpeaking)
+        #expect(await setup.monitor.unjudgedSegment == 5)
+        setup.clock.advance(by: .milliseconds(500))
+        setup.target.setSpeaking(true)
+        #expect(await setup.monitor.agentSpeakingChanged(true) == .deferred)
+        await setup.clock.waitForSleepers()
+        setup.clock.advance(by: .milliseconds(500))
+        try await waitUntil("barge-in") { setup.target.triggers.count == 1 }
+    }
+
+    /// A continuation of a leak that began while Grok spoke isn't carried
+    /// over either: its speech began when the split segment's did, not at
+    /// the split.
+    @Test func aContinuationOfSpeechThatBeganWhileGrokSpokeIsNotCarriedOver() async throws {
+        let setup = Setup(microphone: MicSignal.leak(syllable: -40, pause: -65, seconds: 4))
+        setup.clock.advance(by: .seconds(1))
+        #expect(await setup.monitor.agentSpeakingChanged(true) == nil)
+        // The leak's own onset, judged while Grok speaks: echo.
+        setup.clock.advance(by: .milliseconds(500))
+        #expect(await setup.monitor.handle(.speechStarted(.at(1.2, detected: 1.5, segment: 7))) == .suppressed(.echo))
+        setup.clock.advance(by: .milliseconds(500))
+        setup.target.setSpeaking(false)
+        #expect(await setup.monitor.agentSpeakingChanged(false) == nil)
+        // VAD splits the segment at 2.5 s, after Grok stopped.
+        setup.clock.advance(by: .milliseconds(500))
+        await setup.monitor.handle(
+            .speechEnded(
+                SpeechSegment(
+                    id: 7, sampleRange: MicSignal.offset(1.2)..<MicSignal.offset(2.5), sampleRate: MicSignal.rate,
+                    endReason: .maximumDuration, detectedAt: MicSignal.offset(2.5), peakProbability: 0.9,
+                    meanProbability: 0.8)))
+        let split = SpeechOnset(
+            segmentID: 8, startOffset: MicSignal.offset(2.5), sampleRate: MicSignal.rate, isContinuation: true,
+            detectedAt: MicSignal.offset(2.5))
+        #expect(await setup.monitor.handle(.speechStarted(split)) == .continuation)
+        #expect(await setup.monitor.unjudgedSegment == nil)
+        setup.target.setSpeaking(true)
+        #expect(await setup.monitor.agentSpeakingChanged(true) == nil)
+        #expect(setup.target.triggers.isEmpty)
+    }
+
     // MARK: The player's audible duration
 
     /// The grace period runs from when the agent's audio started after

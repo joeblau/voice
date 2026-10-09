@@ -758,6 +758,20 @@ the user's own level before Grok spoke. That last check stops a leak that
 holds the segment open after the user stopped: the leak sits well under the
 user's voice.
 
+Only speech that began after Grok last stopped speaking is carried over
+this way. Speech that began while Grok was still speaking, and that VAD
+confirmed only once Grok had stopped, may be Grok's own leak: in a tool
+round, the filler's leak is often confirmed after the player goes idle
+(`agentThinking`), and the follow-up's first audio can arrive before VAD's
+300 ms of silence closes that segment. Carried over, the filler's leak
+would become "the user's own level before Grok spoke", the follow-up's
+leak would never be `echoMargin` under it, and Grok would barge in on
+itself and cancel the tool answer. The monitor notes when Grok stopped
+(`agentSpeakingChanged(false)`) and compares it with when the speech began
+(when the onset reached it, less VAD's detection latency; for a
+continuation, when the speech it carries on began), dropping an onset it
+had already noted if the change reaches it after VAD's onset did.
+
 ### Echo guard
 
 Voice processing removes most of Grok's voice from the microphone, but not
@@ -855,7 +869,11 @@ speech, onsets inside and after the grace period, a segment that ends
 during the hold (its hold cancelled), a newer onset replacing a held one,
 speech already under way when Grok starts speaking (barging in, held until
 after the grace period of the actual audio, and a leak holding the segment
-open after the user stopped), the player's audible duration running across
+open after the user stopped), speech that began while Grok spoke not being
+carried over (a filler's leak confirmed after the player went idle, the
+stop reaching the monitor after the onset, a continuation of such speech)
+while speech that began after Grok stopped still is, the player's audible
+duration running across
 items until it goes idle, a rejected or uncertain speaker) and
 `TurnOrchestratorBargeInTests` (the cut over fake sockets: the
 cancel and the truncate at the played milliseconds, a reply nobody heard
