@@ -45,30 +45,44 @@ rather than a URL. `AppConfig` builds `https://<host>` and
 
 ## `AppConfig`
 
-`Blau/Configuration/AppConfig.swift` is the only code that reads these
-Info.plist keys.
+`AppConfig` is public API in `BlauCore`
+(`Packages/BlauKit/Sources/BlauCore/AppConfig.swift`) and is the only code
+that reads these Info.plist keys. It is split in two:
 
-- `AppConfig.current` is the running app's configuration, read once from
-  `Bundle.main`.
-- `AppConfig(infoDictionary:honorsDevelopmentKey:)` parses strictly and throws
-  `AppConfig.LoadError` for a missing, unexpanded (`$(…)`) or invalid value.
-  Tests use it directly.
-- `AppConfig.load(from:)` never fails. If the Info.plist is unusable it logs a
-  fault (subsystem `com.joeblau.blau`, category `config`) and returns
-  `AppConfig.fallback` (the `Base.xcconfig` defaults), so the app still
-  launches.
-- `developmentAPIKey` is `nil` unless the binary was compiled with `DEBUG`
-  **and** a non-empty key was configured. Callers treat `nil` as "ask the
-  user". The DEBUG-only Keychain pre-fill on first launch
+- **BlauCore** holds the pure part: parsing, validation, the derived URLs,
+  run-time overrides and redaction. It never checks `#if DEBUG` (a package's
+  compilation conditions are not the app's) and never logs (BlauCore is
+  layer 0 and can't import BlauTelemetry). Its tests,
+  `Tests/BlauCoreTests/AppConfigParsingTests.swift`, run with `swift test`.
+- **The app** (`Blau/Configuration/AppConfig+App.swift`) adds
+  `isDebugBuild` (the app's own `#if DEBUG`), `fallback`, and the loaders
+  that log. `BlauTests/AppConfigBundleTests.swift` checks them against the
+  built app's Info.plist.
+
+The API:
+
+- `AppConfig.current` (app) is the running app's configuration, read once
+  from `Bundle.main`.
+- `AppConfig(infoDictionary:honorsDevelopmentKey:)` (BlauCore) parses
+  strictly and throws `AppConfig.LoadError` for a missing, unexpanded
+  (`$(…)`) or invalid value. `honorsDevelopmentKey` has no default: the app
+  passes `AppConfig.isDebugBuild`, and its `AppConfig(infoDictionary:)`
+  convenience does exactly that. Tests use both directly.
+- `AppConfig.load(from:)` (app) never fails. If the Info.plist is unusable it
+  logs a fault (subsystem `com.joeblau.blau`, category `config`) and returns
+  `AppConfig.fallback`, which is `AppConfig.defaults(environment:)` (BlauCore,
+  the `Base.xcconfig` defaults) for this build, so the app still launches.
+- `developmentAPIKey` is `nil` unless the app binary was compiled with
+  `DEBUG` **and** a non-empty key was configured. Callers treat `nil` as
+  "ask the user". The DEBUG-only Keychain pre-fill on first launch
   (`DevelopmentKeySeeder`, called from `Blau/XAI/XAIServices.swift`) reads
   this property; see [xai-auth.md](xai-auth.md#debug-pre-fill).
 - `description`, `debugDescription` and `dump()` redact the key.
-- `applyingOverrides(_:)` applies run-time overrides from a
-  `ConfigurationOverrideSource` (BlauCore). `AppConfig.current` uses
-  `UserDefaultsConfigurationOverrides`; an invalid override is ignored.
-
-`AppConfig` is plain Foundation plus `BlauCore`, with no app dependencies, so
-it can move into `BlauKit/BlauCore` unchanged.
+- `applyingOverrides(_:reportingInvalid:)` (BlauCore) applies run-time
+  overrides from a `ConfigurationOverrideSource` and hands an invalid one to
+  the closure; it is ignored. The app's `applyingOverrides(_:)` logs it as a
+  fault, and `AppConfig.current` uses it with
+  `UserDefaultsConfigurationOverrides`.
 
 ## Developer key (optional)
 
