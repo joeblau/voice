@@ -109,6 +109,8 @@ Earlier: …the end of the previous exchange
 - The topic is left out while it still has its placeholder title.
 - `facts:` lists the facts extracted from the exchange's utterances
   (`Fact.sourceUtteranceID`), at most five and at most half the budget.
+  Known gap: invalidated facts are listed too. Leaving them out is tracked
+  in #173, and it lands together with re-recorded memory-eval vectors.
 - The overlap comes **after** the exchange, so if anything is cut by the
   model's 128-token window it is the context, never the exchange itself.
   It is trimmed from the front (`…`) to fit.
@@ -146,7 +148,9 @@ Tokens are counted with `ApproximateTokenCounter` (UTF-8 bytes / 4 plus
 the prompt), not the model's tokenizer, so chunk boundaries don't move when
 the model is installed or replaced: the FTS rows stay put and only vectors
 are (re)computed. A `TextEmbeddingModel` is also a `ChunkTokenCounting` if
-exact counts are ever wanted.
+exact counts are ever wanted. Known gap: bytes / 4 can undercount
+digit-heavy and non-Latin text. A more conservative estimate is tracked in
+#173.
 
 ## Writing
 
@@ -257,7 +261,7 @@ never logged. The fused search (`MemorySearch`, #64) is one
 | Chunking (`swift test`) | `ExchangeChunkingTests`, `DocumentChunkingTests`, `MemoryChunkIdentityTests`, `KeywordQueryTests` |
 | Matrix (`swift test`) | `VectorMatrixTests`: agrees with brute-force `cosineSimilarity` across Accelerate blocks, swap-remove, filters, zero and mismatched vectors, top-K |
 | Index (`swift test`) | `MemoryIndexTests`: round trip, BM25 with stemming, the common-word cutoff (with and without filters), FTS syntax in queries, filters, vector reuse, matrix updates on write, model-version isolation, persistence, corrupt and old-schema files recreated, an unreadable file kept, searching while writing |
-| Rebuild (`swift test`) | `MemoryIndexRebuilderTests` (reuse, changes, deletions, new model, keyword-only fallback, a wrong vector count, cancellation) and `SwiftDataRebuildTests` (the acceptance criterion, CloudKit duplicates) |
+| Rebuild (`swift test`) | `MemoryIndexRebuilderTests` (reuse, changes, deletions, new model, keyword-only fallback, a wrong vector count, cancellation, and invalidated facts in exchange keys as a known issue for #173) and `SwiftDataRebuildTests` (the acceptance criterion, CloudKit duplicates) |
 | BM25 quality (`swift test`) | `KeywordRetrievalEvalTests`: BM25 alone on #59's eval set finds every keyword-style query in the top 5 |
 | 50k benchmark on the Mac (opt-in) | `BLAU_INDEX_BENCHMARK=1 swift test -Xswiftc -O --scratch-path .build/optimized --filter MemoryIndexSearchBenchmarkTests` |
 | 50k benchmark on an iPhone | `make bench` (`MemoryIndexBenchmarks.testSearch50k`) or the debug benchmark screen |
