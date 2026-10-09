@@ -273,6 +273,62 @@ struct VerificationGateTests {
         #expect(gated.disposition == .accepted)
     }
 
+    /// A TV's run of short lines ("Yeah." "Right." "Sure.") with nothing
+    /// recent to inherit, then the owner's 1.1 s, all in one utterance:
+    /// only one short segment's worth of unattributed speech is left out of
+    /// the shares, so the TV's 2.7 s doesn't ride along on the owner's
+    /// words and the utterance isn't sent (or counted as the owner's)
+    /// outside an active turn.
+    @Test func manyShortUnattributedSegmentsDontRideOnAShortAcceptance() async throws {
+        let clock = ManualClock()
+        let activity = ConversationTurnActivity(window: .seconds(10), clock: clock)
+        let verifier = ScriptedVerifier(SpeakerTimeline([(0, 3.7, .other), (3.7, 10, .owner)]))
+        let gate = VerificationGate(verifier: verifier, turnActivity: activity, clock: clock)
+        await gate.feed(SpeechScript.segment(0, from: 0, to: 0.9))
+        await gate.feed(SpeechScript.segment(1, from: 1.3, to: 2.2))
+        await gate.feed(SpeechScript.segment(2, from: 2.6, to: 3.5))
+        await gate.feed(SpeechScript.segment(3, from: 3.9, to: 5.0))
+        #expect(!activity.isActive)
+
+        let gated = await gate.decide(finalUtterance("Yeah. Right. Sure. What's next?", from: 0, to: 5.0))
+
+        #expect(gated.segments.map(\.basis) == [.noRecentDecision, .noRecentDecision, .noRecentDecision, .scored])
+        #expect(gated.segments.map(\.decision) == [.uncertain, .uncertain, .uncertain, .accept])
+        #expect(gated.decision == .uncertain)
+        #expect(gated.disposition == .uncertainDiscarded)
+        #expect(!activity.isActive)
+    }
+
+    /// The same run of a TV's short lines ending in its own scored line,
+    /// inside an active turn (Grok just answered for more than 5 s, so
+    /// nothing is recent enough to inherit): the unattributed speech
+    /// doesn't turn the rejection into uncertain speech, which the active
+    /// turn would send to Grok.
+    @Test func manyShortUnattributedSegmentsDontTurnARejectionUncertainInAnActiveTurn() async throws {
+        let clock = ManualClock()
+        let activity = ConversationTurnActivity(window: .seconds(10), clock: clock)
+        let verifier = ScriptedVerifier(SpeakerTimeline([(0, 2.5, .owner), (2.5, 30, .other)]))
+        let gate = VerificationGate(verifier: verifier, turnActivity: activity, clock: clock)
+        // The owner's question, then Grok answers for 7 s.
+        await gate.feed(SpeechScript.segment(0, from: 0, to: 2.5))
+        let question = await gate.decide(finalUtterance("Should I book it?", from: 0, to: 2.5))
+        #expect(question.disposition == .accepted)
+        activity.agentActivityChanged(true)
+        activity.agentActivityChanged(false)
+        #expect(activity.isActive)
+
+        await gate.feed(SpeechScript.segment(1, from: 10, to: 10.9))
+        await gate.feed(SpeechScript.segment(2, from: 11.3, to: 12.2))
+        await gate.feed(SpeechScript.segment(3, from: 12.6, to: 13.5))
+        await gate.feed(SpeechScript.segment(4, from: 13.9, to: 15.0))
+        let gated = await gate.decide(finalUtterance("Yeah. Right. Sure. Back after this.", from: 10, to: 15.0))
+
+        #expect(gated.segments.map(\.basis) == [.noRecentDecision, .noRecentDecision, .noRecentDecision, .scored])
+        #expect(gated.segments.map(\.decision) == [.uncertain, .uncertain, .uncertain, .reject])
+        #expect(gated.decision == .reject)
+        #expect(gated.disposition == .rejected)
+    }
+
     /// The model can end an utterance before VAD ends the segment: the gate
     /// scores what it has instead of waiting.
     @Test func aFinalBeforeTheSegmentEndsIsScoredAtOnce() async throws {

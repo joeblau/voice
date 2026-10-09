@@ -25,22 +25,39 @@ public enum VerificationGateRules {
     ///   riding along with a few accepted (or rejected) words. The owner's
     ///   2 s with a 0.5 s uncertain tail still accepts (80%); 1.4 s
     ///   accepted then 6 s of an unattributed voice doesn't (19%).
-    ///   Only evidence of uncertainty counts: a part that is `uncertain`
-    ///   just because it was too short to score and had nothing recent to
-    ///   inherit (``SegmentVerdict/Basis/noRecentDecision``) says nothing
-    ///   about who spoke, so it is left out of the shares. Otherwise the
-    ///   owner's "Okay, so… [pause] what about tomorrow?" would lose to its
-    ///   own short opener.
+    ///   A part that is `uncertain` just because it was too short to score
+    ///   and had nothing recent to inherit
+    ///   (``SegmentVerdict/Basis/noRecentDecision``) says nothing about who
+    ///   spoke, so up to `unattributedAllowance` of such speech is left out
+    ///   of the shares. Otherwise the owner's "Okay, so… [pause] what about
+    ///   tomorrow?" would lose to its own short opener. Past the allowance
+    ///   it counts as uncertain when accepted speech outweighs rejected
+    ///   speech: a run of a TV's short lines ("Yeah." "Right." "Sure.")
+    ///   can't ride along on a few accepted words. When rejected speech
+    ///   dominates it is still left out, so the excess can't turn a
+    ///   rejection into `uncertain`, which an active turn would send.
     /// - Otherwise, accepted parts and no rejected ones: `accept`; rejected
     ///   and no accepted ones: `reject`.
     /// - Both: the larger share of speech decides, unless the smaller share
     ///   is at least `minorityShare` of the decided speech, which makes it
     ///   `uncertain`: the transcript can't be split by speaker, so a real
     ///   mix is neither sent as the owner's nor thrown away.
-    public static func combine(_ segments: [SegmentVerdict], minorityShare: Double) -> SpeakerDecision {
+    ///
+    /// - Parameters:
+    ///   - segments: The verdicts of the segments the utterance covers.
+    ///   - minorityShare: The share that makes a mix uncertain.
+    ///   - unattributedAllowance: How much speech of short parts with
+    ///     nothing recent to inherit is left out of the shares when
+    ///     accepted speech outweighs rejected speech (all of it is left out
+    ///     otherwise); the gate passes its minimum scored speech, one short
+    ///     segment's worth.
+    public static func combine(
+        _ segments: [SegmentVerdict], minorityShare: Double, unattributedAllowance: Duration = .seconds(1)
+    ) -> SpeakerDecision {
         var accepted: Duration = .zero
         var rejected: Duration = .zero
         var uncertain: Duration = .zero
+        var unattributed: Duration = .zero
         for segment in segments {
             // A sliver of overlap still counts for something.
             let weight = max(segment.speechDuration, .milliseconds(1))
@@ -48,11 +65,18 @@ public enum VerificationGateRules {
             case .accept: accepted += weight
             case .reject: rejected += weight
             case .uncertain:
-                if case .noRecentDecision = segment.basis { continue }
-                uncertain += weight
+                if case .noRecentDecision = segment.basis {
+                    unattributed += weight
+                } else {
+                    uncertain += weight
+                }
             }
         }
         guard accepted > .zero || rejected > .zero else { return .uncertain }
+        // Unattributed speech past the allowance weighs only against an
+        // acceptance: it can't turn a rejection into an uncertain
+        // utterance that an active turn would send.
+        if accepted > rejected { uncertain += max(.zero, unattributed - unattributedAllowance) }
         let total = (accepted + rejected + uncertain).timeInterval
         // The share outside the dominant decision, so exactly two thirds
         // still decides (`2 / 3 < 1 - 1 / 3` in floating point).
