@@ -47,7 +47,9 @@ struct VoiceEnrollmentView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    if !isFinished {
+                    // No Cancel while saving: the save can't be taken back,
+                    // so the sheet stays up and shows the stored voiceprint.
+                    if !isFinished, enrollment?.phase != .saving {
                         Button("Cancel", role: .cancel) { Task { await cancel() } }
                             .accessibilityIdentifier(VoiceEnrollmentIdentifiers.cancel)
                     }
@@ -68,7 +70,12 @@ struct VoiceEnrollmentView: View {
     }
 
     private func cancel() async {
-        await enrollment?.cancel()
+        if let enrollment {
+            // A tap that lands once saving has begun: stay and show the
+            // result rather than close over a voiceprint that is stored.
+            guard enrollment.canCancel || !enrollment.phase.isActive else { return }
+            await enrollment.cancel()
+        }
         onFinish()
     }
 

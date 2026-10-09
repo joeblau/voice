@@ -85,6 +85,68 @@ struct VoiceEnrollmentAppTests {
         #expect(!VoiceIDSettingsView.isAdapted(try profile()))
     }
 
+    /// A voiceprint whose CloudKit-encrypted vectors were lost (a reset
+    /// iCloud Keychain) shows "Re-enroll needed", not "Enrolled", and
+    /// offers no top-up (review of #46).
+    @Test func anUnreadableVoiceprintNeedsReenrollment() throws {
+        let container = try BlauModelContainer.makeInMemory()
+        let context = ModelContext(container)
+        var vector = [Float](repeating: 0, count: 256)
+        vector[0] = 1
+        let model = VoiceIDConfig.calibrated.modelIdentifier
+        let profile = VoiceProfile(
+            name: "Me", embeddingModelVersion: model, centroid: vector, createdAt: Date(timeIntervalSince1970: 0))
+        context.insert(profile)
+        let set = VoiceEnrollmentSet(
+            deviceModel: "iPhone18,1", embeddings: [vector, vector], createdAt: Date(timeIntervalSince1970: 0))
+        context.insert(set)
+        set.profile = profile
+        try context.save()
+        #expect(VoiceIDStatus(profile: profile).kind == .enrolled)
+
+        profile.centroid = Data()
+        set.embeddings = Data()
+        try context.save()
+        let status = VoiceIDStatus(profile: profile)
+        #expect(status.kind == .unreadable)
+        #expect(status.title == "Re-enroll needed")
+        #expect(status.detail != VoiceIDStatus(kind: .needsReenrollment).detail)
+        // A model change still reads as one, unreadable or not.
+        #expect(VoiceIDStatus(profile: profile, currentModel: "wespeaker-resnet34-lm@next").kind == .needsReenrollment)
+        #expect(VoiceIDStatus(profile: nil).kind == .notEnrolled)
+    }
+
+    /// Two devices of one model topping up before they sync leave two sets;
+    /// the older one loses (and is deleted on the next write), so it isn't
+    /// counted (review of #46).
+    @Test func theClipCountSkipsLosingDuplicateSets() throws {
+        let container = try BlauModelContainer.makeInMemory()
+        let context = ModelContext(container)
+        let vector = [Float](repeating: 0.1, count: 256)
+        let profile = VoiceProfile(
+            name: "Me", embeddingModelVersion: VoiceIDConfig.calibrated.modelIdentifier, centroid: vector,
+            createdAt: Date(timeIntervalSince1970: 0))
+        context.insert(profile)
+        let sets = [
+            VoiceEnrollmentSet(
+                deviceModel: "iPhone18,1", embeddings: Array(repeating: vector, count: 4),
+                createdAt: Date(timeIntervalSince1970: 10)),
+            VoiceEnrollmentSet(
+                deviceModel: "iPhone18,1", embeddings: Array(repeating: vector, count: 3),
+                createdAt: Date(timeIntervalSince1970: 20)),
+            VoiceEnrollmentSet(
+                deviceModel: "iPad16,3", embeddings: Array(repeating: vector, count: 3),
+                createdAt: Date(timeIntervalSince1970: 30)),
+        ]
+        for set in sets {
+            context.insert(set)
+            set.profile = profile
+        }
+        try context.save()
+        #expect(VoiceIDSettingsView.clipCount(in: profile) == 6)
+        #expect(VoiceIDSettingsView.devices(in: profile) == ["iPad16,3", "iPhone18,1"])
+    }
+
     @Test func nonLiveEnvironmentsNeverTouchTheMicrophone() {
         #expect(AppEnvironment.scriptedEnrollmentSpeed(.unitTest) == nil)
         #expect(AppEnvironment.scriptedEnrollmentSpeed(.uiTest) == 8)
@@ -107,7 +169,7 @@ struct VoiceEnrollmentAppTests {
         #expect(Set(issues.map(EnrollmentMessages.issue)).count == issues.count)
         let errors: [VoiceEnrollmentError] = [
             .modelUnavailable(""), .microphoneUnavailable(""), .microphoneBusy, .microphoneStopped, .notEnrolled,
-            .needsReenrollment, .saveFailed(""),
+            .needsReenrollment, .voiceprintUnavailable(""), .saveFailed(""),
         ]
         #expect(Set(errors.map(EnrollmentMessages.failure)).count == errors.count)
         #expect(EnrollmentMessages.failure(.microphoneBusy) == "Stop the conversation first, then enroll.")

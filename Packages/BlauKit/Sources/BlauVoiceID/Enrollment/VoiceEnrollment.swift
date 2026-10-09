@@ -12,13 +12,17 @@ public enum VoiceEnrollmentError: Error, Hashable, Sendable {
     case microphoneUnavailable(String)
     /// A conversation is using the microphone.
     case microphoneBusy
-    /// The microphone stopped before the clip had any audio.
+    /// The microphone stopped underneath a clip (an interruption, the Live
+    /// Activity's Stop button), or couldn't come back for a retry.
     case microphoneStopped
     /// A top-up needs an enrolled voiceprint and there is none.
     case notEnrolled
     /// A top-up was asked for, but the voiceprint is from another model or
     /// unreadable: enroll again instead.
     case needsReenrollment
+    /// The stored voiceprint couldn't be read (a store error), so a top-up
+    /// can't tell whether there is one.
+    case voiceprintUnavailable(String)
     /// The voiceprint couldn't be saved.
     case saveFailed(String)
 }
@@ -38,7 +42,10 @@ public enum VoiceEnrollmentError: Error, Hashable, Sendable {
 /// The microphone stays on from the first prompt to the last, and each
 /// clip stops by itself once it holds enough speech, so the whole capture
 /// is about 4 × 6 s; accepted clips move straight on to the next prompt.
-/// A rejected clip waits for ``retry()`` so the user can read why.
+/// A rejected clip waits for ``retry()`` so the user can read why; if
+/// nobody retries within `idleMicrophoneTimeout` the microphone goes off
+/// (no recording indicator or background audio for a screen nobody is
+/// looking at) and ``retry()`` turns it back on.
 ///
 /// Views observe ``phase``, ``currentPrompt`` and ``results``. Every method
 /// runs on the main actor; embedding and saving happen off it.
@@ -127,6 +134,7 @@ public final class VoiceEnrollment {
     @ObservationIgnored private let name: String
     @ObservationIgnored private let clock: any BlauClock
     @ObservationIgnored private let analyzer: EnrollmentLevelAnalyzer
+    @ObservationIgnored private let idleMicrophoneTimeout: Duration
 
     // MARK: State
 
@@ -143,8 +151,13 @@ public final class VoiceEnrollment {
     @ObservationIgnored private var consecutiveMismatches = 0
     @ObservationIgnored private var startedAt: Duration?
     @ObservationIgnored private var finishRequested = false
+    /// The clip being recorded; ``finishClip()`` cancels it, which ends
+    /// its wait for the next frame even when no frame is coming.
+    @ObservationIgnored private var clipTask: Task<EnrollmentClipRecorder, Never>?
     @ObservationIgnored private var run: Task<Void, Never>?
     @ObservationIgnored private var microphoneOn = false
+    /// Turns the microphone off when a rejection is left idle.
+    @ObservationIgnored private var idleMicrophoneStop: Task<Void, Never>?
 
     /// - Parameters:
     ///   - plan: The prompts: ``EnrollmentPlan/enrollment`` or ``EnrollmentPlan/topUp``.
@@ -155,7 +168,10 @@ public final class VoiceEnrollment {
     ///   - deviceModel: This device's model, the key of its enrollment set.
     ///   - name: The profile's display name.
     ///   - policy: The quality bar.
-    ///   - clock: Timestamps and the enrollment's duration.
+    ///   - idleMicrophoneTimeout: How long a rejected clip keeps the
+    ///     microphone on while waiting for ``retry()``.
+    ///   - clock: Timestamps, the enrollment's duration and the idle
+    ///     microphone timeout.
     public init(
         plan: EnrollmentPlan,
         audio: any EnrollmentAudioSource,
@@ -165,8 +181,10 @@ public final class VoiceEnrollment {
         name: String = "Me",
         policy: EnrollmentQualityPolicy = .standard,
         analyzer: EnrollmentLevelAnalyzer = EnrollmentLevelAnalyzer(),
+        idleMicrophoneTimeout: Duration = .seconds(30),
         clock: any BlauClock = SystemClock()
     ) {
+        self.idleMicrophoneTimeout = idleMicrophoneTimeout
         self.plan = plan
         self.audio = audio
         self.loadEmbedder = loadEmbedder
@@ -188,6 +206,9 @@ public final class VoiceEnrollment {
     /// is cancelled. Returns when it gets there.
     public func start() async {
         guard phase == .notStarted else { return }
+        // Leave `.notStarted` before suspending, so a second call (two
+        // queued taps) can't start a second run.
+        phase = .preparing
         startedAt = clock.uptime
         pending = Array(plan.prompts.indices)
         currentPrompt = plan.prompts.first
@@ -195,26 +216,52 @@ public final class VoiceEnrollment {
     }
 
     /// After a rejection, records the prompt again (or, after a restart,
-    /// the first prompt). Returns like ``start()``.
+    /// the first prompt), turning the microphone back on if a long wait
+    /// turned it off. Returns like ``start()``.
     public func retry() async {
         guard case .rejected = phase else { return }
-        await perform { await self.recordPending() }
+        cancelIdleMicrophoneStop()
+        // Leave `.rejected` before suspending, so a second call can't run
+        // a second recording loop over the same clips.
+        let restartsMicrophone = !microphoneOn
+        phase = restartsMicrophone ? .preparing : .recording(EnrollmentMeter(speechTarget: plan.speechPerClip))
+        await perform {
+            if restartsMicrophone {
+                if let failure = await self.startMicrophone() {
+                    await self.fail(failure)
+                    return
+                }
+                guard !Task.isCancelled else { return }
+            }
+            await self.recordPending()
+        }
     }
 
     /// Ends the clip being recorded now ("Done speaking"); it is judged on
-    /// what was recorded.
+    /// what was recorded, even if no audio has arrived since.
     public func finishClip() {
         guard case .recording = phase else { return }
         finishRequested = true
+        clipTask?.cancel()
     }
 
     /// Stops everything and discards the clips. Nothing is stored.
+    ///
+    /// Does nothing once the voiceprint is being saved: the save can't be
+    /// taken back halfway, so the enrollment finishes instead of claiming
+    /// a cancel that didn't happen.
     public func cancel() async {
-        guard phase.isActive || phase == .notStarted else { return }
+        guard phase.isActive || phase == .notStarted, phase != .saving else { return }
         run?.cancel()
+        cancelIdleMicrophoneStop()
         phase = .cancelled
         await stopMicrophone()
         Log.voiceID.notice("Enrollment cancelled after \(self.accepted.count, privacy: .public) clip(s)")
+    }
+
+    /// Whether ``cancel()`` would do anything now.
+    public var canCancel: Bool {
+        (phase.isActive || phase == .notStarted) && phase != .saving
     }
 
     private func perform(_ body: @escaping @MainActor () async -> Void) async {
@@ -233,15 +280,7 @@ public final class VoiceEnrollment {
         async let loading: Result<any SpeakerEmbedder, any Error> = {
             do { return .success(try await load()) } catch { return .failure(error) }
         }()
-        var failure: VoiceEnrollmentError?
-        do {
-            try await audio.start()
-            microphoneOn = true
-        } catch let error as VoiceEnrollmentError {
-            failure = error
-        } catch {
-            failure = .microphoneUnavailable(String(describing: error))
-        }
+        var failure = await startMicrophone()
         switch await loading {
         case .success(let loaded): embedder = loaded
         case .failure(let error): failure = failure ?? .modelUnavailable(String(describing: error))
@@ -267,7 +306,9 @@ public final class VoiceEnrollment {
             case .needsReenrollment, .unreadable: return .needsReenrollment
             }
         } catch {
-            return .notEnrolled
+            // A read error says nothing about whether a voiceprint exists.
+            Log.voiceID.error("Enrollment couldn't read the voiceprint: \(String(describing: error), privacy: .public)")
+            return .voiceprintUnavailable(String(describing: error))
         }
     }
 
@@ -285,7 +326,7 @@ public final class VoiceEnrollment {
             case .accepted:
                 continue
             case .rejected(let issues, let restarted):
-                phase = .rejected(issues, restarted: restarted)
+                reject(issues, restarted: restarted)
                 return
             case .failed(let error):
                 await fail(error)
@@ -310,28 +351,47 @@ public final class VoiceEnrollment {
             Log.voiceID.notice(
                 "Enrollment clip \(clip.promptIndex, privacy: .public) doesn't match the others (\(outlier.similarity, privacy: .public)); asking again"
             )
-            phase = .rejected([issue], restarted: false)
+            reject([issue], restarted: false)
             return
         }
         await save()
     }
 
     /// Records one clip; `nil` when cancelled or failed.
+    ///
+    /// The clip ends by itself (enough speech, or the time limit), on
+    /// ``finishClip()``, or when the microphone stops underneath it: the
+    /// frame stream finishes, and the enrollment fails with
+    /// ``VoiceEnrollmentError/microphoneStopped`` rather than judging a cut
+    /// clip it couldn't record again anyway.
     private func recordClip() async -> AudioFrame? {
         finishRequested = false
-        var recorder = EnrollmentClipRecorder(plan: plan, analyzer: analyzer)
-        phase = .recording(recorder.meter)
-        var frameCount = 0
-        for await frame in audio.frames() {
-            guard !Task.isCancelled else { return nil }
-            recorder.append(frame)
-            frameCount += 1
-            // The meter refreshes every other 20 ms frame.
-            if frameCount.isMultiple(of: 2) { phase = .recording(recorder.meter) }
-            if recorder.isComplete || finishRequested { break }
+        phase = .recording(EnrollmentClipRecorder(plan: plan, analyzer: analyzer).meter)
+        let frames = audio.frames()
+        let collect = Task { [plan, analyzer] in
+            var recorder = EnrollmentClipRecorder(plan: plan, analyzer: analyzer)
+            var frameCount = 0
+            // Cancelled by `finishClip()` or a cancelled run: the wait for
+            // the next frame ends at once, frame or no frame.
+            for await frame in frames {
+                recorder.append(frame)
+                frameCount += 1
+                // The meter refreshes every other 20 ms frame.
+                if frameCount.isMultiple(of: 2) { phase = .recording(recorder.meter) }
+                if recorder.isComplete || Task.isCancelled { break }
+            }
+            return recorder
         }
+        clipTask = collect
+        let recorder = await withTaskCancellationHandler {
+            await collect.value
+        } onCancel: {
+            collect.cancel()
+        }
+        clipTask = nil
         guard !Task.isCancelled else { return nil }
-        guard recorder.duration > .zero else {
+        guard recorder.isComplete || finishRequested else {
+            Log.voiceID.error("The microphone stopped during an enrollment clip")
             await fail(.microphoneStopped)
             return nil
         }
@@ -455,7 +515,8 @@ public final class VoiceEnrollment {
                 case .enrollment: try await store.enroll(draft)
                 case .topUp: try await store.saveDeviceSet(draft)
                 }
-            guard !Task.isCancelled else { return }
+            // ``cancel()`` doesn't interrupt a save, so whatever was stored
+            // is reported as stored.
             let elapsed = startedAt.map { clock.uptime - $0 }
             duration = elapsed
             phase = .finished(voiceprint)
@@ -473,8 +534,45 @@ public final class VoiceEnrollment {
 
     private func fail(_ error: VoiceEnrollmentError) async {
         phase = .failed(error)
+        cancelIdleMicrophoneStop()
         await stopMicrophone()
         Log.voiceID.error("Enrollment failed: \(String(describing: error), privacy: .public)")
+    }
+
+    /// Shows a rejected clip and starts the idle microphone timeout.
+    private func reject(_ issues: [EnrollmentClipIssue], restarted: Bool) {
+        phase = .rejected(issues, restarted: restarted)
+        cancelIdleMicrophoneStop()
+        let clock = clock
+        let timeout = idleMicrophoneTimeout
+        idleMicrophoneStop = Task { [weak self] in
+            do { try await clock.sleep(for: timeout) } catch { return }
+            await self?.stopIdleMicrophone()
+        }
+    }
+
+    private func stopIdleMicrophone() async {
+        guard case .rejected = phase, microphoneOn else { return }
+        Log.voiceID.notice("Enrollment waited for a retry; turning the microphone off until then")
+        await stopMicrophone()
+    }
+
+    private func cancelIdleMicrophoneStop() {
+        idleMicrophoneStop?.cancel()
+        idleMicrophoneStop = nil
+    }
+
+    /// Turns the microphone on; the error to fail with if it can't.
+    private func startMicrophone() async -> VoiceEnrollmentError? {
+        do {
+            try await audio.start()
+            microphoneOn = true
+            return nil
+        } catch let error as VoiceEnrollmentError {
+            return error
+        } catch {
+            return .microphoneUnavailable(String(describing: error))
+        }
     }
 
     private func stopMicrophone() async {

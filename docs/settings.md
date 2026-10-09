@@ -94,7 +94,9 @@ Microphone** records a 15 s top-up. **Delete Voiceprint** asks first and
 deletes through `PrivacyDataEraser`, like Privacy & Data, so a data export
 in tmp goes too. Enrolling and deleting
 are refused while a conversation is running. A voiceprint from another
-embedding model shows "Re-enroll needed".
+embedding model, or one whose vectors can't be read (a reset iCloud
+Keychain), shows "Re-enroll needed". The clip count covers the newest set
+per device model, the sets the gate scores against.
 
 **Second pass and language** (`TranscriptionOptions`, BlauTranscription).
 Parakeet's realtime model understands English only, so choosing any other

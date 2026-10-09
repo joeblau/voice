@@ -44,6 +44,17 @@ public actor SwiftDataVoiceprintStore: ModelActor, VoiceprintStoring {
         StoredVoiceprint.status(of: try storedRecords(), model: model)
     }
 
+    /// What `profiles` mean for `model`, resolved exactly as
+    /// ``status(for:)`` resolves the store: for views that read the
+    /// profiles themselves (`@Query` on the main context), so they tell an
+    /// unreadable voiceprint (its CloudKit-encrypted vectors lost with a
+    /// reset iCloud Keychain) from a usable one.
+    public nonisolated static func status(of profiles: [VoiceProfile], model: SpeakerEmbeddingModelInfo)
+        -> VoiceprintStatus
+    {
+        StoredVoiceprint.status(of: profiles.map(snapshot), model: model)
+    }
+
     private func storedRecords() throws -> [StoredVoiceprint] {
         try modelContext.fetch(FetchDescriptor<VoiceProfile>()).map(Self.snapshot)
     }

@@ -76,6 +76,8 @@ enum EnrollmentMessages {
             String(localized: "There's no voiceprint to add to yet. Enroll your voice first.")
         case .needsReenrollment:
             String(localized: "Your voiceprint needs to be re-enrolled first.")
+        case .voiceprintUnavailable:
+            String(localized: "Your voiceprint couldn't be read. Try again.")
         case .saveFailed:
             String(localized: "Your voiceprint couldn't be saved. Try again.")
         }
