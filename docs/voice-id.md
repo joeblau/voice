@@ -333,10 +333,14 @@ owner's "Okay, so… [pause] what about tomorrow?" (a 0.7 s opener, then
 1.3 s scored and accepted) would be dropped whenever their last scored
 speech was more than 5 s earlier: the first utterance of a conversation,
 or any reply after Grok spoke for more than 5 s. Past that allowance it
-counts as uncertain, so a TV's run of short lines ("Yeah." "Right."
-"Sure.", 2.7 s with nothing to inherit) followed by the owner's 1.1 s is
-uncertain, not accepted, and isn't sent outside an active turn. An
-utterance made only of such segments is still uncertain. Past that,
+counts as uncertain when accepted speech outweighs rejected speech, so a
+TV's run of short lines ("Yeah." "Right." "Sure.", 2.7 s with nothing to
+inherit) followed by the owner's 1.1 s is uncertain, not accepted, and
+isn't sent outside an active turn. When rejected speech dominates, such
+speech is left out entirely: the same run followed by the TV's own 1.1 s
+scored line stays rejected rather than becoming uncertain, which an active
+turn would send to Grok. An utterance made only of such segments is still
+uncertain. Past that,
 accepted and no rejected parts accept, rejected and no accepted parts
 reject; a mix goes to the larger share unless the smaller is a third or
 more, which makes it uncertain (the text can't be split by speaker).

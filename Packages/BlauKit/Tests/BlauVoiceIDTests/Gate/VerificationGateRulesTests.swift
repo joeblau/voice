@@ -95,10 +95,10 @@ struct VerificationGateRulesTests {
         }
     }
 
-    /// Only one short segment's worth of unattributed speech is left out:
-    /// past the allowance it counts as uncertain, so a TV's run of short
-    /// lines ("Yeah." "Right." "Sure.") doesn't ride along on a few
-    /// accepted words.
+    /// Only one short segment's worth of unattributed speech is left out
+    /// of an acceptance: past the allowance it counts as uncertain, so a
+    /// TV's run of short lines ("Yeah." "Right." "Sure.") doesn't ride
+    /// along on a few accepted words. A rejection stays a rejection.
     @Test func unattributedSpeechPastTheAllowanceCounts() {
         let combine = { (parts: [(SpeakerDecision, Double, SegmentVerdict.Basis)], allowance: Double) in
             VerificationGateRules.combine(
@@ -122,8 +122,20 @@ struct VerificationGateRulesTests {
         #expect(combine([(.uncertain, 1.5, .noRecentDecision), (.accept, 3, .scored)], 1) == .accept)
         // With no allowance it all counts.
         #expect(combine([(.uncertain, 0.7, .noRecentDecision), (.accept, 1.3, .scored)], 0) == .uncertain)
-        // The same holds against rejected speech.
-        #expect(combine([(.uncertain, 2.7, .noRecentDecision), (.reject, 1.1, .scored)], 1) == .uncertain)
+        // Against rejected speech the excess doesn't count: it would turn a
+        // rejection into uncertain speech that an active turn sends.
+        #expect(combine([(.uncertain, 2.7, .noRecentDecision), (.reject, 1.1, .scored)], 1) == .reject)
+        #expect(combine([(.uncertain, 2.7, .noRecentDecision), (.reject, 1.1, .scored)], 0) == .reject)
+        // Nor when rejected speech dominates a mix.
+        #expect(
+            combine(
+                [(.uncertain, 2.7, .noRecentDecision), (.reject, 2, .scored), (.accept, 0.5, .scored)], 1)
+                == .reject)
+        // It does count when accepted speech dominates a mix: 1.7 s of 3.8 s.
+        #expect(
+            combine(
+                [(.uncertain, 2.7, .noRecentDecision), (.accept, 1.6, .scored), (.reject, 0.5, .scored)], 1)
+                == .uncertain)
     }
 
     @Test func aConflictGoesToTheMajorityUnlessItIsClose() {

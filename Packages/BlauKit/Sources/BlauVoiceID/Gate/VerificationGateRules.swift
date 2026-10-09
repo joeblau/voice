@@ -31,8 +31,11 @@ public enum VerificationGateRules {
     ///   spoke, so up to `unattributedAllowance` of such speech is left out
     ///   of the shares. Otherwise the owner's "Okay, so… [pause] what about
     ///   tomorrow?" would lose to its own short opener. Past the allowance
-    ///   it counts as uncertain: a run of a TV's short lines ("Yeah."
-    ///   "Right." "Sure.") can't ride along on a few accepted words.
+    ///   it counts as uncertain when accepted speech outweighs rejected
+    ///   speech: a run of a TV's short lines ("Yeah." "Right." "Sure.")
+    ///   can't ride along on a few accepted words. When rejected speech
+    ///   dominates it is still left out, so the excess can't turn a
+    ///   rejection into `uncertain`, which an active turn would send.
     /// - Otherwise, accepted parts and no rejected ones: `accept`; rejected
     ///   and no accepted ones: `reject`.
     /// - Both: the larger share of speech decides, unless the smaller share
@@ -44,8 +47,10 @@ public enum VerificationGateRules {
     ///   - segments: The verdicts of the segments the utterance covers.
     ///   - minorityShare: The share that makes a mix uncertain.
     ///   - unattributedAllowance: How much speech of short parts with
-    ///     nothing recent to inherit is left out of the shares; the gate
-    ///     passes its minimum scored speech, one short segment's worth.
+    ///     nothing recent to inherit is left out of the shares when
+    ///     accepted speech outweighs rejected speech (all of it is left out
+    ///     otherwise); the gate passes its minimum scored speech, one short
+    ///     segment's worth.
     public static func combine(
         _ segments: [SegmentVerdict], minorityShare: Double, unattributedAllowance: Duration = .seconds(1)
     ) -> SpeakerDecision {
@@ -68,7 +73,10 @@ public enum VerificationGateRules {
             }
         }
         guard accepted > .zero || rejected > .zero else { return .uncertain }
-        uncertain += max(.zero, unattributed - unattributedAllowance)
+        // Unattributed speech past the allowance weighs only against an
+        // acceptance: it can't turn a rejection into an uncertain
+        // utterance that an active turn would send.
+        if accepted > rejected { uncertain += max(.zero, unattributed - unattributedAllowance) }
         let total = (accepted + rejected + uncertain).timeInterval
         // The share outside the dominant decision, so exactly two thirds
         // still decides (`2 / 3 < 1 - 1 / 3` in floating point).
