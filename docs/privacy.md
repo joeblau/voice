@@ -13,7 +13,7 @@ user-facing side is Settings → Privacy & Data (`Blau/Settings/PrivacySettingsV
 | What Blau learned (`Fact`, `MemoryEntity`) and the pinned profile summary (`ProfileBlock`) | Same | Yes | Delete Learned Facts, Delete Knowledge Base, Delete All Data |
 | Voiceprint (`VoiceProfile`, `VoiceEnrollmentSet`); vectors are CloudKit-encrypted fields | Same | Yes ([product decision 2 in #1](voice-id.md)) | Delete Voiceprint (here or in Voice ID), Delete All Data |
 | Memory search index (FTS5 + int8 vectors) | Application Support, this device | No, rebuilt from the store | Follows the store: the incremental indexer drops deleted records from SwiftData history ([memory-indexer.md](memory-indexer.md)) |
-| Profile consolidation log (profile text before/after each run) and extraction notes | Application Support / `UserDefaults`, this device | No | Delete Learned Facts, Delete Knowledge Base, Delete All Data (`ProfileConsolidator.eraseLocalHistory()`) |
+| Profile consolidation log (profile text before/after each run, and the topic titles and summaries it rewrote) and extraction notes | Application Support / `UserDefaults`, this device | No | Delete Learned Facts, Delete Knowledge Base, Delete All Data (`ProfileConsolidator.eraseLocalHistory()`); Delete All Conversations removes the log's topic titles and summaries (`ProfileConsolidator.eraseTopicHistory()`) |
 | Fact extraction queue (ids of closed topics waiting to be learned from) | `UserDefaults`, this device | No | Dropped by Delete Learned Facts, Delete Knowledge Base, Delete All Data |
 | Share-sheet exports (Export Conversations, Export All Data) | The app's temporary directory | No | Replaced by the next export; removed by every delete (including Delete Voiceprint in Voice ID); Export All Data's zip also goes when the user leaves Privacy & Data and at launch |
 | Markdown copies in iCloud Drive → Blau (#78, [export.md](export.md)) | The user's iCloud Drive | Yes (iCloud Drive) | Not by Blau: they are the user's files, deleted in Files |
@@ -138,7 +138,12 @@ learned facts, which can wait for a consolidation request).
    instructions no longer carry what was deleted. The topics still waiting
    for extraction were closed before the delete, so they are dropped rather
    than learned again; then the suspension ends and conversations from now
-   on are learned from as usual. If the delete fails, nothing was deleted
+   on are learned from as usual. Delete All Conversations on its own first
+   lets a running consolidation finish
+   (`ProfileMemory.prepareToEraseConversations()`), then removes the topic
+   titles and summaries from this device's consolidation log
+   (`ProfileMemory.conversationsErased()`); the profile's history, the
+   notes and the pinned facts stay, like the learned facts. If the delete fails, nothing was deleted
    and extraction resumes with its queue (`ProfileMemory.eraseFailed()`).
 
 | Scope (`DataEraseScope`) | Records |

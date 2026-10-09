@@ -278,12 +278,16 @@ enum PrivacyDataEraser {
     /// the share sheet's exports (withdrawn from `exports`, when the pane
     /// has one, so Share Export no longer offers the removed zip), and for
     /// the learned facts and the knowledge base the consolidation log, its
-    /// notes and the pinned memory cache.
+    /// notes and the pinned memory cache. For the conversations alone, the
+    /// topic titles and summaries in the consolidation log go
+    /// (`ProfileMemory.conversationsErased()`); what was learned stays.
     ///
     /// Before the learned facts go, fact extraction is suspended (the
     /// request in flight is cancelled) and a consolidation already running
     /// finishes, so neither writes facts or a profile from what was read
-    /// before the delete (`ProfileMemory.prepareToErase()`).
+    /// before the delete (`ProfileMemory.prepareToErase()`). Before the
+    /// conversations alone go, a running consolidation finishes too, so the
+    /// topic summaries it logs are there to remove.
     ///
     /// Nothing is deleted while a conversation runs (`Refusal`): checked
     /// first, and again after that wait, right before the delete, since one
@@ -296,6 +300,8 @@ enum PrivacyDataEraser {
         guard !(await conversation.isRunning()) else { throw Refusal.conversationRunning }
         if scope.erasesLearnedFacts {
             await profileMemory.prepareToErase()
+        } else if scope.components.contains(.conversations) {
+            await profileMemory.prepareToEraseConversations()
         }
         // A conversation may have started during the wait. `isRunning()`
         // reads `isActive` last, on the main actor, and nothing is awaited
@@ -325,7 +331,10 @@ enum PrivacyDataEraser {
             ConversationExportFiles.removeAll()
         }
         if scope.erasesLearnedFacts {
+            // Covers the topic summaries in the log too: every record goes.
             await profileMemory.memoryErased()
+        } else if scope.components.contains(.conversations) {
+            await profileMemory.conversationsErased()
         }
         return summary
     }

@@ -210,6 +210,36 @@ struct PrivacyAppTests {
         #expect(try fixture.context.fetchCount(FetchDescriptor<Fact>()) == 1)
     }
 
+    /// The consolidation log keeps the topic summaries each run rewrote:
+    /// the titles and summaries of conversations. Deleting the
+    /// conversations removes them from the change history too, while the
+    /// profile's own history stays (#67 review).
+    @Test func deletingConversationsRemovesTheirSummariesFromTheChangeHistory() async throws {
+        let fixture = try await makeFixture()
+        let change = TopicSummaryChange(
+            topicID: UUID(), title: "Moving to Lisbon", before: nil, after: "Joe plans the move to Lisbon.")
+        var log = fixture.log.load()
+        log.records[0].topicChanges = [change]
+        let topicOnly = ProfileConsolidationRecord(
+            date: Self.t0.addingTimeInterval(60), reason: .weekly, before: "Background: The user lives in Lisbon.",
+            after: "Background: The user lives in Lisbon.", topicChanges: [change])
+        log.insert(topicOnly)
+        fixture.log.save(log)
+
+        _ = try await PrivacyDataEraser.erase(
+            .conversations, in: fixture.context, profileMemory: fixture.profile, exports: DataExportModel(),
+            conversation: .idle)
+
+        let records = fixture.log.load().records
+        #expect(records.count == 1)
+        #expect(records.first?.after == "Background: The user lives in Lisbon.")
+        #expect(records.allSatisfy { $0.topicChanges.isEmpty })
+        // What Settings → Memory → Profile → Changes shows.
+        #expect(fixture.profile.log.records == records)
+        #expect(fixture.notes.load().count == 1)
+        #expect(await fixture.pinned.pinnedMemory().facts.map(\.text) == ["User lives in Lisbon"])
+    }
+
     @Test func nothingIsDeletedWhileAConversationRuns() async throws {
         let fixture = try await makeFixture()
         await #expect(throws: PrivacyDataEraser.Refusal.conversationRunning) {

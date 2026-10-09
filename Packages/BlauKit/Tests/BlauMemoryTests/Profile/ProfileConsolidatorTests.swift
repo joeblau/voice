@@ -478,6 +478,78 @@ struct ProfileConsolidatorTests {
         #expect(await consolidator.log().records.isEmpty)
     }
 
+    /// The probe from #67's review: consolidate a profile, leave a note,
+    /// then delete everything (`DataEraser`) and erase this device's
+    /// history. Nothing deleted is pinned or logged any more, and a week
+    /// later no run brings it back into a new synced block.
+    @Test func afterDeletingEverythingNothingComesBack() async throws {
+        let fixture = try ProfileFixture()
+        try fixture.addFacts([(nil, "is", "pregnant")])
+        let generator = ScriptedTextGenerator(replies: [
+            ProfileFixture.reply(profile: "Health: The user is pregnant."),
+            ProfileFixture.reply(profile: "Health: The user is pregnant."),
+        ])
+        let log = InMemoryProfileConsolidationLogStore()
+        let notes = InMemoryProfileConsolidationNoteStore()
+        let clock = ManualClock(now: Self.now)
+        let consolidator = makeConsolidator(fixture, generator: generator, log: log, notes: notes, clock: clock)
+        let pinned = PinnedMemoryProvider(store: fixture.store)
+        _ = await consolidator.consolidate(reason: .manual)
+        await consolidator.record(FactExtractionOutcome(topicID: UUID(), summary: "The user is pregnant."))
+        #expect(await pinned.pinnedMemory().profile?.contains("pregnant") == true)
+
+        try DataEraser.erase(.everything, in: ModelContext(fixture.container))
+        await consolidator.eraseLocalHistory()
+        await pinned.invalidate()
+
+        #expect(log.load().records.isEmpty)
+        #expect(notes.load().isEmpty)
+        let memory = await pinned.pinnedMemory()
+        #expect(memory.profile == nil || memory.profile?.isEmpty == true)
+        #expect(memory.facts.isEmpty)
+        clock.advance(by: .seconds(8 * 86_400))
+        guard case .notDue = try await consolidator.decision() else {
+            Issue.record("A run is due after everything was deleted")
+            return
+        }
+        _ = await consolidator.consolidateIfDue()
+        #expect(try fixture.blocks().isEmpty)
+        #expect(generator.requests.count == 1)
+    }
+
+    /// Delete All Conversations: the topic summaries the log holds (titles
+    /// and summaries of deleted topics) go, and a record that only rewrote
+    /// topics goes with them. The profile's history, the notes and the
+    /// schedule stay, since what was learned stays.
+    @Test func erasingTopicHistoryKeepsTheProfileHistory() async throws {
+        let fixture = try ProfileFixture()
+        let topic = try await fixture.topics.recordTopic([(.user, "Dana and I are raising.", 5)], startingAt: 86_400)
+        let change = TopicSummaryChange(
+            topicID: topic.topicID, title: "Fundraising", before: "They talk money.", after: "Joe and Dana raise.")
+        let profileAndTopic = ProfileConsolidationRecord(
+            date: Self.now, reason: .weekly, before: "Work: Acme.", after: "Work: Acme, raising.",
+            topicChanges: [change])
+        let topicOnly = ProfileConsolidationRecord(
+            date: Self.now.addingTimeInterval(-86_400), reason: .weekly, before: "Work: Acme.", after: "Work: Acme.",
+            topicChanges: [change])
+        let log = InMemoryProfileConsolidationLogStore(
+            ProfileConsolidationLog(lastRunAt: Self.now, pendingRemovals: 1, records: [profileAndTopic, topicOnly]))
+        let note = ProfileConsolidationNote(topicID: topic.topicID, date: Self.now, summary: "The user is raising.")
+        let notes = InMemoryProfileConsolidationNoteStore([note])
+        let consolidator = makeConsolidator(
+            fixture, generator: ScriptedTextGenerator(replies: []), log: log, notes: notes)
+
+        await consolidator.eraseTopicHistory()
+
+        let records = await consolidator.log().records
+        #expect(records.map(\.id) == [profileAndTopic.id])
+        #expect(records.allSatisfy { $0.topicChanges.isEmpty })
+        #expect(records.first?.after == "Work: Acme, raising.")
+        #expect(log.load().lastRunAt == Self.now)
+        #expect(log.load().pendingRemovals == 1)
+        #expect(notes.load() == [note])
+    }
+
     /// A run that already read the facts finishes before they are deleted,
     /// so it can't write a profile from them afterwards.
     @Test func waitingUntilIdleWaitsForTheRunningConsolidation() async throws {

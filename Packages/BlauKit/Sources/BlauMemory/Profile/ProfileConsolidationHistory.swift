@@ -135,6 +135,18 @@ public struct ProfileConsolidationLog: Codable, Hashable, Sendable {
             records: try container.decodeIfPresent([ProfileConsolidationRecord].self, forKey: .records) ?? [])
     }
 
+    /// Drops every record's topic summary changes, and the records that
+    /// changed only topic summaries: what is left is the profile's own
+    /// history.
+    public mutating func removeTopicChanges() {
+        records = records.compactMap { record in
+            guard record.changedProfile else { return nil }
+            var record = record
+            record.topicChanges = []
+            return record
+        }
+    }
+
     /// Adds `record` first and drops the oldest past `capacity`.
     public mutating func insert(_ record: ProfileConsolidationRecord) {
         records.insert(record, at: 0)
