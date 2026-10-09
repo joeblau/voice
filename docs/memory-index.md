@@ -64,10 +64,13 @@ One SQLite file, `Application Support/Blau/Derived/MemoryIndex.sqlite`
 | `fact_link` | `(conversationID, factID)`: the facts each conversation's exchange keys list (`SourceChunks.linkedFactIDs`), so editing or deleting a fact re-chunks its exchange |
 
 `PRAGMA user_version` holds `MemoryIndex.schemaVersion` (2 since #63 added
-`fact_link`). A file that isn't a database, can't be opened, or has another
-schema version is deleted and recreated empty, and `needsRebuild` turns
-`true`: nothing in it is irreplaceable. Bump the version when the schema
-changes.
+`fact_link`). A file that isn't a database (`SQLITE_NOTADB`), is corrupt
+(`SQLITE_CORRUPT`) or has another schema version is deleted and recreated
+empty, and `needsRebuild` turns `true`: nothing in it is irreplaceable. Any
+other failure to open (a full disk, or a file that can't be read because
+the app launched in the background before first unlock) is thrown and the
+file is kept, since recreating it would mean embedding every chunk again.
+Bump the version when the schema changes.
 
 A vector is stored with the `modelVersion` of the model that made it
 ([embeddings.md](embeddings.md#model-version)). Vectors of different models
@@ -100,10 +103,14 @@ Earlier: …the end of the previous exchange
 - The date is the exchange's start, spelled out in English (Gregorian, the
   policy's time zone) so it doesn't depend on the device locale. Spelled-out
   months also give BM25 and the embedding something to match "in March"
-  against.
+  against. The incremental indexer pins the time zone in the index the
+  first time it runs, so travelling doesn't re-chunk and re-embed every
+  chunk whose date would change ([memory-indexer.md](memory-indexer.md)).
 - The topic is left out while it still has its placeholder title.
 - `facts:` lists the facts extracted from the exchange's utterances
   (`Fact.sourceUtteranceID`), at most five and at most half the budget.
+  Known gap: invalidated facts are listed too. Leaving them out is tracked
+  in #173, and it lands together with re-recorded memory-eval vectors.
 - The overlap comes **after** the exchange, so if anything is cut by the
   model's 128-token window it is the context, never the exchange itself.
   It is trimmed from the front (`…`) to fit.
@@ -141,7 +148,9 @@ Tokens are counted with `ApproximateTokenCounter` (UTF-8 bytes / 4 plus
 the prompt), not the model's tokenizer, so chunk boundaries don't move when
 the model is installed or replaced: the FTS rows stay put and only vectors
 are (re)computed. A `TextEmbeddingModel` is also a `ChunkTokenCounting` if
-exact counts are ever wanted.
+exact counts are ever wanted. Known gap: bytes / 4 can undercount
+digit-heavy and non-Latin text. A more conservative estimate is tracked in
+#173.
 
 ## Writing
 
@@ -251,8 +260,8 @@ never logged. The fused search (`MemorySearch`, #64) is one
 | --- | --- |
 | Chunking (`swift test`) | `ExchangeChunkingTests`, `DocumentChunkingTests`, `MemoryChunkIdentityTests`, `KeywordQueryTests` |
 | Matrix (`swift test`) | `VectorMatrixTests`: agrees with brute-force `cosineSimilarity` across Accelerate blocks, swap-remove, filters, zero and mismatched vectors, top-K |
-| Index (`swift test`) | `MemoryIndexTests`: round trip, BM25 with stemming, the common-word cutoff (with and without filters), FTS syntax in queries, filters, vector reuse, matrix updates on write, model-version isolation, persistence, corrupt and old-schema files, searching while writing |
-| Rebuild (`swift test`) | `MemoryIndexRebuilderTests` (reuse, changes, deletions, new model, keyword-only fallback, cancellation) and `SwiftDataRebuildTests` (the acceptance criterion, CloudKit duplicates) |
+| Index (`swift test`) | `MemoryIndexTests`: round trip, BM25 with stemming, the common-word cutoff (with and without filters), FTS syntax in queries, filters, vector reuse, matrix updates on write, model-version isolation, persistence, corrupt and old-schema files recreated, an unreadable file kept, searching while writing |
+| Rebuild (`swift test`) | `MemoryIndexRebuilderTests` (reuse, changes, deletions, new model, keyword-only fallback, a wrong vector count, cancellation, and invalidated facts in exchange keys as a known issue for #173) and `SwiftDataRebuildTests` (the acceptance criterion, CloudKit duplicates) |
 | BM25 quality (`swift test`) | `KeywordRetrievalEvalTests`: BM25 alone on #59's eval set finds every keyword-style query in the top 5 |
 | 50k benchmark on the Mac (opt-in) | `BLAU_INDEX_BENCHMARK=1 swift test -Xswiftc -O --scratch-path .build/optimized --filter MemoryIndexSearchBenchmarkTests` |
 | 50k benchmark on an iPhone | `make bench` (`MemoryIndexBenchmarks.testSearch50k`) or the debug benchmark screen |

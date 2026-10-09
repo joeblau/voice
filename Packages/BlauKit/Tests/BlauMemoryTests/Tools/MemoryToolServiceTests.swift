@@ -219,6 +219,28 @@ struct MemoryToolServiceTests {
         await #expect(throws: MemoryToolFailure.self) { try await service.remember("  ", about: nil) }
     }
 
+    @Test func aRememberedFactIsChunkedInTheIndexersPinnedTimeZone() async throws {
+        let harness = try await Harness()
+        let indexer = MemoryIndexer(
+            index: harness.index, reader: SwiftDataMemorySources(container: harness.container),
+            feed: IndexerTestSupport.ScriptedFeed(), embedder: harness.embedder, chunker: Support.chunker,
+            clock: ManualClock(now: Self.now))
+        try await indexer.runUntilIdle()  // pins UTC
+
+        // The service's own chunker is in Tokyo, where 23:30 UTC is the next day.
+        let tokyo = MemoryChunker(
+            policy: ChunkingPolicy.forSequenceLength(128, timeZone: TimeZone(identifier: "Asia/Tokyo")!))
+        let lateEvening = Date(timeIntervalSince1970: 1_768_519_800)  // 2026-01-15 23:30 UTC
+        let service = MemoryToolService(
+            MemoryToolService.Context(container: harness.container, index: harness.index, indexer: indexer),
+            embedder: QueryEmbedder(embedder: harness.embedder), chunkEmbedder: harness.embedder, chunker: tokyo,
+            clock: ManualClock(now: lateEvening))
+        let fact = try await service.remember("The user's sister Maya lives in Lisbon.", about: nil)
+
+        let chunk = try await harness.index.chunks(ofSource: fact.id, kind: .fact).first?.chunk
+        #expect(chunk?.keyText == "[January 15, 2026] The user's sister Maya lives in Lisbon.")
+    }
+
     @Test func rememberLinksTheEntityItIsAbout() async throws {
         let harness = try await Harness()
         let service = harness.service()

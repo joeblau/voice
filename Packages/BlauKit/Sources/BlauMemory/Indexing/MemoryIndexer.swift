@@ -110,13 +110,17 @@ public actor MemoryIndexer {
     static let fullPassKey = "indexer.fullPass"
     /// `index_state` key of the chunking the index was built with.
     static let chunkingKey = "indexer.chunking"
+    /// `index_state` key of the time zone key texts spell dates in.
+    static let timeZoneKey = "indexer.timeZone"
 
     public nonisolated let index: MemoryIndex
     public nonisolated let configuration: Configuration
     private let reader: any MemorySourceReader
     private let feed: any MemoryChangeFeed
     private let embedder: (any MemoryChunkEmbedding)?
-    private let chunker: MemoryChunker
+    /// The chunking every source is cut with. Its time zone is the one
+    /// pinned in the index (`timeZoneKey`) once `prepareIfNeeded` ran.
+    public private(set) var chunker: MemoryChunker
     private let gate: IndexingGate?
     private let clock: any BlauClock
 
@@ -346,6 +350,7 @@ public actor MemoryIndexer {
     private func prepareIfNeeded() async throws {
         guard !prepared else { return }
         update { $0.activity = .starting }
+        try await pinTimeZone()
         let lastRebuild = try await index.lastRebuild()
         update { $0.lastRebuild = lastRebuild }
         if let saved = try await loadFullPassState() {
@@ -360,6 +365,21 @@ public actor MemoryIndexer {
         }
         prepared = true
         await refreshCounts()
+    }
+
+    /// Key texts spell dates in one time zone for the life of the index:
+    /// the zone pinned in it, or, for an index without one, the chunker's
+    /// (the device's at launch), which is pinned from then on. Following
+    /// the device's zone instead would re-chunk every source and re-embed
+    /// every chunk whose date changes, each time the user travels.
+    private func pinTimeZone() async throws {
+        if let identifier = try await index.stateValue(forKey: Self.timeZoneKey),
+            let zone = TimeZone(identifier: identifier)
+        {
+            chunker.policy.timeZone = zone
+        } else {
+            try await index.setStateValue(chunker.policy.timeZone.identifier, forKey: Self.timeZoneKey)
+        }
     }
 
     // MARK: - Incremental changes
@@ -612,6 +632,7 @@ public actor MemoryIndexer {
         let now = clock.now
         try await index.markRebuilt(at: now)
         try await index.setStateValue(chunkingFingerprint, forKey: Self.chunkingKey)
+        try await index.setStateValue(chunker.policy.timeZone.identifier, forKey: Self.timeZoneKey)
         try await save(nil)
         fullPass = nil
         backlogChecked = false
@@ -679,12 +700,16 @@ public actor MemoryIndexer {
                 modelVersion: modelVersion, limit: configuration.embeddingBatchSize, newestFirst: true)
             guard !chunks.isEmpty else { return finish(nil) }
             embeddings = try await embedder.embedDocuments(chunks.map(\.keyText))
+            guard embeddings.count == chunks.count else {
+                throw ChunkEmbeddingCountMismatch(expected: chunks.count, received: embeddings.count)
+            }
         } catch is CancellationError {
             throw CancellationError()
         } catch {
+            Log.memory.error("Embedding backlog stopped: \(String(describing: error), privacy: .public)")
             return finish(String(describing: error))
         }
-        guard embeddings.count == chunks.count, embeddings.allSatisfy({ $0.modelVersion == modelVersion }) else {
+        guard embeddings.allSatisfy({ $0.modelVersion == modelVersion }) else {
             // The model changed underneath; the next signal starts over.
             return finish(nil)
         }
@@ -813,9 +838,11 @@ public actor MemoryIndexer {
             }
             guard !needed.isEmpty else { return [:] }
             let vectors = try await embedder.embedDocuments(needed.map(\.keyText))
-            guard vectors.count == needed.count, vectors.allSatisfy({ $0.modelVersion == modelVersion }) else {
-                return [:]
+            guard vectors.count == needed.count else {
+                throw ChunkEmbeddingCountMismatch(expected: needed.count, received: vectors.count)
             }
+            // The model changed underneath: the backlog embeds them later.
+            guard vectors.allSatisfy({ $0.modelVersion == modelVersion }) else { return [:] }
             update { $0.vectorsUnavailable = nil }
             return Dictionary(zip(needed.map(\.id), vectors), uniquingKeysWith: { first, _ in first })
         } catch is CancellationError {

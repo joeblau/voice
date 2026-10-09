@@ -331,6 +331,55 @@ struct MemoryIndexerTests {
         #expect(reader.conversationReads.count >= 2)
     }
 
+    @Test func keyDatesStayInThePinnedTimeZoneWhenTheDeviceMoves() async throws {
+        let index = try MemoryIndex.inMemory()
+        // 23:30 UTC: January 15 in UTC, January 16 in Tokyo.
+        let lateEvening = Date(timeIntervalSince1970: 1_768_519_800)
+        let conversation = Support.conversation(start: lateEvening, [(.user, "Good night."), (.agent, "Sleep well.")])
+        let reader = Fakes.FakeReader(Support.FakeSources(conversations: [conversation]))
+        try await Fakes.indexer(index: index, reader: reader).runUntilIdle()
+        #expect(try await index.stateValue(forKey: MemoryIndexer.timeZoneKey) == Support.utc.identifier)
+        let built = try await Fakes.fingerprint(index)
+        let reads = reader.conversationReads.count
+
+        // Relaunched in Tokyo: no full pass, nothing re-chunked or re-embedded.
+        let tokyo = MemoryChunker(
+            policy: ChunkingPolicy.forSequenceLength(128, timeZone: TimeZone(identifier: "Asia/Tokyo")!))
+        let embedder = Support.HashingEmbedder()
+        let feed = Fakes.ScriptedFeed()
+        let indexer = MemoryIndexer(
+            index: index, reader: reader, feed: feed, embedder: embedder, chunker: tokyo,
+            clock: ManualClock(now: Support.t0),
+            configuration: MemoryIndexer.Configuration(debounce: .zero, retryDelay: .zero))
+        try await indexer.runUntilIdle()
+        #expect(await indexer.chunker.policy.timeZone == Support.utc)
+        #expect(reader.conversationReads.count == reads)
+        #expect(try await Fakes.fingerprint(index) == built)
+
+        // A change to the conversation re-chunks it in the pinned zone, so
+        // its key and vector are kept.
+        feed.enqueue(MemorySourceChanges(conversations: [conversation.id]))
+        try await indexer.runUntilIdle()
+        #expect(reader.conversationReads.count == reads + 1)
+        let chunk = try await index.chunks(ofSource: conversation.id, kind: .conversation)[0].chunk
+        #expect(chunk.keyText.hasPrefix("[January 15, 2026]\n"))
+        #expect(embedder.embeddedTexts.isEmpty)
+        #expect(try await Fakes.fingerprint(index) == built)
+    }
+
+    @Test func anEmbedderReturningTheWrongCountIsReported() async throws {
+        let index = try MemoryIndex.inMemory()
+        let indexer = Fakes.indexer(
+            index: index, reader: Self.reader(), embedder: MemoryIndexRebuilderTests.ShortEmbedder())
+        try await indexer.runUntilIdle()
+
+        let status = await indexer.currentStatus
+        #expect(status.vectorsUnavailable?.contains("vectors for") == true)
+        #expect(status.chunkCount == Self.chunkCount)
+        #expect(status.vectorCount == 0)
+        #expect(status.embedding == nil)
+    }
+
     // MARK: - Embedding
 
     @Test func withoutAModelTheIndexIsKeywordOnlyUntilOneArrives() async throws {

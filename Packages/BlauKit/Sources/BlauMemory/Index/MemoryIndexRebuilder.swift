@@ -17,6 +17,19 @@ public protocol MemoryChunkEmbedding: Sendable {
     func embedDocuments(_ texts: [String]) async throws -> [TextEmbedding]
 }
 
+/// An embedder returned a different number of vectors than it was given
+/// texts, so they can't be matched to chunks: a bug in the embedder, treated
+/// like any other embedding failure (logged, and indexing goes on without
+/// vectors).
+public struct ChunkEmbeddingCountMismatch: Error, Hashable, CustomStringConvertible {
+    public var expected: Int
+    public var received: Int
+
+    public var description: String {
+        "The embedder returned \(received) vectors for \(expected) texts"
+    }
+}
+
 extension TextEmbeddingService: MemoryChunkEmbedding {
     public func currentModelVersion() async throws -> String {
         try await model().modelVersion
@@ -194,6 +207,8 @@ public struct MemoryIndexRebuilder: Sendable {
     /// is installed, or after the model changed.
     ///
     /// - Returns: How many chunks got a vector.
+    /// - Throws: The embedder's error, or `ChunkEmbeddingCountMismatch` when
+    ///   it returns a different number of vectors than texts.
     @discardableResult
     public func embedMissingVectors(batchSize: Int = 256) async throws -> Int {
         guard let embedder else { return 0 }
@@ -204,7 +219,10 @@ public struct MemoryIndexRebuilder: Sendable {
             let chunks = try await index.chunksNeedingEmbedding(modelVersion: modelVersion, limit: max(1, batchSize))
             guard !chunks.isEmpty else { break }
             let embeddings = try await embedder.embedDocuments(chunks.map(\.keyText))
-            guard embeddings.count == chunks.count, embeddings.allSatisfy({ $0.modelVersion == modelVersion }) else {
+            guard embeddings.count == chunks.count else {
+                throw ChunkEmbeddingCountMismatch(expected: chunks.count, received: embeddings.count)
+            }
+            guard embeddings.allSatisfy({ $0.modelVersion == modelVersion }) else {
                 // The model changed underneath us; the next call starts over.
                 break
             }
@@ -264,9 +282,10 @@ public struct MemoryIndexRebuilder: Sendable {
             if !needed.isEmpty {
                 do {
                     let vectors = try await embedder.embedDocuments(needed.map(\.keyText))
-                    if vectors.count == needed.count {
-                        for (chunk, vector) in zip(needed, vectors) { embeddings[chunk.id] = vector }
+                    guard vectors.count == needed.count else {
+                        throw ChunkEmbeddingCountMismatch(expected: needed.count, received: vectors.count)
                     }
+                    for (chunk, vector) in zip(needed, vectors) { embeddings[chunk.id] = vector }
                 } catch is CancellationError {
                     throw CancellationError()
                 } catch {
