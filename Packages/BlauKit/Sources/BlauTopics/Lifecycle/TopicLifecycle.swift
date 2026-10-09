@@ -121,6 +121,11 @@ public actor TopicLifecycle: TopicService {
         /// A topic can't be split at its first utterance: the part before it
         /// would be empty.
         case splitAtFirstUtterance
+        /// A practice run's topic (#69) can't be merged into the topic
+        /// before it: that topic would remain and be relabeled, and the
+        /// run's record, kept only in its topic's summary, would be lost.
+        /// Merging the next topic into the run's works.
+        case practiceRun
     }
 
     public nonisolated let labeling: TopicLabelingService
@@ -294,7 +299,8 @@ public actor TopicLifecycle: TopicService {
     /// (and its title, while provisional) is refreshed afterwards.
     ///
     /// - Returns: The identifier of the remaining topic.
-    /// - Throws: `ConversationStoreError.noPreviousTopic` or `.topicNotFound`.
+    /// - Throws: `EditError.practiceRun` for a practice run's topic (#69),
+    ///   `ConversationStoreError.noPreviousTopic` or `.topicNotFound`.
     @discardableResult
     public func mergeWithPrevious(_ topicID: UUID) async throws -> UUID {
         try await enqueueThrowing { lifecycle in try await lifecycle.merge(topicID) }.value
@@ -774,6 +780,7 @@ public actor TopicLifecycle: TopicService {
     // MARK: Edits
 
     private func merge(_ topicID: UUID) async throws -> UUID {
+        try await refuseMergingAwayAPracticeRun(topicID)
         let survivor = try await store.mergeTopicWithPrevious(topicID)
         try await store.flush()
         var conversationID: ConversationID?
@@ -809,6 +816,28 @@ public actor TopicLifecycle: TopicService {
                 survivor, in: owner, finalizing: !(remaining?.isOpen ?? false), announcesClose: false)
         }
         return survivor
+    }
+
+    /// Throws `EditError.practiceRun` if `topicID` is a practice run's topic
+    /// (#69). Merging it into the topic before it would delete it: the
+    /// earlier topic keeps its own title, `refine` relabels it, and the
+    /// run's record (the only copy of its notes) is gone. During the run,
+    /// the lifecycle would also go on writing the record to the deleted
+    /// topic and holding back the segmenter's boundaries.
+    ///
+    /// The lifecycle's own state covers this session's runs, including one
+    /// renamed before its first answer was recorded; the stored topic covers
+    /// runs after the conversation finished or the app relaunched.
+    private func refuseMergingAwayAPracticeRun(_ topicID: UUID) async throws {
+        if live?.practiceTopics.contains(topicID) == true
+            || practiceRuns.values.contains(where: { $0.topicID == topicID })
+        {
+            throw EditError.practiceRun
+        }
+        let snapshot = try await store.topicSnapshot(topicID)
+        if PracticeRunTopic.isPracticeRun(title: snapshot.title, summary: snapshot.summary) {
+            throw EditError.practiceRun
+        }
     }
 
     private func split(_ topicID: UUID, at utteranceID: UUID) async throws -> UUID {

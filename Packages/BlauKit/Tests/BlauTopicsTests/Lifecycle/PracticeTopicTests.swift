@@ -214,6 +214,103 @@ struct PracticeTopicTests {
         #expect(try await fixture.topicOfExchange(5) == newID)
     }
 
+    /// "Merge with Previous" on the run's own topic would delete it and
+    /// leave the previous topic, relabeled, as the survivor: the record
+    /// would be lost. The lifecycle refuses it, also after the conversation
+    /// finished, when only the stored topic says it is a run.
+    @Test func mergingARunIntoThePreviousTopicAfterTheConversationIsRefused() async throws {
+        let (fixture, topics) = try await Self.finishedRun()
+
+        await #expect(throws: TopicLifecycle.EditError.practiceRun) {
+            try await fixture.lifecycle.mergeWithPrevious(topics[1].id)
+        }
+        await fixture.lifecycle.waitUntilIdle()
+        let after = try await fixture.topics()
+        #expect(after.map(\.id) == topics.map(\.id))
+        #expect(after[0].title == topics[0].title)
+        #expect(after[0].summary == topics[0].summary)
+        #expect(after[1].title == Self.title)
+        #expect(after[1].summary == Self.record)
+        #expect(try await fixture.topicOfExchange(3) == topics[1].id)
+    }
+
+    @Test func aRenamedRunIsRecognizedByItsRecordAndNotMergedAway() async throws {
+        let (fixture, topics) = try await Self.finishedRun()
+        try await fixture.lifecycle.rename(topics[1].id, to: "Mock interview")
+        await fixture.lifecycle.waitUntilIdle()
+
+        await #expect(throws: TopicLifecycle.EditError.practiceRun) {
+            try await fixture.lifecycle.mergeWithPrevious(topics[1].id)
+        }
+        await fixture.lifecycle.waitUntilIdle()
+        let after = try await fixture.topics()
+        #expect(after.map(\.id) == topics.map(\.id))
+        #expect(after[1].title == "Mock interview")
+        #expect(after[1].summary == Self.record)
+    }
+
+    /// A live run: refusing the merge keeps the lifecycle's run state on a
+    /// topic that exists, so the next answers are still recorded there.
+    @Test func mergingALiveRunIntoThePreviousTopicIsRefusedAndTheRunGoesOn() async throws {
+        let fixture = try LifecycleFixture(.threeTopics)
+        let lifecycle = fixture.lifecycle
+        try await fixture.begin()
+        try await fixture.play(0..<3)
+        var runID: UUID?
+        try await Self.play(fixture, 3) {
+            runID = await lifecycle.beginPracticeRun(title: Self.title, at: Self.requestTime(fixture, 3))
+        }
+        let run = try #require(runID)
+        await lifecycle.updatePracticeRun(run, summary: Self.record)
+        try await Self.play(fixture, 4)
+        let practiceID = try #require(await lifecycle.practiceTopicID)
+        let before = try await fixture.topics()
+
+        await #expect(throws: TopicLifecycle.EditError.practiceRun) {
+            try await lifecycle.mergeWithPrevious(practiceID)
+        }
+        await lifecycle.waitUntilIdle()
+        #expect(try await fixture.topics().map(\.id) == before.map(\.id))
+        #expect(await lifecycle.isPracticeRunOpen(run))
+        #expect(await lifecycle.practiceTopicID == practiceID)
+        #expect(await lifecycle.currentTopicID == practiceID)
+
+        let next = "Practiced 2 of 30 questions in YC interview questions, average 70%."
+        await lifecycle.updatePracticeRun(run, summary: next)
+        try await Self.play(fixture, 5)
+        let practice = try #require(try await fixture.topics().first { $0.id == practiceID })
+        #expect(practice.title == Self.title)
+        #expect(practice.summary == next)
+        #expect(try await fixture.topicOfExchange(5) == practiceID)
+    }
+
+    /// Before its first answer is recorded, a renamed live run has neither
+    /// the title prefix nor a record: only the lifecycle knows it is a run.
+    @Test func aRenamedLiveRunWithoutARecordIsNotMergedAwayEither() async throws {
+        let fixture = try LifecycleFixture(.threeTopics)
+        let lifecycle = fixture.lifecycle
+        try await fixture.begin()
+        try await fixture.play(0..<3)
+        var runID: UUID?
+        try await Self.play(fixture, 3) {
+            runID = await lifecycle.beginPracticeRun(title: Self.title, at: Self.requestTime(fixture, 3))
+        }
+        let run = try #require(runID)
+        let practiceID = try #require(await lifecycle.practiceTopicID)
+        try await lifecycle.rename(practiceID, to: "Mock interview")
+        await lifecycle.waitUntilIdle()
+
+        await #expect(throws: TopicLifecycle.EditError.practiceRun) {
+            try await lifecycle.mergeWithPrevious(practiceID)
+        }
+        await lifecycle.updatePracticeRun(run, summary: Self.record)
+        await lifecycle.waitUntilIdle()
+        let practice = try #require(try await fixture.topics().first { $0.id == practiceID })
+        #expect(practice.title == "Mock interview")
+        #expect(practice.summary == Self.record)
+        #expect(await lifecycle.practiceTopicID == practiceID)
+    }
+
     @Test func aSecondRunReplacesARunWaitingToClose() async throws {
         let fixture = try LifecycleFixture(.threeTopics)
         let lifecycle = fixture.lifecycle

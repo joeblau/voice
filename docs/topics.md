@@ -439,6 +439,9 @@ instead (three to five exchanges).
   one's is final (refined and manual titles are both final, so a refined
   earlier title wins over a manual later one). Merging away a provisional
   topic also ignores the segmenter's later confirmation of that boundary.
+  A practice run's topic can't be merged into the one before it
+  (`TopicLifecycle.EditError.practiceRun`, see [practice.md](practice.md)):
+  its summary is the run's record and would be lost.
 - **Renaming a provisional topic** accepts its break: if the segmenter
   later takes the candidate back, the named topic is kept rather than
   merged away, and the topic before it is closed and refined.

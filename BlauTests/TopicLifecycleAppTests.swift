@@ -84,5 +84,8 @@ struct TopicLifecycleAppTests {
         #expect(
             TopicEditFailure.message(for: TopicLifecycle.EditError.splitAtFirstUtterance)
                 == "A topic can't be split at its first line.")
+        #expect(
+            TopicEditFailure.message(for: TopicLifecycle.EditError.practiceRun)
+                == "A practice run keeps its own topic. Merge the next topic into it instead.")
     }
 }
