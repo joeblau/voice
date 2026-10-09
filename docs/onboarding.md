@@ -14,7 +14,7 @@ comes back later if a conversation's requirements go missing.
 | `speechModels` | Model size, a notice that downloads use Wi-Fi only, and live progress (`SpeechModelSetupView`, which offers cellular data while waiting for Wi-Fi and Try Again after a failure) | the required models are ready | yes |
 | `iCloud` | iCloud sync status (`SyncStatusPresentation`), with Open Settings when the user can fix it | sync is running | |
 | `voiceEnrollment` | Voice ID. The guided capture is #46 (M2), so for now the page says enrollment is coming and moves on | a voiceprint for the current embedding model is stored, possibly synced from another device | |
-| `aboutYou` | "Tell Blau about you": an optional note saved to the knowledge base as its `.profile` document (`AboutYouDocument`). The memory indexer embeds it like any other page, so Grok can find it with `search_memory` | a non-empty profile document exists | |
+| `aboutYou` | "Tell Blau about you": an optional note saved to the knowledge base as its `.profile` document (`AboutYouDocument`; Settings → Knowledge → About Me edits the same kind of document). `ProfileComposer` pins it verbatim into the session instructions ("In the user's own words", see [memory-profile.md](memory-profile.md)), and the memory indexer embeds it like any other page, so `search_memory` finds it too | a non-empty profile document exists | |
 | `ready` | How to start a conversation, plus anything still missing or downloading | the user taps Start Using Blau | |
 
 Every step can be skipped (Skip for Now / Not Now / Continue While It
@@ -61,11 +61,17 @@ microphone page, which now shows that access is allowed.
 
 After setup finishes, `checkPrerequisites()` runs at launch (once the key and
 the installed models have been read) and on every return to the foreground
-(after the Keychain has been re-read). If a requirement is `missing`,
-onboarding comes back with only the missing steps: no key, microphone access
-not granted, or a required model that isn't scheduled or that failed. A
-download that is running or waiting is not missing. Recovery:
+(after the Keychain has been re-read). The app's first activation arrives
+while launch is still reading the key and the models, so it only re-reads
+the microphone permission; the check at the end of `AppEnvironment.start()`
+covers it. If a requirement is `missing`, onboarding comes back with only the
+missing steps: no key, microphone access not granted, or a required model
+that isn't scheduled or that failed. A download that is running or waiting
+is not missing. Recovery:
 
+- picks each next step from every missing requirement, not only the ones
+  after the step on screen, so a requirement found missing after recovery
+  opened is still asked for. A presentation shows each step once;
 - never interrupts a running conversation;
 - has **Not Now** in its top bar. A requirement the user skips or dismisses
   isn't asked for again until the next launch;
@@ -79,7 +85,7 @@ download that is running or waiting is not missing. Recovery:
 | ------ | ---------- |
 | The app, run by the user or from Xcode (`live`) | On, with progress in `UserDefaults.standard` |
 | Previews, hosted unit tests, `ui-test` launches, and `live` launches with fixture models or any `BLAU_UI_TEST_*` stub | Off, so tests that don't care about onboarding open on the main screen |
-| `BLAU_UI_TEST_ONBOARDING=fresh` / `resume` / `finished` | On, with progress in the `blau.uitests` suite: start over, keep the previous launch's progress, or start with setup finished (to test recovery) |
+| `BLAU_UI_TEST_ONBOARDING=fresh` / `resume` / `finished` (DEBUG builds) | On, with progress in the `blau.uitests` suite: start over, keep the previous launch's progress, or start with setup finished (to test recovery) |
 
 `BLAU_UI_TEST_MICROPHONE` (DEBUG builds) replaces the system permission with
 `StubMicrophonePermission`: `granted`, `denied`, `undetermined` (the prompt
@@ -93,15 +99,18 @@ The DEBUG menu's **Onboarding → Show Onboarding** starts setup over.
 - `BlauCoreTests/OnboardingFlowTests.swift`: step order, skipping finished
   steps, the next step from the latest prerequisites, Back, resuming after an
   interruption, progress persistence and forward compatibility, and recovery
-  (only missing requirements, never during a conversation, Not Now postponing
-  until the next launch).
+  (only missing requirements, including one before the step on screen, never
+  during a conversation, Not Now postponing until the next launch, the saved
+  progress left alone).
 - `MicrophoneOnboardingTests`, `ModelSetupOnboardingTests` (including a fresh
   install and a deletion on the real `ModelManager` over fixture models),
   `XAIAccountOnboardingTests`, `AboutYouDocumentTests` and
   `SyncStateOnboardingTests` cover the per-module mappings (`swift test`).
 - `BlauTests/OnboardingAppTests.swift`: which launches show onboarding, the
   stubs, prerequisites read from the real services, the microphone prompt and
-  a denial fixed in Settings, and recovery after the key is removed.
+  a denial fixed in Settings, recovery after the key is removed, no recovery
+  from the launch-time activation before the key is read, and the store read
+  once per step rather than on every render.
 - `BlauUITests/OnboardingUITests.swift`: a fresh install through every step
   to a conversation that starts and listens; a denied microphone opens
   Settings.app; relaunching mid-setup resumes on the same step; a finished

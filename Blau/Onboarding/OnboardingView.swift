@@ -31,7 +31,6 @@ enum OnboardingIdentifiers {
 /// Skip, so no step can trap the user.
 struct OnboardingView: View {
     @Environment(AppEnvironment.self) private var environment
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -59,11 +58,9 @@ struct OnboardingView: View {
         // A container, so its identifier doesn't replace the pages' own.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(OnboardingIdentifiers.view)
-        // The user may have changed the microphone permission in the
-        // Settings app.
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active { onboarding.refreshMicrophone() }
-        }
+        // A microphone permission changed in the Settings app is picked up
+        // by `AppEnvironment.handleScenePhase` on the return to the
+        // foreground.
     }
 
     @ViewBuilder

@@ -230,6 +230,62 @@ struct OnboardingAppTests {
         #expect(harness.controller.flow.step == .microphone)
     }
 
+    @Test func theLaunchActivationWaitsForTheKeyBeforeRecovery() async throws {
+        // A finished setup, the microphone denied in Settings and the key
+        // removed. The first activation arrives before `start()` has read the
+        // key: recovery must not open on the microphone from half the
+        // picture and then miss the key.
+        let finished = OnboardingProgress(visited: Set(OnboardingStep.allCases), finishedAt: Date())
+        let harness = await makeHarness(microphone: .init(.denied), progress: finished)
+        harness.controller.didBecomeActive()
+        #expect(harness.controller.prerequisites.xaiAccount == .unknown)
+        #expect(harness.controller.microphone == .denied)
+        #expect(!harness.controller.flow.isPresented)
+        #expect(!harness.controller.hasStarted)
+
+        // `start()` reads the key and the models, then checks.
+        await harness.account.load()
+        await harness.models.start()
+        await harness.models.waitUntilIdle()
+        harness.controller.checkPrerequisites()
+        #expect(harness.controller.flow.remainingSteps == [.xaiAccount, .microphone])
+        harness.controller.advance()  // Not Now on the key.
+        #expect(harness.controller.flow.step == .microphone)
+        harness.controller.advance()  // Not Now on the microphone.
+        #expect(!harness.controller.flow.isPresented)
+        #expect(harness.store.load() == finished)
+    }
+
+    @Test func theStoreIsReadOncePerStepNotOnEveryRender() async throws {
+        let harness = await makeHarness()
+        let sources = harness.controller.sources
+        let context = try #require(harness.persistence.stack?.container.mainContext)
+        // What a render reads: the page indicator walks the remaining
+        // steps, each reading the prerequisites.
+        _ = harness.controller.flow.remainingSteps
+        _ = harness.controller.prerequisites
+        _ = harness.controller.prerequisites
+        #expect(sources.storeReads == 1)
+        #expect(harness.controller.prerequisites.aboutYou == .missing)
+
+        // The About You page saves, then moves on: the next step sees it.
+        try AboutYouDocument.save("I'm building Blau.", in: context)
+        try context.save()
+        harness.controller.advance()
+        #expect(harness.controller.prerequisites.aboutYou == .satisfied)
+        #expect(sources.storeReads == 2)
+
+        // A voiceprint synced while Blau was in the background shows up on
+        // the next activation.
+        context.insert(
+            VoiceProfile(
+                name: "Me", embeddingModelVersion: VoiceIDConfig.calibrated.modelIdentifier, centroid: [0.1, 0.2],
+                createdAt: Date()))
+        try context.save()
+        harness.controller.checkPrerequisites()
+        #expect(harness.controller.prerequisites.voiceEnrollment == .satisfied)
+    }
+
     @Test func aDisabledControllerNeverShowsRecovery() async {
         let account = XAIAccount.preview()
         await account.load()

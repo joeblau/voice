@@ -10,12 +10,13 @@ import Foundation
 /// - Tests, previews and test-driven launches (fixture models or any
 ///   `BLAU_UI_TEST_*` stub) open straight on the main screen, so the UI
 ///   tests that don't care about onboarding aren't stopped by it.
-/// - `BLAU_UI_TEST_ONBOARDING` turns it on for a UI test, with progress in
-///   the `blau.uitests` suite: `fresh` starts setup over, `resume` keeps what
-///   the previous launch saved, `finished` starts with setup done (to test
-///   recovery).
+/// - `BLAU_UI_TEST_ONBOARDING` (DEBUG builds) turns it on for a UI test,
+///   with progress in the `blau.uitests` suite: `fresh` starts setup over,
+///   `resume` keeps what the previous launch saved, `finished` starts with
+///   setup done (to test recovery).
 enum OnboardingLaunch {
-    /// Launch environment variable that turns onboarding on in a UI test.
+    /// Launch environment variable that turns onboarding on in a UI test
+    /// (DEBUG builds).
     static let environmentKey = "BLAU_UI_TEST_ONBOARDING"
 
     /// Launch environment variable for the stub microphone permission (DEBUG
@@ -42,9 +43,13 @@ enum OnboardingLaunch {
     }
 
     static func mode(kind: AppEnvironment.Kind, environment: [String: String]) -> Mode {
-        if let raw = environment[environmentKey] {
-            return Start(rawValue: raw).map(Mode.uiTest) ?? .disabled
-        }
+        // UI tests run Debug builds; a Release build never reads it, like
+        // `BLAU_UI_TEST_MICROPHONE`.
+        #if DEBUG
+            if let raw = environment[environmentKey] {
+                return Start(rawValue: raw).map(Mode.uiTest) ?? .disabled
+            }
+        #endif
         guard kind == .live, !SpeechModels.usesFixtures(environment) else { return .disabled }
         return .standard
     }

@@ -6,11 +6,14 @@ import SwiftData
 /// "Tell Blau about you" step (#44) and kept as the knowledge base's
 /// `.profile` document (`DocumentKind.profile`).
 ///
-/// It is an ordinary `Document`, so it syncs through iCloud and the memory
-/// indexer (#63) chunks and embeds it like any other page: Grok finds it
-/// with `search_memory` from the first conversation on. (The
+/// It is an ordinary `Document`, so it syncs through iCloud. From the first
+/// conversation on, Grok gets it two ways: `ProfileComposer` pins every
+/// `.profile` document verbatim into the session instructions ("In the
+/// user's own words", #67), and the memory indexer (#63) chunks and embeds
+/// it like any other page, so `search_memory` finds it too. (The
 /// model-maintained summary is `ProfileBlock`, which consolidation, #67,
-/// keeps from what Blau learns.)
+/// keeps from what Blau learns.) Settings → Knowledge → About Me (#65)
+/// edits the same kind of document.
 ///
 /// Two devices can each write one before they sync (`kind` isn't unique in
 /// CloudKit), so reads take the most recently updated one, ties broken by
