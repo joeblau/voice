@@ -99,6 +99,10 @@ struct PrivacySettingsView: View {
             }
         }
         .navigationTitle("Privacy & Data")
+        // A delete can wait minutes for a memory update; Settings stays up
+        // until it finishes. (It re-checks for a conversation right before
+        // deleting either way.)
+        .interactiveDismissDisabled(erasing != nil)
         .confirmationDialog(
             pending.map(Self.confirmationTitle) ?? "",
             isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
@@ -106,6 +110,9 @@ struct PrivacySettingsView: View {
             presenting: pending
         ) { scope in
             Button(Self.buttonTitle(scope).replacingOccurrences(of: "…", with: ""), role: .destructive) {
+                // Set now, not in the task, so Export and the other deletes
+                // are off from the confirming tap on.
+                erasing = scope
                 Task { await erase(scope) }
             }
             .accessibilityIdentifier(PrivacySettingsIdentifiers.confirm)
@@ -125,11 +132,10 @@ struct PrivacySettingsView: View {
     private func erase(_ scope: DataEraseScope) async {
         erasing = scope
         defer { erasing = nil }
-        let isConversationRunning = await environment.audio.isCapturing || environment.voiceLoop.phase.isActive
         do {
             let summary = try await PrivacyDataEraser.erase(
                 scope, in: modelContext, profileMemory: environment.profileMemory, exports: exports,
-                isConversationRunning: isConversationRunning)
+                conversation: .live(environment))
             result = Self.resultMessage(scope, summary: summary)
         } catch PrivacyDataEraser.Refusal.conversationRunning {
             problem = String(localized: "Stop the conversation first, then delete.")
@@ -235,6 +241,39 @@ enum PrivacyDataEraser {
         case conversationRunning
     }
 
+    /// Whether a conversation is on. `erase` asks before it starts and
+    /// again right before it deletes: waiting for a memory update can take
+    /// minutes, and a conversation can start meanwhile.
+    @MainActor
+    struct ConversationCheck {
+        /// Main-actor state a conversation sets as it starts, before it
+        /// writes to the store (`VoiceLoop.phase`, the record button's
+        /// session). Read with no `await` between it and the delete, so
+        /// nothing can start in between.
+        var isActive: @MainActor () -> Bool
+        /// State that takes an `await` to read: the microphone, which an
+        /// actor owns.
+        var isCapturing: @MainActor () async -> Bool = { false }
+
+        /// No conversation runs (tests).
+        static let idle = ConversationCheck(isActive: { false })
+
+        /// The app's conversation: the voice loop, the record button's
+        /// session and the microphone.
+        static func live(_ environment: AppEnvironment) -> ConversationCheck {
+            ConversationCheck(
+                isActive: { environment.voiceLoop.phase.isActive || environment.conversation.status.isRunning },
+                isCapturing: { await environment.audio.isCapturing })
+        }
+
+        /// Both, the awaited half first, so `isActive` is the last thing
+        /// read before the caller (on the main actor too) carries on.
+        func isRunning() async -> Bool {
+            let capturing = await isCapturing()
+            return capturing || isActive()
+        }
+    }
+
     /// Deletes `scope` everywhere (`DataEraser`), then this device's copies:
     /// the share sheet's exports (withdrawn from `exports`, when the pane
     /// has one, so Share Export no longer offers the removed zip), and for
@@ -245,14 +284,28 @@ enum PrivacyDataEraser {
     /// request in flight is cancelled) and a consolidation already running
     /// finishes, so neither writes facts or a profile from what was read
     /// before the delete (`ProfileMemory.prepareToErase()`).
+    ///
+    /// Nothing is deleted while a conversation runs (`Refusal`): checked
+    /// first, and again after that wait, right before the delete, since one
+    /// can start while it lasts.
     @discardableResult
     static func erase(
         _ scope: DataEraseScope, in context: ModelContext, profileMemory: ProfileMemory, exports: DataExportModel?,
-        isConversationRunning: Bool
+        conversation: ConversationCheck
     ) async throws -> DataEraseSummary {
-        guard !isConversationRunning else { throw Refusal.conversationRunning }
+        guard !(await conversation.isRunning()) else { throw Refusal.conversationRunning }
         if scope.erasesLearnedFacts {
             await profileMemory.prepareToErase()
+        }
+        // A conversation may have started during the wait. `isRunning()`
+        // reads `isActive` last, on the main actor, and nothing is awaited
+        // between it and `DataEraser.erase`, so none can start in between.
+        guard !(await conversation.isRunning()) else {
+            if scope.erasesLearnedFacts {
+                // Nothing was deleted: extraction carries on where it was.
+                await profileMemory.eraseFailed()
+            }
+            throw Refusal.conversationRunning
         }
         let summary: DataEraseSummary
         do {

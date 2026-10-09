@@ -183,7 +183,7 @@ struct PrivacyAppTests {
 
         let summary = try await PrivacyDataEraser.erase(
             .learnedFacts, in: fixture.context, profileMemory: fixture.profile, exports: DataExportModel(),
-            isConversationRunning: false)
+            conversation: .idle)
 
         #expect(summary.facts == 1)
         #expect(summary.profileBlocks == 1)
@@ -204,7 +204,7 @@ struct PrivacyAppTests {
         let fixture = try await makeFixture()
         _ = try await PrivacyDataEraser.erase(
             .conversations, in: fixture.context, profileMemory: fixture.profile, exports: DataExportModel(),
-            isConversationRunning: false)
+            conversation: .idle)
         #expect(fixture.log.load().records.count == 1)
         #expect(fixture.notes.load().count == 1)
         #expect(try fixture.context.fetchCount(FetchDescriptor<Fact>()) == 1)
@@ -215,10 +215,60 @@ struct PrivacyAppTests {
         await #expect(throws: PrivacyDataEraser.Refusal.conversationRunning) {
             try await PrivacyDataEraser.erase(
                 .everything, in: fixture.context, profileMemory: fixture.profile, exports: DataExportModel(),
-                isConversationRunning: true)
+                conversation: .init(isActive: { true }))
         }
         #expect(try fixture.context.fetchCount(FetchDescriptor<Fact>()) == 1)
         #expect(fixture.log.load().records.count == 1)
+    }
+
+    /// Answers `false` the first `falseCount` times it is asked, then
+    /// `true`: a conversation that starts while the delete waits.
+    @MainActor
+    private final class StartsLater {
+        private var asked = 0
+        private let falseCount: Int
+
+        init(after falseCount: Int) { self.falseCount = falseCount }
+
+        func next() -> Bool {
+            asked += 1
+            return asked > falseCount
+        }
+    }
+
+    /// A conversation started while the delete waited for the memory update
+    /// (the user dismissed Settings and tapped Record): nothing is deleted,
+    /// here or on this device (#149 review).
+    @Test(arguments: [DataEraseScope.learnedFacts, .knowledge, .everything])
+    func aConversationStartedDuringTheWaitStopsTheDelete(_ scope: DataEraseScope) async throws {
+        let fixture = try await makeFixture()
+        let recording = StartsLater(after: 1)
+
+        await #expect(throws: PrivacyDataEraser.Refusal.conversationRunning) {
+            try await PrivacyDataEraser.erase(
+                scope, in: fixture.context, profileMemory: fixture.profile, exports: DataExportModel(),
+                conversation: .init(isActive: { recording.next() }))
+        }
+
+        #expect(try fixture.context.fetchCount(FetchDescriptor<Fact>()) == 1)
+        #expect(try fixture.context.fetchCount(FetchDescriptor<ProfileBlock>()) == 1)
+        #expect(try fixture.context.fetchCount(FetchDescriptor<MemoryDocument>()) == 1)
+        #expect(fixture.log.load().records.count == 1)
+        #expect(fixture.notes.load().count == 1)
+        #expect(await fixture.pinned.pinnedMemory().facts.map(\.text) == ["User lives in Lisbon"])
+    }
+
+    /// The microphone, read with an `await`, is asked again too.
+    @Test func aMicrophoneTurnedOnDuringTheWaitStopsTheDelete() async throws {
+        let fixture = try await makeFixture()
+        let capturing = StartsLater(after: 1)
+
+        await #expect(throws: PrivacyDataEraser.Refusal.conversationRunning) {
+            try await PrivacyDataEraser.erase(
+                .conversations, in: fixture.context, profileMemory: fixture.profile, exports: DataExportModel(),
+                conversation: .init(isActive: { false }, isCapturing: { capturing.next() }))
+        }
+        #expect(try fixture.context.fetchCount(FetchDescriptor<Fact>()) == 1)
     }
 
     // MARK: Exporting
@@ -282,7 +332,7 @@ struct PrivacyAppTests {
 
         _ = try await PrivacyDataEraser.erase(
             .everything, in: fixture.context, profileMemory: fixture.profile, exports: exports,
-            isConversationRunning: false)
+            conversation: .idle)
 
         #expect(exports.export == nil)
         #expect(!exports.failed)
@@ -313,7 +363,7 @@ struct PrivacyAppTests {
 
         _ = try await PrivacyDataEraser.erase(
             .everything, in: fixture.context, profileMemory: fixture.profile, exports: exports,
-            isConversationRunning: false)
+            conversation: .idle)
         doRelease.yield()
         await preparing.value
 
@@ -428,7 +478,7 @@ struct PrivacyExtractionAppTests {
 
         let summary = try await PrivacyDataEraser.erase(
             .learnedFacts, in: harness.container.mainContext, profileMemory: harness.profile, exports: nil,
-            isConversationRunning: false)
+            conversation: .idle)
 
         // The minute-long request was cancelled, not waited out.
         #expect(clock.now - started < .seconds(30))
@@ -459,6 +509,28 @@ struct PrivacyExtractionAppTests {
             return (try? ModelContext(harness.container).fetchCount(FetchDescriptor<Fact>())) == 1
         }
         #expect(harness.generator.requests.withLock { $0 } == 2)
+        try await waitFor { await harness.profile.consolidator.pendingNotes().count == 1 }
+    }
+
+    /// A conversation that starts while the delete is preparing (here: as
+    /// soon as extraction is suspended) stops the delete, and extraction
+    /// carries on: the topic is learned (#149 review).
+    @Test func aConversationStartedWhilePreparingLetsExtractionCarryOn() async throws {
+        let harness = try await extractionInFlight()
+        let pipeline = harness.pipeline
+
+        await #expect(throws: PrivacyDataEraser.Refusal.conversationRunning) {
+            try await PrivacyDataEraser.erase(
+                .learnedFacts, in: harness.container.mainContext, profileMemory: harness.profile, exports: nil,
+                conversation: .init(isActive: { false }, isCapturing: { await pipeline.isSuspended }))
+        }
+
+        #expect(!(await pipeline.isSuspended))
+        try await waitFor {
+            await pipeline.waitUntilIdle()
+            return (try? ModelContext(harness.container).fetchCount(FetchDescriptor<Fact>())) == 1
+        }
+        #expect(harness.generator.cancelled.withLock { $0 })
         try await waitFor { await harness.profile.consolidator.pendingNotes().count == 1 }
     }
 }

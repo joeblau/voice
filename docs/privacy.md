@@ -115,6 +115,17 @@ learned facts, which can wait for a consolidation request).
    - waits for a consolidation that is already running
      (`ProfileConsolidator.waitUntilIdle()`), so it can't write a new
      profile summary from facts that are about to go.
+
+   That wait can last up to the consolidation request's 120 s timeout,
+   and a conversation can start meanwhile, so the conversation check
+   (`PrivacyDataEraser.ConversationCheck`) runs again after it. It reads
+   the microphone (awaited) first and the voice loop's phase and the
+   record button's session (main-actor state) last, with nothing awaited
+   between that read and step 2, so no conversation can start in between.
+   If one did start, nothing is deleted, extraction carries on
+   (`ProfileMemory.eraseFailed()`) and the pane says to stop the
+   conversation first. Settings can't be swiped away while a delete runs
+   (`interactiveDismissDisabled`).
 2. `DataEraser.erase(scope, in:)` (BlauPersistence) fetches and deletes
    every record of the scope's models **one by one** and saves. Each
    deletion lands in the persistent history, and `NSPersistentCloudKitContainer`
