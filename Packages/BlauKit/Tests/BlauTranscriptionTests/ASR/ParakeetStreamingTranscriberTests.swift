@@ -254,6 +254,31 @@ struct ParakeetStreamingTranscriberTests {
         #expect(replay.statistics.commits == [.stopped: 1])
     }
 
+    @Test func finishingReleasesTheRecognizersModelOnceAfterTheLastCommit() async throws {
+        // #31: `TranscriberRouter` finishes Parakeet when it switches to
+        // Apple's engine; the Core ML models must go with it even if
+        // something still holds the transcriber.
+        let scenario = Scenario(seconds: 3).speech("wait a second", from: 0.5, to: 2.5, endsUtterance: false)
+        let recognizer = SimulatedEouRecognizer(words: scenario.words)
+        let source = FixtureAudioSource(block: scenario.samples)
+        let transcriber = makeTranscriber(recognizer, source: source)
+        let onset = scenario.events.filter { if case .speechStarted = $0 { true } else { false } }
+        await transcriber.ingest(onset, frame: source.frame(at: 0, length: 40_000))
+        await transcriber.stop()
+        // A stopped transcriber can start again: it keeps its model.
+        #expect(await recognizer.unloads == 0)
+        try await transcriber.start()
+        await transcriber.finish()
+        await transcriber.finish()
+
+        #expect(await recognizer.finishes == 1)
+        #expect(await recognizer.unloads == 1)
+        #expect(await recognizer.callsAfterUnload == 0)
+        // Finished for good: a start doesn't bring the unloaded model back.
+        try await transcriber.start()
+        #expect(await transcriber.isRunning == false)
+    }
+
     @Test func aRecognizerFailureCommitsWhatWasDecodedAndCarriesOn() async throws {
         let scenario = Scenario(seconds: 9)
             .speech("one two three four five six", from: 0.5, to: 3.0, endsUtterance: true)

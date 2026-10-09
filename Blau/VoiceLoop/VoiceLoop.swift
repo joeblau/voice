@@ -7,7 +7,6 @@ import BlauTranscription
 import BlauVoiceID
 import Foundation
 import Observation
-import Synchronization
 
 /// Runs a spoken conversation with Grok (#36): the live audio pipeline
 /// (voice-processing capture, Silero VAD, streaming Parakeet ASR, and the
@@ -463,6 +462,8 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
     /// Adaptive voiceprint updates (#49), saved when the pipeline stops.
     private let voiceprintAdapter: VoiceprintAdapter?
     /// The Parakeet transcriber built last, for the HUD's chunk counters.
+    /// It holds it weakly: the router's switch away from Parakeet frees
+    /// the model.
     private let parakeets: ParakeetHandoff
     private let stopAudio: @Sendable () async -> Void
     private var vadTask: Task<Void, Never>?
@@ -682,40 +683,5 @@ final class LiveVoicePipeline: VoiceLoopPipeline {
     var parakeetStatistics: StreamingTranscriberStatistics? {
         guard transcriber.activeEngine == .parakeet else { return nil }
         return parakeets.latest?.statistics
-    }
-}
-
-/// Hands a Parakeet transcriber loaded alongside the audio to the router's
-/// first build, and remembers the one built last for the HUD.
-final class ParakeetHandoff: Sendable {
-    private struct State {
-        var preloaded: ParakeetStreamingTranscriber?
-        var latest: ParakeetStreamingTranscriber?
-    }
-
-    private let state = Mutex(State())
-
-    /// The Parakeet transcriber built last.
-    var latest: ParakeetStreamingTranscriber? { state.withLock { $0.latest } }
-
-    func built(_ transcriber: ParakeetStreamingTranscriber) {
-        state.withLock { $0.latest = transcriber }
-    }
-
-    func preload(_ transcriber: ParakeetStreamingTranscriber?) {
-        state.withLock { $0.preloaded = transcriber }
-    }
-
-    /// The preloaded transcriber, once.
-    func takePreloaded() -> ParakeetStreamingTranscriber? {
-        state.withLock { state in
-            defer { state.preloaded = nil }
-            return state.preloaded
-        }
-    }
-
-    /// Finishes a preloaded transcriber nobody took, releasing its model.
-    func releasePreloaded() async {
-        await takePreloaded()?.finish()
     }
 }

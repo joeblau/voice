@@ -44,9 +44,19 @@ public protocol StreamingSpeechRecognizer: Sendable {
     /// Forgets the utterance: audio, tokens, decoder and encoder state. Call
     /// it after every committed utterance.
     func reset() async
+
+    /// Releases the model (`ParakeetEouRecognizer`: its Core ML models).
+    /// The recognizer can't be used afterwards.
+    /// `ParakeetStreamingTranscriber.finish()` calls it, so a transcriber
+    /// switched away from frees its model even if something still holds the
+    /// transcriber.
+    func unload() async
 }
 
 extension StreamingSpeechRecognizer {
+    /// Nothing to release: the recognizer runs no model.
+    public func unload() async {}
+
     /// Decodes the audio still buffered and returns the whole transcript.
     public func finish() async throws -> RecognizerOutput {
         try await finish(keepingTokensThrough: nil)

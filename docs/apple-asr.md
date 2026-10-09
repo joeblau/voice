@@ -153,7 +153,12 @@ the first word) to VAD's end of speech (or the last word).
 3. **`BackgroundInferenceMonitor` moved speech-to-text to `systemSpeech`**
    → Apple (`background`). See below.
 4. **Critical memory pressure** → Apple (`memoryPressure`): its model runs
-   in a system process, not in Blau's.
+   in a system process, not in Blau's. Switching away from Parakeet frees
+   its Core ML models: the router drops the transcriber, and
+   `ParakeetStreamingTranscriber.finish()` unloads its recognizer
+   (`StreamingSpeechRecognizer.unload()`). The performance HUD reaches
+   Parakeet's chunk counters through `ParakeetHandoff`, which holds the
+   transcriber weakly so it doesn't keep the model alive.
 5. Otherwise Parakeet (`primary`).
 
 When the chosen engine isn't available the other runs (`fallback`), and
@@ -295,6 +300,7 @@ in audio time (finals the end of the fixture committed are left out).
 | `Tests/BlauTranscriptionTests/Apple/AppleTranscriberTests.swift` | Every commit rule on a scripted engine: pauses, sentences across a short pause, finalization request and timeout, stale results, maximum length, VAD pauses and splitting, `start`/`stop`/stream end, resume, session failure and restart, vocabulary, timestamps | `swift test` |
 | `Tests/BlauTranscriptionTests/Apple/SystemSpeechEngineTests.swift` | Audio conversion to the analyzer's format, the analyzer timeline | `swift test` |
 | `Tests/BlauTranscriptionTests/Routing/TranscriberRouterTests.swift` | The policy table, switching at a boundary, the settle delay, forced switches, the background monitor driving the router (with the real `BackgroundInferenceMonitor`), memory pressure, model availability, build and start failures, the Settings model | `swift test` |
+| `Tests/BlauTranscriptionTests/Routing/ParakeetHandoffTests.swift` | Switching to Apple's engine frees Parakeet: its recognizer is unloaded, and the HUD's handoff (weak) and preload (until taken) don't keep it alive | `swift test` |
 | `Tests/BlauTranscriptionTests/ASR/ParakeetResumeTests.swift` | Parakeet taking over at a resume position | `swift test` |
 | `Tests/BlauTranscriptionTests/ASR/ParakeetInferenceObserverTests.swift` | Parakeet reporting its chunks to the monitor | `swift test` |
 | `Tests/BlauPersistenceTests/MemoryEntityVocabularyTests.swift` | The vocabulary from memory | `swift test` |

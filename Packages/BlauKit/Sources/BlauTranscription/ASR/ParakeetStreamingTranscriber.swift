@@ -199,6 +199,9 @@ public actor ParakeetStreamingTranscriber: Transcriber {
     public func start() async throws {
         guard driver == nil, !isFinished else { return }
         await applyChunkSizePolicy()
+        // `finish()` (which unloads the recognizer) or another `start()`
+        // may have run while the policy loaded a recognizer.
+        guard driver == nil, !isFinished else { return }
 
         let inbox = EventInbox()
         let vadEvents = voiceActivity.events()
@@ -252,11 +255,16 @@ public actor ParakeetStreamingTranscriber: Transcriber {
         }
     }
 
-    /// Stops and ends `events` for good.
+    /// Stops, ends `events` for good and releases the recognizer's model
+    /// (`StreamingSpeechRecognizer.unload()`), so the memory is freed when
+    /// `TranscriberRouter` switches away from Parakeet, whoever still holds
+    /// the transcriber.
     public func finish() async {
         await stop()
+        guard !isFinished else { return }
         isFinished = true
         continuation.finish()
+        await recognizer.unload()
     }
 
     // MARK: Input
