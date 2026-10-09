@@ -21,6 +21,10 @@ struct RecordButton: View {
         let state = model.state
         let accessibility = RecordButtonAccessibility(state: state, isAwaitingConnection: model.isAwaitingConnection)
         control(state: state)
+            // A menu takes the button style only as a button-style menu;
+            // otherwise the bar draws it as plain glass and the white face
+            // disappears on it (#81).
+            .menuStyle(.button)
             .buttonStyle(.borderedProminent)
             .tint(RecordButtonFace.tint(for: state))
             // Only while a start or stop is in flight: a running
@@ -304,13 +308,10 @@ struct MutedSpeechHint: View {
     let resume: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            Label("You're muted", systemImage: "mic.slash.fill")
-                .font(.subheadline.weight(.semibold))
-            Button("Resume", action: resume)
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .accessibilityIdentifier(MainScreenAccessibility.mutedHintResume)
+        // Side by side when they fit, stacked at large text sizes (#81).
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) { content }
+            VStack(alignment: .leading, spacing: 8) { content }
         }
         .padding(.leading, 16)
         .padding(.trailing, 8)
@@ -318,6 +319,17 @@ struct MutedSpeechHint: View {
         .glassEffect(in: .capsule)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(MainScreenAccessibility.mutedHint)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        Label("You're muted", systemImage: "mic.slash.fill")
+            .font(.subheadline.weight(.semibold))
+            .fixedSize(horizontal: false, vertical: true)
+        Button("Resume", action: resume)
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .accessibilityIdentifier(MainScreenAccessibility.mutedHintResume)
     }
 }
 

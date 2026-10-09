@@ -31,6 +31,9 @@ final class TopicEditor {
 
     /// The rename prompt's state, while it is up.
     var rename: Rename?
+    /// The topics the user renamed here, so VoiceOver isn't told the title
+    /// they just typed (`TopicAnnouncer`, #81).
+    private(set) var renamedTopicIDs: Set<UUID> = []
     /// What went wrong, while the alert is up.
     struct Failure: Equatable {
         var title: String
@@ -50,6 +53,7 @@ final class TopicEditor {
         guard let rename else { return }
         self.rename = nil
         let title = rename.draft
+        renamedTopicIDs.insert(rename.topicID)
         perform(using: lifecycle) { try await $0.rename(rename.topicID, to: title) }
     }
 

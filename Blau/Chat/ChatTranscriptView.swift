@@ -168,7 +168,7 @@ private struct ChatRowText: View {
         case (.user, .partial):
             Text(verbatim: text)
                 .font(.body.weight(.medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.brand(.secondaryText))
         case (.user, _):
             Text(verbatim: text)
                 .font(.body.weight(.medium))
@@ -187,7 +187,7 @@ private struct ChatRowText: View {
         case (.system, _):
             Text(verbatim: text)
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.brand(.secondaryText))
         }
     }
 }
@@ -207,7 +207,7 @@ private struct ChatDeliveryNote: View {
             }
         }
         .font(.caption2)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(Color.brand(.secondaryText))
         .accessibilityHidden(true)
     }
 }
@@ -258,7 +258,7 @@ struct ChatToolChip: View {
             Image(systemName: symbol)
         }
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(Color.brand(.secondaryText))
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
         .overlay(Capsule().strokeBorder(.quaternary))

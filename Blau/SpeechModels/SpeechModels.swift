@@ -57,13 +57,32 @@ enum SpeechModels {
         FileManager.default.temporaryDirectory.appending(path: "blau-fixture-models", directoryHint: .isDirectory)
     }
 
+    /// Launch argument that slows the fixture download to this many
+    /// milliseconds per chunk (of 25 per model), e.g.
+    /// `-BlauModelFixtureChunkDelay 2000`, so a UI test can look at the
+    /// setup card while it is still downloading (#81's accessibility audit).
+    static let fixtureChunkDelayArgument = "BlauModelFixtureChunkDelay"
+
+    /// The delay `fixtureChunkDelayArgument` asks for, if any.
+    static var launchArgumentChunkDelay: Duration? {
+        let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        guard let value = arguments[fixtureChunkDelayArgument] as? String, let milliseconds = Int(value),
+            milliseconds >= 0
+        else { return nil }
+        return .milliseconds(milliseconds)
+    }
+
     /// A manager over fixture models that downloads at a visible pace. Every
     /// launch starts from a fresh install.
+    ///
+    /// - Parameter delayPerChunk: The pace; `nil` takes the launch
+    ///   argument's (`fixtureChunkDelayArgument`), or 15 ms.
     @MainActor
     static func fixtureManager(
         root: URL = defaultFixtureRoot,
-        delayPerChunk: Duration = .milliseconds(15)
+        delayPerChunk: Duration? = nil
     ) -> ModelManager {
+        let delayPerChunk = delayPerChunk ?? launchArgumentChunkDelay ?? .milliseconds(15)
         try? FileManager.default.removeItem(at: root)
         // The models the real manifest has, so fixture launches look like
         // production (the text embedding model isn't pinned yet, #60).

@@ -94,6 +94,7 @@ its increased-contrast variant `#8AAEFF` only 2.2:1.
 | `launchBackground` | `Brand/LaunchBackground` | `#FFFFFF` | `#000000` | | Launch screen background |
 | `recording` | `Brand/RecordingTint` | `#D92D20` | `#F0443A` | `#B02018` / `#FF7A70` | Recording state as text or a glyph |
 | `recordingFill` | `Brand/RecordingFill` | `#D92D20` | `#C7271C` | `#A81F16` / `#B02018` | Behind a white label: the record button while recording |
+| `secondaryText` | `Brand/SecondaryText` | `#636366` | `#98989D` | `#48484A` / `#C7C7CC` | Secondary text on the background: times, durations, conversation headings, summaries, speech in progress, the live caption's speaker ([accessibility.md](accessibility.md#contrast)). The system `.secondary` is about 3.5:1 on white |
 
 Contrast, WCAG 2 (checked by `BrandingTests`):
 
@@ -110,6 +111,7 @@ Contrast, WCAG 2 (checked by `BrandingTests`):
 | ----- | ------- | ----- | ---- | --------------------------------- |
 | `accent` | background | 6.1:1 | 5.6:1 | 8.4:1 / 9.6:1 |
 | `recording` | background | 4.8:1 | 5.6:1 | 6.9:1 / 8.3:1 |
+| `secondaryText` | background | 6.0:1 | 7.3:1 | 9.1:1 / 12.5:1 |
 | `accentFill` | white label | 6.1:1 | 5.3:1 | 8.4:1 / 6.9:1 |
 | `accentFill` | background | 6.1:1 | 4.0:1 | 8.4:1 / 3.0:1 |
 | `recordingFill` | white label | 4.8:1 | 5.6:1 | 7.3:1 / 6.9:1 |

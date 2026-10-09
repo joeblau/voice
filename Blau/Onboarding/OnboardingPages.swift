@@ -58,7 +58,7 @@ private struct WelcomeRow: View {
         Label {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.headline)
-                Text(detail).font(.subheadline).foregroundStyle(.secondary)
+                Text(detail).font(.subheadline).foregroundStyle(Color.brand(.secondaryText))
                     .fixedSize(horizontal: false, vertical: true)
             }
         } icon: {
@@ -164,7 +164,7 @@ struct SpeechModelsOnboardingPage: View {
                     systemImage: "wifi"
                 )
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.brand(.secondaryText))
                 .fixedSize(horizontal: false, vertical: true)
             }
             SpeechModelSetupView()
@@ -175,7 +175,7 @@ struct SpeechModelsOnboardingPage: View {
                 OnboardingPrimaryButton("Continue While It Downloads", action: onContinue)
                 Text("You can start talking once the download is done.")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.brand(.secondaryText))
             }
         }
     }
@@ -209,12 +209,14 @@ struct ICloudOnboardingPage: View {
                 }
                 Text(presentation.detail)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.brand(.secondaryText))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.regularMaterial, in: .rect(cornerRadius: 16))
+            // Opaque, like the speech-model card: through a material the
+            // detail text's contrast failed the audit (#81).
+            .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 16))
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier(OnboardingIdentifiers.iCloudStatus)
         } actions: {
@@ -249,7 +251,7 @@ struct VoiceEnrollmentOnboardingPage: View {
                 .disabled(true)
             Text("Voice enrollment is coming in an update. Until then, Blau answers anyone it hears.")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.brand(.secondaryText))
                 .fixedSize(horizontal: false, vertical: true)
         } actions: {
             OnboardingPrimaryButton("Continue", action: onContinue)
@@ -346,7 +348,7 @@ struct ReadyOnboardingPage: View {
                     }
                 }
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.brand(.secondaryText))
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier(OnboardingIdentifiers.stillMissing)

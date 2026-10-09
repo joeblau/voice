@@ -358,6 +358,8 @@ final class AppEnvironment {
         onboarding.checkPrerequisites()
         await fixture
         await timelineFixture
+        // UI tests only: Grok "speaking", for the live caption (#81).
+        Task { await LiveCaptionFixture.applyIfRequested(in: self) }
     }
 
     /// Wires what keeps a conversation going off screen (#26): the Live

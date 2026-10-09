@@ -113,11 +113,13 @@ private struct OnboardingTopBar: View {
             }
 
             if total > 1 {
+                // One plain element as tall as the bar's buttons, read as
+                // "Setup progress, Step 2 of 6" (#81).
                 ProgressView(value: Double(flow.completedCount + 1), total: Double(total))
                     .tint(.brand(.accent))
-                    .accessibilityLabel("Setup progress")
-                    .accessibilityValue("Step \(flow.completedCount + 1) of \(total)")
-                    .accessibilityIdentifier(OnboardingIdentifiers.progress)
+                    .accessibilityProgressBar(
+                        "Setup progress", value: Text("Step \(flow.completedCount + 1) of \(total)"),
+                        identifier: OnboardingIdentifiers.progress)
             } else {
                 Spacer()
             }
@@ -156,7 +158,7 @@ struct OnboardingPage<Content: View, Actions: View>: View {
                     .font(.title.bold())
                     .accessibilityAddTraits(.isHeader)
                 Text(message)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.brand(.secondaryText))
                     .fixedSize(horizontal: false, vertical: true)
                 content()
             }
