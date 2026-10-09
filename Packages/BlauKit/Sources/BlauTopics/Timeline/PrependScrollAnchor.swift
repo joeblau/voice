@@ -27,6 +27,25 @@ public struct PrependScrollAnchor<ID: Hashable & Sendable>: Equatable, Sendable 
         case shift(by: Double)
     }
 
+    /// What the view does when the scroll view comes to rest, or the top of
+    /// the loaded history comes near.
+    public enum PageRequest: Equatable, Sendable {
+        /// Don't load now: no page is wanted, or no row on screen can be
+        /// held (only a pinned header, such as a long expanded topic's,
+        /// with its transcript below). A page that landed then would push
+        /// the rows on screen down by its height with nothing to put them
+        /// back, so the view waits for the next rest, when a heading or a
+        /// compressed bullet may be on screen.
+        case wait
+        /// Load without holding a row. Only while the first window settles
+        /// its cutoff at launch: the screen is at the latest line, where the
+        /// bottom size-change anchor keeps the rows on screen.
+        case loadUnheld
+        /// Hold this row in place (``begin(anchor:)``), then load once it
+        /// reported its position.
+        case hold(ID)
+    }
+
     /// Movement smaller than this is rounding, not a jump.
     public static var tolerance: Double { 0.5 }
 
@@ -46,6 +65,25 @@ public struct PrependScrollAnchor<ID: Hashable & Sendable>: Equatable, Sendable 
     /// window instead, so its position says nothing about the content.)
     public static func choose(from visible: [ID], where canAnchor: (ID) -> Bool) -> ID? {
         visible.first(where: canAnchor)
+    }
+
+    /// Whether to ask for a page, and how to hold the rows on screen while
+    /// it lands.
+    ///
+    /// - Parameters:
+    ///   - settlingFirstWindow: The first window just filled and needs its
+    ///     cutoff.
+    ///   - wantsPage: There is older history, its top is near, and the user
+    ///     has scrolled.
+    ///   - visible: The rows on screen, top to bottom.
+    ///   - canAnchor: Whether a row moves with the content (see
+    ///     ``choose(from:where:)``).
+    public static func request(
+        settlingFirstWindow: Bool, wantsPage: Bool, visible: [ID], where canAnchor: (ID) -> Bool
+    ) -> PageRequest {
+        if settlingFirstWindow { return .loadUnheld }
+        guard wantsPage, let anchor = choose(from: visible, where: canAnchor) else { return .wait }
+        return .hold(anchor)
     }
 
     /// Starts holding `anchor`: the view asks it for its position, then
@@ -73,5 +111,27 @@ public struct PrependScrollAnchor<ID: Hashable & Sendable>: Equatable, Sendable 
     public mutating func end() {
         anchorID = nil
         pinnedY = nil
+    }
+}
+
+extension TopicTimeline.ItemID {
+    /// Whether the row moves with the content, so it can be held in place
+    /// while a page lands (``PrependScrollAnchor``).
+    ///
+    /// Day and conversation headings and compressed bullets do. An expanded
+    /// bullet is a pinned section header: it sticks to the top of the
+    /// window while its transcript scrolls under it, so its position says
+    /// nothing about the content. "Earlier topics" stays at the top, above
+    /// the page that lands. The transcript's lines aren't timeline rows, so
+    /// the scroll view never reports them.
+    ///
+    /// - Parameter isExpanded: Whether a topic is expanded, the current
+    ///   topic included.
+    public func movesWithContent(isExpanded: (UUID) -> Bool) -> Bool {
+        switch self {
+        case .earlier: false
+        case .day, .conversation: true
+        case .topic(let topic): !isExpanded(topic)
+        }
     }
 }

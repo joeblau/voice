@@ -270,6 +270,9 @@ private struct TopicTimelineScrollView: View {
         }
         .onScrollTargetVisibilityChange(idType: TopicTimeline.ItemID.self) { visible in
             tracker.visible = visible
+            // At rest, the rows on screen change when a bullet expands or
+            // compresses: a page that waited for a row to hold may load now.
+            loadOlderIfNeeded()
         }
         .onScrollPhaseChange { _, phase in
             tracker.isIdle = phase == .idle
@@ -380,39 +383,40 @@ private struct TopicTimelineScrollView: View {
     /// unless one is still landing.
     private func loadOlderIfNeeded() {
         guard !isPrepending, tracker.isIdle else { return }
-        if needsCutoff {
+        let request = PrependScrollAnchor.request(
+            settlingFirstWindow: needsCutoff,
+            wantsPage: timeline.hasOlderHistory && isNearTop && tracker.hasScrolled,
+            visible: tracker.visible,
+            where: canAnchor)
+        switch request {
+        case .wait:
+            // Nothing to load, or nothing on screen to hold: a page landing
+            // now would jump the rows down by its height. The next rest, or
+            // the next change of the rows on screen, asks again.
+            break
+        case .loadUnheld:
             // Settling the first window, at launch: at the latest line,
             // where the bottom anchor keeps the rows on screen.
             isPrepending = true
             loadOlder()
             endPrepend(after: Self.settleHold)
-            return
+        case .hold(let anchor):
+            isPrepending = true
+            tracker.holdStarted = .now
+            tracker.corrections = (0, 0)
+            // The row reports where it is first; then the page loads
+            // (`anchorMoved`).
+            tracker.anchor.begin(anchor: anchor)
+            anchorID = anchor
+            endPrepend(after: Self.maximumHold)
         }
-        guard timeline.hasOlderHistory, isNearTop, tracker.hasScrolled else { return }
-        isPrepending = true
-        tracker.holdStarted = .now
-        tracker.corrections = (0, 0)
-        guard let anchor = PrependScrollAnchor.choose(from: tracker.visible, where: canAnchor) else {
-            loadOlder()
-            endPrepend(after: Self.settleHold)
-            return
-        }
-        // The row reports where it is first; then the page loads
-        // (`anchorMoved`).
-        tracker.anchor.begin(anchor: anchor)
-        anchorID = anchor
-        endPrepend(after: Self.maximumHold)
     }
 
     /// Whether a row on screen can be held in place: not a pinned section
     /// header (the current topic's, or an expanded one's), which sticks to
     /// the top of the window instead of moving with the content.
     private func canAnchor(_ id: TopicTimeline.ItemID) -> Bool {
-        switch id {
-        case .earlier: false
-        case .day, .conversation: true
-        case .topic(let topic): !expansion.isExpanded(topic, current: timeline.currentTopicID)
-        }
+        id.movesWithContent { expansion.isExpanded($0, current: timeline.currentTopicID) }
     }
 
     /// The held row's top in the window changed.
@@ -430,6 +434,10 @@ private struct TopicTimelineScrollView: View {
                 tracker.corrections.count += 1
                 tracker.corrections.distance += distance
                 Signposts.ui.event("timeline.prependCorrected")
+            } else {
+                // No `UIScrollView` found behind the `ScrollView`: nothing
+                // can put the rows back.
+                Log.ui.error("Timeline page landed uncorrected: no scroll view, \(Int(distance), privacy: .public) pt")
             }
             // Hold until the layout has been still for a moment.
             endPrepend(after: Self.settleHold)
