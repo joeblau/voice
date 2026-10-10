@@ -318,6 +318,16 @@ the split. Any other gap in VAD's audio is filled from the capture history
 no longer holds it. `VerificationGateStatistics` counts both
 (`seededContinuations`, `gapSamplesFromHistory`, `gapSamplesSilenced`).
 
+**Memory.** The gate buffers a segment's audio (at most
+`maximumBufferedSpeech`, 20 s) only while it may still be scored: a
+finished segment drops it, and only the last `retainedSegments` (32)
+decisions are remembered. The buffer grows in place, so each frame costs
+the same however long the segment already is; `audioBufferReallocations`
+counts the times it moved to bigger storage, a few per segment. Copying
+it on every frame (a copy-on-write of a buffer the segment table still
+held) was the soak test's footprint growth in #183: about 5.7 GB of
+short-lived arrays over a 20-minute session, which fragmented the heap.
+
 **Short segments.** Speech under 1 s isn't scored (18% EER at 1 s). It
 inherits the previous segment's decision when the last *scored* speech
 ended less than 5 s before it, and is uncertain otherwise. Measuring from
@@ -976,6 +986,7 @@ The gate's start line gives the stored drift. A failed save logs at
 | Enrollment on the real model (opt-in) | `RealModelEnrollmentTests` with `BLAU_SPEAKER_MODEL_DIR`: each fixture speaker enrolls, another speaker's clip is rejected, and the compute time is reported |
 | Enrollment in the app | `VoiceEnrollmentAppTests` (`BlauTests`) and `VoiceEnrollmentUITests` (`BlauUITests`): enrolling from Settings stores the voiceprint Settings reads, cancelling stores nothing, deleting removes it |
 | Gate (hermetic) | `VerificationGateTests`, `VerificationGateRulesTests`, `SpeakerVerifierTests`: checkpoints and re-scores, short-segment inheritance and its limit, the uncertain policy, utterances spanning segments, finals before their segment ends or starts, the capture-history fallback, continuations after VAD's 8 s split and gaps in VAD's audio (no silence scored), checkpoints reached on the hangover, which utterances extend the active turn, the transcript filter (dropped finals passed on as `.reject`), barge-in verdicts and timeouts, the hold on finals; `ScriptedVerifier` scores a scripted speaker timeline. `VoiceGateTranscriptIntegrationTests` (BlauKitIntegrationTests) runs a TV line through `gate.filter` into the real `TurnOrchestrator` |
+| Gate memory (hermetic) | `VerificationGateMemoryTests`: a 16 s segment's audio grows in place (a few reallocations, not one per frame), and over 360 segments of every length (about 23 minutes of speech), the owner's and a TV's, finished segments keep no audio, at most `retainedSegments` are remembered and each segment costs the same at the end as at the start (#183) |
 | Gate scenarios (hermetic) | `VerificationGateScenarioTests`: the owner talking to Blau between a TV, a podcast and another person (synthetic voices through the real `SpeakerVerifier`); only the owner's lines are sent, with the turn idle and active |
 | Gate on the real model (opt-in) | `RealModelGateScenarioTests` with `BLAU_SPEAKER_MODEL_DIR`: the owner (CMU ARCTIC `bdl`) close and in a small room, other speakers through a simulated TV loudspeaker and in the room; only the owner is sent. Also measures the hold on a final |
 | Barge-in with voice ID | `VoiceGateBargeInIntegrationTests` (`BlauKitIntegrationTests`): the real `BargeInMonitor` asking the real gate; accepted and uncertain speech interrupt, rejected doesn't |

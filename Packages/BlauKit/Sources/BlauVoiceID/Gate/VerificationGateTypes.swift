@@ -188,6 +188,11 @@ public struct VerificationGateStatistics: Hashable, Sendable {
     /// them).
     public var gapSamplesFromHistory = 0
     public var gapSamplesSilenced = 0
+    /// Times a segment's audio buffer moved to new storage as its audio
+    /// came in: a few per segment while the buffer doubles. About one per
+    /// frame would mean the whole buffer is copied on every frame, the
+    /// churn that grew the soak test's footprint (#183).
+    public var audioBufferReallocations = 0
     /// Language checks (#50) run on segments, and those that failed.
     public var languageChecks = 0
     public var languageFailures = 0

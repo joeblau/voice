@@ -287,6 +287,7 @@ public actor VerificationGate {
             guard !segment.hasEnded, frame.sampleRate == segment.sampleRate else { return false }
             let limit = Int(configuration.maximumBufferedSpeech.sampleCount(sampleRate: segment.sampleRate))
             guard segment.samples.count < limit else { return false }
+            let storage = segment.samples.storageAddress
             let end = segment.bufferedEnd
             if frame.sampleOffset > end {
                 fillGap(end..<frame.sampleOffset, in: &segment, limit: limit)
@@ -294,6 +295,9 @@ public actor VerificationGate {
             let skip = Int(max(0, segment.bufferedEnd - frame.sampleOffset))
             if skip < frame.sampleCount {
                 segment.samples.append(contentsOf: frame.samples[skip...].prefix(limit - segment.samples.count))
+            }
+            if segment.samples.storageAddress != storage {
+                shared.withLock { $0.audioBufferReallocations += 1 }
             }
             return true
         }
@@ -873,6 +877,13 @@ public actor VerificationGate {
 
     // MARK: Helpers
 
+    /// The segments remembered and the audio they hold, in samples: the
+    /// gate's memory. Finished segments drop their audio and at most
+    /// `retainedSegments` are kept, so neither grows with the session.
+    var retainedAudio: (segments: Int, samples: Int) {
+        (segments.count, segments.values.reduce(0) { $0 + $1.samples.count })
+    }
+
     private func segmentIDs(overlapping range: Range<Int64>) -> [Int] {
         order.filter { segments[$0]?.contains(range) ?? false }
     }
@@ -935,6 +946,15 @@ public actor VerificationGate {
         let waiting = waiters
         waiters.removeAll()
         for continuation in waiting.values { continuation.resume() }
+    }
+}
+
+extension Array where Element == Float {
+    /// Where the array's elements are stored: it changes when the array
+    /// moves to new storage (it grew, or it was copied because the storage
+    /// was shared).
+    fileprivate var storageAddress: UnsafeRawPointer? {
+        withUnsafeBufferPointer { UnsafeRawPointer($0.baseAddress) }
     }
 }
 
