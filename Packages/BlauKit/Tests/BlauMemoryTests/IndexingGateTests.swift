@@ -56,7 +56,9 @@ struct IndexingGateTests {
         let waiter = Waiter(gate)
         await clock.waitForSleepers()
         clock.advance(by: .seconds(299))
-        try await Task.sleep(for: .milliseconds(20))
+        // The deferral's timer is still asleep: a fired one would have left
+        // the clock's sleepers.
+        #expect(clock.sleeperCount == 1)
         #expect(!waiter.isDone)
         clock.advance(by: .seconds(1))
         await waiter.task.value
@@ -81,7 +83,8 @@ struct IndexingGateTests {
         // deferral, so the clock only moves once that is fixed.
         try await waitUntil { level.subscriberCount == 1 }
         clock.advance(by: .seconds(3_600))
-        try await Task.sleep(for: .milliseconds(20))
+        // Suspended, it arms no deadline: only the level can release it.
+        #expect(clock.sleeperCount == 0)
         #expect(!waiter.isDone, "suspended: time alone doesn't release it")
 
         // Back to reduced after more than the deferral: no further wait.
@@ -99,7 +102,8 @@ struct IndexingGateTests {
         level.set(.reduced)
         await clock.waitForSleepers()
         clock.advance(by: .seconds(199))
-        try await Task.sleep(for: .milliseconds(20))
+        // Still asleep: the deferral counts from the call, 300 s in all.
+        #expect(clock.sleeperCount == 1)
         #expect(!waiter.isDone)
         clock.advance(by: .seconds(1))
         await waiter.task.value
@@ -107,27 +111,35 @@ struct IndexingGateTests {
     }
 
     @Test func cancellingTheWaitThrows() async throws {
-        let gate = IndexingGate(performance: FixedPerformanceLevel(.minimal), clock: clock)
+        let level = ManualPerformanceLevel(.minimal)
+        let gate = IndexingGate(performance: level, clock: clock)
         let waiter = Waiter(gate)
-        try await Task.sleep(for: .milliseconds(20))
+        // Cancel once it is waiting, not before it starts.
+        try await waitUntil { level.subscriberCount == 1 }
         waiter.task.cancel()
         await waiter.task.value
         #expect(waiter.wasCancelled)
     }
 }
 
-/// Polls `condition` until it holds, failing after `timeout`.
+/// Polls `condition` every 2 ms until it holds, failing after `timeout`
+/// worth of polls. The limit counts this wait's own polls, not wall time,
+/// so a runner that keeps the whole test process off the CPU for a while
+/// can't run it out (#180); on an idle machine it still fails a broken test
+/// after at least `timeout`.
 private func waitUntil(
     timeout: Duration = .seconds(5),
     sourceLocation: SourceLocation = #_sourceLocation,
     _ condition: @Sendable () async -> Bool
 ) async throws {
-    let deadline = ContinuousClock.now + timeout
+    let interval = Duration.milliseconds(2)
+    var polls = Int(timeout / interval)
     while !(await condition()) {
-        guard ContinuousClock.now < deadline else {
+        guard polls > 0 else {
             Issue.record("Timed out waiting for the condition", sourceLocation: sourceLocation)
             return
         }
-        try await Task.sleep(for: .milliseconds(2))
+        polls -= 1
+        try await Task.sleep(for: interval)
     }
 }

@@ -25,6 +25,7 @@ struct TurnOrchestratorContinuityTests {
         let updates = StreamCollector(harness.orchestrator.updates(bufferingPolicy: .unbounded))
         defer { updates.cancel() }
         let first = try await harness.start()
+        try await harness.waitForLiveSession()
         first.push(ServerEvents.conversationCreated("conv_1"))
         try await harness.waitForEndpoint(conversation: "conv_1")
 
@@ -147,6 +148,7 @@ struct TurnOrchestratorContinuityTests {
     @Test func theRenewalWaitsForTheTurnInProgress() async throws {
         let harness = TurnHarness(configuration: Self.shortSessions, sessionTimers: true)
         let first = try await harness.start()
+        try await harness.waitForLiveSession()
         harness.clock.advance(by: .seconds(570))
 
         harness.audio.setIdle(false)
@@ -183,6 +185,10 @@ struct TurnOrchestratorContinuityTests {
     @Test func atTheDeadlineTheRenewalCutsTheTurnShort() async throws {
         let harness = TurnHarness(configuration: Self.shortSessions, sessionTimers: true)
         let first = try await harness.start()
+        // The session's timers count from its start (#180): fix that start
+        // before moving the clock, or the renewal and its deadline would
+        // land after this test's 12 minutes.
+        try await harness.waitForLiveSession()
         harness.clock.advance(by: .seconds(590))
         harness.audio.setIdle(false)
         await harness.orchestrator.handle(.final(harness.utterance("Keep talking", from: 590, to: 592)))
@@ -192,6 +198,10 @@ struct TurnOrchestratorContinuityTests {
         first.push(ServerEvents.audio("item_1", response: "resp_1", milliseconds: 400))
         first.push(ServerEvents.transcript("item_1", response: "resp_1", "Here is a very long answer"))
         try await harness.waitForState(.agentSpeaking)
+        // What the cut keeps is the text handled by then.
+        try await waitUntil("transcript") {
+            await harness.snapshot().agentText == "Here is a very long answer"
+        }
 
         // Still talking at 12 minutes: renewed anyway, before the server's
         // own limit; what arrived of the reply is kept.
@@ -211,6 +221,7 @@ struct TurnOrchestratorContinuityTests {
     @Test func noClientSecretMeansTheOldSessionIsKeptForNow() async throws {
         let harness = TurnHarness(configuration: Self.shortSessions, sessionTimers: true)
         _ = try await harness.start()
+        try await harness.waitForLiveSession()
         harness.tokens.failNext(XAIError.rateLimited(retryAfter: nil), XAIError.rateLimited(retryAfter: nil))
 
         harness.clock.advance(by: .seconds(540))
@@ -267,6 +278,11 @@ struct TurnOrchestratorContinuityTests {
         first.push(ServerEvents.audio("item_2", response: "resp_2", milliseconds: 300))
         first.push(ServerEvents.transcript("item_2", response: "resp_2", "First we"))
         try await harness.waitForState(.agentSpeaking)
+        // The first audio makes Grok "speaking"; its words come in a later
+        // event. Events and the connection's state reach the orchestrator on
+        // separate streams, so wait for the words before the drop, or the
+        // drop can be handled first and leave nothing to keep.
+        try await waitUntil("transcript") { await harness.snapshot().agentText == "First we" }
         connector.enqueue(.fail(.network(code: URLError.networkConnectionLost.rawValue)))
         first.fail()
 
@@ -335,7 +351,12 @@ struct TurnOrchestratorContinuityTests {
         try await harness.waitForEndpoint(conversation: "conv_1")
         await harness.orchestrator.handle(.final(harness.utterance("What's the weather?", from: 0, to: 1)))
         try await harness.waitForSent("response.create", on: first)
+        // Events and the connection's state reach the orchestrator on
+        // separate streams, so the drop could be handled first. Wait until
+        // `response.created` has been: it disarms the response timeout.
+        await harness.clock.waitForSleepers()
         first.push(ServerEvents.responseCreated("resp_1", turn: first.turnTag()))
+        try await waitUntil("response.created handled") { harness.clock.sleeperCount == 0 }
         first.fail()
 
         let second = try await connector.socket(1)
@@ -529,6 +550,15 @@ extension TurnHarness {
         }
         try await waitUntil("turn \(id) answered") { await snapshot().completedTurns == completed + 1 }
         try await waitForState(.listening)
+    }
+
+    /// Waits until the server session is ready. Its start, which the
+    /// session's renewal timers count from, is fixed by then, so moving the
+    /// clock afterwards moves it relative to that start.
+    func waitForLiveSession(sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        try await waitUntil("session live", sourceLocation: sourceLocation) {
+            await snapshot().session.phase == .live
+        }
     }
 
     /// Waits until the client's next connection resumes `conversation`

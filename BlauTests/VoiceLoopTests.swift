@@ -134,7 +134,7 @@ struct VoiceLoopTests {
 
     /// The DEBUG "ignored speech" lane lists what the gate kept from Grok,
     /// and the gate hears when Grok is answering.
-    @Test func ignoredSpeechAndAgentActivityReachTheGate() async {
+    @Test func ignoredSpeechAndAgentActivityReachTheGate() async throws {
         let (snapshots, snapshotFeed) = AsyncStream.makeStream(of: TurnSnapshot.self)
         let pipeline = FakeLoopPipeline()
         let loop = VoiceLoop(
@@ -148,8 +148,10 @@ struct VoiceLoopTests {
         pipeline.verdictFeed.yield(verdict("Y ahora el tiempo", .otherLanguage))
         snapshotFeed.yield(TurnSnapshot(state: .agentSpeaking))
         snapshotFeed.yield(TurnSnapshot(state: .listening))
-        for _ in 0..<100 where loop.ignoredSpeech.count < 3 || pipeline.agentActivity.count < 2 {
-            try? await Task.sleep(for: .milliseconds(10))
+        // Polled with the hang guard every wait here uses, instead of a
+        // second's worth of tries that gave up silently on a slow run (#180).
+        try await until("the verdicts and agent activity forwarded") {
+            loop.ignoredSpeech.count >= 3 && pipeline.agentActivity.count >= 2
         }
 
         #expect(loop.ignoredSpeech.map(\.utterance.text) == ["And now the weather", "Hm", "Y ahora el tiempo"])
@@ -339,13 +341,16 @@ struct VoiceLoopTests {
         }
     }
 
-    /// Polls `condition` until it holds, failing after 10 s.
+    /// Polls `condition` until it holds, failing after 10 s worth of polls.
+    /// The limit counts polls, not wall time, so a loaded runner that keeps
+    /// the whole process off the CPU can't run it out (#180).
     private func until(
         _ what: String, sourceLocation: SourceLocation = #_sourceLocation, _ condition: () -> Bool
     ) async throws {
-        let deadline = ContinuousClock.now + .seconds(10)
+        var polls = Int(Duration.seconds(10) / Duration.microseconds(200))
         while !condition() {
-            if ContinuousClock.now >= deadline {
+            polls -= 1
+            if polls < 0 {
                 Issue.record("Timed out waiting for \(what)", sourceLocation: sourceLocation)
                 return
             }

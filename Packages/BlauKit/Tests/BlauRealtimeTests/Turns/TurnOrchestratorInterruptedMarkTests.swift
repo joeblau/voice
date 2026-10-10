@@ -44,9 +44,13 @@ struct TurnOrchestratorInterruptedMarkTests {
             .conversationItemTruncated(
                 .init(itemID: "item_1", contentIndex: 0, audioEndMilliseconds: 400, transcript: "The Golden Gate")))
         try await waitUntil("server transcript stored") {
-            await harness.orchestrator.waitUntilSettled()
-            return recording.stored.first { $0.id == id }?.text == "The Golden Gate"
+            recording.stored.first { $0.id == id }?.text == "The Golden Gate"
         }
+        // The handler that queued that write queued the mark right after it.
+        // A drain taken while the event was still on its way would let the
+        // write be seen without the mark; this one, on the orchestrator's
+        // actor, can only start once the handler has queued both.
+        await harness.orchestrator.waitUntilSettled()
         #expect(recording.endReasons == [id: .bargedIn])
         order = Self.positions(of: id, in: recording.calls)
         #expect(try #require(order.record) < #require(order.mark))
@@ -179,9 +183,11 @@ struct TurnOrchestratorInterruptedMarkTests {
             .conversationItemTruncated(
                 .init(itemID: "item_1", contentIndex: 0, audioEndMilliseconds: 20, transcript: "The")))
         try await waitUntil("reply stored") {
-            await harness.orchestrator.waitUntilSettled()
-            return (try? ModelContext(container).fetchCount(FetchDescriptor<StoredUtterance>())) == 2
+            (try? ModelContext(container).fetchCount(FetchDescriptor<StoredUtterance>())) == 2
         }
+        // Its mark is queued right after that write, by the same handler:
+        // drain on the orchestrator's actor, after the handler has run.
+        await harness.orchestrator.waitUntilSettled()
         let reply = try #require(
             try ModelContext(container).fetch(FetchDescriptor<StoredUtterance>()).first { $0.role == .agent })
         #expect(reply.text == "The")

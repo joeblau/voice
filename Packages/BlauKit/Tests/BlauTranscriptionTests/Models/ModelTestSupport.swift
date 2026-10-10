@@ -214,13 +214,17 @@ func waitUntil(
     sourceLocation: SourceLocation = #_sourceLocation,
     _ condition: @MainActor () -> Bool
 ) async {
-    let deadline = ContinuousClock.now + timeout
+    // Counts polls, not wall time: a loaded runner that keeps the whole
+    // process off the CPU can't run it out (#180).
+    let interval = Duration.milliseconds(2)
+    var polls = Int(timeout / interval)
     while !condition() {
-        guard ContinuousClock.now < deadline else {
+        guard polls > 0 else {
             Issue.record("Timed out waiting: \(description)", sourceLocation: sourceLocation)
             return
         }
-        try? await Task.sleep(for: .milliseconds(2))
+        polls -= 1
+        try? await Task.sleep(for: interval)
     }
 }
 

@@ -129,16 +129,21 @@ struct MemoryToolIntegrationTests {
         func invalidate() async {}
     }
 
+    /// Polls `condition` until it holds, failing after `timeout` worth of
+    /// polls. The limit counts polls, not wall time, so a loaded runner that
+    /// keeps the whole process off the CPU can't run it out (#180).
     static func waitUntil(
         _ what: String, timeout: Duration = .seconds(10), _ condition: () async -> Bool
     ) async throws {
-        let deadline = ContinuousClock.now + timeout
+        let interval = Duration.milliseconds(2)
+        var polls = Int(timeout / interval)
         while !(await condition()) {
-            guard ContinuousClock.now < deadline else {
+            guard polls > 0 else {
                 Issue.record("Timed out waiting for \(what)")
                 throw CancellationError()
             }
-            try await Task.sleep(for: .milliseconds(2))
+            polls -= 1
+            try await Task.sleep(for: interval)
         }
     }
 

@@ -2,6 +2,7 @@ import BlauAudio
 import BlauCore
 import BlauTelemetry
 import Foundation
+import Synchronization
 import Testing
 
 @testable import BlauVoiceID
@@ -343,9 +344,13 @@ struct VerificationGateTests {
     }
 
     @Test func aFinalArrivingBeforeItsSegmentWaitsForIt() async throws {
-        let (gate, _) = Self.gate(SpeakerTimeline([(0, 10, .other)]))
+        // On a manual clock the final's wait can't time out in real time
+        // before the segment is fed (#180).
+        let clock = ManualClock()
+        let (gate, _) = Self.timedGate(SpeakerTimeline([(0, 10, .other)]), delay: .zero, clock: clock)
         let decided = Task { await gate.decide(finalUtterance("Breaking news", from: 0, to: 2)) }
-        try await Task.sleep(for: .milliseconds(20))
+        // Waiting: its arrival timeout is asleep.
+        await clock.waitForSleepers()
         await gate.feed(SpeechScript.segment(0, from: 0, to: 2))
         #expect(await decided.value.decision == .reject)
     }
@@ -360,24 +365,75 @@ struct VerificationGateTests {
 
     // MARK: Latency
 
+    /// A gate whose embeddings each take `delay` of `clock`'s time, which
+    /// also measures the holds: latency checked to the tick, however loaded
+    /// the machine running the test (#180).
+    static func timedGate(
+        _ timeline: SpeakerTimeline, delay: Duration, clock: ManualClock
+    ) -> (VerificationGate, ScriptedVerifier) {
+        let verifier = ScriptedVerifier(timeline, delay: delay, clock: clock)
+        return (VerificationGate(verifier: verifier, clock: clock), verifier)
+    }
+
+    /// Feeds `events`, moving `clock` on by `delay` for every embedding the
+    /// gate starts meanwhile, until the feed returns.
+    static func feed(
+        _ events: [SpeechAudioEvent], to gate: VerificationGate, clock: ManualClock, delay: Duration
+    ) async throws {
+        let done = Mutex(false)
+        let feeding = Task {
+            await gate.feed(events)
+            done.withLock { $0 = true }
+        }
+        while true {
+            try await waitUntil { done.withLock { $0 } || clock.sleeperCount > 0 }
+            if done.withLock({ $0 }) { break }
+            clock.advance(by: delay)
+        }
+        await feeding.value
+    }
+
     /// With the decision made while the user spoke, the final isn't held.
     @Test func aDecidedSegmentAddsNoLatency() async throws {
-        let (gate, _) = Self.gate(SpeakerTimeline([(0, 10, .owner)]), delay: .milliseconds(30))
-        await gate.feed(SpeechScript.segment(0, from: 0, to: 3.2))
+        let clock = ManualClock()
+        let (gate, verifier) = Self.timedGate(
+            SpeakerTimeline([(0, 10, .owner)]), delay: .milliseconds(30), clock: clock)
+        try await Self.feed(SpeechScript.segment(0, from: 0, to: 3.2), to: gate, clock: clock, delay: .milliseconds(30))
+        let scores = verifier.calls.count
         let gated = await gate.decide(finalUtterance("Set a timer", from: 0, to: 3.2))
-        #expect(gated.delay < .milliseconds(25))
+        #expect(gated.decision == .accept)
+        #expect(gated.delay == .zero)
+        #expect(verifier.calls.count == scores, "the final waited for an embedding")
     }
 
     /// The end-of-segment re-score runs while the final waits: one embedding.
     @Test func theEndOfSegmentScoreIsTheOnlyHold() async throws {
-        let (gate, _) = Self.gate(SpeakerTimeline([(0, 10, .owner)]), delay: .milliseconds(40))
-        await gate.feed([.started(SpeechScript.onset(0, at: 0))] + SpeechScript.audio(from: 0, to: 2.8))
+        let clock = ManualClock()
+        let embedding = Duration.milliseconds(40)
+        let (gate, verifier) = Self.timedGate(SpeakerTimeline([(0, 10, .owner)]), delay: embedding, clock: clock)
+        // The 1.5 s checkpoint is scored while the user speaks.
+        try await Self.feed(
+            [.started(SpeechScript.onset(0, at: 0))] + SpeechScript.audio(from: 0, to: 2.8), to: gate, clock: clock,
+            delay: embedding)
+        #expect(verifier.calls.count == 1)
+
+        // VAD ends the segment: its end-of-segment score starts...
         let ending = Task { await gate.feed([.ended(SpeechScript.ended(0, from: 0, to: 2.5))]) }
-        try await Task.sleep(for: .milliseconds(5))
-        let gated = await gate.decide(finalUtterance("Hello there", from: 0, to: 2.5))
+        await clock.waitForSleepers()
+        #expect(verifier.calls.count == 2)
+        // ...and the final arrives while it runs. Once the final is waiting
+        // for that score (its timeout is the second sleeper), the embedding
+        // finishes.
+        let deciding = Task { await gate.decide(finalUtterance("Hello there", from: 0, to: 2.5)) }
+        await clock.waitForSleepers(count: 2)
+        clock.advance(by: embedding)
+        let gated = await deciding.value
         await ending.value
+
         #expect(gated.decision == .accept)
-        #expect(gated.delay < .milliseconds(100))
+        // Held for exactly the embedding in flight, and no other.
+        #expect(gated.delay == embedding)
+        #expect(verifier.calls.count == 2)
         #expect(gate.statistics.longestDelay == gated.delay)
     }
 
@@ -554,10 +610,14 @@ struct VerificationGateTests {
     // MARK: Barge-in
 
     @Test func bargeInWaitsForTheFirstScore() async throws {
-        let (gate, _) = Self.gate(SpeakerTimeline([(0, 10, .other)]))
+        // On a manual clock the 2 s decision timeout can't run out in real
+        // time before the rest of the speech is fed (#180).
+        let clock = ManualClock()
+        let (gate, _) = Self.timedGate(SpeakerTimeline([(0, 10, .other)]), delay: .zero, clock: clock)
         await gate.feed([.started(SpeechScript.onset(0, at: 0))] + SpeechScript.audio(from: 0, to: 0.5))
         let verdict = Task { await gate.bargeInDecision(for: SpeechScript.onset(0, at: 0)) }
-        try await Task.sleep(for: .milliseconds(20))
+        // Waiting: its decision timeout is asleep.
+        await clock.waitForSleepers()
         await gate.feed(SpeechScript.audio(from: 0.5, to: 1.6))
         #expect(await verdict.value == .reject)
     }

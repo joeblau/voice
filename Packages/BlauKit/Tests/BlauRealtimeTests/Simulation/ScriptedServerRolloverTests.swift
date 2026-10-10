@@ -33,9 +33,12 @@ import Testing
 
     @Test(.timeLimit(.minutes(1)))
     func aScaledSessionRenewsAndTheConversationGoesOn() async throws {
-        // 110 minutes in 0.6 s of wall time: the renewal comes after the
-        // first few turns.
+        // 110 minutes in 0.6 s of the clock: the renewal comes after the
+        // first few turns. The client, configurator and orchestrator share a
+        // manual clock, so how long the machine takes to run a turn doesn't
+        // move the renewal (#180).
         let continuity = SessionContinuityConfiguration.standard.scaled(by: 110 * 60 / 0.6)
+        let clock = ManualClock()
         let server = ScriptedRealtimeServer { request in
             .init(text: "Reply \(request.index + 1).", audioDuration: .milliseconds(100))
         }
@@ -43,10 +46,10 @@ import Testing
         let orchestrator = TurnOrchestrator(
             client: RealtimeClient(
                 endpoint: .realtimeTest, tokenProvider: ScriptedRealtimeServer.TokenProvider(), connector: server,
-                configuration: .init(keepAliveInterval: nil), signposter: .disabled(.realtime)),
-            configurator: RealtimeSessionConfigurator(settings: RealtimeVoiceSettingsStore()),
-            audio: DiscardingAgentAudioOutput(), transcript: transcript, signposter: .disabled(.realtime),
-            configuration: .init(continuity: continuity))
+                clock: clock, configuration: .init(keepAliveInterval: nil), signposter: .disabled(.realtime)),
+            configurator: RealtimeSessionConfigurator(settings: RealtimeVoiceSettingsStore(), clock: clock),
+            audio: DiscardingAgentAudioOutput(), transcript: transcript, clock: clock,
+            signposter: .disabled(.realtime), configuration: .init(continuity: continuity))
 
         let lines = (1...8).map { "Question number \($0) about the plan" }
         let script = TranscriptScript.speaking(
@@ -58,18 +61,21 @@ import Testing
             try await waitUntil("reply \(index + 1)") {
                 transcript.stored.filter { $0.speaker == .agent }.count == index + 1
             }
-            // Turns spread over about 1.2 s, so the session passes its
-            // (scaled) renewal age between two of them.
-            try await Task.sleep(for: .milliseconds(150))
+            // Turns 150 ms apart, over 1.05 s: the session passes its
+            // (scaled) renewal age once, between two of them, and the new
+            // session is never old enough to renew again.
+            if index < script.finals.count - 1 {
+                clock.advance(by: .milliseconds(150))
+            }
         }
         try await waitUntil("a renewal") { await orchestrator.snapshot.session.rollovers >= 1 }
         let snapshot = await orchestrator.snapshot
         await orchestrator.stop()
 
         #expect(transcript.stored.filter { $0.speaker == .agent }.count == lines.count)
-        #expect(snapshot.session.rollovers >= 1)
-        #expect(snapshot.session.reseeds >= snapshot.session.rollovers)
-        #expect(server.sockets.count >= snapshot.session.rollovers + 1)
+        #expect(snapshot.session.rollovers == 1)
+        #expect(snapshot.session.reseeds == 1)
+        #expect(server.sockets.count == 2)
         // The old session was closed cleanly by the client, not dropped.
         #expect(server.sockets[0].clientCloseCode == .normalClosure)
     }

@@ -133,13 +133,17 @@ struct PerformanceHUDTests {
         #expect(!AppEnvironment.preview().performanceHUD.isVisible)
     }
 
+    /// Polls `condition` until it holds, failing after 10 s worth of polls.
+    /// The limit counts polls, not wall time, so a loaded runner that keeps
+    /// the whole process off the CPU can't run it out (#180).
     private func waitUntil(_ condition: @MainActor () -> Bool) async throws {
-        let deadline = ContinuousClock.now + .seconds(10)
+        var polls = 1_000
         while !condition() {
-            guard ContinuousClock.now < deadline else {
+            guard polls > 0 else {
                 Issue.record("Timed out")
                 return
             }
+            polls -= 1
             try await Task.sleep(for: .milliseconds(10))
         }
     }

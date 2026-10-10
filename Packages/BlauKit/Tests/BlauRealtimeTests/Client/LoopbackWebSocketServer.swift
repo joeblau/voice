@@ -25,6 +25,7 @@ final class LoopbackWebSocketServer: Sendable {
         var rejectsUpgrades = false
         var port: UInt16?
         var failure: NWError?
+        var isCancelled = false
     }
 
     /// State shared with the listener's handlers, which are set up before
@@ -70,6 +71,8 @@ final class LoopbackWebSocketServer: Sendable {
                 shared.state.withLock { $0.port = port }
             case .failed(let error):
                 shared.state.withLock { $0.failure = error }
+            case .cancelled:
+                shared.state.withLock { $0.isCancelled = true }
             default:
                 break
             }
@@ -97,6 +100,8 @@ final class LoopbackWebSocketServer: Sendable {
     }
 
     var connectionCount: Int { shared.state.withLock { $0.connections.count } }
+    /// Whether the listener has stopped listening since ``stop()``.
+    var isCancelled: Bool { shared.state.withLock { $0.isCancelled } }
     var offeredSubprotocols: [[String]] { shared.state.withLock { $0.offeredSubprotocols } }
     var received: [Received] { shared.state.withLock { $0.received } }
 

@@ -895,7 +895,7 @@ public actor VerificationGate {
             let id = nextWaiterID
             let clock = clock
             let timer = Task { [weak self] in
-                try? await clock.sleep(for: remaining)
+                try? await clock.sleep(until: deadline)
                 await self?.wake(id)
             }
             await withCheckedContinuation { continuation in

@@ -204,7 +204,7 @@ public final class PerformancePolicy: PerformanceLevelProviding, Sendable {
             _ = body(&state.tracker, now)
             let after = Self.snapshot(of: state.tracker)
             state.recorder.record(after, at: now)
-            scheduleRecovery(&state, now: now)
+            scheduleRecovery(&state)
             updateSignposts(&state, from: before.level, to: after.level)
             if before != after {
                 for subscriber in state.snapshotSubscribers.values { subscriber.yield(after) }
@@ -230,8 +230,10 @@ public final class PerformancePolicy: PerformanceLevelProviding, Sendable {
         }
     }
 
-    /// Keeps one timer running for the tracker's recovery deadline.
-    private func scheduleRecovery(_ state: inout State, now: Duration) {
+    /// Keeps one timer running for the tracker's recovery deadline. It
+    /// sleeps until the deadline itself, so a timer task that starts late
+    /// still fires on time.
+    private func scheduleRecovery(_ state: inout State) {
         let deadline = state.tracker.recoveryDeadline
         guard deadline != state.timerDeadline else { return }
         state.timer?.cancel()
@@ -241,7 +243,7 @@ public final class PerformancePolicy: PerformanceLevelProviding, Sendable {
         let clock = clock
         state.timer = Task { [weak self] in
             do {
-                try await clock.sleep(for: max(deadline - now, .zero))
+                try await clock.sleep(until: deadline)
             } catch {
                 return
             }

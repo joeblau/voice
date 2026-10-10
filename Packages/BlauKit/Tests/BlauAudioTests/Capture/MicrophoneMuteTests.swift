@@ -37,32 +37,16 @@ private final class FakeVoiceInput: VoiceProcessingInputMuting {
     }
 }
 
-/// Collects a stream's elements on a task of its own.
-private final class Collector<Element: Sendable>: Sendable {
-    private let items = Mutex<[Element]>([])
-    private let task: Mutex<Task<Void, Never>?> = Mutex(nil)
-
-    init(_ stream: AsyncStream<Element>) {
-        let collecting = Task { [self] in
-            for await item in stream {
-                items.withLock { $0.append(item) }
-            }
-        }
-        task.withLock { $0 = collecting }
+/// The first `count` elements of `stream`, awaited one by one. The stream
+/// subscribes when it is made and buffers what is sent meanwhile, so this
+/// neither misses an element nor gives up on a slow machine (#180).
+private func first<Element: Sendable>(_ count: Int, of stream: AsyncStream<Element>) async -> [Element] {
+    var values: [Element] = []
+    for await value in stream {
+        values.append(value)
+        if values.count == count { break }
     }
-
-    var values: [Element] { items.withLock { $0 } }
-
-    func cancel() {
-        task.withLock { $0?.cancel() }
-    }
-}
-
-private func waitFor(_ condition: () -> Bool) async {
-    for _ in 0..<2_000 where !condition() {
-        await Task.yield()
-        try? await Task.sleep(for: .microseconds(200))
-    }
+    return values
 }
 
 @Suite("MicrophoneMute", .timeLimit(.minutes(1)))
@@ -114,8 +98,7 @@ struct MicrophoneMuteTests {
         let mute = MicrophoneMute()
         let input = FakeVoiceInput()
         mute.attach(to: input)
-        let collector = Collector(mute.speechActivity())
-        defer { collector.cancel() }
+        let activity = mute.speechActivity()
 
         input.detect(.started)  // unmuted: ignored
         input.detect(.ended)
@@ -124,42 +107,34 @@ struct MicrophoneMuteTests {
         input.detect(.started)  // repeated: ignored
         input.detect(.ended)
 
-        await waitFor { collector.values.count >= 2 }
-        #expect(collector.values == [.started, .ended])
+        #expect(await first(2, of: activity) == [.started, .ended])
     }
 
     @Test func unmutingEndsSpeechInProgress() async {
         let mute = MicrophoneMute()
         let input = FakeVoiceInput()
         mute.attach(to: input)
-        let collector = Collector(mute.speechActivity())
-        defer { collector.cancel() }
+        let activity = mute.speechActivity()
 
         mute.setMuted(true)
         input.detect(.started)
         mute.setMuted(false)
 
-        await waitFor { collector.values.count >= 2 }
-        #expect(collector.values == [.started, .ended])
+        #expect(await first(2, of: activity) == [.started, .ended])
     }
 
     @Test func everySubscriberHearsIt() async {
         let mute = MicrophoneMute()
         let input = FakeVoiceInput()
         mute.attach(to: input)
-        let first = Collector(mute.speechActivity())
-        let second = Collector(mute.speechActivity())
-        defer {
-            first.cancel()
-            second.cancel()
-        }
+        let one = mute.speechActivity()
+        let other = mute.speechActivity()
 
         mute.setMuted(true)
         input.detect(.started)
 
-        await waitFor { first.values.count == 1 && second.values.count == 1 }
-        #expect(first.values == [.started])
-        #expect(second.values == [.started])
+        #expect(await first(1, of: one) == [.started])
+        #expect(await first(1, of: other) == [.started])
     }
 }
 
