@@ -37,10 +37,15 @@ final class TopicDetailUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
-    private func launch() -> XCUIApplication {
+    private func launch(largestText: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["BLAU_APP_ENVIRONMENT"] = "ui-test"
         app.launchArguments += ["-BlauTimelineFixture", "\(Self.topicCount)"]
+        if largestText {
+            app.launchArguments += [
+                "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
+            ]
+        }
         app.launch()
         XCTAssertTrue(
             app.descendants(matching: .any)[Identifier.timeline].waitForExistence(timeout: 30),
@@ -143,6 +148,42 @@ final class TopicDetailUITests: XCTestCase {
             guard let element = issue.element else { return true }
             return !element.identifier.hasPrefix("blau.timeline.topic")
         }
+    }
+
+    /// At large text sizes each action remains reachable by scrolling and
+    /// fits the screen, even when all controls cannot fit in one viewport.
+    func testActionsRemainReachableAtTheLargestTextSize() {
+        let app = launch(largestText: true)
+        let previous = bullet(Self.previousTitle, in: app)
+        let timeline = element(Identifier.timeline, in: app)
+        for _ in 0..<8 where !previous.isHittable { timeline.swipeDown() }
+        XCTAssertTrue(previous.isHittable, "The older bullet isn't reachable")
+        expandPrevious(app)
+        let controls = [
+            app.buttons[Identifier.continueTopic].firstMatch,
+            app.buttons[Identifier.share].firstMatch,
+            app.buttons[Identifier.more].firstMatch,
+        ]
+        for control in controls {
+            XCTAssertTrue(control.waitForExistence(timeout: 5), "Missing action \(control)")
+        }
+        let window = app.windows.firstMatch.frame
+        for control in controls {
+            for _ in 0..<8 where !control.isHittable {
+                // A full-viewport swipe can pass a whole action when the
+                // pinned large-text bullet leaves a short visible area.
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
+                    .press(
+                        forDuration: 0.05,
+                        thenDragTo: app.coordinate(
+                            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)))
+            }
+            if !control.isHittable { attachScreenshot(app, "Unreachable large-text action") }
+            XCTAssertTrue(control.isHittable, "An action isn't tappable at the largest text size")
+            XCTAssertGreaterThanOrEqual(control.frame.minX, window.minX - 1)
+            XCTAssertLessThanOrEqual(control.frame.maxX, window.maxX + 1, "An action extends past the screen")
+        }
+        attachScreenshot(app, "Topic actions at the largest text size")
     }
 
     /// Tap → expanded under 100 ms (#58), as the app measured it
