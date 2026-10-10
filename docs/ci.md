@@ -13,7 +13,7 @@ evaluation.
 | `lint`          | swift-format (`make lint`), then the shell-script tests    | `make lint test-scripts` | nothing |
 | `package-tests` | `swift build --build-tests` and `swift test` in `Packages/BlauKit` on the macOS host | `make test-kit` | Swift Testing xUnit report |
 | `app-unit-tests` | XcodeGen, then the `Blau` test plan's unit tests (`BlauTests`) on an iOS Simulator | `make test-unit` | `app-unit-tests-xcresult` |
-| `app-ui-tests (K/3)` | Three jobs, one per shard: XcodeGen, the build, a warm-up launch of the app on the simulator, then the K-th third of `BlauUITests`, then a check that the result bundle ran every test of the shard ([UI-test shards](#ui-test-shards)) | `make test-ui UI_SHARD=K/3` | `app-ui-tests-K-xcresult` |
+| `app-ui-tests (K/4)` | Four jobs, one per shard: XcodeGen, the build, a warm-up launch of the app on the simulator, then the K-th quarter of `BlauUITests`, then a check that the result bundle ran every test of the shard ([UI-test shards](#ui-test-shards)) | `make test-ui UI_SHARD=K/4` | `app-ui-tests-K-xcresult` |
 | `app-tests`     | Waits for `app-unit-tests` and every `app-ui-tests` shard and passes only if all of them passed: the one check for the app's tests (ubuntu, seconds) | `make test` runs the same tests in one go | nothing |
 | `perf-kit`      | The BlauKit micro-benchmarks (package-benchmark) on the macOS host; fails when an allocation count (and, on a machine with performance counters, an instruction count) is more than 10% above `Packages/BlauKitBenchmarks/Thresholds` ([performance.md](performance.md#micro-benchmarks)) | `make microbench-check` | `perf-kit-results` (the check's output), 30 days; the output on the summary page |
 | `perf`          | Nightly (and on demand) only: `Blau-Perf` scheme, `BlauPerf` test plan, Release with the scripted session, then the regression gate against `BlauPerfTests/Baselines/ci-simulator.json`: 10% on memory, tolerances calibrated to the runner's run-to-run spread on time ([performance.md](performance.md#the-regression-gate)) | `make perf perf-check` | `perf-results` (`perf.xcresult`, `perf-report.md`, `perf-results.json`), 90 days; the report on the summary page |
@@ -43,7 +43,7 @@ machine; device numbers are a separate, manual table.
 
 - `pull_request`, `push` to `main`, `merge_group` (GitHub merge queue) and
   `workflow_dispatch` run `lint`, `package-tests`, `app-unit-tests`, the
-  three `app-ui-tests` shards, `app-tests` and `perf-kit`.
+  four `app-ui-tests` shards, `app-tests` and `perf-kit`.
 - `schedule` (08:23 UTC daily, `main`) runs those plus `perf`, `soak`,
   `asr-eval` and `memory-eval`. **Run workflow** has a checkbox for each of
   the four (and a length for the soak).
@@ -134,7 +134,7 @@ the suite outgrew its 40-minute limit (#179; push run
 [38013389852](https://github.com/joeblau/voice/actions/runs/38013389852) was
 cancelled in `SettingsUITests` after about 30 minutes of UI tests, with 38 of
 the 93 still to run). So `app-unit-tests` runs `BlauTests` alone and the
-`app-ui-tests` matrix splits `BlauUITests` over three jobs.
+`app-ui-tests` matrix splits `BlauUITests` over four jobs.
 
 [`scripts/ci/ui-test-shard.sh`](../scripts/ci/ui-test-shard.sh) lists every
 XCTest method in `BlauUITests` from the sources, sorts them by
@@ -146,8 +146,8 @@ into `-only-testing:BlauUITests/<Class>/<testMethod>` arguments, so a shard's
 failure reproduces locally with the command in the job's log:
 
 ```sh
-make test-ui UI_SHARD=2/3 DESTINATION='id=<simulator udid>'
-scripts/ci/ui-test-shard.sh --list 2/3   # which tests that is
+make test-ui UI_SHARD=2/4 DESTINATION='id=<simulator udid>'
+scripts/ci/ui-test-shard.sh --list 2/4   # which tests that is
 ```
 
 Nothing is dropped:
@@ -159,9 +159,10 @@ Nothing is dropped:
   together are every UI test, each exactly once.
 - After testing, each shard runs `ui-test-shard.sh --check`, which fails
   unless the result bundle ran exactly as many tests as the shard selected
-  (skipped ones count), so a selection that matched nothing cannot pass.
+  (skipped and failed ones count), so a selection that matched nothing
+  cannot pass. It runs after failing tests too.
 
-To change the number of shards, edit the matrix (`shard: [1, 2, 3]`); the
+To change the number of shards, edit the matrix (`shard: [1, 2, 3, 4]`); the
 jobs pass `strategy.job-total` as N. `make test` and `make test-ui` without
 `UI_SHARD` still run everything in one go.
 
@@ -169,8 +170,8 @@ Two things the single job got for free need doing in each shard:
 
 - **A warm simulator.** On a cold runner simulator the app's first launch
   outlasted XCUITest's launch timeout ("Timed out while launching
-  application"), failing the first test of two of the three shards on the
-  first sharded run. In one job the app-hosted unit tests had absorbed that.
+  application"), failing the first test of two of the three shards of the
+  first sharded run (38018073024). In one job the app-hosted unit tests had absorbed that.
   So each shard builds first (`make build-tests`), then
   [`scripts/ci/warm-simulator.sh`](../scripts/ci/warm-simulator.sh) boots the
   device, waits for it, and installs and launches the app once with the UI
@@ -186,24 +187,25 @@ Two things the single job got for free need doing in each shard:
 
 ## Runtime
 
-The budget is under 15 minutes per job with a warm cache, and the jobs run in
-parallel, so a run takes as long as its slowest job (when enough runners are
-free; otherwise jobs queue). Measured on the pull request that added CI (#15)
-and on push run 38013389852 (#179), `xcode-27` image, Xcode 27.1, warm cache:
+The jobs run in parallel, so a run takes as long as its slowest job when
+enough runners are free; when they aren't, jobs queue, which can take longer
+than the jobs. Measured on the pull request for #179 (runs 38018073024 and
+38021860678), `xcode-27` image, Xcode 27.1, warm cache:
 
 | Job             | Duration | Where the time goes |
 | --------------- | -------- | ------------------- |
 | `lint`          | ~1 min   | swift-format, script tests |
-| `package-tests` | 1 to 8 min | cache restore (~580 MB), build (up to 4.5 min), up to 2 min of tests |
-| `app-unit-tests` | about 10 min | ~2 min build; then booting the simulator and the unit tests |
-| `app-ui-tests` (each) | about 20 min | ~2 min build, booting the simulator, then about a third of the 46 minutes the UI tests take in a row |
+| `package-tests` | 6 to 8 min | cache restore (~580 MB), build (up to 4.5 min), up to 2 min of tests |
+| `app-unit-tests` | about 9 min | 2.5 min build; booting the simulator, then 306 unit tests in about 4 min |
+| `app-ui-tests` (each, three shards) | 24 to 36 min | 4 to 8 min build, 3 to 8 min booting and warming the simulator, then 14 to 21 min of UI tests |
 
-UI testing dominates and grows with the number of UI tests, not with the
-code. When the shards approach their limit, add a shard before reaching for a
-larger runner. Each job's `timeout-minutes` (15 to 45, 60 for `asr-eval`, 75
-for `soak`, 90 for `perf`) is a safety net for a hung simulator, not the
-budget: `app-unit-tests` has 30 and each `app-ui-tests` shard 45, about twice
-what they take.
+The UI tests take 45 to 55 minutes in a row on the runner, and grow with the
+number of UI tests, not with the code. Four shards bring each job to about
+half its limit. When the shards approach their limit, add a shard before
+reaching for a larger runner. Each job's `timeout-minutes` (15 to 60, 75 for
+`soak`, 90 for `perf`) is a safety net for a hung simulator, not the budget:
+`app-unit-tests` has 30 and each `app-ui-tests` shard 60, about twice what
+they take on a busy runner.
 
 ## Secrets
 

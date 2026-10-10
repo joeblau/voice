@@ -221,18 +221,20 @@ jobs:
 
   # The UI tests, one slice per matrix job: scripts/ci/ui-test-shard.sh deals
   # the test methods out over strategy.job-total shards, so adding a shard is
-  # adding a number to the list. All of BlauUITests in one job took about 46
-  # minutes of testing; a third is about 15, plus the build and the boot.
+  # adding a number to the list. The 93 UI tests take 45 to 55 minutes in a
+  # row on the runner; with three shards a job took 24 to 36 minutes (up to 8
+  # of them building and 8 warming the simulator on a busy runner), so four
+  # shards keep each job near half its limit.
   app-ui-tests:
     name: app-ui-tests (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ${{ vars.BLAU_CI_RUNNER || 'xcode-27' }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       # One failing shard does not cancel the others, so a run reports every
       # failing UI test.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     env:
       UI_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
     steps:
@@ -275,8 +277,9 @@ jobs:
           DESTINATION: ${{ steps.simulator.outputs.destination }}
         run: make build-tests
 
+      # Three to eight minutes on the runner.
       - name: Warm up simulator
-        timeout-minutes: 10
+        timeout-minutes: 15
         continue-on-error: true
         env:
           UDID: ${{ steps.simulator.outputs.udid }}
@@ -284,13 +287,17 @@ jobs:
 
       # The same flags as app-unit-tests. The build is already done.
       - name: Test
+        id: test
         env:
           DESTINATION: ${{ steps.simulator.outputs.destination }}
           XCODEBUILD_FLAGS: "-resultBundlePath .build/results/app-ui-tests.xcresult -parallel-testing-enabled NO -collect-test-diagnostics never"
         run: make test-ui UI_SHARD="$UI_SHARD"
 
-      # A selection that matched no test would otherwise pass with nothing run.
+      # A selection that matched no test would otherwise pass with nothing
+      # run. Also after failing tests, which count, so every run shows the
+      # shard ran its whole slice.
       - name: Check the shard ran all its tests
+        if: ${{ !cancelled() && steps.test.outcome != 'skipped' }}
         run: scripts/ci/ui-test-shard.sh --check "$UI_SHARD" .build/results/app-ui-tests.xcresult
 
       - name: Shut down simulator
