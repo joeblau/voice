@@ -269,31 +269,51 @@ public actor VerificationGate {
     /// point. VAD's audio simply carries on after a split, so without it the
     /// continuation's audio would begin up to a second after its start.
     private func seedContinuation(_ id: Int) {
-        guard let tail = splitTail, var segment = segments[id], segment.samples.isEmpty,
-            tail.sampleRate == segment.sampleRate, tail.sampleOffset <= segment.start,
-            segment.start < tail.nextSampleOffset
-        else { return }
-        let limit = Int(configuration.maximumBufferedSpeech.sampleCount(sampleRate: segment.sampleRate))
-        let skip = Int(segment.start - tail.sampleOffset)
-        segment.samples.append(contentsOf: tail.samples[skip...].prefix(limit))
-        segments[id] = segment
-        shared.withLock { $0.seededContinuations += 1 }
+        guard let tail = splitTail else { return }
+        let seeded = updateSegment(id) { segment in
+            guard segment.samples.isEmpty, tail.sampleRate == segment.sampleRate,
+                tail.sampleOffset <= segment.start, segment.start < tail.nextSampleOffset
+            else { return false }
+            let limit = Int(configuration.maximumBufferedSpeech.sampleCount(sampleRate: segment.sampleRate))
+            let skip = Int(segment.start - tail.sampleOffset)
+            segment.samples.append(contentsOf: tail.samples[skip...].prefix(limit))
+            return true
+        }
+        if seeded == true { shared.withLock { $0.seededContinuations += 1 } }
     }
 
     private func append(_ frame: AudioFrame, to id: Int) {
-        guard var segment = segments[id], !segment.hasEnded, frame.sampleRate == segment.sampleRate else { return }
-        let limit = Int(configuration.maximumBufferedSpeech.sampleCount(sampleRate: segment.sampleRate))
-        guard segment.samples.count < limit else { return }
-        let end = segment.bufferedEnd
-        if frame.sampleOffset > end {
-            fillGap(end..<frame.sampleOffset, in: &segment, limit: limit)
+        let appended = updateSegment(id) { segment in
+            guard !segment.hasEnded, frame.sampleRate == segment.sampleRate else { return false }
+            let limit = Int(configuration.maximumBufferedSpeech.sampleCount(sampleRate: segment.sampleRate))
+            guard segment.samples.count < limit else { return false }
+            let end = segment.bufferedEnd
+            if frame.sampleOffset > end {
+                fillGap(end..<frame.sampleOffset, in: &segment, limit: limit)
+            }
+            let skip = Int(max(0, segment.bufferedEnd - frame.sampleOffset))
+            if skip < frame.sampleCount {
+                segment.samples.append(contentsOf: frame.samples[skip...].prefix(limit - segment.samples.count))
+            }
+            return true
         }
-        let skip = Int(max(0, segment.bufferedEnd - frame.sampleOffset))
-        if skip < frame.sampleCount {
-            segment.samples.append(contentsOf: frame.samples[skip...].prefix(limit - segment.samples.count))
-        }
-        segments[id] = segment
-        notifyWaiters()
+        if appended == true { notifyWaiters() }
+    }
+
+    /// Changes segment `id` in place and returns what `change` returned, or
+    /// `nil` when there is no such segment.
+    ///
+    /// The segment is taken out of `segments` while it changes, so its
+    /// audio buffer has a single owner. Copying it out (`var segment =
+    /// segments[id]`), appending and storing it back would copy the whole
+    /// buffer on every frame (copy-on-write): up to 20 s of audio per 20 ms
+    /// frame, gigabytes of short-lived allocations over a long session,
+    /// which fragmented the heap until the soak test's footprint grew
+    /// (#183).
+    private func updateSegment<Result>(_ id: Int, _ change: (inout Segment) -> Result) -> Result? {
+        guard var segment = segments.removeValue(forKey: id) else { return nil }
+        defer { segments[id] = segment }
+        return change(&segment)
     }
 
     /// Fills `gap`, audio of the segment VAD's stream didn't carry, from the
