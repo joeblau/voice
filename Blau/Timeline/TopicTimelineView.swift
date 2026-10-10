@@ -578,7 +578,12 @@ private struct TopicTimelineScrollView: View {
     private static let topAnchorHold = Duration.milliseconds(400)
 
     private func toggleExpansion(of id: UUID) {
-        withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) {
+        // A height animation also animates SwiftUI's scroll offset, defeating
+        // the same-frame hold. Insert the detail immediately; Now still
+        // returns with its spring and refined titles still cross-fade.
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
             _ = expansion.toggle(id, current: timeline.currentTopicID)
         }
     }
