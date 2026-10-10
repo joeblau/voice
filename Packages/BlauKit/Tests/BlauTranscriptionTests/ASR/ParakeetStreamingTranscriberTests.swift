@@ -167,6 +167,101 @@ struct ParakeetStreamingTranscriberTests {
         #expect(replay.statistics.commits[.silence] == 2)
     }
 
+    // MARK: Noise that keeps VAD open (#178)
+
+    /// Background voices keep VAD hearing speech, so its fallback never
+    /// starts, and the model's EOU head doesn't fire (in noise it fires late
+    /// or not at all: `cafe-05` on the CPU, `cafe-02` everywhere). Before
+    /// the word-timing fallback both sentences came out as one final when
+    /// the stream ended, so the first turn waited for the second sentence
+    /// (5 s on `cafe-05`, the ASR eval's end-of-utterance p95 regression).
+    /// Now each ends `silenceCommitDelay` after its last word, as in a quiet
+    /// room, and the model carries on in the same context between them.
+    @Test func noiseThatKeepsVADHearingSpeechStillEndsEachSentenceAfterItsLastWord() async throws {
+        let scenario = Scenario(seconds: 9)
+            .speech("can you read me the notes", from: 0.8, to: 2.3, endsUtterance: false)
+            .speech("only the hiring part", from: 3.9, to: 5.2, endsUtterance: false)
+        let recognizer = SimulatedEouRecognizer(words: scenario.words)
+        let source = FixtureAudioSource(block: scenario.samples)
+        let replay = await TranscriptionReplay.run(
+            makeTranscriber(recognizer, source: source), source: source,
+            vadEvents: scenario.eventsWithVADHearingSpeechThroughout, vadLag: 320)
+
+        try #require(replay.finals.map(\.text) == ["can you read me the notes", "only the hiring part"])
+        #expect(replay.statistics.commits == [.wordSilence: 2, .streamEnded: 1])
+        #expect(replay.statistics.blankUtterancesDropped == 1, "The rest of the noise, at the end of the stream")
+        // 0.9 s of decoded audio after the last word, plus the model's
+        // lookahead (310 ms) and up to one chunk (320 ms): long before the
+        // stream ends (the second sentence used to wait for that).
+        for (emission, end) in zip(replay.finalEmissions, [2.3, 5.2]) {
+            let delay = Double(emission.position) / 16_000 - end
+            #expect(delay >= 0.9 && delay < 1.6, "\(delay)")
+        }
+        // Each utterance spans its own words.
+        let (first, second) = (replay.finals[0], replay.finals[1])
+        #expect(first.timeRange.end == .samples(36_800, sampleRate: 16_000))
+        #expect(second.timeRange.start >= first.timeRange.end)
+        #expect(second.timeRange.start < .seconds(3.9))
+        #expect(second.timeRange.end == .samples(83_200, sampleRate: 16_000))
+        // The model carried on between the sentences (only the stream end
+        // reset it), and its audio stayed contiguous.
+        #expect(await recognizer.utterancesContinued == 2)
+        #expect(await recognizer.resets == 1)
+        #expect(await recognizer.finishes == 1)
+        #expect(await recognizer.discontinuities == 0)
+        let transcribed = await recognizer.transcribed
+        #expect(transcribed.count == 1)
+    }
+
+    /// A recognizer without `startNextUtterance()` is reset after the
+    /// word-timing fallback instead, and the next utterance reads the audio
+    /// after the cut back from the history: same sentences, nothing lost or
+    /// repeated.
+    @Test func aRecognizerThatCannotCarryOnIsResetAfterTheWordTimingFallback() async throws {
+        let scenario = Scenario(seconds: 9)
+            .speech("can you read me the notes", from: 0.8, to: 2.3, endsUtterance: false)
+            .speech("only the hiring part", from: 3.9, to: 5.2, endsUtterance: false)
+        let recognizer = SimulatedEouRecognizer(words: scenario.words, continuesUtterances: false)
+        let source = FixtureAudioSource(block: scenario.samples)
+        let replay = await TranscriptionReplay.run(
+            makeTranscriber(recognizer, source: source), source: source,
+            vadEvents: scenario.eventsWithVADHearingSpeechThroughout, vadLag: 320)
+
+        #expect(replay.finals.map(\.text) == ["can you read me the notes", "only the hiring part"])
+        #expect(replay.statistics.commits == [.wordSilence: 2, .streamEnded: 1])
+        #expect(await recognizer.utterancesContinued == 0)
+        #expect(await recognizer.resets == 3)
+        #expect(await recognizer.discontinuities == 0)
+    }
+
+    /// The model's token history keeps growing while it carries on, so the
+    /// transcriber still resets it once it holds `maximumUtteranceDuration`
+    /// of audio, even though no utterance got that long.
+    @Test func theRecognizerCarriesOnForAtMostTheMaximumUtteranceDuration() async throws {
+        let scenario = Scenario(seconds: 9)
+            .speech("one two", from: 0.5, to: 1.0, endsUtterance: false)
+            .speech("three four", from: 2.5, to: 3.0, endsUtterance: false)
+            .speech("five six", from: 4.5, to: 5.0, endsUtterance: false)
+            .speech("seven eight", from: 6.5, to: 7.0, endsUtterance: false)
+        let recognizer = SimulatedEouRecognizer(words: scenario.words)
+        let source = FixtureAudioSource(block: scenario.samples)
+        let transcriber = makeTranscriber(
+            recognizer, source: source, configuration: .init(maximumUtteranceDuration: .seconds(4)))
+        let replay = await TranscriptionReplay.run(
+            transcriber, source: source, vadEvents: scenario.eventsWithVADHearingSpeechThroughout, vadLag: 320)
+
+        #expect(replay.finals.map(\.text) == ["one two", "three four", "five six", "seven eight"])
+        #expect(replay.statistics.commits[.wordSilence] == 4)
+        #expect(replay.statistics.commits[.maximumLength] == nil)
+        // Carried on after the first and third sentences; reset after the
+        // second and fourth (the history then covered more than 4 s), and at
+        // the end of the stream.
+        #expect(await recognizer.utterancesContinued == 2)
+        #expect(await recognizer.resets == 3)
+        #expect(await recognizer.maximumHistory == 4)
+        #expect(await recognizer.discontinuities == 0)
+    }
+
     @Test func theMaximumLengthSplitsAMonologueWithoutLosingOrRepeatingAudio() async throws {
         // 12 s of speech with no pause; VAD splits it at 8 s itself.
         let words = (0..<40).map { "w\($0)" }.joined(separator: " ")
@@ -684,6 +779,23 @@ struct Scenario {
     /// Room tone at -60 dBFS (the simulated recognizer ignores the audio).
     var samples: [Float] {
         roomNoise(count: Int(seconds * 16_000), levelDecibels: -60, seed: 7)
+    }
+
+    /// VAD's events when background voices (a cafe, a TV) keep it hearing
+    /// speech for the whole scenario: one segment from the start, confirmed
+    /// 300 ms in, that only the end of the stream closes. Use them instead
+    /// of `events`.
+    var eventsWithVADHearingSpeechThroughout: [VoiceActivityEvent] {
+        let end = Int64(seconds * 16_000)
+        return [
+            .speechStarted(
+                SpeechOnset(segmentID: 0, startOffset: 0, sampleRate: 16_000, isContinuation: false, detectedAt: 4_800)
+            ),
+            .speechEnded(
+                SpeechSegment(
+                    id: 0, sampleRange: 0..<end, sampleRate: 16_000, endReason: .streamEnded, detectedAt: end,
+                    peakProbability: 0.9, meanProbability: 0.7)),
+        ]
     }
 
     func speech(

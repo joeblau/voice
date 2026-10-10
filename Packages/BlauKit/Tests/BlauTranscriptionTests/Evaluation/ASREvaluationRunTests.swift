@@ -23,6 +23,7 @@ import Testing
 /// | `BLAU_ASR_EVAL_GATE` | `1` | `0` reports the gate without failing |
 /// | `BLAU_ASR_EVAL_BASELINE` | none | A previous `report.json` to compare with (`docs/asr-eval/baseline.json`) |
 /// | `BLAU_ASR_EVAL_COMMIT` | `GITHUB_SHA` | The commit recorded in the report |
+/// | `BLAU_ASR_EVAL_COMPUTE_UNITS` | `default` | `cpu` runs the streaming engine's models on the CPU only, as on the CI runners |
 @Suite(
     "ASR evaluation run (real models)",
     .enabled(if: ProcessInfo.processInfo.environment["BLAU_ASR_EVAL"] == "1"),
@@ -41,6 +42,13 @@ struct ASREvaluationRunTests {
         value(key).map { value in
             value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         }.flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// `BLAU_ASR_EVAL_COMPUTE_UNITS`: `cpu`, or `default` (the app's units).
+    static func cpuOnly() throws -> Bool {
+        let units = value("BLAU_ASR_EVAL_COMPUTE_UNITS") ?? "default"
+        try #require(["cpu", "default"].contains(units), "BLAU_ASR_EVAL_COMPUTE_UNITS is cpu or default, not \(units)")
+        return units == "cpu"
     }
 
     @Test(.timeLimit(.minutes(60)))
@@ -68,7 +76,7 @@ struct ASREvaluationRunTests {
 
         var loaded: [any ASREvaluationEngine] = []
         for engine in engines {
-            loaded.append(try await engine.load(directories))
+            loaded.append(try await engine.load(directories, cpuOnly: try Self.cpuOnly()))
         }
 
         let started = ContinuousClock.now
@@ -123,14 +131,16 @@ enum ASREvaluationEngineID: String, CaseIterable, CustomStringConvertible {
         }
     }
 
-    func load(_ directories: [ModelID: URL]) async throws -> any ASREvaluationEngine {
+    /// - Parameter cpuOnly: The streaming engine's models on the CPU only
+    ///   (`BLAU_ASR_EVAL_COMPUTE_UNITS=cpu`).
+    func load(_ directories: [ModelID: URL], cpuOnly: Bool = false) async throws -> any ASREvaluationEngine {
         let manifest = ModelManifest.pinned
         switch self {
         case .parakeetEOU:
             return try await StreamingASREvaluationEngine.parakeetRealtimeEOU(
                 modelDirectory: try #require(directories[.parakeetRealtimeEOU]),
                 vadModelDirectory: try #require(directories[.sileroVAD]),
-                revision: manifest[.parakeetRealtimeEOU]?.revision)
+                revision: manifest[.parakeetRealtimeEOU]?.revision, cpuOnly: cpuOnly)
         case .parakeetTDTv3:
             return try await OfflineASREvaluationEngine.parakeetTDTv3(
                 modelDirectory: try #require(directories[.parakeetTDTv3]),

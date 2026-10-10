@@ -1,5 +1,5 @@
 {
-  "description": "Regression gate for make eval-asr and the nightly asr-eval job (docs/asr-eval.md). WER and audio-time latency limits are the 2026-10-07 baseline plus a margin of a few words or 150-450 ms; latency with compute and RTF are ceilings with room for the CI virtual machine, which has no Neural Engine. The parakeet-tdt-v3 end-of-utterance audio limit is a sanity check rather than a regression gate: that latency is the second pass's trailing padding (120 ms, SecondPassConfiguration), so it only fails when the harness stops cutting the audio the shipped second pass reads. Tighten them once nightly runs have a history.",
+  "description": "Regression gate for make eval-asr and the nightly asr-eval job (docs/asr-eval.md). WER and audio-time latency limits are the 2026-10-07 baseline plus a margin of a few words or 150-450 ms (parakeet-eou-320ms end of utterance and unended: the 2026-10-10 baseline of #178, 1495 ms and 1 unended on both the Neural Engine and the CPU, plus 405 ms and 2); latency with compute and RTF are ceilings with room for the CI virtual machine, which has no Neural Engine. The parakeet-tdt-v3 end-of-utterance audio limit is a sanity check rather than a regression gate: that latency is the second pass's trailing padding (120 ms, SecondPassConfiguration), so it only fails when the harness stops cutting the audio the shipped second pass reads. Tighten them once nightly runs have a history.",
   "engines": {
     "parakeet-eou-320ms": {
       "maxWER": 0.13,
@@ -11,12 +11,12 @@
       },
       "maxFirstPartialAudioP95Ms": 1400,
       "maxFirstPartialP95Ms": 2000,
-      "maxEndOfUtteranceAudioP95Ms": 2600,
+      "maxEndOfUtteranceAudioP95Ms": 1900,
       "maxEndOfUtteranceP95Ms": 3500,
       "maxRealTimeFactor": 0.5,
       "maxMissedUtterances": 1,
       "maxSplitUtterances": 1,
-      "maxUnendedUtterances": 12,
+      "maxUnendedUtterances": 3,
       "maxFailures": 0
     },
     "parakeet-tdt-v3": {

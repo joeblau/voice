@@ -37,8 +37,11 @@ import os
 /// 1. the model confirms the end of utterance (`ParakeetEouRecognizer`);
 /// 2. `silenceCommitDelay` of audio has passed since the end of speech VAD
 ///    reported, with no new speech (the VAD fallback);
-/// 3. the utterance reaches `maximumUtteranceDuration`;
-/// 4. the stream ends or `stop()` is called.
+/// 3. while VAD still hears speech (noise it can't tell from a voice), the
+///    model has decoded `silenceCommitDelay` of audio past the last word
+///    without a new one (the word-timing fallback);
+/// 4. the utterance reaches `maximumUtteranceDuration`;
+/// 5. the stream ends or `stop()` is called.
 ///
 /// Speech that resumes before then (VAD reports a new onset) carries on in
 /// the same utterance, so a pause to think doesn't split a sentence. After a
@@ -95,6 +98,9 @@ public actor ParakeetStreamingTranscriber: Transcriber {
     /// earlier.
     private var committedEnd: Int64 = 0
     private var utterance: OpenUtterance?
+    /// Where the audio the recognizer has decoded since its last `reset()`
+    /// starts: utterances the word-timing fallback ended don't reset it.
+    private var recognizerSessionStart: Int64?
     private var nextUtteranceNumber = 0
     private var consecutiveFailures = 0
     /// Chunk sizes the provider couldn't supply, so they aren't retried for
@@ -400,6 +406,7 @@ public actor ParakeetStreamingTranscriber: Transcriber {
 
             let output: RecognizerOutput
             do {
+                recognizerSessionStart = recognizerSessionStart ?? audio.sampleOffset
                 output = try await recognizer.append(audio)
                 consecutiveFailures = 0
             } catch {
@@ -483,27 +490,49 @@ public actor ParakeetStreamingTranscriber: Transcriber {
         utterance = open
     }
 
-    /// Commits on the VAD fallback or the length limit when they are due.
+    /// Commits on the VAD fallback, the word-timing fallback or the length
+    /// limit when they are due.
     private func commitIfDue() async {
         guard let open = utterance else { return }
         if let speechEnd = open.speechEnd, open.fedEnd >= speechEnd + configuration.silenceCommitSamples {
             await commit(.silence)
+        } else if Self.wordSilenceIsDue(open, silenceCommitSamples: configuration.silenceCommitSamples) {
+            await commit(.wordSilence)
         } else if open.fedEnd - open.audioStart >= configuration.maximumUtteranceSamples {
             await commit(.maximumLength)
         }
     }
 
+    /// The word-timing fallback: VAD still hears speech (background noise
+    /// it can't tell from a voice keeps its segment open, so the VAD
+    /// fallback never starts), but the model has decoded
+    /// `silenceCommitDelay` of audio past the last word without a new one.
+    /// The same pause that ends an utterance in a quiet room, measured on
+    /// the words instead of VAD's end of speech. Without it only the
+    /// model's end-of-utterance head can end the turn, and in noise it
+    /// fires late or not at all: the next sentence is then merged into this
+    /// one, and the turn waits for it (#178).
+    private static func wordSilenceIsDue(_ open: OpenUtterance, silenceCommitSamples: Int64) -> Bool {
+        guard open.speechEnd == nil, let lastTokenEnd = open.lastTokenEnd, !normalized(open.transcript).isEmpty
+        else { return false }
+        return open.decodedSamples - lastTokenEnd >= silenceCommitSamples
+    }
+
     /// Ends the open utterance: emits its final (unless it is blank), resets
-    /// the recognizer, and opens the next one at once if speech is still
-    /// going on.
+    /// the recognizer (or, after the word-timing fallback, lets it carry on
+    /// into the next utterance), and opens the next one at once if speech is
+    /// still going on.
     private func commit(_ reason: UtteranceCommitReason) async {
         guard var open = utterance else { return }
         utterance = nil
 
         var position = open.fedEnd
-        if reason == .endOfUtterance {
-            // What the model decoded up to its decision; audio after it is
-            // the next utterance's.
+        let endsAtTheDecodedAudio = reason == .endOfUtterance || reason == .wordSilence
+        if endsAtTheDecodedAudio {
+            // What the model decoded up to its decision (for the word-timing
+            // fallback: the last word and the silence decoded after it); the
+            // audio after it is the next utterance's, read back from the
+            // history if speech goes on.
             position = min(open.fedEnd, open.audioStart + open.decodedSamples)
         } else if reason != .recognizerFailure {
             // On silence the recognizer has been fed `silenceCommitDelay`
@@ -528,9 +557,13 @@ public actor ParakeetStreamingTranscriber: Transcriber {
                     "Streaming ASR couldn't flush the utterance: \(String(describing: error), privacy: .public)")
             }
         }
-        await recognizer.reset()
+        let keepsListening = await continuesRecognizer(after: reason, open: open)
+        if !keepsListening {
+            await recognizer.reset()
+            recognizerSessionStart = nil
+        }
         let speechEnd = open.speechEnd.flatMap { $0 > open.audioStart && $0 < position ? $0 : nil }
-        committedEnd = max(committedEnd, reason == .endOfUtterance ? position : speechEnd ?? position)
+        committedEnd = max(committedEnd, endsAtTheDecodedAudio ? position : speechEnd ?? position)
 
         _ = open.endOfSpeechInterval?.end(message: reason.rawValue)
         let text = Self.normalized(open.transcript)
@@ -551,7 +584,7 @@ public actor ParakeetStreamingTranscriber: Transcriber {
                 "Utterance \(open.number, privacy: .public) had no words (\(reason.rawValue, privacy: .public))")
         } else {
             let utterance = makeUtterance(open, text: text, position: position)
-            if reason == .endOfUtterance || reason == .silence {
+            if reason == .endOfUtterance || reason == .silence || reason == .wordSilence {
                 // Before the final goes out, so the orchestrator finds them.
                 latencyMarks?.record(
                     .init(endOfSpeech: uptime(at: utterance.timeRange.end), endOfUtterance: clock.uptime),
@@ -572,9 +605,32 @@ public actor ParakeetStreamingTranscriber: Transcriber {
             // Still speaking (a long monologue, or the model ended the
             // utterance mid-segment): the next one starts where this ended.
             openUtterance(at: position)
+            if keepsListening, var next = utterance {
+                // The recognizer already holds the audio up to here.
+                next.fedEnd = max(position, open.fedEnd)
+                utterance = next
+            }
         } else {
             await applyChunkSizePolicy()
         }
+    }
+
+    /// Whether the recognizer carries on into the next utterance instead of
+    /// being reset (`StreamingSpeechRecognizer.startNextUtterance()`): only
+    /// after the word-timing fallback, while VAD still hears speech, and
+    /// while the recognizer's token history, which keeps growing until the
+    /// next reset, covers less than `maximumUtteranceDuration` of audio.
+    ///
+    /// VAD stays open there because of voices in the background (a TV, a
+    /// cafe). A reset model hears only them and transcribes them into
+    /// utterances of their own; the model that has just heard the user
+    /// mostly doesn't, while the user's own next sentence still comes
+    /// through.
+    private func continuesRecognizer(after reason: UtteranceCommitReason, open: OpenUtterance) async -> Bool {
+        guard reason == .wordSilence, isSpeechActive, let start = recognizerSessionStart,
+            open.fedEnd - start < configuration.maximumUtteranceSamples
+        else { return false }
+        return await recognizer.startNextUtterance()
     }
 
     private func recognizerFailed(_ error: any Error) async {

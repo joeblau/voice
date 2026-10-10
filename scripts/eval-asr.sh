@@ -23,6 +23,9 @@
 #                           release` doesn't build on main yet, see
 #                           docs/asr-eval.md)
 #   ASR_EVAL_COMMIT         commit recorded in the report (default GITHUB_SHA or HEAD)
+#   ASR_EVAL_COMPUTE_UNITS  default (the app's: Neural Engine with CPU fallback) or
+#                           cpu, the streaming engine's models on the CPU only, as
+#                           on the CI runners (no Neural Engine)
 
 set -eu
 
@@ -80,6 +83,7 @@ status=0
         BLAU_ASR_EVAL_CATEGORIES="${ASR_EVAL_CATEGORIES:-}" \
         BLAU_ASR_EVAL_MANIFEST="$manifest" \
         BLAU_ASR_EVAL_COMMIT="$commit" \
+        BLAU_ASR_EVAL_COMPUTE_UNITS="${ASR_EVAL_COMPUTE_UNITS:-}" \
         swift test -c "$configuration" --filter ASREvaluationRunTests
 ) || status=$?
 

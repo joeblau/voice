@@ -11,6 +11,11 @@ public struct StreamingTranscriberConfiguration: Hashable, Sendable {
     /// speech without the model confirming the end of the utterance or
     /// speech resuming. Measured from the end of the speech as VAD places
     /// it (to 16 ms), on the audio timeline.
+    ///
+    /// It is also the word-timing fallback's delay, for when VAD can't hear
+    /// the pause (background noise keeps its segment open): the utterance
+    /// is committed once the model has decoded this much audio past the
+    /// last word without a new one.
     public var silenceCommitDelay: Duration
 
     /// The longest utterance. Longer speech is committed at this length and
@@ -54,6 +59,11 @@ public enum UtteranceCommitReason: String, CaseIterable, Hashable, Sendable {
     /// VAD reported the end of speech and `silenceCommitDelay` passed with
     /// no end of utterance from the model (the VAD fallback).
     case silence
+    /// VAD still heard speech (noise kept its segment open), but the model
+    /// decoded `silenceCommitDelay` of audio past the last word without a
+    /// new one and without confirming the end of the utterance (the
+    /// word-timing fallback).
+    case wordSilence
     /// The utterance reached `maximumUtteranceDuration`.
     case maximumLength
     /// The audio stream ended (capture stopped or VAD closed the segment at

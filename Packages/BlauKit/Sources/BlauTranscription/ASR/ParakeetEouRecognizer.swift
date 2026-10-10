@@ -33,7 +33,10 @@ import os
 /// `finish()` clears the tokens but keeps the confirmed end-of-utterance
 /// flag (so no later end would fire) and the encoder caches. The
 /// transcriber calls `reset()` after each committed utterance, so the work
-/// per chunk stays flat over an hour.
+/// per chunk stays flat over an hour. The one exception is the
+/// transcriber's word-timing fallback (`startNextUtterance()`), which lets
+/// the model carry on into the next utterance for at most
+/// `maximumUtteranceDuration` of audio before a reset.
 ///
 /// **End of utterance.** FluidAudio confirms the end once
 /// `eouDebounceMs` of audio has been decoded since the model's EOU token
@@ -54,8 +57,14 @@ public actor ParakeetEouRecognizer: StreamingSpeechRecognizer {
     private var buffered = 0
     /// Audio decoded since the last reset (chunks × shift).
     private var decodedSamples: Int64 = 0
+    /// The current utterance's transcript and last token end (relative to
+    /// `utteranceStart`).
     private var transcript = ""
     private var lastTokenEnd: Int64?
+    /// Where the current utterance starts, after `startNextUtterance()`:
+    /// the tokens FluidAudio decoded before it (it keeps them until
+    /// `reset()`) and the audio decoded before it. Zero after a reset.
+    private var utteranceStart: (tokens: Int, samples: Int64) = (0, 0)
 
     /// The default debounce: two 320 ms chunks of silence after the EOU
     /// token (see docs/asr.md for why not the 800 ms first proposed).
@@ -133,7 +142,7 @@ public actor ParakeetEouRecognizer: StreamingSpeechRecognizer {
 
     public func append(_ frame: AudioFrame) async throws -> RecognizerOutput {
         precondition(frame.sampleRate == AudioFrame.captureSampleRate, "Parakeet takes 16 kHz audio")
-        var output = RecognizerOutput(transcript: transcript, decodedSamples: decodedSamples)
+        var output = RecognizerOutput(transcript: transcript, decodedSamples: decodedSamples - utteranceStart.samples)
         let samples = frame.samples
         var index = 0
         while index < samples.count {
@@ -161,19 +170,20 @@ public actor ParakeetEouRecognizer: StreamingSpeechRecognizer {
 
             let fired = callbacks.take()
             if let partial = fired.partial {
-                transcript = partial
+                // FluidAudio's text covers every token since the reset.
+                transcript = utteranceStart.tokens == 0 ? partial : await keptTokens(through: nil).text
                 output.hasNewText = true
                 lastTokenEnd = await tokenEnd()
             }
             if let final = fired.endOfUtterance {
-                transcript = final
+                transcript = utteranceStart.tokens == 0 ? final : await keptTokens(through: nil).text
                 output.isEndOfUtterance = true
                 break
             }
         }
         output.consumedSamples = index
         output.transcript = transcript
-        output.decodedSamples = decodedSamples
+        output.decodedSamples = decodedSamples - utteranceStart.samples
         output.lastTokenEnd = lastTokenEnd
         return output
     }
@@ -197,7 +207,7 @@ public actor ParakeetEouRecognizer: StreamingSpeechRecognizer {
         // The buffered audio after `decodedSamples` hasn't been decoded yet
         // (it was the window's lookahead). Decode what the transcript needs.
         let undecoded = Int64(buffered)
-        let needed = cutoff.map { min(max($0 - decodedSamples, 0), undecoded) } ?? undecoded
+        let needed = cutoff.map { min(max($0 + utteranceStart.samples - decodedSamples, 0), undecoded) } ?? undecoded
         let shift = Int64(chunkSize.shiftSamples)
         let chunks = Int((needed + shift - 1) / shift)
         for _ in 0..<chunks {
@@ -216,10 +226,10 @@ public actor ParakeetEouRecognizer: StreamingSpeechRecognizer {
 
         let tokens = await keptTokens(through: cutoff)
         output.hasNewText = tokens.text != transcript
-        lastTokenEnd = tokens.lastTimestampMs.map(samples(atMilliseconds:))
+        lastTokenEnd = tokens.lastTimestampMs.map(utteranceSamples(atMilliseconds:))
         transcript = tokens.text
         output.transcript = tokens.text
-        output.decodedSamples = decodedSamples
+        output.decodedSamples = decodedSamples - utteranceStart.samples
         output.lastTokenEnd = lastTokenEnd
         return output
     }
@@ -231,6 +241,29 @@ public actor ParakeetEouRecognizer: StreamingSpeechRecognizer {
         decodedSamples = 0
         transcript = ""
         lastTokenEnd = nil
+        utteranceStart = (0, 0)
+    }
+
+    /// Starts the next utterance at the audio decoded so far without
+    /// resetting FluidAudio: its encoder caches, decoder state and buffered
+    /// audio carry on, and the tokens it has decoded so far are left out of
+    /// what this recognizer reports from now on.
+    ///
+    /// FluidAudio keeps those tokens (and re-decodes them for each partial)
+    /// until `reset()`, so this is only for the transcriber's word-timing
+    /// fallback, which resets at least every `maximumUtteranceDuration`.
+    /// Returns `false`, leaving the state alone, when the token timestamps
+    /// don't line up with the tokens (not expected), since the next
+    /// utterance's tokens couldn't be told apart.
+    public func startNextUtterance() async -> Bool {
+        let timestamps = await manager.getTokenTimestampsMs()
+        let pieces = await manager.getRawTokenStrings()
+        guard pieces.count == timestamps.count else { return false }
+        utteranceStart = (pieces.count, decodedSamples)
+        callbacks.clear()
+        transcript = ""
+        lastTokenEnd = nil
+        return true
     }
 
     /// Releases the Core ML models. The recognizer can't be used afterwards.
@@ -240,9 +273,18 @@ public actor ParakeetEouRecognizer: StreamingSpeechRecognizer {
 
     // MARK: Internals
 
-    /// The end of the newest token, in samples since the last reset.
+    /// The end of the current utterance's newest token, in samples since
+    /// the utterance started.
     private func tokenEnd() async -> Int64? {
-        await manager.getTokenTimestampsMs().last.map(samples(atMilliseconds:))
+        let timestamps = await manager.getTokenTimestampsMs()
+        guard timestamps.count > utteranceStart.tokens else { return nil }
+        return timestamps.last.map(utteranceSamples(atMilliseconds:))
+    }
+
+    /// `samples(atMilliseconds:)` counted from the start of the current
+    /// utterance.
+    private func utteranceSamples(atMilliseconds milliseconds: Int) -> Int64 {
+        samples(atMilliseconds: milliseconds) - utteranceStart.samples
     }
 
     /// The end of a token timestamped `milliseconds` after the last reset, in
@@ -251,11 +293,12 @@ public actor ParakeetEouRecognizer: StreamingSpeechRecognizer {
         Int64(milliseconds) * Int64(AudioFrame.captureSampleRate) / 1_000 + Int64(chunkSize.frameSamples)
     }
 
-    /// The decoded tokens timestamped at or before `cutoff` (samples since
-    /// the last reset), as text.
+    /// The current utterance's decoded tokens timestamped at or before
+    /// `cutoff` (samples since the utterance started), as text.
     private func keptTokens(through cutoff: Int64?) async -> (text: String, lastTimestampMs: Int?) {
-        let timestamps = await manager.getTokenTimestampsMs()
-        let pieces = await manager.getRawTokenStrings()
+        let skipped = utteranceStart.tokens
+        let timestamps = Array(await manager.getTokenTimestampsMs().dropFirst(skipped))
+        let pieces = Array(await manager.getRawTokenStrings().dropFirst(skipped))
         guard pieces.count == timestamps.count else {
             // Not expected: FluidAudio appends both for every decoded token.
             // Keep everything rather than guess which tokens to drop.
@@ -265,9 +308,14 @@ public actor ParakeetEouRecognizer: StreamingSpeechRecognizer {
                 (\(timestamps.count, privacy: .public) vs \(pieces.count, privacy: .public)): no cutoff
                 """
             )
-            return (await manager.getPartialTranscript(), timestamps.last)
+            guard skipped > 0 else { return (await manager.getPartialTranscript(), timestamps.last) }
+            // FluidAudio's text would repeat the earlier utterances.
+            let all = Self.transcript(
+                pieces: pieces, timestampsMs: Array(repeating: 0, count: pieces.count), throughMilliseconds: nil)
+            return (all.text, timestamps.last)
         }
-        let cutoffMs = cutoff.map { $0 * 1_000 / Int64(AudioFrame.captureSampleRate) }
+        // Token timestamps count from the reset, not from the utterance.
+        let cutoffMs = cutoff.map { ($0 + utteranceStart.samples) * 1_000 / Int64(AudioFrame.captureSampleRate) }
         return Self.transcript(pieces: pieces, timestampsMs: timestamps, throughMilliseconds: cutoffMs)
     }
 
