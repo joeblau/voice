@@ -90,10 +90,14 @@ public enum ChatTranscript {
     ///
     /// An agent row is marked interrupted when it is in `interrupted` (the
     /// replies the turn orchestrator cut short in the running conversation,
-    /// `TurnSnapshot.interruptedAgentUtterances`), or when the next user
+    /// `TurnSnapshot.interruptedAgentUtterances`), when the store says so
+    /// (``ChatLine/isInterrupted``, written since schema v3 and synced, so it
+    /// holds after a relaunch and on other devices), or when the next user
     /// utterance started before the reply ended
-    /// (``isInterrupted(_:before:)``), which also holds after a relaunch and
-    /// on other devices.
+    /// (``isInterrupted(_:before:)``). That last rule is the fallback for
+    /// rows stored without the mark (before v3, or by an older app version);
+    /// it runs on every unmarked row, because an unmarked v3 row can't be
+    /// told from an older one.
     ///
     /// A user row in `waiting` (queued for the connection,
     /// `TurnSnapshot.queuedUtteranceIDs`) or `notSent` (discarded,
@@ -146,7 +150,12 @@ public enum ChatTranscript {
         if recorded.isEmpty {
             lines = stored
         } else {
-            lines = stored.map { recorded[$0.id] ?? $0 }
+            lines = stored.map { line in
+                guard var newer = recorded[line.id] else { return line }
+                // A just-recorded line carries no stored mark: keep it.
+                newer.isInterrupted = newer.isInterrupted || line.isInterrupted
+                return newer
+            }
             let storedIDs = Set(stored.map(\.id))
             lines += recorded.values.filter { !storedIDs.contains($0.id) }
         }
@@ -163,7 +172,8 @@ public enum ChatTranscript {
                     ChatRow(
                         id: line.id, role: line.role, text: line.text, startedAt: line.startedAt,
                         isInterrupted: line.role == .agent
-                            && (interrupted.contains(line.id) || isInterrupted(line, before: nextUser)),
+                            && (interrupted.contains(line.id) || line.isInterrupted
+                                || isInterrupted(line, before: nextUser)),
                         delivery: delivery(of: line, waiting: waiting, notSent: notSent)))
             }
             if line.role == .user {
@@ -178,11 +188,12 @@ public enum ChatTranscript {
     /// it: the user started speaking more than ``interruptionTolerance``
     /// before the reply ended.
     ///
-    /// The store keeps no "interrupted" flag (schema v1 is additive only),
-    /// but a cut reply is stored ending where it was heard, which is after
-    /// the user started the utterance that cut it (the cut happens when
-    /// that utterance is final). A reply that played to the end ends before
-    /// the user's next utterance starts.
+    /// The fallback for rows stored without the interrupted mark
+    /// (``ChatLine/isInterrupted``, schema v3): before v3, or by an older
+    /// app version on another device. A cut reply is stored ending where it
+    /// was heard, which is after the user started the utterance that cut it
+    /// (the cut happens when that utterance is final). A reply that played
+    /// to the end ends before the user's next utterance starts.
     public static func isInterrupted(_ agent: ChatLine, before next: ChatLine?) -> Bool {
         guard agent.role == .agent, let next, next.role == .user, let ended = agent.endedAt else { return false }
         return next.startedAt < ended.addingTimeInterval(-interruptionTolerance)

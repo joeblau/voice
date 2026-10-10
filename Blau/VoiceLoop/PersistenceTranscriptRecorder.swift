@@ -46,6 +46,10 @@ actor PersistenceTranscriptRecorder: TurnTranscriptRecording, RealtimeReseedCont
         try await currentStore().record(utterance)
     }
 
+    func markInterrupted(_ utteranceID: UUID, reason: UtteranceEndReason) async throws {
+        try await currentStore().markInterrupted(utteranceID, reason: reason)
+    }
+
     func finishConversation(_ id: ConversationID, at date: Date) async throws {
         defer { active = nil }
         try await currentStore().finishConversation(id, at: date)

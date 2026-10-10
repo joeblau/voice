@@ -3,7 +3,7 @@
 // the older versions untouched for migration.
 
 /// The schema version the app reads and writes.
-public typealias CurrentSchema = SchemaV2
+public typealias CurrentSchema = SchemaV3
 
 public typealias Conversation = CurrentSchema.Conversation
 

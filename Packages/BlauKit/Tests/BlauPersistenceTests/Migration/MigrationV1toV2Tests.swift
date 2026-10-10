@@ -26,7 +26,8 @@ enum V1StoreSource: String, CaseIterable, CustomTestStringConvertible {
     }
 }
 
-private func makeTemporaryDirectory() throws -> URL {
+/// A new temporary directory. Shared with the v2 → v3 migration tests.
+func makeTemporaryDirectory() throws -> URL {
     let url = FileManager.default.temporaryDirectory
         .appending(path: "blau-migration-\(UUID().uuidString)", directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -34,15 +35,17 @@ private func makeTemporaryDirectory() throws -> URL {
 }
 
 /// Opens `url` the way the app opens its synced store when iCloud is off.
-private func openMigrated(_ url: URL) throws -> ModelContainer {
+func openMigrated(_ url: URL) throws -> ModelContainer {
     try BlauModelContainer.make(configurations: [
         ModelConfiguration(
             BlauCloud.syncedConfigurationName, schema: BlauModelContainer.schema, url: url, cloudKitDatabase: .none)
     ])
 }
 
-/// Checks every fixture value through the v2 (current) model types.
-private func expectFixtureData(in container: ModelContainer) throws {
+/// Checks every value of the v1 fixture's data through the current model
+/// types. `SchemaV2Fixture` holds the same conversations and voiceprint, so
+/// the v2 → v3 tests check them with this too.
+func expectFixtureData(in container: ModelContainer) throws {
     let context = ModelContext(container)
     let conversations = try context.fetch(FetchDescriptor<Conversation>(sortBy: [SortDescriptor(\.startedAt)]))
     #expect(conversations.map(\.id) == [Fixture.endedConversationID, Fixture.openConversationID])
@@ -84,6 +87,9 @@ private func expectFixtureData(in container: ModelContainer) throws {
         #expect(utterance.voiceScore == row.voiceScore)
         #expect(utterance.isFinal == row.isFinal)
         #expect(utterance.source == row.source)
+        // No row stored before v3 carries the interrupted mark (#160).
+        #expect(utterance.endReasonRaw == nil)
+        #expect(!utterance.isInterrupted)
     }
 
     let profiles = try context.fetch(FetchDescriptor<VoiceProfile>())
@@ -102,7 +108,9 @@ private func expectFixtureData(in container: ModelContainer) throws {
     #expect(set.embeddingVectors == Fixture.clips)
 }
 
-private func memoryCounts(in container: ModelContainer) throws -> [Int] {
+/// How many documents, collection items, entities, facts and profile blocks
+/// the store holds.
+func memoryCounts(in container: ModelContainer) throws -> [Int] {
     let context = ModelContext(container)
     return [
         try context.fetchCount(FetchDescriptor<MemoryDocument>()),
@@ -113,14 +121,16 @@ private func memoryCounts(in container: ModelContainer) throws -> [Int] {
     ]
 }
 
+/// A v1 store opened by the current app: it migrates v1 → v2, then on
+/// through the later stages (v2 → v3, `MigrationV2toV3Tests`) to the current
+/// schema.
 @Suite("Migration v1 → v2")
 struct MigrationV1toV2Tests {
-    @Test func thePlanMigratesV1ToV2WithOneLightweightStage() {
+    @Test func thePlanMigratesV1ToV2WithALightweightStage() {
         #expect(
-            BlauMigrationPlan.schemas.map { $0.versionIdentifier } == [
+            Array(BlauMigrationPlan.schemas.prefix(2).map { $0.versionIdentifier }) == [
                 SchemaV1.versionIdentifier, SchemaV2.versionIdentifier,
             ])
-        #expect(BlauMigrationPlan.stages.count == 1)
         let stage = BlauMigrationPlan.migrateV1toV2
         guard case .lightweight(let from, let to) = stage else {
             Issue.record("v1 → v2 must be lightweight, got \(stage)")
@@ -141,7 +151,7 @@ struct MigrationV1toV2Tests {
         let container = try openMigrated(url)
         try expectFixtureData(in: container)
         #expect(try memoryCounts(in: container) == [0, 0, 0, 0, 0])
-        #expect(try Fixture.storedVersionHashes(at: url) == Fixture.versionHashes(of: SchemaV2.self))
+        #expect(try Fixture.storedVersionHashes(at: url) == Fixture.versionHashes(of: CurrentSchema.self))
     }
 
     @Test func theMigratedStoreTakesMemoryModelsAndReopens() throws {
@@ -170,7 +180,8 @@ struct MigrationV1toV2Tests {
             try context.save()
         }
 
-        // Reopening a v2 store runs no migration and keeps both old and new data.
+        // Reopening the migrated store runs no migration and keeps both old
+        // and new data.
         let reopened = try openMigrated(url)
         try expectFixtureData(in: reopened)
         #expect(try memoryCounts(in: reopened) == [1, 1, 1, 1, 1])
@@ -201,7 +212,8 @@ struct MigrationV1toV2Tests {
         #expect(stack.syncedStoreURL == location.syncedStoreURL)
         try expectFixtureData(in: stack.container)
         #expect(
-            try Fixture.storedVersionHashes(at: location.syncedStoreURL) == Fixture.versionHashes(of: SchemaV2.self))
+            try Fixture.storedVersionHashes(at: location.syncedStoreURL)
+                == Fixture.versionHashes(of: CurrentSchema.self))
     }
 }
 

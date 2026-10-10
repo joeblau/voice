@@ -446,6 +446,10 @@
             }
         }
 
+        func markInterrupted(_ utteranceID: UUID, reason: UtteranceEndReason) async throws {
+            try await store.markInterrupted(utteranceID, reason: reason)
+        }
+
         func finishConversation(_ id: ConversationID, at date: Date) async throws {
             try await store.finishConversation(id, at: date)
         }

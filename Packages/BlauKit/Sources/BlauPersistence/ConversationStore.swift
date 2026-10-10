@@ -335,6 +335,31 @@ public actor ConversationStore: ModelActor {
         return true
     }
 
+    /// Records why a stored utterance was cut short (`Utterance.endReason`,
+    /// schema v3, #160), for example an agent reply the user talked over.
+    /// The save is batched by `savePolicy`.
+    ///
+    /// The mark stays when the utterance is committed again (the server's
+    /// corrected transcript of a cut reply), and it syncs with the row, so
+    /// the reply still reads as interrupted after a relaunch and on the
+    /// user's other devices. Passing `nil` clears it.
+    ///
+    /// - Returns: `false` if no utterance with that id is stored (for
+    ///   example a cut reply none of whose text was heard, which is never
+    ///   stored); nothing changes then.
+    @discardableResult
+    public func markEnded(utteranceID: UUID, reason: UtteranceEndReason?) throws -> Bool {
+        let stored = try utterancesByID[utteranceID] ?? storedUtteranceIfExists(utteranceID)
+        guard let stored else {
+            Log.data.debug("No stored utterance \(utteranceID, privacy: .public) to mark")
+            return false
+        }
+        guard stored.endReasonRaw != reason?.rawValue else { return true }
+        stored.endReason = reason
+        noteChanges()
+        return true
+    }
+
     // MARK: Topics
 
     /// Opens a new topic in the active conversation, starting at `startedAt`.

@@ -116,10 +116,13 @@ public struct DataExport: Codable, Hashable, Sendable {
         public var source: String
         public var asrConfidence: Double?
         public var voiceScore: Double?
+        /// `interrupted`, `bargedin` or `stopped` for a reply the user cut
+        /// short (schema v3, #160); absent otherwise.
+        public var endReason: String?
 
         public init(
             id: UUID, topicID: UUID?, role: String, text: String, startedAt: Date, endedAt: Date?, isFinal: Bool,
-            source: String, asrConfidence: Double? = nil, voiceScore: Double? = nil
+            source: String, asrConfidence: Double? = nil, voiceScore: Double? = nil, endReason: String? = nil
         ) {
             self.id = id
             self.topicID = topicID
@@ -131,6 +134,7 @@ public struct DataExport: Codable, Hashable, Sendable {
             self.source = source
             self.asrConfidence = asrConfidence
             self.voiceScore = voiceScore
+            self.endReason = endReason
         }
     }
 
@@ -363,7 +367,7 @@ extension DataExport {
                     id: utterance.id, topicID: utterance.topic?.id, role: utterance.roleRaw, text: utterance.text,
                     startedAt: utterance.startedAt, endedAt: utterance.endedAt, isFinal: utterance.isFinal,
                     source: utterance.sourceRaw, asrConfidence: utterance.asrConfidence,
-                    voiceScore: utterance.voiceScore)
+                    voiceScore: utterance.voiceScore, endReason: utterance.endReasonRaw)
             })
     }
 

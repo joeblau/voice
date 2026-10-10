@@ -69,6 +69,14 @@ struct TopicMarkdownRendererTests {
                 """)
     }
 
+    @Test func marksAnInterruptedReply() {
+        var snapshot = sample
+        snapshot.utterances[1].text = "Why a designer"
+        snapshot.utterances[1].isInterrupted = true
+        let markdown = TopicMarkdownRenderer(timeZone: losAngeles).render(topicID: hiringID, of: snapshot)
+        #expect(markdown.contains("\n**14:03:20 · Grok:** Why a designer — *interrupted*\n"))
+    }
+
     @Test func linesTheStoreHasntLinkedGoByTime() {
         let lines = sample.utterances(inTopic: moneyID).map(\.text)
         #expect(lines == ["Let's talk money.", "Seed or Series A?"])

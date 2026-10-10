@@ -510,7 +510,8 @@ played milliseconds) and stored with the share of its text that was heard,
 replaced by the transcript `conversation.item.truncated` brings. Triggering
 the same cut on *speech start* (VAD), with the echo guard, is
 [barge-in](#barge-in) (#37). Both mark the cut agent utterance in
-`TurnSnapshot.interruptedAgentUtterances`.
+`TurnSnapshot.interruptedAgentUtterances` and in storage
+(`Utterance.endReasonRaw`, see [Stored](#stored)).
 
 ### Connection
 
@@ -742,7 +743,7 @@ the VAD and the transcriber.
 | Cancel | `response.cancel` with the response id, if the reply is still being generated. A reply that is done but still playing needs none |
 | Truncate | Per agent item: `conversation.item.truncate {item_id, content_index, audio_end_ms}` with the milliseconds the player rendered (`PlayedItem.playedMilliseconds`, rounded down, fade included), or `conversation.item.delete` if none of it was heard. Grok's next reply builds only on what the user heard |
 | Store | The heard share of the transcript is written at once and replaced by the server's `conversation.item.truncated` transcript when it arrives (see [Rapid follow-ups and interruptions](#rapid-follow-ups-and-interruptions)) |
-| Mark | The id of each agent utterance that was cut short goes into `TurnSnapshot.interruptedAgentUtterances`: one with less heard than arrived, or whose audio was still arriving. An earlier item of the reply that was complete (`response.output_audio.done`) and heard in full isn't marked. `TurnSnapshot.lastBargeIn` (`BargeInRecord`) says what was cut and how fast |
+| Mark | The id of each agent utterance that was cut short goes into `TurnSnapshot.interruptedAgentUtterances`: one with less heard than arrived, or whose audio was still arriving. An earlier item of the reply that was complete (`response.output_audio.done`) and heard in full isn't marked. The same utterances are marked in storage (`bargedin`, see [Stored](#stored)). `TurnSnapshot.lastBargeIn` (`BargeInRecord`) says what was cut and how fast |
 | State | `agentSpeaking → listening` (`userSpeaking` once ASR partials arrive). The user's final utterance starts the next turn as usual; its `response.create` waits for the cancelled response's `response.done` (see [Matching responses to turns](#matching-responses-to-turns)) |
 
 Speech while Grok is still *thinking* doesn't barge in when it happens:
@@ -845,15 +846,41 @@ earlier signal, for example ducking playback on a rise in microphone energy
 before VAD confirms, and restoring it if VAD doesn't. Whether that is worth
 the extra false ducks is the owner's call.
 
-### Not stored yet
+### Stored
 
-The SwiftData `Utterance` model has no "interrupted" field, and adding one
-is a schema change (`SchemaV3`, see [data-model.md](data-model.md)) with a
-CloudKit production deploy, tracked in #160. Until then the stored agent
-row is cut to what was heard (its text and its `endedAt`), and the live
-conversation's interrupted replies are in
-`TurnSnapshot.interruptedAgentUtterances` for the transcript view (#42) to
-mark; after a relaunch the mark is gone.
+The stored agent row is cut to what was heard (its text and its `endedAt`)
+and, since schema v3 (#160), also says that it was cut:
+`Utterance.endReasonRaw` ([data-model.md](data-model.md#schema-v3-interrupted-mark)).
+`TurnOrchestrator.abandon` writes it for every utterance it adds to
+`TurnSnapshot.interruptedAgentUtterances`, through
+`TurnTranscriptRecording.markInterrupted(_:reason:)`:
+
+| Cut by | Stored reason |
+| ------ | ------------- |
+| Barge-in (`bargeIn(_:)`) | `bargedin` |
+| A new final utterance, or a rapid follow-up that continues the user's last one | `interrupted` |
+| `stop()` while the reply plays | `stopped` |
+
+The mark goes through the same serial queue as the transcript writes, after
+the write that stored the heard part, so it always finds the row. When
+`conversation.item.truncated` brings the server's transcript, the row is
+written again (the mark stays) and marked again: if too little was heard to
+keep a whole word, the cut stored nothing and that write is the first. A
+reply none of which was heard is never stored, so there is nothing to mark.
+Wrappers of the transcript (`FeedingTranscriptRecorder`,
+`TopicTrackingTranscript`, `PersistenceTranscriptRecorder`) pass the mark on;
+the protocol has no default, so a new wrapper can't drop it by accident.
+
+So a cut reply still reads as interrupted after a relaunch, on the user's
+other devices (the field syncs), in the timeline history, in the Markdown
+exports and in Export All Data. The live set still marks the running
+conversation's rows at once, before the store has saved.
+
+**Before release:** the field must be in the CloudKit production schema
+before a build that writes it ships (the deploy checklist in
+[release.md](release.md#production-schema-deploy-checklist)); an upload
+run fails `release.py schema` until `BLAU_CLOUDKIT_PRODUCTION_SCHEMA` says
+`3.0.0`.
 
 ### Barge-in tests
 
@@ -882,6 +909,13 @@ marked interrupted, nothing cut outside `agentSpeaking`, the next turn
 going out after the cancelled response, `agentSpeakingChanges()`; the
 stored row through the real `ConversationStore`; and the end-to-end path
 from a VAD onset through the real `StreamingAudioPlayer`).
+`TurnOrchestratorInterruptedMarkTests` covers the stored mark (#160): the
+reason for a barge-in, a new utterance and a stop, each written after the
+row and again after the server's transcript; no mark for a reply nobody
+heard or one that played to the end; and, through the real
+`ConversationStore` on disk, a barged-in reply still marked when the
+transcript is rebuilt from a reopened store with no live set, and a reply
+first stored by the server's transcript.
 
 ## Testing
 

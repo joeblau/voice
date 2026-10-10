@@ -176,6 +176,7 @@ Development environment; never mix a Debug device with a TestFlight device.
 | 9 | On B, sign out of iCloud (Settings → Apple Account → Sign Out, keep a copy of data if asked), reopen Blau. | Blau keeps working; Settings: "Off: You're not signed in to iCloud…" with "Open Settings". New conversations save locally. | pending |
 | 10 | Create a conversation on B while signed out, then sign back in to the same account and reopen Blau. | Settings returns to "On"; the conversation from step 10 reaches A. | pending |
 | 11 | Fill iCloud storage (or use an account that is full) and create a conversation. | Settings shows "Paused: Your iCloud storage is full…"; the data stays on the device. | pending |
+| 12 | On A, ask Grok a long question and talk over the reply (barge-in); in a second turn, stop the conversation while Grok speaks. Force-quit and reopen A, then open the conversation on B. | Both cut replies end in the interrupted dash on A after the relaunch and on B (`Utterance.endReasonRaw`, schema v3, #160). In the CloudKit Console the `CD_Utterance` records of those replies have `CD_endReasonRaw` `bargedin` and `stopped`. | pending |
 
 Record the device models, iOS versions, build number and results in the PR or
 release notes that ran the plan.

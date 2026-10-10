@@ -18,13 +18,21 @@ public struct ChatLine: Identifiable, Hashable, Sendable {
     /// Wall-clock time the speech ended. For an agent reply cut short, the
     /// end of what was heard.
     public var endedAt: Date?
+    /// The store says the speech was cut short (`StoredUtterance.isInterrupted`,
+    /// schema v3, #160): an agent reply the user interrupted. Synced, so it
+    /// holds after a relaunch and on the user's other devices.
+    public var isInterrupted: Bool
 
-    public init(id: UUID, role: UtteranceRole, text: String, startedAt: Date, endedAt: Date? = nil) {
+    public init(
+        id: UUID, role: UtteranceRole, text: String, startedAt: Date, endedAt: Date? = nil,
+        isInterrupted: Bool = false
+    ) {
         self.id = id
         self.role = role
         self.text = text
         self.startedAt = startedAt
         self.endedAt = endedAt
+        self.isInterrupted = isInterrupted
     }
 
     /// The line for a stored utterance, or `nil` when its role was written
@@ -32,7 +40,8 @@ public struct ChatLine: Identifiable, Hashable, Sendable {
     public init?(_ stored: StoredUtterance) {
         guard let role = stored.role else { return nil }
         self.init(
-            id: stored.id, role: role, text: stored.text, startedAt: stored.startedAt, endedAt: stored.endedAt)
+            id: stored.id, role: role, text: stored.text, startedAt: stored.startedAt, endedAt: stored.endedAt,
+            isInterrupted: stored.isInterrupted)
     }
 
     /// The line for a pipeline utterance, ended where its speech ends (as

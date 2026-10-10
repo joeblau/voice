@@ -89,7 +89,7 @@ only, so a conversation reopened after a relaunch has none (see
 
 ## Interrupted replies
 
-Two sources mark a reply as interrupted; a row is marked when either does.
+Three sources mark a reply as interrupted; a row is marked when any does.
 
 1. **Live, from the orchestrator.** While a conversation runs, the turn
    orchestrator lists the stored replies it cut short, by barge-in (#37)
@@ -97,20 +97,30 @@ Two sources mark a reply as interrupted; a row is marked when either does.
    `TurnSnapshot.interruptedAgentUtterances`. `ChatLiveState` collects
    them (`interruptedAgentIDs`) and keeps them while that conversation
    stays on screen. This is exact, including for barge-ins, where the cut
-   lands about when the user starts talking.
-2. **Derived from stored times**, for conversations reopened after a
-   relaunch or synced from another device. The store has no "interrupted"
-   flag (adding one is a schema change), and the orchestrator's set lives
-   only in memory.
+   lands about when the user starts talking, and it shows before the
+   store has saved.
+2. **Stored, since schema v3 (#160).** The orchestrator also marks each of
+   those replies in the store (`Utterance.endReasonRaw`,
+   [data-model.md](data-model.md#schema-v3-interrupted-mark)), and
+   `ChatLine.isInterrupted` carries it into the rows. It is just as exact,
+   and it holds after a relaunch, in the timeline history and on the user's
+   other devices. A line the app just recorded replaces the stored one
+   without dropping its mark.
+3. **Derived from stored times**, the fallback for rows stored without the
+   mark: before v3, or by an older app version on another device. It runs
+   on every unmarked row, since an unmarked v3 row can't be told from an
+   older one.
 
-For the second: when the user cuts Grok off, the orchestrator stores the
+For the third: when the user cuts Grok off, the orchestrator stores the
 reply ending where it was heard (`conversation.item.truncate`), which is
 after the user started the utterance that cut it, because the cut happens
 when that utterance is final. `ChatTranscript.isInterrupted(_:before:)`
 marks an agent row whose next user utterance started more than 250 ms
 before the reply ended (the tolerance absorbs the jitter buffer).
 
-Edge cases of the derived rule, which only apply once the live set is gone:
+Edge cases of the derived rule, which only apply to unmarked rows once the
+live set is gone (a v3 row the orchestrator cut is marked whatever its
+times say):
 a barge-in cut stores the reply ending about when the VAD heard the user
 start, so it is marked only when the stored user utterance starts more than
 250 ms earlier than that. Two more read differently from a strict "cut"
@@ -154,7 +164,7 @@ frame rate come from a device run:
 
 | Test | Covers |
 | --- | --- |
-| `ChatTranscriptTests` (BlauKit) | ordering, merging stored and just-written lines, interruptions, revealing a reply, the fetch descriptors |
+| `ChatTranscriptTests` (BlauKit) | ordering, merging stored and just-written lines, interruptions (live, stored and derived, and a just-written line keeping the stored mark), revealing a reply, the fetch descriptors |
 | `ChatToolCallTests` (BlauKit) | tool chip titles, placement between question and answer, live and finished chips |
 | `ChatLiveStateTests`, `TranscriptFeedTests` (BlauKit) | partials resolving to finals, held partials expiring, streaming rows, conversation switches, the feed, the orchestrator's `agentSpeech` |
 | `ChatTranscriptViewTests` (BlauTests) | the live model, the fixture, and a rendered row: on its speaker's side, within 85 %, no filled background |
@@ -163,5 +173,6 @@ frame rate come from a device run:
 
 UI and performance tests seed a canned conversation with the launch
 arguments `-BlauChatFixture <count>` on a `ui-test` launch
-(`ChatTranscriptFixture`); the live app never seeds anything. Previews use
+(`ChatTranscriptFixture`, whose cut replies carry the stored mark like the
+app's); the live app never seeds anything. Previews use
 the same fixture.

@@ -329,7 +329,8 @@ and tick it there.
       `CD_Topic`, `CD_Utterance`, `CD_VoiceProfile`, `CD_VoiceEnrollmentSet`
       (v1) and `CD_Document`, `CD_CollectionItem`, `CD_MemoryEntity`,
       `CD_Fact`, `CD_ProfileBlock` (v2), with a `CD_<property>` field for
-      every new property.
+      every new property. v3 adds no record type, only the field
+      `CD_endReasonRaw` (String) on `CD_Utterance`.
 - [ ] Voiceprint vectors (`VoiceProfile.centroid`, `VoiceEnrollmentSet.embeddings`)
       are encrypted fields.
 - [ ] No field you didn't expect (a typo deployed to Production is forever).
@@ -394,4 +395,4 @@ archive); the rest needs Xcode and App Store Connect.
 
 | Version (build) | Tag | Schema version | Schema deployed to Production | Sync test plan run by / result |
 | --------------- | --- | -------------- | ----------------------------- | ------------------------------ |
-| 0.1.0 (first TestFlight) | pending | 2.0.0 | pending | pending |
+| 0.1.0 (first TestFlight) | pending | 3.0.0 | pending | pending |

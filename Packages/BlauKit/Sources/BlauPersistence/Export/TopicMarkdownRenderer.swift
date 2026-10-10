@@ -101,9 +101,8 @@ public struct TopicMarkdownRenderer: Sendable {
         let day = format.day(topic.startedAt)
         for utterance in utterances {
             lines.append("")
-            let time = format.time(utterance.startedAt, day: day)
-            let speaker = ConversationMarkdownRenderer.speaker(for: utterance.role)
-            lines.append("**\(time) · \(speaker):** \(MarkdownText.inline(utterance.text))")
+            lines.append(
+                ConversationMarkdownRenderer.line(for: utterance, time: format.time(utterance.startedAt, day: day)))
         }
         return lines.joined(separator: "\n") + "\n"
     }

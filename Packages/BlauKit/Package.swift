@@ -104,7 +104,7 @@ enum KitModule: String, CaseIterable {
             // Recorded and hand-written realtime sessions (JSON Lines).
             [.copy("Fixtures")]
         case .persistence:
-            // A store written by schema v1, for the v1 → v2 migration tests.
+            // Stores written by schemas v1 and v2, for the migration tests.
             [.copy("Fixtures")]
         case .voiceID:
             // CMU ARCTIC speech clips from four speakers, for the speaker

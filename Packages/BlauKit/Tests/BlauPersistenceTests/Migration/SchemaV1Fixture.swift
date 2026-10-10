@@ -141,8 +141,9 @@ enum SchemaV1Fixture {
     /// ahead log included, into a new self-contained file at `destination`
     /// in rollback-journal mode. SwiftData may keep `source` open, so this
     /// reads it with `VACUUM INTO` rather than checkpointing it. Core Data
-    /// switches the copy back to WAL the next time it opens it.
-    private static func snapshot(_ source: URL, into destination: URL) throws {
+    /// switches the copy back to WAL the next time it opens it. Also writes
+    /// the v2 fixture (`SchemaV2Fixture`).
+    static func snapshot(_ source: URL, into destination: URL) throws {
         try withDatabase(at: source, flags: SQLITE_OPEN_READONLY) { database in
             let path = destination.path(percentEncoded: false).replacingOccurrences(of: "'", with: "''")
             try execute("VACUUM INTO '\(path)';", in: database)

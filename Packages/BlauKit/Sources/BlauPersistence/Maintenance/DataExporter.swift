@@ -81,7 +81,8 @@ public struct DataExporter: Sendable {
                 lines: conversation.utterances.filter(\.isFinal).map { utterance in
                     ConversationExporter.Snapshot.Line(
                         role: UtteranceRole(rawValue: utterance.role) ?? .system, text: utterance.text,
-                        startedAt: utterance.startedAt, topic: utterance.topicID.flatMap { topics[$0] })
+                        startedAt: utterance.startedAt, topic: utterance.topicID.flatMap { topics[$0] },
+                        isInterrupted: utterance.endReason.flatMap(UtteranceEndReason.init(rawValue:)) != nil)
                 })
         }
         return ConversationExporter(locale: locale, timeZone: timeZone)
