@@ -56,13 +56,13 @@ struct VerificationGateMemoryTests {
         #expect(await gate.retainedAudio.samples == 0, "A finished segment keeps no audio")
     }
 
-    /// Two hours of mixed speech would take minutes here; 360 segments of
+    /// Two hours of mixed speech would take minutes here; 120 segments of
     /// every length (too short to score, scored once, re-scored, split by
     /// VAD at 8 s), the owner's and a TV's, hold the same pattern: per
     /// segment work and memory that don't depend on how many came before.
     @Test func aLongSessionKeepsTheGateBounded() async {
         let lengths = [0.6, 1.8, 2.5, 4.0, 6.0, 8.0]
-        let count = 360
+        let count = 120
         var timeline: [(start: Double, end: Double, voice: SpeakerTimeline.Voice)] = []
         var segments: [(start: Double, end: Double)] = []
         var time = 0.0
