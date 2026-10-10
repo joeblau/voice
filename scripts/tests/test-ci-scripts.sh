@@ -216,6 +216,229 @@ else
     sed 's/^/       /' "$work/github_output"
 fi
 
+# --- ui-test-shard.sh -----------------------------------------------------------
+
+shard="$scripts_dir/ci/ui-test-shard.sh"
+ui="$work/UITests"
+mkdir -p "$ui/Nested"
+cat >"$ui/AlphaUITests.swift" <<'EOF'
+import XCTest
+
+/// Not a test: func testInADocComment()
+@MainActor
+final class AlphaUITests: XCTestCase {
+    private enum Identifier {
+        static let url = "https://example.com/{"
+    }
+
+    private struct Row {
+        func testableFrame() -> Int { 0 }
+    }
+
+    override func setUp() async throws {
+        continueAfterFailure = false
+    }
+
+    func testOne() throws {
+        if true { XCTAssertTrue(true) }
+    }
+
+    @MainActor func testTwo() async throws {}
+
+    private func testHelper() {}
+
+    func testWithArgument(_ value: Int) {}
+
+    func testThree() {
+        let format = "{ \(1) }"
+        _ = format
+    }
+}
+
+final class BetaUITests: XCTestCase {
+    override class func setUp() {
+        super.setUp()
+    }
+
+    private final class FakeServer
+    {
+        func testDouble() {}
+    }
+
+    func testFour() {}
+}
+EOF
+cat >"$ui/Nested/GammaUITests.swift" <<'EOF'
+import XCTest
+
+final class GammaUITests: XCTestCase {
+    func testFive() {}
+}
+
+extension GammaUITests {
+    func testSix() {}
+}
+
+extension XCTestCase {
+    func tap(_ element: XCUIElement) {}
+}
+
+private struct Fixture {
+    func testable() -> Bool { true }
+}
+EOF
+
+expect "ui-test-shard: 1/1 lists every XCTest method, sorted, and nothing else" \
+    0 "AlphaUITests/testOne
+AlphaUITests/testThree
+AlphaUITests/testTwo
+BetaUITests/testFour
+GammaUITests/testFive
+GammaUITests/testSix" \
+    env UI_TESTS_DIR="$ui" "$shard" --list 1/1
+
+expect "ui-test-shard: deals the tests out round-robin (shard 1 of 4)" \
+    0 "AlphaUITests/testOne
+GammaUITests/testFive" \
+    env UI_TESTS_DIR="$ui" "$shard" --list 1/4
+
+expect "ui-test-shard: deals the tests out round-robin (shard 4 of 4)" \
+    0 "BetaUITests/testFour" \
+    env UI_TESTS_DIR="$ui" "$shard" --list 4/4
+
+expect "ui-test-shard: a shard with no tests prints nothing" \
+    0 "" \
+    env UI_TESTS_DIR="$ui" "$shard" --list 7/7
+
+expect "ui-test-shard: prints xcodebuild -only-testing arguments for the target" \
+    0 "-only-testing:BlauUITests/AlphaUITests/testThree
+-only-testing:BlauUITests/GammaUITests/testFive" \
+    env UI_TESTS_DIR="$ui" "$shard" 2/3
+
+# Every test in exactly one shard, for several shard counts.
+for n in 1 2 3 5 6 9; do
+    : >"$work/union"
+    k=1
+    while [ "$k" -le "$n" ]; do
+        env UI_TESTS_DIR="$ui" "$shard" --list "$k/$n" >>"$work/union"
+        k=$((k + 1))
+    done
+    env UI_TESTS_DIR="$ui" "$shard" --list 1/1 >"$work/all"
+    if [ "$(LC_ALL=C sort "$work/union")" = "$(cat "$work/all")" ]; then
+        pass "ui-test-shard: $n shards cover every test exactly once"
+    else
+        fail "ui-test-shard: $n shards cover every test exactly once"
+        diff "$work/all" "$work/union" | sed 's/^/       /'
+    fi
+done
+
+for spec in 0/3 4/3 3/0 1 a/b 1/2/3 -1/3; do
+    expect "ui-test-shard: rejects the shard '$spec'" \
+        2 "" \
+        env UI_TESTS_DIR="$ui" "$shard" --list "$spec"
+done
+expect "ui-test-shard: rejects unknown options" \
+    2 "" \
+    env UI_TESTS_DIR="$ui" "$shard" --bogus 1/1
+
+swift_testing="$work/SwiftTestingUITests"
+mkdir -p "$swift_testing"
+cat >"$swift_testing/MixedUITests.swift" <<'EOF'
+import Testing
+import XCTest
+
+final class MixedUITests: XCTestCase {
+    func testOne() {}
+}
+
+@Suite struct Other {
+    @Test func works() {}
+}
+EOF
+expect "ui-test-shard: fails on Swift Testing, which shards cannot select" \
+    2 "" \
+    env UI_TESTS_DIR="$swift_testing" "$shard" --list 1/1
+
+stray="$work/StrayUITests"
+mkdir -p "$stray"
+cat >"$stray/StrayUITests.swift" <<'EOF'
+import XCTest
+
+extension XCTestCase {
+    func testEverywhere() {}
+}
+
+final class StrayUITests: XCTestCase {
+    func testOne() {}
+}
+
+func testAtTopLevel() {}
+EOF
+expect "ui-test-shard: fails on a test method it cannot place in a class" \
+    2 "" \
+    env UI_TESTS_DIR="$stray" "$shard" --list 1/1
+if grep -q 'StrayUITests.swift:4: testEverywhere()' "$work/err" &&
+    grep -q 'StrayUITests.swift:11: testAtTopLevel()' "$work/err"; then
+    pass "ui-test-shard: the failure names each file and line"
+else
+    fail "ui-test-shard: the failure names each file and line"
+    sed 's/^/       /' "$work/err"
+fi
+
+printf '{ "totalTestCount" : 2, "passedTests" : 2, "skippedTests" : 0 }\n' >"$work/summary-2.json"
+printf '{ "totalTestCount" : 0, "passedTests" : 0 }\n' >"$work/summary-0.json"
+printf '{ "title" : "no counts" }\n' >"$work/summary-none.json"
+expect "ui-test-shard: --check passes when the bundle ran the shard's tests" \
+    0 "" \
+    env UI_TESTS_DIR="$ui" XCRESULT_SUMMARY_JSON="$work/summary-2.json" "$shard" --check 1/3 unused.xcresult
+expect "ui-test-shard: --check fails when the bundle ran fewer tests" \
+    1 "" \
+    env UI_TESTS_DIR="$ui" XCRESULT_SUMMARY_JSON="$work/summary-0.json" "$shard" --check 1/3 unused.xcresult
+expect "ui-test-shard: --check fails when the bundle ran more tests" \
+    1 "" \
+    env UI_TESTS_DIR="$ui" XCRESULT_SUMMARY_JSON="$work/summary-2.json" "$shard" --check 4/4 unused.xcresult
+expect "ui-test-shard: --check fails on a summary without a test count" \
+    1 "" \
+    env UI_TESTS_DIR="$ui" XCRESULT_SUMMARY_JSON="$work/summary-none.json" "$shard" --check 1/3 unused.xcresult
+expect "ui-test-shard: --check fails without a result bundle" \
+    1 "" \
+    env UI_TESTS_DIR="$ui" XCRESULT_SUMMARY_JSON= "$shard" --check 1/3 "$work/missing.xcresult"
+
+# The real UI tests: every test-like method is placed (the script fails
+# otherwise), and the shards of ci.yml's app-ui-tests matrix (shard: [1, ..., N],
+# run as K/N) cover them all exactly once.
+if "$shard" --list 1/1 >"$work/real-all" 2>"$work/err" && [ -s "$work/real-all" ]; then
+    pass "ui-test-shard: lists the real BlauUITests ($(wc -l <"$work/real-all" | tr -d ' ') tests)"
+else
+    fail "ui-test-shard: lists the real BlauUITests"
+    sed 's/^/       /' "$work/err"
+fi
+matrix=$(awk '/^  app-ui-tests:/{job=1; next} job && /^  [a-z]/{exit} job && /^ +shard: \[/{print; exit}' "$workflow" |
+    sed 's/.*\[//; s/\].*//; s/[[:space:]]//g')
+shards=$(printf '%s\n' "$matrix" | tr ',' '\n' | grep -c . || true)
+numbered=""
+k=1
+while [ "$k" -le "$shards" ]; do
+    numbered="$numbered${numbered:+,}$k"
+    k=$((k + 1))
+done
+if [ -n "$matrix" ] && [ "$matrix" = "$numbered" ]; then
+    pass "ci.yml's app-ui-tests matrix numbers its $shards shards 1 to $shards"
+else
+    fail "ci.yml's app-ui-tests matrix numbers its shards 1 to N (found '$matrix')"
+fi
+: >"$work/real-union"
+k=1
+while [ "$k" -le "$shards" ]; do
+    "$shard" --list "$k/$shards" >>"$work/real-union" 2>/dev/null
+    k=$((k + 1))
+done
+if [ "$shards" -gt 0 ] && [ "$(LC_ALL=C sort "$work/real-union")" = "$(cat "$work/real-all")" ]; then
+    pass "ui-test-shard: CI's $shards shards cover the real BlauUITests exactly once"
+else
+    fail "ui-test-shard: CI's $shards shards cover the real BlauUITests exactly once"
+fi
+
 # --- ci.yml guard rails ---------------------------------------------------------
 
 # docs/configuration.md: CI never sees the xAI key, because .xcresult bundles
@@ -243,13 +466,32 @@ else
     echo "$unpinned" | sed 's/^/       /'
 fi
 
-for job in lint package-tests app-tests perf-kit perf soak asr-eval memory-eval; do
+for job in lint package-tests app-unit-tests app-ui-tests app-tests perf-kit perf soak asr-eval memory-eval; do
     if grep -Eq "^  $job:" "$workflow"; then
         pass "ci.yml defines the $job job"
     else
         fail "ci.yml defines the $job job"
     fi
 done
+
+# app-tests is the required check for the app's tests (docs/ci.md): it needs
+# the unit-test job and every UI shard, and always runs, because a skipped
+# required check counts as passing.
+app_tests=$(awk '/^  app-tests:/{job=1; next} job && /^  [a-z]/{exit} job' "$workflow")
+if printf '%s\n' "$app_tests" | grep -Eq '^    needs: \[app-unit-tests, app-ui-tests\]$' &&
+    printf '%s\n' "$app_tests" | grep -Eq '^    if: \$\{\{ always\(\) \}\}$'; then
+    pass "ci.yml's app-tests needs every app test job and always runs"
+else
+    fail "ci.yml's app-tests needs every app test job and always runs"
+fi
+# Each UI shard runs its slice as K/N, N being the size of the matrix.
+# shellcheck disable=SC2016 # the workflow's ${{ }} expressions, literally
+if awk '/^  app-ui-tests:/{job=1; next} job && /^  [a-z]/{exit} job' "$workflow" |
+    grep -Fq 'UI_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}'; then
+    pass "ci.yml's app-ui-tests runs shard matrix.shard of strategy.job-total"
+else
+    fail "ci.yml's app-ui-tests runs shard matrix.shard of strategy.job-total"
+fi
 
 # The ASR evaluation needs the fixture audio, which is in Git LFS.
 if awk '/^  asr-eval:/{job=1} job && /lfs: true/{found=1} END{exit !found}' "$workflow"; then

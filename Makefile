@@ -8,12 +8,15 @@
 #   DERIVED_DATA       DerivedData location (kept inside the repo)
 #   XCODEBUILD_FLAGS   Extra xcodebuild arguments, e.g. CI's
 #                      XCODEBUILD_FLAGS='-resultBundlePath .build/results/app.xcresult'
+#   UI_SHARD           K/N: `make test-ui` runs only the K-th of N slices of
+#                      the UI tests (scripts/ci/ui-test-shard.sh), as CI does
 
 PROJECT           := Blau.xcodeproj
 DERIVED_DATA      ?= .build/DerivedData
 DESTINATION       ?= platform=iOS Simulator,name=iPhone 17,OS=latest
 BUILD_DESTINATION ?= generic/platform=iOS Simulator
 XCODEBUILD_FLAGS  ?=
+UI_SHARD          ?=
 
 XCODEGEN   ?= xcodegen
 XCODEBUILD := xcodebuild -project $(PROJECT) -derivedDataPath $(DERIVED_DATA) $(XCODEBUILD_FLAGS)
@@ -47,9 +50,20 @@ test: generate ## Run unit + UI tests (Blau scheme, Blau test plan, coverage on)
 test-unit: generate ## Run only the unit tests
 	$(XCODEBUILD) test -scheme Blau -testPlan Blau -only-testing:BlauTests -destination '$(DESTINATION)' $(SIM_FLAGS)
 
+# With UI_SHARD=K/N, only the K-th of N slices of BlauUITests: CI runs the N
+# slices as parallel jobs (docs/ci.md). The selection is computed first so a
+# failure stops here instead of running the whole test plan.
 .PHONY: test-ui
-test-ui: generate ## Run only the UI tests
-	$(XCODEBUILD) test -scheme Blau -testPlan Blau -only-testing:BlauUITests -destination '$(DESTINATION)' $(SIM_FLAGS)
+test-ui: generate ## Run only the UI tests (UI_SHARD=K/N: one of N slices, as CI)
+	@set -e; \
+	if [ -n '$(UI_SHARD)' ]; then \
+		selection=$$(scripts/ci/ui-test-shard.sh '$(UI_SHARD)'); \
+		echo "UI tests, shard $(UI_SHARD): $$(echo "$$selection" | wc -l | tr -d ' ') tests"; \
+	else \
+		selection=-only-testing:BlauUITests; \
+	fi; \
+	set -x; \
+	$(XCODEBUILD) test -scheme Blau -testPlan Blau $$selection -destination '$(DESTINATION)' $(SIM_FLAGS)
 
 .PHONY: test-kit
 test-kit: ## Run the BlauKit package tests on the macOS host

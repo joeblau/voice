@@ -309,7 +309,7 @@ n counting from the oldest (the "Timeline, long history" preview seeds
 2,000).
 
 The paging UI tests take about 25 minutes together (the scroll through
-2,000 topics alone about 15), more than CI's `app-tests` job
+2,000 topics alone about 15), more than a CI UI-test shard
 allows, so they skip unless `BLAU_LONG_UI_TESTS=1` (xcodebuild passes
 `TEST_RUNNER_`-prefixed variables to the test runner). Run them on an iOS 26
 and an iOS 27 simulator before changing the timeline's scrolling:

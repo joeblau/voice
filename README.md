@@ -39,7 +39,7 @@ configured. See [docs/configuration.md](docs/configuration.md).
 | `make build`     | Build the app for the iOS Simulator (Debug)                      |
 | `make test`      | Run unit and UI tests (`Blau` scheme, `Blau` test plan, coverage) |
 | `make test-unit` | Run only `BlauTests`                                             |
-| `make test-ui`   | Run only `BlauUITests`                                           |
+| `make test-ui`   | Run only `BlauUITests` (`UI_SHARD=2/3`: one of three slices, as CI) |
 | `make test-kit`  | Run the `BlauKit` package tests on the macOS host (`swift test`) |
 | `make perf`      | Run `BlauPerfTests` (`Blau-Perf` scheme, Release build with the scripted session, [docs](docs/performance.md#performance-suite)) |
 | `make perf-check` | Compare the last `make perf` with the committed baseline; fails on a >10% regression |
@@ -80,7 +80,8 @@ Formatting, branch naming, commit and pull request conventions are in
 
 ## Continuous integration
 
-GitHub Actions runs `lint`, `package-tests`, `app-tests` and the
+GitHub Actions runs `lint`, `package-tests`, the app's tests (unit tests and
+three UI-test shards, summed up by the `app-tests` check) and the
 micro-benchmark gate (`perf-kit`) on every pull request and push to `main`,
 and the performance suite, the long-session soak test, the ASR evaluation
 and the memory evaluation nightly. Each job calls
