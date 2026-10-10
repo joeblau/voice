@@ -261,3 +261,9 @@ values, the model setup inset leaving, and onboarding's next visible step.
 Resuming permissions can proceed directly to iCloud when models are already
 ready. Timeline title refinement is triggered after reaching history rather
 than by a timer measured from launch.
+
+Performance and soak jobs use the same cold-launch mitigation: build their
+Release test bundles with `make build-perf-tests`, warm that app on the
+selected simulator, then run the existing suites with test diagnostics
+disabled. A failed soak launch is a harness failure, not memory-growth
+evidence. No performance or soak checks are removed.

@@ -445,13 +445,23 @@ jobs:
         run: scripts/ci/simulator-destination.sh
 
       # Writes .build/results/perf.xcresult (the Makefile's PERF_RESULT).
+      - name: Build performance test bundles
+        env:
+          DESTINATION: ${{ steps.simulator.outputs.destination }}
+        run: make build-perf-tests
+
+      - name: Warm up performance simulator
+        env:
+          UDID: ${{ steps.simulator.outputs.udid }}
+        run: scripts/ci/warm-simulator.sh "$UDID" .build/DerivedData/Build/Products/Release-iphonesimulator/Blau.app
+
       # One retry: the runner's simulator sometimes crashes the test runner
       # before any test starts ("never finished bootstrapping"), which would
       # fail the night with nothing measured. A real failure fails twice.
       - name: Performance tests
         env:
           DESTINATION: ${{ steps.simulator.outputs.destination }}
-          XCODEBUILD_FLAGS: "-parallel-testing-enabled NO"
+          XCODEBUILD_FLAGS: "-parallel-testing-enabled NO -collect-test-diagnostics never"
         run: |
           if ! make perf; then
             echo "::warning::The performance tests failed; retrying once."
@@ -542,12 +552,22 @@ jobs:
         run: scripts/ci/simulator-destination.sh
 
       # Writes .build/results/soak (the Makefile's SOAK_OUTPUT).
+      - name: Build soak test bundles
+        env:
+          DESTINATION: ${{ steps.simulator.outputs.destination }}
+        run: make build-perf-tests
+
+      - name: Warm up soak simulator
+        env:
+          UDID: ${{ steps.simulator.outputs.udid }}
+        run: scripts/ci/warm-simulator.sh "$UDID" .build/DerivedData/Build/Products/Release-iphonesimulator/Blau.app
+
       - name: Soak
         env:
           DESTINATION: ${{ steps.simulator.outputs.destination }}
           SOAK_MINUTES: ${{ inputs.soak_minutes || vars.BLAU_CI_SOAK_MINUTES || '20' }}
           SOAK_LEAKS: ${{ vars.BLAU_CI_SOAK_LEAKS || '1' }}
-          XCODEBUILD_FLAGS: "-parallel-testing-enabled NO"
+          XCODEBUILD_FLAGS: "-parallel-testing-enabled NO -collect-test-diagnostics never"
         run: make soak SOAK_MINUTES="$SOAK_MINUTES"
 
       - name: Shut down simulator
