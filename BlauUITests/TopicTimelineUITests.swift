@@ -120,13 +120,13 @@ final class TopicTimelineUITests: XCTestCase {
         let settings = app.buttons[Identifier.settings]
         XCTAssertTrue(settings.waitForExistence(timeout: 10))
         let rows =
-            (app.descendants(matching: .any).matching(identifier: Identifier.user).allElementsBoundByIndex
-            + app.descendants(matching: .any).matching(identifier: Identifier.agent).allElementsBoundByIndex)
-            .filter { $0.exists && window.intersects($0.frame) }
+            (ChatGeometry.frames(for: Identifier.user, in: app)
+            + ChatGeometry.frames(for: Identifier.agent, in: app))
+            .filter { window.intersects($0) }
         XCTAssertEqual(rows.count, Self.linesPerTopic, "Only the current topic is expanded")
         for row in rows {
-            XCTAssertGreaterThanOrEqual(row.frame.minY, current.frame.maxY - 1, "A line above its bullet: \(row.frame)")
-            XCTAssertLessThanOrEqual(row.frame.maxY, settings.frame.minY + 1, "A line under the bar: \(row.frame)")
+            XCTAssertGreaterThanOrEqual(row.minY, current.frame.maxY - 1, "A line above its bullet: \(row)")
+            XCTAssertLessThanOrEqual(row.maxY, settings.frame.minY + 1, "A line under the bar: \(row)")
         }
         XCTAssertEqual(transcriptRowCount(app), Self.linesPerTopic, "Older topics' lines were built")
         XCTAssertFalse(app.descendants(matching: .any)[Identifier.summary].exists, "An older topic is expanded")
@@ -240,23 +240,21 @@ final class TopicTimelineUITests: XCTestCase {
         XCTAssertFalse(now.waitForExistence(timeout: 2), "The Now pill showed at the latest line")
         XCTAssertTrue(currentBullet(app).isHittable, "The current topic left the screen")
         XCTAssertGreaterThanOrEqual(
-            currentBullet(app).frame.minY, currentBefore.minY - 1, "The current topic moved up: \(currentBefore)")
+            currentBullet(app).frame.minY, currentBefore.minY - 1,
+            "The current topic moved up: \(currentBefore)")
         attachScreenshot(app, "Collapsed at the latest line")
     }
 
     /// Provisional titles are refined in place while the user reads the
     /// history: the titles change and nothing on screen moves.
     func testRefinedLabelsDontMoveTheHistory() {
-        let relabelAfter: TimeInterval = 30
-        let launchedAt = Date()
-        let app = launch(arguments: ["-BlauTimelineRelabelAfter", "\(Int(relabelAfter))"])
+        let app = launch(arguments: ["-BlauTimelineRelabelOnDemand", "YES"])
         let drafts = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Draft'"))
         XCTAssertGreaterThan(drafts.count, 0, "No provisional titles")
         swipeIntoHistory(app, until: bullet("Hiring the First Engineer", in: app))
         XCTAssertTrue(app.buttons[Identifier.now].waitForExistence(timeout: 5), "Not in the history")
-        XCTAssertLessThan(Date().timeIntervalSince(launchedAt), relabelAfter, "Too slow to reach the history first")
-
         let before = olderBullets(app).map(\.frame).sorted { $0.minY < $1.minY }
+        app.buttons["blau.timeline.fixture.refineTitles"].tap()
         let refined = expectation(
             for: NSPredicate(format: "count == 0"), evaluatedWith: drafts, handler: nil)
         wait(for: [refined], timeout: 60)

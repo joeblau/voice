@@ -245,3 +245,19 @@ their names include the shard count.
   (`brew install actionlint`) and the scripts with `shellcheck`.
 - Keep the jobs calling `make` targets so a failure reproduces locally with
   the same command.
+
+## UI assertions on iOS 27
+
+Selectable transcript text can report an accessibility frame at the screen
+edge even when its rendered SwiftUI frame keeps the 16-point margin. Debug
+builds launched in the `ui-test` environment expose each row's actual frame
+through a one-point accessibility probe (`<row identifier>.geometry`).
+Alignment, width, and header-overlap assertions read these frames, retaining
+the original bounds. The probe is absent from production builds and other
+launch environments.
+
+Asynchronous state changes are awaited before assertions: debug-menu toggle
+values, the model setup inset leaving, and onboarding's next visible step.
+Resuming permissions can proceed directly to iCloud when models are already
+ready. Timeline title refinement is triggered after reaching history rather
+than by a timer measured from launch.

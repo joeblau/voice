@@ -44,6 +44,9 @@ struct RootView: View {
             }
         }
         .animation(reduceMotion ? nil : .default, value: isOnboarding)
+        #if DEBUG
+            .environment(\.reportsChatRowFrames, environment.kind == .uiTest)
+        #endif
     }
 }
 
@@ -95,6 +98,14 @@ struct MainScreenScaffold: View {
                 }
                 .toolbar {
                     #if DEBUG
+                        if TopicTimelineFixture.offersRelabelControl(in: environment) {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button("Refine fixture titles") {
+                                    TopicTimelineFixture.refineTitles(in: environment.persistence)
+                                }
+                                .accessibilityIdentifier(TopicTimelineFixture.relabelButtonIdentifier)
+                            }
+                        }
                         ToolbarItem(placement: .topBarTrailing) {
                             DebugMenuButton { isShowingDebugMenu = true }
                         }
