@@ -11,8 +11,9 @@ import BlauCore
 /// the model confirms the end of the utterance, or the caller decides the
 /// utterance is over and calls `finish(keepingTokensThrough:)`. Either way
 /// the caller then calls `reset()`, so the next utterance starts from an
-/// empty history. Without the reset the token history grows for the whole
-/// conversation and every partial re-decodes all of it.
+/// empty history (after the word-timing fallback it may call
+/// `startNextUtterance()` instead). Without the reset the token history
+/// grows for the whole conversation and every partial re-decodes all of it.
 ///
 /// Calls must not overlap: the transcriber awaits each one before the next.
 public protocol StreamingSpeechRecognizer: Sendable {
@@ -45,6 +46,23 @@ public protocol StreamingSpeechRecognizer: Sendable {
     /// it after every committed utterance.
     func reset() async
 
+    /// Ends the utterance at the audio decoded so far but keeps listening:
+    /// the model's state (encoder caches, decoder state, the audio buffered
+    /// for the next chunk) carries on, and later outputs describe only what
+    /// is decoded from here (`transcript`, `decodedSamples` and
+    /// `lastTokenEnd` count from this point, as after a reset).
+    ///
+    /// `ParakeetStreamingTranscriber` uses it for the word-timing fallback,
+    /// where VAD still hears speech: a reset model, hearing only the
+    /// background voices that kept VAD open (a TV), transcribes them, where
+    /// the model that has just heard the user mostly doesn't. The token
+    /// history keeps growing until the next `reset()`, which the transcriber
+    /// still calls at least every `maximumUtteranceDuration`.
+    ///
+    /// - Returns: `false` when the recognizer can't, and the caller resets
+    ///   it instead.
+    func startNextUtterance() async -> Bool
+
     /// Releases the model (`ParakeetEouRecognizer`: its Core ML models).
     /// The recognizer can't be used afterwards.
     /// `ParakeetStreamingTranscriber.finish()` calls it when the transcriber
@@ -58,6 +76,9 @@ public protocol StreamingSpeechRecognizer: Sendable {
 extension StreamingSpeechRecognizer {
     /// Nothing to release: the recognizer runs no model.
     public func unload() async {}
+
+    /// Not supported: the caller resets the recognizer.
+    public func startNextUtterance() async -> Bool { false }
 
     /// Decodes the audio still buffered and returns the whole transcript.
     public func finish() async throws -> RecognizerOutput {

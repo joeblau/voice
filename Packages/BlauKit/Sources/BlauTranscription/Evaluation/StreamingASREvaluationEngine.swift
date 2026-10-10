@@ -1,6 +1,7 @@
 import BlauAudio
 import BlauCore
 import BlauTelemetry
+import CoreML
 import Foundation
 import Synchronization
 
@@ -176,27 +177,39 @@ public struct StreamingASREvaluationEngine: ASREvaluationEngine {
 extension StreamingASREvaluationEngine {
     /// Parakeet realtime EOU 120M at 320 ms chunks behind Silero VAD, loaded
     /// from the directories `ModelManager` installed. Id `parakeet-eou-320ms`.
+    ///
+    /// - Parameter cpuOnly: Runs both models on the CPU only, as on the CI
+    ///   runners (virtual machines without a Neural Engine), instead of the
+    ///   Neural Engine the app uses. The numbers differ slightly between the
+    ///   two, enough to change where the model hears an end of utterance,
+    ///   so this reproduces the nightly job on a Mac (docs/asr-eval.md).
     public static func parakeetRealtimeEOU(
         modelDirectory: URL,
         vadModelDirectory: URL,
         endOfUtteranceDebounce: Duration = ParakeetEouRecognizer.defaultEndOfUtteranceDebounce,
         configuration: StreamingTranscriberConfiguration = .standard,
-        revision: String? = nil
+        revision: String? = nil,
+        cpuOnly: Bool = false
     ) async throws -> StreamingASREvaluationEngine {
         let recognizer = try await ParakeetEouRecognizer.load(
             modelDirectory: modelDirectory, endOfUtteranceDebounce: endOfUtteranceDebounce,
-            signposter: .disabled(.asr))
-        let vad = try await SileroSpeechProbabilityModel(modelDirectory: vadModelDirectory)
+            computeUnits: cpuOnly ? .cpuOnly : nil, signposter: .disabled(.asr))
+        let vad = try await SileroSpeechProbabilityModel(
+            modelDirectory: vadModelDirectory, backend: cpuOnly ? .cpu : .neuralEngine)
+        var settings = [
+            "eouDebounce": "\(Int(endOfUtteranceDebounce.timeInterval * 1_000)) ms",
+            "silenceCommitDelay": "\(Int(configuration.silenceCommitDelay.timeInterval * 1_000)) ms",
+            "maximumUtterance": "\(Int(configuration.maximumUtteranceDuration.timeInterval)) s",
+        ]
+        if cpuOnly {
+            settings["computeUnits"] = "CPU only"
+        }
         let descriptor = ASREngineDescriptor(
             id: "parakeet-eou-320ms",
             title: "Parakeet realtime EOU 120M, 320 ms chunks + Silero VAD (streaming)",
             kind: .streaming,
             model: revision.map { "\(ModelID.parakeetRealtimeEOU.rawValue)@\($0.prefix(8))" },
-            settings: [
-                "eouDebounce": "\(Int(endOfUtteranceDebounce.timeInterval * 1_000)) ms",
-                "silenceCommitDelay": "\(Int(configuration.silenceCommitDelay.timeInterval * 1_000)) ms",
-                "maximumUtterance": "\(Int(configuration.maximumUtteranceDuration.timeInterval)) s",
-            ])
+            settings: settings)
         return StreamingASREvaluationEngine(
             descriptor: descriptor, recognizer: { _ in recognizer }, speechModel: vad,
             transcriberConfiguration: configuration)

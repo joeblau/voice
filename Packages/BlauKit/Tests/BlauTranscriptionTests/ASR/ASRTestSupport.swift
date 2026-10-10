@@ -139,12 +139,21 @@ actor SimulatedEouRecognizer: StreamingSpeechRecognizer {
     private var buffered = 0
     private var decoded: Int64 = 0
     private var history: [ScriptedWord] = []
+    /// Where the current utterance starts after `startNextUtterance()`: the
+    /// words decoded before it (kept in `history`, as FluidAudio keeps its
+    /// tokens until a reset) and the audio decoded before it.
+    private var origin: (words: Int, samples: Int64) = (0, 0)
     private var eouAnchor: Int64?
     private var eouConfirmed = false
+    /// Whether `startNextUtterance()` is supported, as `ParakeetEouRecognizer`
+    /// does; without it the transcriber resets the recognizer instead.
+    private let continuesUtterances: Bool
 
     private(set) var chunksRun = 0
     private(set) var resets = 0
     private(set) var finishes = 0
+    /// `startNextUtterance()` calls that carried the model on.
+    private(set) var utterancesContinued = 0
     /// `unload()` calls: `ParakeetStreamingTranscriber.finish()` releases
     /// the model of a recognizer it owns (`unloadsRecognizerOnFinish`).
     private(set) var unloads = 0
@@ -168,7 +177,8 @@ actor SimulatedEouRecognizer: StreamingSpeechRecognizer {
         debounce: Duration = .milliseconds(640),
         period: Int64? = nil,
         chunkTime: Duration = .milliseconds(12),
-        failingChunks: Set<Int> = []
+        failingChunks: Set<Int> = [],
+        continuesUtterances: Bool = true
     ) {
         self.words = words.sorted { $0.end < $1.end }
         self.chunkSize = chunkSize
@@ -176,6 +186,7 @@ actor SimulatedEouRecognizer: StreamingSpeechRecognizer {
         self.period = period
         self.chunkTime = chunkTime
         self.failingChunks = failingChunks
+        self.continuesUtterances = continuesUtterances
     }
 
     func append(_ frame: AudioFrame) throws -> RecognizerOutput {
@@ -217,8 +228,8 @@ actor SimulatedEouRecognizer: StreamingSpeechRecognizer {
         }
         output.consumedSamples = index
         output.transcript = transcript
-        output.decodedSamples = decoded
-        output.lastTokenEnd = history.last.map { $0.end - streamStart! }
+        output.decodedSamples = decoded - origin.samples
+        output.lastTokenEnd = lastTokenEnd
         let consumed = frame.sampleOffset..<(frame.sampleOffset + Int64(index))
         expectedNext = consumed.upperBound
         if !consumed.isEmpty {
@@ -243,7 +254,7 @@ actor SimulatedEouRecognizer: StreamingSpeechRecognizer {
         let before = transcript
         if let streamStart {
             let undecoded = Int64(buffered)
-            let needed = cutoff.map { min(max($0 - decoded, 0), undecoded) } ?? undecoded
+            let needed = cutoff.map { min(max($0 + origin.samples - decoded, 0), undecoded) } ?? undecoded
             let shift = Int64(chunkSize.shiftSamples)
             let chunks = Int((needed + shift - 1) / shift)
             // Only real audio holds words; the padding is silence.
@@ -258,14 +269,15 @@ actor SimulatedEouRecognizer: StreamingSpeechRecognizer {
             output.modelTime = chunkTime * chunks
         }
         if let cutoff, let streamStart {
-            history.removeAll { $0.end - streamStart > cutoff }
+            history.removeAll { $0.end - streamStart - origin.samples > cutoff }
         }
         output.hasNewText = transcript != before
         output.transcript = transcript
-        output.decodedSamples = decoded
-        output.lastTokenEnd = history.last.map { $0.end - (streamStart ?? 0) }
+        output.decodedSamples = decoded - origin.samples
+        output.lastTokenEnd = lastTokenEnd
         buffered = 0
         history.removeAll()
+        origin.words = 0
         return output
     }
 
@@ -276,17 +288,36 @@ actor SimulatedEouRecognizer: StreamingSpeechRecognizer {
         buffered = 0
         decoded = 0
         history.removeAll()
+        origin = (0, 0)
         eouAnchor = nil
         eouConfirmed = false
         expectedNext = nil
+    }
+
+    /// `ParakeetEouRecognizer.startNextUtterance()`: the chunk timing, the
+    /// buffered audio, the EOU state and the word history carry on; the
+    /// outputs describe only what is decoded from here.
+    func startNextUtterance() -> Bool {
+        guard continuesUtterances else { return false }
+        if unloads > 0 { callsAfterUnload += 1 }
+        utterancesContinued += 1
+        origin = (history.count, decoded)
+        return true
     }
 
     func unload() {
         unloads += 1
     }
 
+    /// The current utterance's words.
     private var transcript: String {
-        history.map(\.text).joined(separator: " ")
+        history.dropFirst(origin.words).map(\.text).joined(separator: " ")
+    }
+
+    /// Where the current utterance's last word ends, from its start.
+    private var lastTokenEnd: Int64? {
+        guard history.count > origin.words, let last = history.last else { return nil }
+        return last.end - (streamStart ?? 0) - origin.samples
     }
 
     /// Moves every word ending at or before `end` (and after what was

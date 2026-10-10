@@ -59,8 +59,9 @@ flowchart LR
    audio (the model's end-of-utterance detector has to hear the silence) and
    commits on the first of the rules below.
 4. **Commit.** The final is emitted (a blank one, noise that VAD took for
-   speech, is dropped), the recognizer is **reset**, and the transcriber
-   goes idle until the next onset. Nothing is decoded between utterances.
+   speech, is dropped), the recognizer is **reset** (except after the
+   word-timing fallback, below), and the transcriber goes idle until the
+   next onset. Nothing is decoded between utterances.
 
 ## When an utterance ends
 
@@ -68,6 +69,7 @@ flowchart LR
 | --- | --- | --- |
 | The model confirms the end of utterance | EOU token + 640 ms debounce (`ParakeetEouRecognizer.defaultEndOfUtteranceDebounce`) | At the model's decision; audio after it belongs to the next utterance |
 | **VAD fallback**: VAD reported the end of speech and no new speech followed | `silenceCommitDelay` 0.9 s after the end of the speech | Flush up to the end of speech (words after it are dropped), then reset |
+| **Word-timing fallback**: VAD still hears speech (background voices keep its segment open), but the model has decoded no new word | `silenceCommitDelay` 0.9 s of decoded audio after the last word | At the decoded audio, no flush; the model carries on into the next utterance (`startNextUtterance()`) instead of being reset, for up to `maximumUtteranceDuration` |
 | The utterance is too long | `maximumUtteranceDuration` 30 s | Flush and reset; if speech goes on, the next utterance starts at the cut |
 | The audio stream ends, or `stop()` | | Flush and reset |
 | The recognizer throws | | What was decoded so far; the failing audio is skipped |
@@ -102,15 +104,48 @@ model's detector still ends utterances that VAD can't (steady noise that
 keeps a segment open), and its debounce of two chunks (640 ms) keeps a
 stray EOU token from cutting a sentence.
 
+### Noise that keeps VAD open: the word-timing fallback (#178)
+
+In a cafe or with a TV on, Silero VAD hears the background voices as
+speech and its segment never closes, so the VAD fallback never starts.
+Before #178 only the model's EOU head could then end the turn, and in
+noise it fires late or not at all: on the ASR eval's `cafe-02` the user's
+two sentences came out as one final, the first one's 5 s after it ended,
+on every backend; on `cafe-05` the same happened on the CPU (the CI
+runners) but not on the Mac's Neural Engine, which is what failed the
+nightly gate. With a TV, the turn waited for the 30 s maximum.
+
+The word-timing fallback applies the VAD fallback's 0.9 s pause to the
+model's own words: while VAD hears speech, an utterance with words is
+committed once the model has decoded `silenceCommitDelay` of audio past
+the last word (`RecognizerOutput.lastTokenEnd`) without a new one. With the
+model's 310 ms lookahead and 320 ms chunks the final comes 1.2–1.55 s after
+the last word's token (0.7–1.55 s after the end of the speech on the eval's
+cafe and TV fixtures). In a quiet room VAD's end of speech comes first, so
+nothing changes there.
+
+It doesn't reset the recognizer. A reset model, hearing only the TV that
+kept VAD open, transcribes it (on the eval's TV fixtures, twice the
+insertions); the model that has just heard the user mostly doesn't, while
+the user's next sentence still comes through. So the transcriber calls
+`startNextUtterance()`: FluidAudio's encoder caches, decoder state and
+buffered audio carry on, and the recognizer leaves the tokens before the
+cut out of what it reports. FluidAudio keeps those tokens until a reset,
+so the transcriber still resets the recognizer at the next commit once its
+history covers `maximumUtteranceDuration` (30 s) of audio. A recognizer
+without `startNextUtterance()` is reset, and the next utterance reads the
+audio after the cut back from the capture history.
+
 ### The flush and `reset()` after every utterance
 
 FluidAudio keeps every token since its last `reset()` and decodes all of
 them again for each partial, so without a reset the work per chunk grows
 for the whole conversation. The transcriber flushes the recognizer
 (`finish(keepingTokensThrough:)`) only when it needs the buffered audio
-decoded (every rule except the model's own end of utterance, where the
-audio after the decision belongs to the next utterance) and calls
-**`reset()` after every commit**.
+decoded (every rule except the model's own end of utterance and the
+word-timing fallback, where the audio after the decision belongs to the
+next utterance) and calls **`reset()` after every commit**, except after
+the word-timing fallback (above), which resets at least every 30 s of audio.
 
 The flush doesn't use FluidAudio's `finish()`: that clears the token
 timestamps before it returns (so the tokens can't be cut at the end of
@@ -340,7 +375,7 @@ the second pass, are tracked by the ASR evaluation harness:
 
 | Where | What | Runs |
 | --- | --- | --- |
-| `Tests/BlauTranscriptionTests/ASR/ParakeetStreamingTranscriberTests.swift` | Every rule on a simulated recognizer with Parakeet's chunk timing and FluidAudio's debounce: fixtures committed within 1.2 s, pauses, resumption, the VAD race, maximum length without gaps or repeats, history read-back, blank and failing utterances, partial ranges, wall-clock start, `asr.eou` messages, `start`/`stop`/stream end, chunk-size switching | `swift test` |
+| `Tests/BlauTranscriptionTests/ASR/ParakeetStreamingTranscriberTests.swift` | Every rule on a simulated recognizer with Parakeet's chunk timing and FluidAudio's debounce: fixtures committed within 1.2 s, pauses, resumption, the VAD race, the word-timing fallback with VAD held open by noise (carrying the model on, resetting one that can't, the 30 s cap), maximum length without gaps or repeats, history read-back, blank and failing utterances, partial ranges, wall-clock start, `asr.eou` messages, `start`/`stop`/stream end, chunk-size switching | `swift test` |
 | `Tests/BlauTranscriptionTests/ASR/TranscriberSoakTests.swift` | An hour of looped fixtures (2 s): every sentence of every repeat, the recognizer's history bounded by one sentence, work per chunk flat, nothing skipped or repeated | `swift test` |
 | `Tests/BlauTranscriptionTests/ASR/ParakeetEouRecognizerTests.swift` | Chunk geometry against FluidAudio's `StreamingChunkSize`, the installed export, loading errors | `swift test` |
 | `Tests/BlauTranscriptionTests/ASR/ParakeetLiveTests.swift` | The fixtures through the **real model** (WER, latency), the raw EOU timing, and the hour-long soak | `BLAU_ASR_MODEL_DIR` (and `BLAU_ASR_SOAK=1`) |
