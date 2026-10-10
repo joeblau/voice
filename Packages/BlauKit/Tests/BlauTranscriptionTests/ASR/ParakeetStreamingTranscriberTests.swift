@@ -751,15 +751,22 @@ final class Counter: Sendable {
     }
 }
 
-/// Polls `condition` until it holds, failing after `timeout`.
+/// Thrown by `waitUntil` when its condition never held, so the test stops
+/// there instead of reading state that isn't there.
+struct WaitTimedOut: Error {}
+
+/// Polls `condition` until it holds. After `timeout` it records an issue at
+/// the caller and throws `WaitTimedOut`.
 func waitUntil(
-    timeout: Duration = .seconds(5), _ condition: @Sendable () async -> Bool
+    timeout: Duration = .seconds(5),
+    sourceLocation: SourceLocation = #_sourceLocation,
+    _ condition: @Sendable () async -> Bool
 ) async throws {
     let deadline = ContinuousClock.now + timeout
     while await !condition() {
         guard ContinuousClock.now < deadline else {
-            Issue.record("Timed out")
-            return
+            Issue.record("Timed out", sourceLocation: sourceLocation)
+            throw WaitTimedOut()
         }
         try await Task.sleep(for: .milliseconds(5))
     }

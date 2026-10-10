@@ -158,6 +158,10 @@ enum SchemaV1Fixture {
         guard sqlite3_open_v2(url.path(percentEncoded: false), &database, flags, nil) == SQLITE_OK else {
             throw FixtureError.sqlite("open \(url.lastPathComponent): \(String(cString: sqlite3_errmsg(database)))")
         }
+        // SwiftData's connections to the store it just wrote can still hold
+        // a lock for a moment; wait for it rather than fail with
+        // "database is locked".
+        sqlite3_busy_timeout(database, 10_000)
         try body(database)
     }
 

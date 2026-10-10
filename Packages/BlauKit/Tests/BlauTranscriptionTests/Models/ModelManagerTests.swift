@@ -411,6 +411,9 @@ struct ModelManagerTests {
 
         manager.preferences.downloadsOptionalModels = true
         await waitUntil("optional model downloads") { manager.state(of: .parakeetTDTv3) == .ready }
+        // The other optional models may still be downloading or warming up;
+        // let them finish before the temporary directory goes away.
+        await manager.waitUntilIdle()
         #expect(harness.preferences.load().downloadsOptionalModels)
     }
 

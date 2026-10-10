@@ -209,6 +209,36 @@ final class SilentCaptureSource: CaptureFrameSource {
         }
     }
 
+    /// Keeps capturing silence from `seconds` on, 20 ms at a time and no
+    /// further than `limit`, until `condition` holds, the way a live
+    /// microphone keeps producing frames. VAD events reach the transcriber
+    /// on their own task and are only looked at with the next frame, so a
+    /// test that stops publishing at a fixed point can stall before one
+    /// lands. Records an issue at the caller and throws `WaitTimedOut` after
+    /// `timeout`.
+    func keepCapturing(
+        from seconds: Double,
+        through limit: Double,
+        timeout: Duration = .seconds(10),
+        sourceLocation: SourceLocation = #_sourceLocation,
+        until condition: () -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        var end = seconds
+        publish(to: end)
+        while !condition() {
+            guard ContinuousClock.now < deadline else {
+                Issue.record("Timed out capturing through \(end) s", sourceLocation: sourceLocation)
+                throw WaitTimedOut()
+            }
+            if end < limit {
+                end = min(end + 0.02, limit)
+                publish(to: end)
+            }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
     func finishFrames() {
         let subscribers = state.withLock { state in
             defer { state.subscribers.removeAll() }
@@ -329,12 +359,12 @@ final class TranscriptLog: Sendable {
         all.compactMap { if case .partial(let text, _) = $0 { text } else { nil } }
     }
 
-    /// Waits until `count` finals have arrived.
-    func waitForFinals(_ count: Int) async throws {
-        try await waitUntil { self.finals.count >= count }
+    /// Waits until `count` finals have arrived; throws if they don't.
+    func waitForFinals(_ count: Int, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        try await waitUntil(sourceLocation: sourceLocation) { self.finals.count >= count }
     }
 
-    func waitForEvents(_ count: Int) async throws {
-        try await waitUntil { self.all.count >= count }
+    func waitForEvents(_ count: Int, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        try await waitUntil(sourceLocation: sourceLocation) { self.all.count >= count }
     }
 }

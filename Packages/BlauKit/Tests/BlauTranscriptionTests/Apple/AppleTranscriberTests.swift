@@ -428,9 +428,15 @@ struct AppleTranscriberTests {
         try await waitUntil { transcriber.statistics.partialsEmitted == 1 }
         vad.send(.ended(from: 5.0, to: 6.0))
         await engine.emit(.final("Go on.", wordsFrom: 5.1, wordsTo: 5.7, to: 6.5))
-        source.publish(to: 7.5)
-        try await log.waitForFinals(1)
-        #expect(log.finals[0].timeRange.start == .samples(streamOffset(5.0), sampleRate: 16_000))
+        // The VAD end reaches the transcriber on its own task and is only
+        // read with the next frame, so keep the microphone running until the
+        // pause commits (with the first frame after both the end and the
+        // final have landed), well short of the 30 s length limit.
+        try await source.keepCapturing(from: 7.5, through: 20) { !log.finals.isEmpty }
+        let utterance = try #require(log.finals.first)
+        #expect(utterance.text == "Go on.")
+        #expect(utterance.timeRange.start == .samples(streamOffset(5.0), sampleRate: 16_000))
+        #expect(transcriber.statistics.commits[.silence] == 1)
         await transcriber.finish()
     }
 
