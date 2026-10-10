@@ -160,11 +160,19 @@ final class OnboardingUITests: XCTestCase {
         // Allowed in the meantime: the page says so and moves on.
         XCTAssertEqual(microphone.staticTexts["blau.onboarding.microphone.status"].label, "Microphone allowed")
         tapPrimary(on: "microphone", in: relaunched)
-        // The fixture models start over on every launch, so they are still
-        // downloading: the page shows their progress.
-        let models = page("speechModels", in: relaunched)
-        XCTAssertTrue(models.descendants(matching: .any)["blau.models.setup"].waitForExistence(timeout: 10))
-        XCTAssertTrue(models.buttons["blau.onboarding.primary"].exists)
+        // Downloads can finish while the runner inspects the microphone
+        // page. As on a fresh install, ready models skip their setup page.
+        let models = relaunched.descendants(matching: .any)["blau.onboarding.step.speechModels"]
+        let iCloud = relaunched.descendants(matching: .any)["blau.onboarding.step.iCloud"]
+        let advanced = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in models.exists || iCloud.exists }, object: nil)
+        XCTAssertEqual(XCTWaiter().wait(for: [advanced], timeout: 15), .completed, "Setup didn't advance")
+        if models.exists {
+            XCTAssertTrue(models.descendants(matching: .any)["blau.models.setup"].waitForExistence(timeout: 10))
+            XCTAssertTrue(models.buttons["blau.onboarding.primary"].exists)
+        } else {
+            XCTAssertTrue(iCloud.descendants(matching: .any)["blau.onboarding.iCloud.status"].exists)
+        }
     }
 
     /// After setup, onboarding comes back with only the missing

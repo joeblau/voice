@@ -168,6 +168,10 @@ private final class PrependScrollTracker {
     /// load after that: while the screen opens, its geometry passes through
     /// the top before the bottom anchor applies.
     var hasScrolled = false
+    /// Visible bullets' actual positions, before a tap changes their rows.
+    var bulletPositions: [UUID: CGFloat] = [:]
+    /// The bullet held while its detail and lazy transcript are laid out.
+    var expandingBullet: (id: UUID, y: CGFloat)?
     /// Ends a page's hold once it has settled, or gives up on it.
     var timeout: Task<Void, Never>?
     /// Finishes Now's trip to the latest line (`finishReturningToNow`).
@@ -280,6 +284,7 @@ private struct TopicTimelineScrollView: View {
             if phase == .tracking || phase == .interacting {
                 // The user took over: Now stops finishing its trip.
                 tracker.returnToNow?.cancel()
+                tracker.expandingBullet = nil
             }
             if tracker.isIdle {
                 loadOlderIfNeeded()
@@ -383,6 +388,12 @@ private struct TopicTimelineScrollView: View {
                 }
                 .accessibilityRotorEntry(id: topic.id, in: rotor)
                 .prependAnchor(item.id == anchorID, moved: anchorMoved)
+                .onGeometryChange(for: CGFloat.self) {
+                    $0.frame(in: .global).minY
+                } action: { y in
+                    bulletMoved(topic.id, to: y)
+                }
+                .onDisappear { tracker.bulletPositions[topic.id] = nil }
             }
         }
     }
@@ -501,6 +512,17 @@ private struct TopicTimelineScrollView: View {
 
     // MARK: Taps
 
+    /// Lazy rows may change the content above the tapped bullet as they are
+    /// measured. Hold its rendered position, rather than an estimated offset.
+    private func bulletMoved(_ id: UUID, to y: CGFloat) {
+        tracker.bulletPositions[id] = y
+        guard let held = tracker.expandingBullet, held.id == id, tracker.isIdle else { return }
+        let distance = y - held.y
+        if abs(distance) > 0.5 {
+            _ = tracker.scrollView.shiftContent(by: distance)
+        }
+    }
+
     /// The current bullet returns to the latest line; any other expands or
     /// compresses.
     private func tap(_ topic: TimelineTopic, placement: TopicTimeline.Placement) {
@@ -513,6 +535,13 @@ private struct TopicTimelineScrollView: View {
         // layout (#58).
         if expansion.isExpanded(topic.id, current: timeline.currentTopicID) {
             expansionTimer.cancelled(topic.id)
+            // Collapsing at the latest line should keep following that line.
+            if isAtBottom, let current = timeline.currentTopicID {
+                holdBullet(current, whileToggling: topic.id)
+                return
+            }
+            toggleExpansion(of: topic.id)
+            return
         } else {
             expansionTimer.began(topic.id)
         }
@@ -527,11 +556,20 @@ private struct TopicTimelineScrollView: View {
         // animation and the lazy rows' measuring are done, then the geometry
         // decides again: collapsing at the latest line stays there (and keeps
         // following new lines), expanding scrolls it out of view.
+        holdBullet(topic.id, whileToggling: topic.id)
+    }
+
+    private func holdBullet(_ anchor: UUID, whileToggling topic: UUID) {
         topAnchorHolds += 1
+        // A previous Now target must stop following the bottom while this
+        // topic changes height; its rendered bullet supplies the anchor.
+        position = ScrollPosition(idType: TopicTimeline.ItemID.self)
+        if let y = tracker.bulletPositions[anchor] { tracker.expandingBullet = (anchor, y) }
         Task { @MainActor in
-            toggleExpansion(of: topic.id)
+            toggleExpansion(of: topic)
             try? await Task.sleep(for: Self.topAnchorHold)
             topAnchorHolds -= 1
+            if topAnchorHolds == 0 { tracker.expandingBullet = nil }
         }
     }
 
@@ -540,7 +578,12 @@ private struct TopicTimelineScrollView: View {
     private static let topAnchorHold = Duration.milliseconds(400)
 
     private func toggleExpansion(of id: UUID) {
-        withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) {
+        // A height animation also animates SwiftUI's scroll offset, defeating
+        // the same-frame hold. Insert the detail immediately; Now still
+        // returns with its spring and refined titles still cross-fade.
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
             _ = expansion.toggle(id, current: timeline.currentTopicID)
         }
     }

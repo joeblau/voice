@@ -79,6 +79,9 @@ struct ChatRowView: View {
             }
         }
         .modifier(ChatRowMenu(row: row, onSplit: onSplit))
+        #if DEBUG
+            .modifier(ChatRowGeometryProbe(identifier: accessibilityIdentifier))
+        #endif
         .containerRelativeFrame(.horizontal, alignment: frameAlignment) { length, _ in
             row.role == .system ? length : length * ChatTranscriptLayout.maxWidthFraction
         }

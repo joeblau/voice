@@ -25,11 +25,14 @@ final class ChatTranscriptUITests: XCTestCase {
     private func launch(rows: Int, arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["BLAU_APP_ENVIRONMENT"] = "ui-test"
-        app.launchArguments += ["-BlauChatFixture", "\(rows)"] + arguments
+        app.launchArguments += ["-BlauChatFixture", "\(rows)", "-BlauChatGeometry"] + arguments
         app.launch()
         XCTAssertTrue(
             app.descendants(matching: .any)[Identifier.transcript].waitForExistence(timeout: 30),
             "The transcript did not appear")
+        XCTAssertTrue(
+            app.descendants(matching: .any)["blau.models.setup"].waitForNonExistence(timeout: 30),
+            "The model setup card stayed")
         return app
     }
 
@@ -39,6 +42,19 @@ final class ChatTranscriptUITests: XCTestCase {
         return query.allElementsBoundByIndex.filter { $0.exists && !$0.frame.isEmpty }
     }
 
+    private func visibleFrames(_ identifier: String, in app: XCUIApplication) -> [CGRect] {
+        // Rows behind the bars or the pinned topic header can retain
+        // estimated accessibility frames. Only fully rendered rows in the
+        // transcript's unobscured viewport have meaningful layout geometry.
+        let top = max(
+            app.navigationBars.firstMatch.frame.maxY,
+            app.buttons["blau.timeline.topic.current"].frame.maxY)
+        let bottom = app.buttons[Identifier.settings].frame.minY
+        return ChatGeometry.frames(for: identifier, in: app).filter {
+            $0.maxY > top && $0.minY < bottom
+        }
+    }
+
     /// The visual spec, checked on the rows on screen: every user row ends
     /// at the right margin and leaves the left 15 % empty, every agent row
     /// starts at the left margin and leaves the right 15 % empty.
@@ -46,27 +62,25 @@ final class ChatTranscriptUITests: XCTestCase {
         let app = launch(rows: 40)
         let window = app.windows.firstMatch.frame
         let maxWidth = window.width * 0.85 + 1
-        let users = rows(Identifier.user, in: app)
-        let agents = rows(Identifier.agent, in: app)
+        let users = visibleFrames(Identifier.user, in: app)
+        let agents = visibleFrames(Identifier.agent, in: app)
         XCTAssertFalse(users.isEmpty)
         XCTAssertFalse(agents.isEmpty)
 
         let margin: CGFloat = 24
-        for row in users {
-            let frame = row.frame
+        for frame in users {
             XCTAssertEqual(frame.maxX, window.maxX - 16, accuracy: 2, "User row not on the right: \(frame)")
             XCTAssertGreaterThanOrEqual(frame.minX, window.maxX - 16 - maxWidth, "User row too wide: \(frame)")
             XCTAssertGreaterThan(frame.minX, window.minX + margin, "User row reaches the left: \(frame)")
         }
-        for row in agents {
-            let frame = row.frame
+        for frame in agents {
             XCTAssertEqual(frame.minX, window.minX + 16, accuracy: 2, "Agent row not on the left: \(frame)")
             XCTAssertLessThanOrEqual(frame.maxX, window.minX + 16 + maxWidth, "Agent row too wide: \(frame)")
             XCTAssertLessThan(frame.maxX, window.maxX - margin, "Agent row reaches the right: \(frame)")
         }
 
         // The rows read as a conversation: alternating sides, in order.
-        let onScreen = (users + agents).filter { window.contains($0.frame) }.sorted { $0.frame.minY < $1.frame.minY }
+        let onScreen = (users + agents).filter { window.contains($0) }.sorted { $0.minY < $1.minY }
         XCTAssertGreaterThan(onScreen.count, 2)
 
         attachScreenshot(app, "Transcript")
@@ -112,11 +126,21 @@ final class ChatTranscriptUITests: XCTestCase {
         let app = launch(
             rows: 10, arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
         let window = app.windows.firstMatch.frame
-        for row in rows(Identifier.user, in: app) where window.intersects(row.frame) {
-            XCTAssertEqual(row.frame.maxX, window.maxX - 16, accuracy: 2, "\(row.frame)")
+        let agents = visibleFrames(Identifier.agent, in: app)
+        XCTAssertFalse(agents.isEmpty)
+        for row in agents {
+            XCTAssertEqual(row.minX, window.minX + 16, accuracy: 2, "\(row)")
         }
-        for row in rows(Identifier.agent, in: app) where window.intersects(row.frame) {
-            XCTAssertEqual(row.frame.minX, window.minX + 16, accuracy: 2, "\(row.frame)")
+        // A long reply at accessibility XXXL can fill the whole viewport.
+        // Bring the preceding user row into view before checking its edge.
+        var users = visibleFrames(Identifier.user, in: app)
+        for _ in 0..<6 where users.isEmpty {
+            app.descendants(matching: .any)[Identifier.transcript].swipeDown()
+            users = visibleFrames(Identifier.user, in: app)
+        }
+        XCTAssertFalse(users.isEmpty, "No user row became visible")
+        for row in users {
+            XCTAssertEqual(row.maxX, window.maxX - 16, accuracy: 2, "\(row)")
         }
         attachScreenshot(app, "Transcript, accessibility XXXL")
     }

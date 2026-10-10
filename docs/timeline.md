@@ -122,6 +122,10 @@ fetches that one conversation's utterances.
   latest line holds `.top` for the length of the expansion (a transient
   hold, separate from the at-bottom flag), so the bullet stays where it is
   while its transcript opens; after that the scroll geometry alone decides.
+  A prior Now scroll target is cleared before toggling, and the bullet's
+  measured position corrects lazy-layout movement in the same frame. When
+  collapsing at the latest line, the current bullet supplies that hold,
+  preventing a stale size estimate from leaving space below the transcript.
   Collapsing a topic at the latest line therefore stays there, with no Now
   pill, and keeps following new lines.
 - **No scroll jumps from labels.** Compressed rows have a fixed height, so a
@@ -302,14 +306,17 @@ UI tests seed a canned history with `-BlauTimelineFixture <topics>` on a
 yesterday and today, the last topic open; every third title starts as
 "Draft <n>"), and `-BlauTimelineRelabelAfter <seconds>` refines every
 provisional title from a separate `ModelContext` that long after seeding,
-the way the topic lifecycle's store does. Previews use the same fixture.
+the way the topic lifecycle's store does. `-BlauTimelineRelabelOnDemand YES`
+instead offers a UI-test-only toolbar action that refines the titles once
+the test has reached history; slow launches cannot consume its timer.
+Previews use the same fixture.
 `-BlauTimelineHistory <topics>` seeds a long history instead: conversations
 of five topics, two a day going back from today, titled "<title> <n>" with
 n counting from the oldest (the "Timeline, long history" preview seeds
 2,000).
 
 The paging UI tests take about 25 minutes together (the scroll through
-2,000 topics alone about 15), more than CI's `app-tests` job
+2,000 topics alone about 15), more than a CI UI-test shard
 allows, so they skip unless `BLAU_LONG_UI_TESTS=1` (xcodebuild passes
 `TEST_RUNNER_`-prefixed variables to the test runner). Run them on an iOS 26
 and an iOS 27 simulator before changing the timeline's scrolling:
