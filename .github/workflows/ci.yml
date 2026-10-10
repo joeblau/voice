@@ -66,6 +66,40 @@ jobs:
           xcodebuild test-without-building -project Blau.xcodeproj -scheme Blau -testPlan Blau -destination "$DESTINATION" -derivedDataPath .build/DerivedData -resultBundlePath .build/results/large-actions.xcresult -only-testing:BlauUITests/TopicDetailUITests/testActionsRemainReachableAtTheLargestTextSize -parallel-testing-enabled NO -collect-test-diagnostics never SWIFT_OPTIMIZATION_LEVEL=-O SWIFT_COMPILATION_MODE=wholemodule -enableCodeCoverage NO CODE_SIGNING_ALLOWED=NO XAI_DEV_API_KEY=
           xcrun xcresulttool get test-results summary --path .build/results/large-actions.xcresult --format json > .build/results/large-actions-summary.json
           python3 -c 'import json; r=json.load(open(".build/results/large-actions-summary.json")); print(r); assert r["totalTestCount"] == 1 and r["failedTests"] == 0'
+      - name: Profile an expansion failure
+        if: failure()
+        timeout-minutes: 10
+        env:
+          DESTINATION: ${{ steps.simulator.outputs.destination }}
+          UDID: ${{ steps.simulator.outputs.udid }}
+        run: |
+          mkdir -p .build/results
+          app=.build/DerivedData/Build/Products/Debug-iphonesimulator/Blau.app
+          xcrun dsymutil "$app/Blau.debug.dylib" -o .build/results/Blau.debug.dylib.dSYM
+          printf '%s\n' '{"Time Profiler":{"contextSwitchSampling":true,"highFrequencySampling":true,"recordWaitingThreads":true}}' > .build/results/recording-options.json
+          (
+            for i in $(seq 1 600); do
+              pid=$(pgrep -x Blau | head -1 || true)
+              if [ -n "$pid" ]; then
+                xcrun xctrace record --template 'Time Profiler' --instrument os_signpost --device "$UDID" --attach "$pid" --time-limit 60s --no-prompt --recording-options .build/results/recording-options.json --output .build/results/expansion.trace > .build/results/profile.log 2>&1
+                exit $?
+              fi
+              sleep 0.2
+            done
+            exit 1
+          ) &
+          profile_pid=$!
+          set +e
+          xcodebuild test-without-building -project Blau.xcodeproj -scheme Blau -testPlan Blau -destination "$DESTINATION" -derivedDataPath .build/DerivedData -resultBundlePath .build/results/profiled-expansion.xcresult -only-testing:BlauUITests/TopicDetailUITests/testTappingExpandsWithinAHundredMilliseconds -parallel-testing-enabled NO -collect-test-diagnostics never SWIFT_OPTIMIZATION_LEVEL=-O SWIFT_COMPILATION_MODE=wholemodule -enableCodeCoverage NO CODE_SIGNING_ALLOWED=NO XAI_DEV_API_KEY= > .build/results/profiled-expansion.log 2>&1
+          test_status=$?
+          wait "$profile_pid"
+          profile_status=$?
+          set -e
+          echo "Profiled test status: $test_status; trace status: $profile_status"
+          if [ "$profile_status" -eq 0 ]; then
+            xcrun xctrace symbolicate --input .build/results/expansion.trace --dsym .build/results/Blau.debug.dylib.dSYM
+            xcrun xctrace export --input .build/results/expansion.trace --toc --output .build/results/trace-toc.xml
+          fi
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
