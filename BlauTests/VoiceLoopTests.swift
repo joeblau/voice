@@ -341,13 +341,16 @@ struct VoiceLoopTests {
         }
     }
 
-    /// Polls `condition` until it holds, failing after 10 s.
+    /// Polls `condition` until it holds, failing after 10 s worth of polls.
+    /// The limit counts polls, not wall time, so a loaded runner that keeps
+    /// the whole process off the CPU can't run it out (#180).
     private func until(
         _ what: String, sourceLocation: SourceLocation = #_sourceLocation, _ condition: () -> Bool
     ) async throws {
-        let deadline = ContinuousClock.now + .seconds(10)
+        var polls = Int(Duration.seconds(10) / Duration.microseconds(200))
         while !condition() {
-            if ContinuousClock.now >= deadline {
+            polls -= 1
+            if polls < 0 {
                 Issue.record("Timed out waiting for \(what)", sourceLocation: sourceLocation)
                 return
             }

@@ -86,14 +86,17 @@ struct SwiftDataIncrementalIndexingTests {
         }
     }
 
-    /// Polls until `condition` holds (the run loop works on its own task).
+    /// Polls until `condition` holds (the run loop works on its own task),
+    /// for up to 20 s worth of polls. Counting polls rather than wall time
+    /// means a loaded runner can't run the wait out (#180).
     static func eventually(_ condition: () async throws -> Bool) async throws {
-        let deadline = ContinuousClock.now + .seconds(20)
+        var polls = 1_000
         while try await !condition() {
-            guard ContinuousClock.now < deadline else {
+            guard polls > 0 else {
                 Issue.record("Timed out")
                 return
             }
+            polls -= 1
             try await Task.sleep(for: .milliseconds(20))
         }
     }

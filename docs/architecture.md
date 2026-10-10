@@ -112,7 +112,10 @@ The complete list of declared edges:
    late. Tests wait on state (`ManualClock.waitForSleepers`,
    `sleeperDeadlines`, or the condition itself), never on a real-time pause
    or a fixed number of yields, so a loaded CI runner can't reorder them
-   (#180); a pause only backs a check that something did *not* happen.
+   (#180); a pause only backs a check that something did *not* happen. A
+   `ManualClock` sleeper counts from when its task can be cancelled until
+   it fires or is cancelled, however slow its task is: `advance(by:)`
+   settles a due sleeper at once, and `cancel()` removes one at once.
 6. **Third-party packages are pinned in `Package.swift`**, added by the issue
    that first needs them and linked only by the modules that use them.
    FluidAudio is pinned `from: "0.17.5"` with its default

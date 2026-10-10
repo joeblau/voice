@@ -351,7 +351,12 @@ struct TurnOrchestratorContinuityTests {
         try await harness.waitForEndpoint(conversation: "conv_1")
         await harness.orchestrator.handle(.final(harness.utterance("What's the weather?", from: 0, to: 1)))
         try await harness.waitForSent("response.create", on: first)
+        // Events and the connection's state reach the orchestrator on
+        // separate streams, so the drop could be handled first. Wait until
+        // `response.created` has been: it disarms the response timeout.
+        await harness.clock.waitForSleepers()
         first.push(ServerEvents.responseCreated("resp_1", turn: first.turnTag()))
+        try await waitUntil("response.created handled") { harness.clock.sleeperCount == 0 }
         first.fail()
 
         let second = try await connector.socket(1)

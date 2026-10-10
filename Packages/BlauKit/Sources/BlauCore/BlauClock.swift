@@ -75,15 +75,32 @@ extension BlauClock where Self == SystemClock {
 /// A clock that only moves when told to. For tests and previews.
 ///
 /// `sleep(for:)` and `sleep(until:)` suspend until `advance(by:)` moves
-/// `uptime` to or past the sleeper's deadline. Sleepers wake in deadline
-/// order, and a cancelled sleeper throws `CancellationError` immediately.
+/// `uptime` to or past the sleeper's deadline. Suspended sleepers wake in
+/// deadline order (one whose task hadn't suspended yet returns when it
+/// runs), and a cancelled sleeper throws `CancellationError` immediately.
 public final class ManualClock: BlauClock {
     private enum Sleeper {
+        /// The ID is taken, but the sleeper isn't counted yet: it registers
+        /// once its cancellation handler is installed, so a `cancel()` never
+        /// leaves a counted sleeper behind.
+        case reserved
         /// Registered, but the continuation isn't installed yet.
         case pending(deadline: Duration)
+        /// Its deadline was reached before its continuation was installed.
+        /// It returns as soon as the continuation is.
+        case fired
         /// Cancelled before its continuation was installed.
         case cancelled
         case waiting(deadline: Duration, continuation: CheckedContinuation<Void, any Error>)
+
+        /// When the sleeper wakes, while it's on the clock: `nil` before it
+        /// registers and once it has fired or been cancelled.
+        var deadline: Duration? {
+            switch self {
+            case .pending(let deadline), .waiting(let deadline, _): deadline
+            case .reserved, .fired, .cancelled: nil
+            }
+        }
     }
 
     /// A task in ``waitForSleepers(count:)``.
@@ -103,10 +120,9 @@ public final class ManualClock: BlauClock {
         var nextWaiterID: UInt64 = 0
         var sleeperWaiters: [UInt64: SleeperWaiter] = [:]
 
+        /// Sleepers that are registered, not yet due and not cancelled.
         var sleeperCount: Int {
-            sleepers.values.count { sleeper in
-                if case .cancelled = sleeper { false } else { true }
-            }
+            sleepers.values.count { $0.deadline != nil }
         }
 
         /// Removes and returns the waiters that have as many sleepers as
@@ -149,13 +165,7 @@ public final class ManualClock: BlauClock {
     /// sleeper".
     public var sleeperDeadlines: [Duration] {
         state.withLock { state in
-            state.sleepers.values.compactMap { sleeper -> Duration? in
-                switch sleeper {
-                case .pending(let deadline), .waiting(let deadline, _): deadline
-                case .cancelled: nil
-                }
-            }
-            .sorted()
+            state.sleepers.values.compactMap(\.deadline).sorted()
         }
     }
 
@@ -172,25 +182,41 @@ public final class ManualClock: BlauClock {
     private func sleep(_ deadline: (Duration) -> Duration) async throws {
         try Task.checkCancellation()
 
-        let (id, satisfied) = state.withLock { state in
+        let id = state.withLock { state in
             let id = state.nextSleeperID
             state.nextSleeperID += 1
-            state.sleepers[id] = .pending(deadline: deadline(state.uptime))
-            return (id, state.satisfiedWaiters())
+            state.sleepers[id] = .reserved
+            return id
         }
-        for waiter in satisfied { waiter.resume() }
 
         try await withTaskCancellationHandler {
+            // Counted only from here, where the handler is installed: once a
+            // test sees the sleeper, cancelling its task removes it at once.
+            let satisfied: [CheckedContinuation<Void, Never>]? = state.withLock { state in
+                guard case .reserved = state.sleepers[id] else {
+                    // Cancelled before it registered.
+                    state.sleepers[id] = nil
+                    return nil
+                }
+                state.sleepers[id] = .pending(deadline: deadline(state.uptime))
+                return state.satisfiedWaiters()
+            }
+            guard let satisfied else { throw CancellationError() }
+            for waiter in satisfied { waiter.resume() }
+
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
                 let result: Result<Void, any Error>? = state.withLock { state in
                     switch state.sleepers[id] {
+                    case .fired:
+                        state.sleepers[id] = nil
+                        return .success(())
                     case .pending(let deadline) where deadline <= state.uptime:
                         state.sleepers[id] = nil
                         return .success(())
                     case .pending(let deadline):
                         state.sleepers[id] = .waiting(deadline: deadline, continuation: continuation)
                         return nil
-                    case .cancelled, .waiting, nil:
+                    case .reserved, .cancelled, .waiting, nil:
                         state.sleepers[id] = nil
                         return .failure(CancellationError())
                     }
@@ -205,10 +231,11 @@ public final class ManualClock: BlauClock {
                 case .waiting(_, let continuation):
                     state.sleepers[id] = nil
                     return continuation
-                case .pending:
+                case .reserved, .pending:
                     state.sleepers[id] = .cancelled
                     return nil
-                case .cancelled, nil:
+                case .fired, .cancelled, nil:
+                    // Already woken, or already gone: nothing to undo.
                     return nil
                 }
             }
@@ -219,6 +246,11 @@ public final class ManualClock: BlauClock {
     /// Moves both `now` and `uptime` forward by `duration` and wakes every
     /// sleeper whose deadline has been reached, earliest first.
     ///
+    /// A due sleeper whose task hasn't suspended yet is settled too: it
+    /// leaves ``sleeperCount`` and ``sleeperDeadlines`` now and returns as
+    /// soon as its task runs. So a sleeper that's gone from the clock has
+    /// fired or been cancelled, however slow its task is to get going.
+    ///
     /// - Precondition: `duration >= .zero`. Time never goes backwards.
     public func advance(by duration: Duration) {
         precondition(duration >= .zero, "ManualClock can't move backwards")
@@ -226,6 +258,11 @@ public final class ManualClock: BlauClock {
             state.uptime += duration
             state.now += duration.timeInterval
 
+            for (id, sleeper) in state.sleepers {
+                if case .pending(let deadline) = sleeper, deadline <= state.uptime {
+                    state.sleepers[id] = .fired
+                }
+            }
             let due = state.sleepers.compactMap {
                 id, sleeper -> (UInt64, Duration, CheckedContinuation<Void, any Error>)? in
                 guard case .waiting(let deadline, let continuation) = sleeper, deadline <= state.uptime else {

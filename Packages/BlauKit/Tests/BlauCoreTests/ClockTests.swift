@@ -80,6 +80,36 @@ struct ManualClockTests {
         #expect(clock.sleeperCount == 0)
     }
 
+    /// `waitForSleepers` returns the moment a sleeper registers, which can
+    /// be before its task has suspended. Cancelling it then still takes it
+    /// off the clock at once, and it throws (#180).
+    @Test func aCountedSleeperLeavesTheClockTheMomentItIsCancelled() async {
+        let clock = ManualClock()
+        for _ in 0..<200 {
+            let sleeper = Task { try await clock.sleep(for: .seconds(60)) }
+            await clock.waitForSleepers()
+            sleeper.cancel()
+            #expect(clock.sleeperCount == 0)
+            #expect(clock.sleeperDeadlines.isEmpty)
+            await #expect(throws: CancellationError.self) { try await sleeper.value }
+        }
+    }
+
+    /// Likewise, reaching a sleeper's deadline takes it off the clock at
+    /// once even when its task hasn't suspended yet, and it then returns
+    /// normally: a sleeper gone from the clock has fired (#180).
+    @Test func aDueSleeperLeavesTheClockEvenBeforeItsTaskSuspends() async throws {
+        let clock = ManualClock()
+        for _ in 0..<200 {
+            let sleeper = Task { try await clock.sleep(for: .seconds(1)) }
+            await clock.waitForSleepers()
+            clock.advance(by: .seconds(1))
+            #expect(clock.sleeperCount == 0)
+            #expect(clock.sleeperDeadlines.isEmpty)
+            try await sleeper.value
+        }
+    }
+
     @Test func sleepingInAnAlreadyCancelledTaskThrows() async {
         let clock = ManualClock()
         let sleeper = Task {

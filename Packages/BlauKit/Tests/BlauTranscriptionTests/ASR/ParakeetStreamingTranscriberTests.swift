@@ -610,10 +610,10 @@ struct ParakeetStreamingTranscriberTests {
         let vad = ScriptedVoiceActivity()
         let transcriber = makeTranscriber(recognizer, source: source, voiceActivity: vad)
         try await transcriber.start()
+        #expect(vad.subscriberCount == 1)
         for event in scenario.events.prefix(1) { vad.send(event) }
-        try await waitUntil { vad.subscriberCount == 1 }
-        // Let the VAD event land before the audio.
-        try await Task.sleep(for: .milliseconds(20))
+        // The VAD event reaches the transcriber before the audio does.
+        try await waitUntil { vad.deliveredCount == 1 }
         for offset in stride(from: Int64(0), to: 32_000, by: 320) {
             source.publish(source.frame(at: offset, length: 320))
         }

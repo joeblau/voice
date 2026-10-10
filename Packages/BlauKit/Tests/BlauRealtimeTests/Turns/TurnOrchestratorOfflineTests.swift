@@ -20,22 +20,36 @@ struct TurnOrchestratorOfflineTests {
     /// until it gives up (`disconnected(error)`), then waits until the
     /// orchestrator has seen it give up.
     ///
+    /// Each step waits for the client's next attempt to have failed and its
+    /// backoff to be asleep (a sleeper due later than now), then moves the
+    /// clock to exactly that deadline. Counting sleepers alone isn't enough:
+    /// a backoff the clock has already passed may not have woken yet, and
+    /// moving time on past it would run the steps out before the client
+    /// tried again (#180).
+    ///
     /// The orchestrator follows `client.states` on a task of its own, so the
     /// client's state changes before the orchestrator's does: a snapshot
     /// taken in between still shows the connection retrying.
     static func driveUntilTheClientGivesUp(_ harness: TurnHarness) async throws {
-        var attempts = 0
-        while !(await Self.hasGivenUp(harness.client.state)) {
-            attempts += 1
-            guard attempts <= 20 else {
-                Issue.record("The client never gave up")
-                return
-            }
-            try await waitUntil("a reconnect attempt waiting, or given up") {
-                await Self.hasGivenUp(harness.client.state) || harness.clock.sleeperCount > 0
+        let clock = harness.clock
+        var attemptsWhenAdvanced = 0
+        for _ in 0...RetryPolicy.realtimeReconnect.maximumAttempts {
+            try await waitUntil("a failed reconnect attempt waiting to retry, or given up") {
+                if await Self.hasGivenUp(harness.client.state) { return true }
+                let uptime = clock.uptime
+                return harness.connector.attempts > attemptsWhenAdvanced
+                    && clock.sleeperDeadlines.contains { $0 > uptime }
             }
             if await Self.hasGivenUp(harness.client.state) { break }
-            harness.clock.advance(by: .seconds(10))
+            let uptime = clock.uptime
+            let next = try #require(clock.sleeperDeadlines.first { $0 > uptime })
+            attemptsWhenAdvanced = harness.connector.attempts
+            clock.advance(by: next - uptime)
+        }
+        let state = await harness.client.state
+        guard Self.hasGivenUp(state) else {
+            Issue.record("The client never gave up: \(state)")
+            return
         }
         try await waitUntil("the orchestrator saw the client give up") {
             await Self.hasGivenUp(harness.snapshot().connection)
@@ -246,6 +260,12 @@ struct TurnOrchestratorOfflineTests {
         let harness = TurnHarness(tokens: tokens, retriesAfterGivingUp: true)
         await #expect(throws: TurnOrchestrator.OrchestratorError.self) {
             try await harness.orchestrator.start(conversationID: harness.conversationID)
+        }
+        // `start()` throws as soon as the client fails; the orchestrator
+        // hears of it on its own `client.states` task, so its view can still
+        // say "connecting" for a moment.
+        try await waitUntil("the orchestrator saw the key problem") {
+            if case .unavailable = await harness.snapshot().connectivity { true } else { false }
         }
         let snapshot = await harness.snapshot()
         guard case .unavailable(let issue) = snapshot.connectivity else {
