@@ -562,7 +562,11 @@ private struct TopicTimelineScrollView: View {
         topAnchorHolds += 1
         // A previous Now target must stop following the bottom while this
         // topic changes height; its rendered bullet supplies the anchor.
-        position = ScrollPosition(idType: TopicTimeline.ItemID.self)
+        // Initial offset and user scrolling leave no requested target. A
+        // fresh binding in that case only triggers another scroll update.
+        if position.edge != nil || position.point != nil || position.viewID != nil {
+            position = ScrollPosition(idType: TopicTimeline.ItemID.self)
+        }
         if let y = tracker.bulletPositions[anchor] { tracker.expandingBullet = (anchor, y) }
         toggleExpansion(of: topic)
         Task { @MainActor in

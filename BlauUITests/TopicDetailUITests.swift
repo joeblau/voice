@@ -169,7 +169,16 @@ final class TopicDetailUITests: XCTestCase {
         }
         let window = app.windows.firstMatch.frame
         for control in controls {
-            for _ in 0..<8 where !control.isHittable { timeline.swipeUp() }
+            for _ in 0..<8 where !control.isHittable {
+                // A full-viewport swipe can pass a whole action when the
+                // pinned large-text bullet leaves a short visible area.
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
+                    .press(
+                        forDuration: 0.05,
+                        thenDragTo: app.coordinate(
+                            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)))
+            }
+            if !control.isHittable { attachScreenshot(app, "Unreachable large-text action") }
             XCTAssertTrue(control.isHittable, "An action isn't tappable at the largest text size")
             XCTAssertGreaterThanOrEqual(control.frame.minX, window.minX - 1)
             XCTAssertLessThanOrEqual(control.frame.maxX, window.maxX + 1, "An action extends past the screen")
