@@ -174,21 +174,24 @@ struct RealtimeSessionConfiguratorTests {
             await clock.waitForSleepers()
         }
 
-        // Let go at 1500 ms. Nothing goes out before 400 ms of quiet.
+        // Let go at 1500 ms. The quiet-period check due at 1600 ms finds the
+        // settings changed since the last one (at 1200 ms), so it waits
+        // another 400 ms, counted from when it goes back to sleep: wait for
+        // that before moving the clock on, or a slow follower would count
+        // from later (#180).
+        clock.advance(by: .milliseconds(100))
+        await clock.waitForSleepers()
         for _ in 0..<3 {
             clock.advance(by: .milliseconds(100))
             try await settle()
         }
         #expect(sender.sessions.count == 1, "sent before 400 ms of quiet")
 
-        // One update within two debounce periods of the last change.
-        var waited = 300
-        while sender.sessions.count == 1 && waited < 800 {
-            clock.advance(by: .milliseconds(100))
-            waited += 100
-            try await settle()
-        }
-        #expect(sender.sessions.count == 2)
+        // At 2000 ms, 500 ms after the last change (within two debounce
+        // periods), the settings have been still for a whole check: one
+        // update, with the final value.
+        clock.advance(by: .milliseconds(100))
+        try await waitUntil("the final value sent") { sender.sessions.count == 2 }
         #expect(sender.sessions.last?.speed == 1.5)
 
         // The buffered change wakes the loop once more; nothing new is sent.

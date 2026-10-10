@@ -134,7 +134,7 @@ struct VoiceLoopTests {
 
     /// The DEBUG "ignored speech" lane lists what the gate kept from Grok,
     /// and the gate hears when Grok is answering.
-    @Test func ignoredSpeechAndAgentActivityReachTheGate() async {
+    @Test func ignoredSpeechAndAgentActivityReachTheGate() async throws {
         let (snapshots, snapshotFeed) = AsyncStream.makeStream(of: TurnSnapshot.self)
         let pipeline = FakeLoopPipeline()
         let loop = VoiceLoop(
@@ -148,8 +148,10 @@ struct VoiceLoopTests {
         pipeline.verdictFeed.yield(verdict("Y ahora el tiempo", .otherLanguage))
         snapshotFeed.yield(TurnSnapshot(state: .agentSpeaking))
         snapshotFeed.yield(TurnSnapshot(state: .listening))
-        for _ in 0..<100 where loop.ignoredSpeech.count < 3 || pipeline.agentActivity.count < 2 {
-            try? await Task.sleep(for: .milliseconds(10))
+        // Polled with the hang guard every wait here uses, instead of a
+        // second's worth of tries that gave up silently on a slow run (#180).
+        try await until("the verdicts and agent activity forwarded") {
+            loop.ignoredSpeech.count >= 3 && pipeline.agentActivity.count >= 2
         }
 
         #expect(loop.ignoredSpeech.map(\.utterance.text) == ["And now the weather", "Hm", "Y ahora el tiempo"])

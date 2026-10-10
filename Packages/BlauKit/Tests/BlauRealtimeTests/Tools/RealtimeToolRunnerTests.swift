@@ -37,6 +37,28 @@ struct RealtimeToolRunnerTests {
         try await waitUntil("\(count) calls at the gate") { gate.arrivals.count >= count }
     }
 
+    /// Waits until `count` calls' outputs are still to be sent. The runner
+    /// marks an output sent and decides on the follow-up in one step on its
+    /// actor, so once this holds that decision has been made: a check that
+    /// no `response.create` went out is then exact, not a guess after a
+    /// pause.
+    private func waitForPendingCalls(
+        _ count: Int, on runner: RealtimeToolRunner, sourceLocation: SourceLocation = #_sourceLocation
+    ) async throws {
+        try await waitUntil("\(count) pending calls", sourceLocation: sourceLocation) {
+            await runner.pendingCallCount == count
+        }
+    }
+
+    /// Waits until no tool round is left. A round is dropped right after its
+    /// `response.create` is sent, so the request being on the wire doesn't
+    /// mean the runner is idle yet; once it is, nothing more can be sent.
+    private func waitUntilIdle(
+        _ runner: RealtimeToolRunner, sourceLocation: SourceLocation = #_sourceLocation
+    ) async throws {
+        try await waitUntil("idle", sourceLocation: sourceLocation) { await runner.isIdle }
+    }
+
     // MARK: The round trip
 
     @Test func oneCallSendsItsOutputThenOneResponseCreate() async throws {
@@ -88,18 +110,17 @@ struct RealtimeToolRunnerTests {
             gate.open(key)
             try await sender.waitForSent(index + 1)
             if index < finishOrder.count - 1 {
-                try await Task.sleep(for: .milliseconds(5))
+                try await waitForPendingCalls(finishOrder.count - index - 1, on: runner)
                 #expect(sender.responseCreates == 0, "response.create before every output was in")
             }
         }
         try await sender.waitForSent(4)
-        try await Task.sleep(for: .milliseconds(10))
+        try await waitUntilIdle(runner)
 
         #expect(sender.outputs.map(\.callID) == finishOrder.map { "call_\($0)" })
         #expect(sender.responseCreates == 1)
         #expect(sender.sent.last == .responseCreate())
         #expect(sender.sent.count == 4)
-        #expect(await runner.isIdle)
     }
 
     @Test func waitsForResponseDoneEvenWhenTheToolsAreFaster() async throws {
@@ -110,7 +131,7 @@ struct RealtimeToolRunnerTests {
             ToolEvents.argumentsDone("call_1", name: "echo", arguments: #"{"text":"one"}"#),
             ToolEvents.argumentsDone("call_2", name: "echo", arguments: #"{"text":"two"}"#))
         try await sender.waitForSent(2)
-        try await Task.sleep(for: .milliseconds(10))
+        try await waitForPendingCalls(0, on: runner)
         // The response is still active: a response.create now would be
         // rejected by the server.
         #expect(sender.responseCreates == 0)
@@ -124,9 +145,9 @@ struct RealtimeToolRunnerTests {
     @Test func aResponseWithoutCallsSendsNothing() async throws {
         let runner = try makeRunner()
         await feed(runner, ToolEvents.created("resp_1"), ToolEvents.done("resp_1"))
-        try await Task.sleep(for: .milliseconds(10))
-        #expect(sender.sent.isEmpty)
+        // A call would have opened a round while its event was handled.
         #expect(await runner.isIdle)
+        #expect(sender.sent.isEmpty)
     }
 
     @Test func eachToolRoundGetsItsOwnFollowUp() async throws {
@@ -161,7 +182,7 @@ struct RealtimeToolRunnerTests {
             ToolEvents.itemDone("call_1", name: "search_memory", arguments: arguments),
             ToolEvents.done("resp_1", output: [ToolEvents.functionCall("call_1", name: "search_memory", arguments)]))
         try await sender.waitForSent(2)
-        try await Task.sleep(for: .milliseconds(10))
+        try await waitUntilIdle(runner)
 
         #expect(search.calls.values == ["launch"])
         #expect(sender.outputs.count == 1)
@@ -211,7 +232,10 @@ struct RealtimeToolRunnerTests {
             ToolEvents.created("resp_1"),
             .responseOutputItemDone(.init(responseID: "resp_1", item: partial)),
             ToolEvents.done("resp_1", status: .incomplete, output: [partial]))
-        try await Task.sleep(for: .milliseconds(10))
+        // A started call would have opened a round while its event was
+        // handled.
+        #expect(await runner.isIdle)
+        #expect(await runner.pendingCallCount == 0)
         #expect(sender.sent.isEmpty)
     }
 
@@ -228,7 +252,8 @@ struct RealtimeToolRunnerTests {
         try await waitUntil("timer") { clock.sleeperCount == 1 }
 
         clock.advance(by: .milliseconds(2_999))
-        try await Task.sleep(for: .milliseconds(10))
+        // A timer that had fired would have left the clock's sleepers.
+        #expect(clock.sleeperCount == 1)
         #expect(sender.sent.isEmpty)
 
         clock.advance(by: .milliseconds(1))
@@ -254,7 +279,8 @@ struct RealtimeToolRunnerTests {
         try await waitUntil("timer") { clock.sleeperCount == 1 }
 
         clock.advance(by: .seconds(3))
-        try await Task.sleep(for: .milliseconds(10))
+        // The 10 s timer is still asleep: the default 3 s didn't apply.
+        #expect(clock.sleeperCount == 1)
         #expect(sender.sent.isEmpty)
 
         gate.open("patient")
@@ -340,6 +366,9 @@ struct RealtimeToolRunnerTests {
         try await waitUntil("timer") { clock.sleeperCount == 1 }
 
         await runner.cancelAll()
+        // The timer was cancelled with the call, so moving the clock wakes
+        // nothing.
+        #expect(clock.sleeperCount == 0)
         try await waitUntil("cancellation") { tool.cancellations.values.count == 1 }
         clock.advance(by: .seconds(5))
         try await Task.sleep(for: .milliseconds(20))
@@ -403,10 +432,10 @@ struct RealtimeToolRunnerTests {
         #expect(try outputObject(sender.outputs[2].output)["error"] == "limit_reached")
         #expect(sender.sent.last == .responseCreate())
 
-        // And again: refused with no follow-up, which ends the loop.
+        // And again: refused with no follow-up, which ends the loop. A
+        // refused call runs no tool: its output and the follow-up decision
+        // happen while its events are handled, so nothing is left in flight.
         await round(4)
-        try await sender.waitForSent(7)
-        try await Task.sleep(for: .milliseconds(20))
         #expect(sender.sent.count == 7)
         #expect(try outputObject(sender.outputs[3].output)["error"] == "limit_reached")
         #expect(await runner.isIdle)
@@ -434,10 +463,9 @@ struct RealtimeToolRunnerTests {
         try await sender.waitForSent(4)
         await round(3)
         try await sender.waitForSent(6)
-        // Round 4 is refused and gets no follow-up: the loop is stopped.
+        // Round 4 is refused and gets no follow-up: the loop is stopped
+        // (handled in full while its events were fed, as above).
         await round(4)
-        try await sender.waitForSent(7)
-        try await Task.sleep(for: .milliseconds(20))
         #expect(sender.sent.count == 7)
         #expect(try outputObject(sender.outputs[3].output)["error"] == "limit_reached")
         #expect(await runner.isIdle)
@@ -505,16 +533,16 @@ struct RealtimeToolRunnerTests {
         await feed(runner, ToolEvents.created("resp_U"))
         gate.open("a")
         try await sender.waitForSent(1)
-        try await Task.sleep(for: .milliseconds(20))
+        try await waitForPendingCalls(0, on: runner)
         #expect(sender.sent == [.conversationItemCreate(.functionOutput(callID: "call_1", output: #"{"key":"a"}"#))])
         #expect(sender.responseCreates == 0, "response.create while resp_U is active")
         #expect(!activity.values.contains(.followUpRequested(responseID: "resp_1")))
         #expect(!(await runner.isIdle))
 
-        // The user's response ends: now the follow-up goes out, once.
+        // The user's response ends: now the follow-up goes out, once (while
+        // `response.done` is handled).
         await feed(runner, ToolEvents.done("resp_U"))
-        try await sender.waitForSent(2)
-        try await Task.sleep(for: .milliseconds(10))
+        #expect(sender.sent.count == 2)
         #expect(sender.sent.last == .responseCreate())
         #expect(sender.responseCreates == 1)
         try await activity.waitFor(.followUpRequested(responseID: "resp_1"))
@@ -539,12 +567,11 @@ struct RealtimeToolRunnerTests {
         try await sender.waitForSent(1)
         gate.open("a")
         try await sender.waitForSent(2)
-        try await Task.sleep(for: .milliseconds(10))
+        try await waitForPendingCalls(0, on: runner)
         #expect(sender.responseCreates == 0)
 
+        // Handling `response.done` sends the shared follow-up.
         await feed(runner, ToolEvents.done("resp_U"))
-        try await sender.waitForSent(3)
-        try await Task.sleep(for: .milliseconds(10))
         #expect(Set(sender.outputs.map(\.callID)) == ["call_1", "call_U"])
         #expect(sender.sent.count == 3)
         #expect(sender.sent.last == .responseCreate())
@@ -576,7 +603,7 @@ struct RealtimeToolRunnerTests {
         #expect(sender.sent.last == .responseCreate())
         gate.open("b")
         try await sender.waitForSent(3)
-        try await Task.sleep(for: .milliseconds(20))
+        try await waitForPendingCalls(0, on: runner)
         #expect(sender.responseCreates == 1, "a second response.create before the first one started")
 
         // The follow-up runs and ends; round 2 gets its own.

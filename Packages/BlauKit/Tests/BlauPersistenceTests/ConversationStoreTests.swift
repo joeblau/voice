@@ -578,7 +578,9 @@ struct ConversationStoreSaveTests {
         try await store.commitUtterance(makeUtterance("hi", in: conversation, at: 0))
         await fixture.clock.waitForSleepers()
         fixture.clock.advance(by: .milliseconds(1_999))
-        try await Task.sleep(for: .milliseconds(20))
+        // The save timer is still asleep: a fired one would have left the
+        // clock's sleepers.
+        #expect(fixture.clock.sleeperCount == 1)
         #expect(await store.statistics.saveCount == 1)
         #expect(try fixture.savedCount(StoredUtterance.self) == 0)
 
@@ -625,8 +627,8 @@ struct ConversationStoreSaveTests {
 
         // The cancelled timer must not save again.
         try await waitUntil { fixture.clock.sleeperCount == 0 }
+        // Nothing is asleep on the clock, so moving it can't save.
         fixture.clock.advance(by: .seconds(10))
-        try await Task.sleep(for: .milliseconds(20))
         #expect(await store.statistics.saveCount == 2)
     }
 

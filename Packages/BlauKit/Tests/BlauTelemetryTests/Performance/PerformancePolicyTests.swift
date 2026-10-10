@@ -83,7 +83,8 @@ struct PerformancePolicyTests {
         // The next step gets its own timer.
         await clock.waitForSleepers()
         clock.advance(by: .seconds(59))
-        try await Task.sleep(for: .milliseconds(20))
+        // Its timer is still asleep: a fired one would have left the clock.
+        #expect(clock.sleeperCount == 1)
         #expect(policy.performanceLevel == .reduced)
         clock.advance(by: .seconds(1))
         try await waitUntil { policy.performanceLevel == .normal }
@@ -97,8 +98,9 @@ struct PerformancePolicyTests {
         await clock.waitForSleepers()
         policy.update(DeviceConditions(thermalState: .serious))
         try await waitUntil { clock.sleeperCount == 0 }
+        // Nothing is asleep on the clock any more, so moving it can't relax
+        // the level.
         clock.advance(by: .seconds(120))
-        try await Task.sleep(for: .milliseconds(20))
         #expect(policy.performanceLevel == .reduced)
     }
 
@@ -287,18 +289,24 @@ final class Collector<Value: Sendable>: Sendable {
     var finished: Bool { state.withLock { $0.finished } }
 }
 
-/// Polls `condition` until it holds, failing after `timeout`.
+/// Polls `condition` every 2 ms until it holds, failing after `timeout`
+/// worth of polls. The limit counts this wait's own polls, not wall time,
+/// so a runner that keeps the whole test process off the CPU for a while
+/// can't run it out (#180); on an idle machine it still fails a broken test
+/// after at least `timeout`.
 func waitUntil(
     timeout: Duration = .seconds(5),
     sourceLocation: SourceLocation = #_sourceLocation,
     _ condition: @Sendable () async -> Bool
 ) async throws {
-    let deadline = ContinuousClock.now + timeout
+    let interval = Duration.milliseconds(2)
+    var polls = Int(timeout / interval)
     while !(await condition()) {
-        guard ContinuousClock.now < deadline else {
+        guard polls > 0 else {
             Issue.record("Timed out waiting for the condition", sourceLocation: sourceLocation)
             return
         }
-        try await Task.sleep(for: .milliseconds(2))
+        polls -= 1
+        try await Task.sleep(for: interval)
     }
 }

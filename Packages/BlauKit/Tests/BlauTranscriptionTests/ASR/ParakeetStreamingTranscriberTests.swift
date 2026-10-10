@@ -867,20 +867,29 @@ final class Counter: Sendable {
 /// there instead of reading state that isn't there.
 struct WaitTimedOut: Error {}
 
-/// Polls `condition` until it holds. After `timeout` it records an issue at
-/// the caller and throws `WaitTimedOut`.
+/// Polls `condition` every 5 ms until it holds. After `timeout` worth of
+/// polls it records an issue at the caller and throws `WaitTimedOut`.
+///
+/// The limit counts this wait's own polls, not wall time: when a loaded
+/// runner keeps the whole test process off the CPU (CI has stalled one for
+/// over a minute), the work being waited for and this wait stall alike,
+/// and a stall used to run out several tests' waits at once (#180). On an
+/// idle machine it gives up after at least `timeout`, so a broken test
+/// still fails instead of hanging.
 func waitUntil(
     timeout: Duration = .seconds(5),
     sourceLocation: SourceLocation = #_sourceLocation,
     _ condition: @Sendable () async -> Bool
 ) async throws {
-    let deadline = ContinuousClock.now + timeout
+    let interval = Duration.milliseconds(5)
+    var polls = Int(timeout / interval)
     while await !condition() {
-        guard ContinuousClock.now < deadline else {
+        guard polls > 0 else {
             Issue.record("Timed out", sourceLocation: sourceLocation)
             throw WaitTimedOut()
         }
-        try await Task.sleep(for: .milliseconds(5))
+        polls -= 1
+        try await Task.sleep(for: interval)
     }
 }
 

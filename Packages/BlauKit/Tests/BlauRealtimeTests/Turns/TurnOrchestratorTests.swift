@@ -77,6 +77,9 @@ struct TurnOrchestratorTests {
         #expect(stored[1].timeRange.duration == .milliseconds(500))
         #expect(stored[1].startedAt == turnT0.addingTimeInterval(0.64))
 
+        // The collector reads the snapshots on a task of its own: let it
+        // catch up with the last one before comparing.
+        try await waitUntil("every state collected") { updates.states.count >= 7 }
         #expect(
             updates.states == [
                 .paused, .listening, .userSpeaking, .committing, .agentThinking, .agentSpeaking, .listening,
