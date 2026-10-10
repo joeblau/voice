@@ -78,7 +78,8 @@ jobs:
           binary="$app/Blau"
           if [ -f "$app/Blau.debug.dylib" ]; then binary="$app/Blau.debug.dylib"; fi
           xcrun dsymutil "$binary" -o .build/results/Blau.dSYM
-          printf '%s\n' '{"Time Profiler":{"contextSwitchSampling":true,"highFrequencySampling":true,"recordWaitingThreads":true},"os_signpost":{"dynamicTracingEnabledSubsystems":["com.joeblau.blau"]}}' > .build/results/recording-options.json
+          xcrun xctrace record --template 'Time Profiler' --instrument os_signpost --show-recording-options > .build/results/recording-options.json
+          python3 -c 'import json; p=".build/results/recording-options.json"; x=json.load(open(p)); x["Time Profiler"].update(contextSwitchSampling=True, highFrequencySampling=True, recordWaitingThreads=True); x["os_signpost"]["dynamicTracingEnabledSubsystems"]=["com.joeblau.blau"]; json.dump(x, open(p,"w"))'
           (
             for i in $(seq 1 600); do
               pid=$(pgrep -x Blau | head -1 || true)
@@ -99,7 +100,7 @@ jobs:
           set -e
           echo "Profiled test status: $test_status; trace status: $profile_status"
           if [ "$profile_status" -eq 0 ]; then
-            xcrun xctrace symbolicate --input .build/results/expansion.trace --dsym .build/results/Blau.dSYM
+            xcrun xctrace symbolicate --input .build/results/expansion.trace --dsym .build/results/Blau.dSYM || true
             xcrun xctrace export --input .build/results/expansion.trace --toc --output .build/results/trace-toc.xml
           fi
       - name: Upload results
