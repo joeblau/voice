@@ -110,8 +110,11 @@ public struct IndexingGate: Sendable {
                     if remaining <= .zero { return }
                     if timer == nil {
                         let clock = clock
+                        // Until the deadline, not for `remaining`: the timer
+                        // keeps counting from the call even if its task
+                        // starts late.
                         timer = Task {
-                            guard (try? await clock.sleep(for: remaining)) != nil else { return }
+                            guard (try? await clock.sleep(until: deadline)) != nil else { return }
                             sink.yield(.deferralElapsed)
                         }
                     }

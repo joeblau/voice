@@ -336,7 +336,7 @@ public actor FactExtractionPipeline {
             }
             let now = clock.uptime
             guard let next = pending.first(where: { (notBefore[$0.topicID] ?? .zero) <= now }) else {
-                scheduleWake(now: now)
+                scheduleWake()
                 return
             }
             guard await generator.isAvailable() else {
@@ -433,13 +433,14 @@ public actor FactExtractionPipeline {
         pendingStore.save(pending)
     }
 
-    /// Restarts the worker when the earliest backoff ends.
-    private func scheduleWake(now: Duration) {
+    /// Restarts the worker when the earliest backoff ends (sleeping until
+    /// that moment, so a wake task that starts late isn't late too).
+    private func scheduleWake() {
         guard let earliest = pending.compactMap({ notBefore[$0.topicID] }).min() else { return }
         wake?.cancel()
         let clock = clock
         wake = Task(priority: .utility) { [weak self] in
-            guard (try? await clock.sleep(for: earliest - now)) != nil else { return }
+            guard (try? await clock.sleep(until: earliest)) != nil else { return }
             await self?.resume()
         }
     }

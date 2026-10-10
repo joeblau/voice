@@ -462,13 +462,14 @@ public actor TranscriberRouter: Transcriber {
             await transcriber.finish()
             return
         }
-        let elapsed = clock.uptime - current.requestedAt
-        let remaining = max(.zero, configuration.maximumSwitchDelay - elapsed)
+        // Counted from the request, however long building the engine and
+        // starting this task took.
+        let deadline = current.requestedAt + configuration.maximumSwitchDelay
         let clock = self.clock
         current.transcriber = transcriber
         current.deadline = Task { [weak self] in
             do {
-                try await clock.sleep(for: remaining)
+                try await clock.sleep(until: deadline)
             } catch {
                 return
             }

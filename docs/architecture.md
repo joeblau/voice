@@ -106,7 +106,13 @@ The complete list of declared edges:
    them is testable on macOS. iOS 27-only APIs go behind `#available`.
 5. **Time comes from `BlauClock`.** Code that timestamps, measures or waits
    takes a `BlauClock` rather than calling `Date()`, `ContinuousClock` or
-   `Task.sleep`. Tests use `ManualClock` and advance it explicitly.
+   `Task.sleep`. Tests use `ManualClock` and advance it explicitly. A timer
+   whose deadline is fixed up front (a session's renewal, a backoff's end)
+   sleeps `until:` that deadline, so a task that starts late doesn't fire
+   late. Tests wait on state (`ManualClock.waitForSleepers`,
+   `sleeperDeadlines`, or the condition itself), never on a real-time pause
+   or a fixed number of yields, so a loaded CI runner can't reorder them
+   (#180); a pause only backs a check that something did *not* happen.
 6. **Third-party packages are pinned in `Package.swift`**, added by the issue
    that first needs them and linked only by the modules that use them.
    FluidAudio is pinned `from: "0.17.5"` with its default
