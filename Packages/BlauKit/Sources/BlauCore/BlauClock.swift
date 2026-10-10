@@ -23,6 +23,23 @@ public protocol BlauClock: Sendable {
     ///
     /// - Throws: `CancellationError` if the task is cancelled while waiting.
     func sleep(for duration: Duration) async throws
+
+    /// Suspends until ``uptime`` reaches `deadline`; returns at once if it
+    /// already has.
+    ///
+    /// Use it for a timer whose deadline was fixed earlier (a session's
+    /// renewal, counted from when the session started): unlike
+    /// `sleep(for: deadline - uptime)` computed up front, it doesn't fire
+    /// late by however long the sleeping task took to start.
+    ///
+    /// - Throws: `CancellationError` if the task is cancelled while waiting.
+    func sleep(until deadline: Duration) async throws
+}
+
+extension BlauClock {
+    public func sleep(until deadline: Duration) async throws {
+        try await sleep(for: max(.zero, deadline - uptime))
+    }
 }
 
 // MARK: - SystemClock
@@ -42,6 +59,10 @@ public struct SystemClock: BlauClock {
     public func sleep(for duration: Duration) async throws {
         try await ContinuousClock().sleep(for: duration)
     }
+
+    public func sleep(until deadline: Duration) async throws {
+        try await ContinuousClock().sleep(until: Self.origin + deadline)
+    }
 }
 
 extension BlauClock where Self == SystemClock {
@@ -53,9 +74,9 @@ extension BlauClock where Self == SystemClock {
 
 /// A clock that only moves when told to. For tests and previews.
 ///
-/// `sleep(for:)` suspends until `advance(by:)` moves `uptime` to or past the
-/// sleeper's deadline. Sleepers wake in deadline order, and a cancelled
-/// sleeper throws `CancellationError` immediately.
+/// `sleep(for:)` and `sleep(until:)` suspend until `advance(by:)` moves
+/// `uptime` to or past the sleeper's deadline. Sleepers wake in deadline
+/// order, and a cancelled sleeper throws `CancellationError` immediately.
 public final class ManualClock: BlauClock {
     private enum Sleeper {
         /// Registered, but the continuation isn't installed yet.
@@ -65,11 +86,42 @@ public final class ManualClock: BlauClock {
         case waiting(deadline: Duration, continuation: CheckedContinuation<Void, any Error>)
     }
 
+    /// A task in ``waitForSleepers(count:)``.
+    private enum SleeperWaiter {
+        /// Registered, but the continuation isn't installed yet.
+        case pending
+        /// Cancelled before its continuation was installed.
+        case cancelled
+        case waiting(count: Int, continuation: CheckedContinuation<Void, Never>)
+    }
+
     private struct State {
         var now: Date
         var uptime: Duration
         var nextSleeperID: UInt64 = 0
         var sleepers: [UInt64: Sleeper] = [:]
+        var nextWaiterID: UInt64 = 0
+        var sleeperWaiters: [UInt64: SleeperWaiter] = [:]
+
+        var sleeperCount: Int {
+            sleepers.values.count { sleeper in
+                if case .cancelled = sleeper { false } else { true }
+            }
+        }
+
+        /// Removes and returns the waiters that have as many sleepers as
+        /// they wait for.
+        mutating func satisfiedWaiters() -> [CheckedContinuation<Void, Never>] {
+            let count = sleeperCount
+            let satisfied = sleeperWaiters.compactMap { id, waiter -> (UInt64, CheckedContinuation<Void, Never>)? in
+                guard case .waiting(let wanted, let continuation) = waiter, wanted <= count else { return nil }
+                return (id, continuation)
+            }
+            for (id, _) in satisfied {
+                sleeperWaiters[id] = nil
+            }
+            return satisfied.map(\.1)
+        }
     }
 
     private let state: Mutex<State>
@@ -88,22 +140,45 @@ public final class ManualClock: BlauClock {
 
     /// The number of tasks currently sleeping on this clock.
     public var sleeperCount: Int {
+        state.withLock { $0.sleeperCount }
+    }
+
+    /// When each task sleeping on this clock wakes (`uptime` readings),
+    /// earliest first. Tells a test which timer is armed when the count
+    /// alone can't: a 10 s timeout and a 15 s interval are both "one
+    /// sleeper".
+    public var sleeperDeadlines: [Duration] {
         state.withLock { state in
-            state.sleepers.values.count { sleeper in
-                if case .cancelled = sleeper { false } else { true }
+            state.sleepers.values.compactMap { sleeper -> Duration? in
+                switch sleeper {
+                case .pending(let deadline), .waiting(let deadline, _): deadline
+                case .cancelled: nil
+                }
             }
+            .sorted()
         }
     }
 
     public func sleep(for duration: Duration) async throws {
+        try await sleep { uptime in uptime + duration }
+    }
+
+    public func sleep(until deadline: Duration) async throws {
+        try await sleep { _ in deadline }
+    }
+
+    /// Sleeps until the deadline `deadline(uptime)` computes from the
+    /// reading at the moment the sleeper registers.
+    private func sleep(_ deadline: (Duration) -> Duration) async throws {
         try Task.checkCancellation()
 
-        let id = state.withLock { state in
+        let (id, satisfied) = state.withLock { state in
             let id = state.nextSleeperID
             state.nextSleeperID += 1
-            state.sleepers[id] = .pending(deadline: state.uptime + duration)
-            return id
+            state.sleepers[id] = .pending(deadline: deadline(state.uptime))
+            return (id, state.satisfiedWaiters())
         }
+        for waiter in satisfied { waiter.resume() }
 
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
@@ -173,9 +248,44 @@ public final class ManualClock: BlauClock {
     /// Suspends until at least `count` tasks are sleeping on this clock.
     /// Lets a test start work in a child task and advance time only once
     /// that work is actually waiting.
+    ///
+    /// It suspends rather than polling, so it costs nothing while the work
+    /// gets going however slow the machine is. Returns at once when the
+    /// calling task is cancelled.
     public func waitForSleepers(count: Int = 1) async {
-        while sleeperCount < count {
-            await Task.yield()
+        let id = state.withLock { state in
+            let id = state.nextWaiterID
+            state.nextWaiterID += 1
+            state.sleeperWaiters[id] = .pending
+            return id
+        }
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let ready = state.withLock { state in
+                    // Cancelled meanwhile, or the sleepers are already there.
+                    guard case .pending = state.sleeperWaiters[id], state.sleeperCount < count else {
+                        state.sleeperWaiters[id] = nil
+                        return true
+                    }
+                    state.sleeperWaiters[id] = .waiting(count: count, continuation: continuation)
+                    return false
+                }
+                if ready { continuation.resume() }
+            }
+        } onCancel: {
+            let continuation: CheckedContinuation<Void, Never>? = state.withLock { state in
+                switch state.sleeperWaiters[id] {
+                case .waiting(_, let continuation):
+                    state.sleeperWaiters[id] = nil
+                    return continuation
+                case .pending:
+                    state.sleeperWaiters[id] = .cancelled
+                    return nil
+                case .cancelled, nil:
+                    return nil
+                }
+            }
+            continuation?.resume()
         }
     }
 }
