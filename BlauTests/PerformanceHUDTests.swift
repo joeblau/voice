@@ -104,14 +104,13 @@ struct PerformanceHUDTests {
     /// compact HUD (whose rows rarely change) shouldn't be rendered again
     /// every second, nor for rows only the expanded panel shows.
     @Test func onlySamplesThatChangeTheCompactRowsUpdateThem() {
-        var turnState = "listening"
-        var firstAudio: LatencyStats?
+        let pipeline = ScriptedPipeline()
         let hud = PerformanceHUDController(
             flags: .inMemory(), preferences: .inMemory(),
             sampler: PerformanceHUDSampler(
                 memory: FixedMemory(), cpu: StillCPU(), thermal: { .nominal }, tap: SignpostLatencyTap(),
                 gauges: PerformanceGauges())
-        ) { PipelineReadings(turnState: turnState, firstAudio: firstAudio) }
+        ) { pipeline.readings }
         hud.start()
         defer { hud.stop() }
 
@@ -135,14 +134,14 @@ struct PerformanceHUDTests {
 
         // An expanded-only row changed: the readout follows, the compact
         // panel isn't told.
-        turnState = "thinking"
+        pipeline.readings.turnState = "thinking"
         hud.sample()
         #expect(hud.readout.row("Turn")?.value == "thinking")
         #expect(compactWrites.withLock { $0 } == 0)
         #expect(hud.compactUpdates == updates)
 
         // A compact row changed.
-        firstAudio = LatencyStats(
+        pipeline.readings.firstAudio = LatencyStats(
             last: 640, p50: 640, p95: 640, mean: 640, maximum: 640, windowCount: 1, totalCount: 1)
         hud.sample()
         #expect(compactWrites.withLock { $0 } == 1)
@@ -184,6 +183,12 @@ struct PerformanceHUDTests {
     @Test func theEnvironmentWiresTheHUDToItsFlags() {
         #expect(AppEnvironment.preview(flags: [.perfHUD: true]).performanceHUD.isVisible)
         #expect(!AppEnvironment.preview().performanceHUD.isVisible)
+    }
+
+    /// What the voice pipeline reports, changed by the test between samples.
+    @MainActor
+    private final class ScriptedPipeline {
+        var readings = PipelineReadings(turnState: "listening")
     }
 
     /// A process that uses no CPU time, so the CPU row stays the same.
