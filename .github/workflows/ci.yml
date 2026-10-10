@@ -75,8 +75,10 @@ jobs:
         run: |
           mkdir -p .build/results
           app=.build/DerivedData/Build/Products/Debug-iphonesimulator/Blau.app
-          xcrun dsymutil "$app/Blau.debug.dylib" -o .build/results/Blau.debug.dylib.dSYM
-          printf '%s\n' '{"Time Profiler":{"contextSwitchSampling":true,"highFrequencySampling":true,"recordWaitingThreads":true}}' > .build/results/recording-options.json
+          binary="$app/Blau"
+          if [ -f "$app/Blau.debug.dylib" ]; then binary="$app/Blau.debug.dylib"; fi
+          xcrun dsymutil "$binary" -o .build/results/Blau.dSYM
+          printf '%s\n' '{"Time Profiler":{"contextSwitchSampling":true,"highFrequencySampling":true,"recordWaitingThreads":true},"os_signpost":{"dynamicTracingEnabledSubsystems":["com.joeblau.blau"]}}' > .build/results/recording-options.json
           (
             for i in $(seq 1 600); do
               pid=$(pgrep -x Blau | head -1 || true)
@@ -97,7 +99,7 @@ jobs:
           set -e
           echo "Profiled test status: $test_status; trace status: $profile_status"
           if [ "$profile_status" -eq 0 ]; then
-            xcrun xctrace symbolicate --input .build/results/expansion.trace --dsym .build/results/Blau.debug.dylib.dSYM
+            xcrun xctrace symbolicate --input .build/results/expansion.trace --dsym .build/results/Blau.dSYM
             xcrun xctrace export --input .build/results/expansion.trace --toc --output .build/results/trace-toc.xml
           fi
       - name: Upload results
