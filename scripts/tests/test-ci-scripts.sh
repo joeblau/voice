@@ -1,8 +1,10 @@
 #!/bin/sh
-# Tests for scripts/ci/select-xcode.sh, scripts/ci/simulator-destination.sh and
-# the guard rails of .github/workflows/ci.yml.
-# Hermetic: fake Xcode bundles and recorded simctl output in a temporary
-# directory; never boots, creates or selects a real simulator or Xcode.
+# Tests for scripts/ci/select-xcode.sh, scripts/ci/simulator-destination.sh,
+# scripts/ci/ui-test-shard.sh, scripts/ci/warm-simulator.sh and the guard rails
+# of .github/workflows/ci.yml.
+# Hermetic: fake Xcode bundles, test sources, xcresult summaries, a fake simctl
+# and recorded simctl output in a temporary directory; never boots, creates or
+# selects a real simulator or Xcode.
 # Run with `make test-scripts`.
 
 set -u
@@ -438,6 +440,72 @@ if [ "$shards" -gt 0 ] && [ "$(LC_ALL=C sort "$work/real-union")" = "$(cat "$wor
 else
     fail "ui-test-shard: CI's $shards shards cover the real BlauUITests exactly once"
 fi
+
+# --- warm-simulator.sh ----------------------------------------------------------
+
+warm="$scripts_dir/ci/warm-simulator.sh"
+fake_app="$work/Blau.app"
+mkdir -p "$fake_app"
+cat >"$fake_app/Info.plist" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.example.blau</string>
+</dict>
+</plist>
+EOF
+# A fake simctl: records each call (with the launch environment) and fails
+# the subcommand named in FAKE_SIMCTL_FAIL.
+fake_simctl="$work/fake-simctl"
+cat >"$fake_simctl" <<'EOF'
+#!/bin/sh
+echo "$* env=${SIMCTL_CHILD_BLAU_APP_ENVIRONMENT:-}" >>"$FAKE_SIMCTL_LOG"
+[ "$1" = "${FAKE_SIMCTL_FAIL:-}" ] && exit 1
+exit 0
+EOF
+chmod +x "$fake_simctl"
+
+: >"$work/simctl.log"
+expect "warm-simulator: boots, installs, launches with fake services, terminates" \
+    0 "" \
+    env SIMCTL="$fake_simctl" FAKE_SIMCTL_LOG="$work/simctl.log" WARM_SECONDS=0 "$warm" UDID-1 "$fake_app"
+if [ "$(cat "$work/simctl.log")" = "bootstatus UDID-1 -b env=
+install UDID-1 $fake_app env=
+launch UDID-1 com.example.blau env=ui-test
+terminate UDID-1 com.example.blau env=" ]; then
+    pass "warm-simulator: simctl calls in order"
+else
+    fail "warm-simulator: simctl calls in order"
+    sed 's/^/       /' "$work/simctl.log"
+fi
+
+: >"$work/simctl.log"
+expect "warm-simulator: fails when the simulator does not boot" \
+    1 "" \
+    env SIMCTL="$fake_simctl" FAKE_SIMCTL_LOG="$work/simctl.log" FAKE_SIMCTL_FAIL=bootstatus WARM_SECONDS=0 \
+    "$warm" UDID-1 "$fake_app"
+if grep -q '^install' "$work/simctl.log"; then
+    fail "warm-simulator: installs nothing after a failed boot"
+else
+    pass "warm-simulator: installs nothing after a failed boot"
+fi
+
+expect "warm-simulator: a failed launch only warns" \
+    0 "::warning::warm-simulator: launching com.example.blau failed; the UI tests start cold" \
+    env SIMCTL="$fake_simctl" FAKE_SIMCTL_LOG="$work/simctl.log" FAKE_SIMCTL_FAIL=launch WARM_SECONDS=0 \
+    "$warm" UDID-1 "$fake_app"
+
+expect "warm-simulator: fails without a built app" \
+    2 "" \
+    env SIMCTL="$fake_simctl" FAKE_SIMCTL_LOG="$work/simctl.log" "$warm" UDID-1 "$work/Missing.app"
+expect "warm-simulator: rejects a bad WARM_SECONDS" \
+    2 "" \
+    env SIMCTL="$fake_simctl" FAKE_SIMCTL_LOG="$work/simctl.log" WARM_SECONDS=soon "$warm" UDID-1 "$fake_app"
+expect "warm-simulator: needs a UDID and an app" \
+    2 "" \
+    env SIMCTL="$fake_simctl" FAKE_SIMCTL_LOG="$work/simctl.log" "$warm" UDID-1
 
 # --- ci.yml guard rails ---------------------------------------------------------
 

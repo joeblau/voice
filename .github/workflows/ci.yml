@@ -194,11 +194,14 @@ jobs:
         run: scripts/ci/simulator-destination.sh
 
       # Parallel testing is off: it would clone the simulator per worker,
-      # which costs more than it saves on a runner this size.
+      # which costs more than it saves on a runner this size. Test
+      # diagnostics are off: at the end of the session xcodebuild ran
+      # `simctl diagnose` for its full 600-second timeout and got nothing
+      # (#179); failures, logs and screenshots are in the .xcresult anyway.
       - name: Test
         env:
           DESTINATION: ${{ steps.simulator.outputs.destination }}
-          XCODEBUILD_FLAGS: "-resultBundlePath .build/results/app-unit-tests.xcresult -parallel-testing-enabled NO"
+          XCODEBUILD_FLAGS: "-resultBundlePath .build/results/app-unit-tests.xcresult -parallel-testing-enabled NO -collect-test-diagnostics never"
         run: make test-unit
 
       - name: Shut down simulator
@@ -262,10 +265,28 @@ jobs:
         id: simulator
         run: scripts/ci/simulator-destination.sh
 
+      # Build first, then boot the simulator and launch the app once. On a
+      # cold simulator the app's first launch outlasted XCUITest's launch
+      # timeout and failed each shard's first test; in one job the unit tests
+      # used to warm it up. Booting only after the build keeps the boot from
+      # starving the build.
+      - name: Build
+        env:
+          DESTINATION: ${{ steps.simulator.outputs.destination }}
+        run: make build-tests
+
+      - name: Warm up simulator
+        timeout-minutes: 10
+        continue-on-error: true
+        env:
+          UDID: ${{ steps.simulator.outputs.udid }}
+        run: scripts/ci/warm-simulator.sh "$UDID" .build/DerivedData/Build/Products/Debug-iphonesimulator/Blau.app
+
+      # The same flags as app-unit-tests. The build is already done.
       - name: Test
         env:
           DESTINATION: ${{ steps.simulator.outputs.destination }}
-          XCODEBUILD_FLAGS: "-resultBundlePath .build/results/app-ui-tests.xcresult -parallel-testing-enabled NO"
+          XCODEBUILD_FLAGS: "-resultBundlePath .build/results/app-ui-tests.xcresult -parallel-testing-enabled NO -collect-test-diagnostics never"
         run: make test-ui UI_SHARD="$UI_SHARD"
 
       # A selection that matched no test would otherwise pass with nothing run.

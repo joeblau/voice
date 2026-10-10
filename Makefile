@@ -46,6 +46,10 @@ build: generate ## Build the app for the iOS Simulator (Debug)
 test: generate ## Run unit + UI tests (Blau scheme, Blau test plan, coverage on)
 	$(XCODEBUILD) test -scheme Blau -testPlan Blau -destination '$(DESTINATION)' $(SIM_FLAGS)
 
+.PHONY: build-tests
+build-tests: generate ## Build the app and the Blau test plan's test bundles for DESTINATION without testing
+	$(XCODEBUILD) build-for-testing -scheme Blau -testPlan Blau -destination '$(DESTINATION)' $(SIM_FLAGS)
+
 .PHONY: test-unit
 test-unit: generate ## Run only the unit tests
 	$(XCODEBUILD) test -scheme Blau -testPlan Blau -only-testing:BlauTests -destination '$(DESTINATION)' $(SIM_FLAGS)

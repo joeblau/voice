@@ -38,6 +38,7 @@ configured. See [docs/configuration.md](docs/configuration.md).
 | `make open`      | Generate, then open the project in Xcode                         |
 | `make build`     | Build the app for the iOS Simulator (Debug)                      |
 | `make test`      | Run unit and UI tests (`Blau` scheme, `Blau` test plan, coverage) |
+| `make build-tests` | Build the app and the test bundles without running them         |
 | `make test-unit` | Run only `BlauTests`                                             |
 | `make test-ui`   | Run only `BlauUITests` (`UI_SHARD=2/3`: one of three slices, as CI) |
 | `make test-kit`  | Run the `BlauKit` package tests on the macOS host (`swift test`) |

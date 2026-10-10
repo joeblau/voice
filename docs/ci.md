@@ -13,7 +13,7 @@ evaluation.
 | `lint`          | swift-format (`make lint`), then the shell-script tests    | `make lint test-scripts` | nothing |
 | `package-tests` | `swift build --build-tests` and `swift test` in `Packages/BlauKit` on the macOS host | `make test-kit` | Swift Testing xUnit report |
 | `app-unit-tests` | XcodeGen, then the `Blau` test plan's unit tests (`BlauTests`) on an iOS Simulator | `make test-unit` | `app-unit-tests-xcresult` |
-| `app-ui-tests (K/3)` | Three jobs, one per shard: XcodeGen, then the K-th third of `BlauUITests` on an iOS Simulator, then a check that the result bundle ran every test of the shard ([UI-test shards](#ui-test-shards)) | `make test-ui UI_SHARD=K/3` | `app-ui-tests-K-xcresult` |
+| `app-ui-tests (K/3)` | Three jobs, one per shard: XcodeGen, the build, a warm-up launch of the app on the simulator, then the K-th third of `BlauUITests`, then a check that the result bundle ran every test of the shard ([UI-test shards](#ui-test-shards)) | `make test-ui UI_SHARD=K/3` | `app-ui-tests-K-xcresult` |
 | `app-tests`     | Waits for `app-unit-tests` and every `app-ui-tests` shard and passes only if all of them passed: the one check for the app's tests (ubuntu, seconds) | `make test` runs the same tests in one go | nothing |
 | `perf-kit`      | The BlauKit micro-benchmarks (package-benchmark) on the macOS host; fails when an allocation count (and, on a machine with performance counters, an instruction count) is more than 10% above `Packages/BlauKitBenchmarks/Thresholds` ([performance.md](performance.md#micro-benchmarks)) | `make microbench-check` | `perf-kit-results` (the check's output), 30 days; the output on the summary page |
 | `perf`          | Nightly (and on demand) only: `Blau-Perf` scheme, `BlauPerf` test plan, Release with the scripted session, then the regression gate against `BlauPerfTests/Baselines/ci-simulator.json`: 10% on memory, tolerances calibrated to the runner's run-to-run spread on time ([performance.md](performance.md#the-regression-gate)) | `make perf perf-check` | `perf-results` (`perf.xcresult`, `perf-report.md`, `perf-results.json`), 90 days; the report on the summary page |
@@ -77,7 +77,8 @@ leaves xcodebuild with no destination. If the model is missing, the job fails
 and lists the iPhones that are available.
 
 The simulator is **not** booted ahead of the build: xcodebuild boots it when
-testing starts, and a later step shuts it down. Booting it first starved the
+testing starts (the UI shards boot it right after the build, to warm it up;
+see [UI-test shards](#ui-test-shards)), and a later step shuts it down. Booting it first starved the
 runner; with the freshly booted simulator's background work competing,
 xcodebuild took about four minutes just to start and the job took 14 minutes
 instead of 6 to 7.5.
@@ -163,6 +164,25 @@ Nothing is dropped:
 To change the number of shards, edit the matrix (`shard: [1, 2, 3]`); the
 jobs pass `strategy.job-total` as N. `make test` and `make test-ui` without
 `UI_SHARD` still run everything in one go.
+
+Two things the single job got for free need doing in each shard:
+
+- **A warm simulator.** On a cold runner simulator the app's first launch
+  outlasted XCUITest's launch timeout ("Timed out while launching
+  application"), failing the first test of two of the three shards on the
+  first sharded run. In one job the app-hosted unit tests had absorbed that.
+  So each shard builds first (`make build-tests`), then
+  [`scripts/ci/warm-simulator.sh`](../scripts/ci/warm-simulator.sh) boots the
+  device, waits for it, and installs and launches the app once with the UI
+  tests' fake services before `make test-ui` (whose build is then a no-op).
+  Booting only after the build keeps the boot from starving the build (see
+  [Runner and Xcode](#runner-and-xcode)).
+- **No test diagnostics.** The app test jobs pass
+  `-collect-test-diagnostics never`. Otherwise, at the end of a session with
+  a failure (or even without one, after the unit tests), xcodebuild ran
+  `simctl diagnose` for its full 600-second timeout and collected nothing:
+  ten minutes of every job. Failures, logs and screenshots are in the
+  `.xcresult` either way.
 
 ## Runtime
 
