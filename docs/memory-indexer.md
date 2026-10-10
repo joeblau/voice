@@ -111,7 +111,7 @@ fact. It starts when:
 | The index has never finished a rebuild (new device, first launch with #63, deleted, corrupt or old-schema file) | Skipped to now first (`skipToLatest`): the pass reads everything as it is after that point, so replaying history would only duplicate it |
 | History expired (`historyWasReset`) | The tracker already moved to now |
 | One history read touches more than `incrementalLimit` (500) sources, e.g. a big CloudKit import, and no pass is running | Committed: the pass covers it |
-| The chunking changed (`indexer.chunking` differs: the policy, or the time zone of an index built before the zone was pinned) | Kept |
+| The chunking changed (`indexer.chunking` differs: the chunking rules' version, `MemoryIndexer.chunkingVersion`, `v2` since #173 left invalidated facts out of exchange keys and made the token estimate conservative; the policy; or the time zone of an index built before the zone was pinned) | Kept |
 | Settings → Rebuild Index | Kept |
 
 **Time zone.** Key texts spell dates in one time zone for the life of the
@@ -209,7 +209,7 @@ indexer adds no interval of its own.
 
 | What | How |
 | --- | --- |
-| Indexer logic (`swift test`) | `MemoryIndexerTests`: first build skips history, newest-first order, partial re-embedding of an edited note, new utterances, sweeps, fact links, renamed collections, large imports, expired history, chunking changes, the pinned time zone, keyword-only then backlog, an embedder returning the wrong number of vectors, model change, re-embed all, throttling, the run loop; every case compares the index with a from-scratch `MemoryIndexRebuilder` build |
+| Indexer logic (`swift test`) | `MemoryIndexerTests`: first build skips history, newest-first order, partial re-embedding of an edited note, new utterances, sweeps, fact links, invalidated facts (left out of exchange keys, still linked, undone), renamed collections, large imports, expired history, chunking changes, the pinned time zone, keyword-only then backlog, an embedder returning the wrong number of vectors, model change, re-embed all, throttling, the run loop; every case compares the index with a from-scratch `MemoryIndexRebuilder` build |
 | 10k-chunk rebuild resumes after a kill (`swift test`) | `MemoryIndexerRebuildTests`: 500 conversations × 20 exchanges on an on-disk index, cancelled mid-pass, reopened from the file by a new indexer: it continues after the checkpoint, embeds only what was missing, and ends identical to a from-scratch build; progress survives the relaunch |
 | SwiftData end to end (`swift test`) | `SwiftDataIncrementalIndexingTests`: a note edited through a CloudKit-import-authored context becomes searchable with no call (remote-change notification → history → resolver → reader), conversations likewise; 13 kinds of change, applied incrementally, each match a full rebuild; a change read but not committed is replayed; the resolver and reader |
 | Controller (`swift test`) | `MemoryIndexingControllerTests`: on-disk store indexed and followed, in-memory store left alone, a new indexer per generation on the same file, rebuild |

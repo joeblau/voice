@@ -652,11 +652,20 @@ public actor MemoryIndexer {
 
     /// What the chunks depend on besides the sources. A change starts a
     /// full pass.
+    ///
+    /// The leading version names the chunking rules themselves: `v2` (#173)
+    /// left invalidated facts out of exchange keys and made
+    /// `ApproximateTokenCounter` conservative, which changes keys and chunk
+    /// boundaries.
     var chunkingFingerprint: String {
         let policy = chunker.policy
         return
-            "v1 max=\(policy.maximumTokens) min=\(policy.minimumDocumentTokens) overlap=\(policy.exchangeOverlap) facts=\(policy.maximumFactsPerExchange) tz=\(policy.timeZone.identifier)"
+            "\(Self.chunkingVersion) max=\(policy.maximumTokens) min=\(policy.minimumDocumentTokens) overlap=\(policy.exchangeOverlap) facts=\(policy.maximumFactsPerExchange) tz=\(policy.timeZone.identifier)"
     }
+
+    /// Bumped whenever the chunker's output changes for the same sources
+    /// and policy.
+    static let chunkingVersion = "v2"
 
     // MARK: - Embedding backlog
 
@@ -737,7 +746,9 @@ public actor MemoryIndexer {
         var factIDs: [UUID: [UUID]] = [:]
         for fact in batch.exchangeFacts {
             guard let utterance = fact.sourceUtteranceID else { continue }
-            statements[utterance, default: []].append(fact.statement)
+            // As in `MemoryIndexRebuilder`: an invalidated fact is linked but
+            // left out of the `facts:` prefix.
+            if fact.invalidatedAt == nil { statements[utterance, default: []].append(fact.statement) }
             factIDs[utterance, default: []].append(fact.id)
         }
         var sources: [MemoryIndex.SourceChunks] = []

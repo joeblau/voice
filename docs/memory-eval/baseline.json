@@ -2,27 +2,27 @@
   "answers" : {
     "byType" : {
       "abstention" : {
-        "correct" : 15,
+        "correct" : 16,
         "count" : 20,
         "failures" : 0
       },
       "knowledge-update" : {
-        "correct" : 16,
-        "count" : 20,
-        "failures" : 0
-      },
-      "multi-hop" : {
         "correct" : 14,
         "count" : 20,
         "failures" : 0
       },
+      "multi-hop" : {
+        "correct" : 15,
+        "count" : 20,
+        "failures" : 0
+      },
       "single-fact" : {
-        "correct" : 28,
+        "correct" : 27,
         "count" : 30,
         "failures" : 0
       },
       "temporal" : {
-        "correct" : 16,
+        "correct" : 17,
         "count" : 25,
         "failures" : 0
       }
@@ -35,13 +35,13 @@
       "failures" : 0
     },
     "reader" : "apple-foundation-models",
-    "seconds" : 216.78926058300002,
+    "seconds" : 128.54602125,
     "system" : "hybrid"
   },
-  "commit" : "241364e+70",
-  "createdAt" : "2026-10-07T20:44:19Z",
+  "commit" : "ad4298a",
+  "createdAt" : "2026-10-10T01:47:48Z",
   "dataset" : {
-    "chunks" : 259,
+    "chunks" : 265,
     "documents" : 110,
     "entities" : 24,
     "facts" : 59,
@@ -69,7 +69,7 @@
         "metric" : "MRR@10",
         "passed" : true,
         "scope" : "bm25-fallback",
-        "value" : 0.7695614035087721
+        "value" : 0.7630701754385966
       },
       {
         "isMaximum" : false,
@@ -77,7 +77,7 @@
         "metric" : "Recall@5",
         "passed" : true,
         "scope" : "bm25-fallback",
-        "value" : 0.9315789473684211
+        "value" : 0.9210526315789473
       },
       {
         "isMaximum" : false,
@@ -85,7 +85,7 @@
         "metric" : "MRR@10",
         "passed" : true,
         "scope" : "dense",
-        "value" : 0.7171428571428572
+        "value" : 0.7149248120300752
       },
       {
         "isMaximum" : false,
@@ -93,7 +93,7 @@
         "metric" : "Recall@5",
         "passed" : true,
         "scope" : "dense",
-        "value" : 0.8052631578947368
+        "value" : 0.8315789473684211
       },
       {
         "isMaximum" : false,
@@ -101,7 +101,7 @@
         "metric" : "Complete@5",
         "passed" : true,
         "scope" : "hybrid",
-        "value" : 0.8736842105263158
+        "value" : 0.8842105263157894
       },
       {
         "isMaximum" : false,
@@ -109,7 +109,7 @@
         "metric" : "Current first",
         "passed" : true,
         "scope" : "hybrid",
-        "value" : 0.65
+        "value" : 0.7
       },
       {
         "isMaximum" : false,
@@ -125,7 +125,7 @@
         "metric" : "MRR@10",
         "passed" : true,
         "scope" : "hybrid",
-        "value" : 0.7808897243107767
+        "value" : 0.7851294903926482
       },
       {
         "isMaximum" : false,
@@ -141,7 +141,7 @@
         "metric" : "Recall@5",
         "passed" : true,
         "scope" : "hybrid",
-        "value" : 0.9
+        "value" : 0.9105263157894737
       },
       {
         "isMaximum" : false,
@@ -149,7 +149,7 @@
         "metric" : "Current first",
         "passed" : true,
         "scope" : "hybrid knowledge-update",
-        "value" : 0.65
+        "value" : 0.7
       },
       {
         "isMaximum" : false,
@@ -157,7 +157,7 @@
         "metric" : "MRR@10",
         "passed" : true,
         "scope" : "hybrid knowledge-update",
-        "value" : 0.6541666666666667
+        "value" : 0.6666666666666667
       },
       {
         "isMaximum" : false,
@@ -173,7 +173,7 @@
         "metric" : "Complete@5",
         "passed" : true,
         "scope" : "hybrid multi-hop",
-        "value" : 0.85
+        "value" : 0.8
       },
       {
         "isMaximum" : false,
@@ -181,7 +181,7 @@
         "metric" : "MRR@10",
         "passed" : true,
         "scope" : "hybrid multi-hop",
-        "value" : 0.925
+        "value" : 0.9
       },
       {
         "isMaximum" : false,
@@ -189,7 +189,7 @@
         "metric" : "Recall@5",
         "passed" : true,
         "scope" : "hybrid multi-hop",
-        "value" : 0.925
+        "value" : 0.9
       },
       {
         "isMaximum" : false,
@@ -197,7 +197,7 @@
         "metric" : "MRR@10",
         "passed" : true,
         "scope" : "hybrid single-fact",
-        "value" : 0.7722222222222221
+        "value" : 0.7888888888888889
       },
       {
         "isMaximum" : false,
@@ -213,7 +213,7 @@
         "metric" : "Complete@5",
         "passed" : true,
         "scope" : "hybrid temporal",
-        "value" : 0.76
+        "value" : 0.84
       },
       {
         "isMaximum" : false,
@@ -221,7 +221,7 @@
         "metric" : "MRR@10",
         "passed" : true,
         "scope" : "hybrid temporal",
-        "value" : 0.7773809523809524
+        "value" : 0.7834920634920636
       },
       {
         "isMaximum" : false,
@@ -229,7 +229,7 @@
         "metric" : "Recall@5",
         "passed" : true,
         "scope" : "hybrid temporal",
-        "value" : 0.8
+        "value" : 0.86
       },
       {
         "isMaximum" : false,
@@ -237,7 +237,7 @@
         "metric" : "MRR@10",
         "passed" : true,
         "scope" : "hybrid-no-entities",
-        "value" : 0.8033333333333333
+        "value" : 0.807280701754386
       },
       {
         "isMaximum" : false,
@@ -245,7 +245,7 @@
         "metric" : "Recall@5",
         "passed" : true,
         "scope" : "hybrid-no-entities",
-        "value" : 0.8842105263157894
+        "value" : 0.8947368421052632
       },
       {
         "isMaximum" : false,
@@ -261,7 +261,7 @@
         "metric" : "accuracy",
         "passed" : true,
         "scope" : "answers (apple-foundation-models) abstention",
-        "value" : 0.75
+        "value" : 0.8
       },
       {
         "isMaximum" : false,
@@ -269,7 +269,7 @@
         "metric" : "accuracy",
         "passed" : true,
         "scope" : "answers (apple-foundation-models) knowledge-update",
-        "value" : 0.8
+        "value" : 0.7
       },
       {
         "isMaximum" : false,
@@ -277,7 +277,7 @@
         "metric" : "accuracy",
         "passed" : true,
         "scope" : "answers (apple-foundation-models) multi-hop",
-        "value" : 0.7
+        "value" : 0.75
       },
       {
         "isMaximum" : false,
@@ -285,7 +285,7 @@
         "metric" : "accuracy",
         "passed" : true,
         "scope" : "answers (apple-foundation-models) single-fact",
-        "value" : 0.9333333333333333
+        "value" : 0.9
       },
       {
         "isMaximum" : false,
@@ -293,7 +293,7 @@
         "metric" : "accuracy",
         "passed" : true,
         "scope" : "answers (apple-foundation-models) temporal",
-        "value" : 0.64
+        "value" : 0.68
       },
       {
         "isMaximum" : true,
@@ -312,7 +312,7 @@
   "questions" : [
     {
       "correct" : true,
-      "expandedFacts" : 4,
+      "expandedFacts" : 7,
       "firstEvidenceRank" : 2,
       "id" : "sf-01",
       "judgeReply" : "yes",
@@ -320,15 +320,15 @@
         "pf-016",
         "cv-004",
         "pf-033",
+        "n-013",
         "f-sam-brasa",
         "pf-017",
         "n-012",
-        "cv-002",
-        "n-013",
-        "cv-006",
-        "cv-001"
+        "pf-008",
+        "f-dad-dinner",
+        "cv-002"
       ],
-      "response" : "Menya Kotori, near Namba station, opens at 11 and sells out by 2.",
+      "response" : "The ramen place in Osaka your friend recommended is Menya Kotori, near Namba station, and it opens at 11 and sells out by 2.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -351,10 +351,10 @@
       "judgeReply" : "yes",
       "ranking" : [
         "pf-013",
-        "cv-009",
         "cv-012",
         "f-half-marathon",
         "n-001",
+        "cv-009",
         "pf-035",
         "n-011",
         "cv-016",
@@ -377,24 +377,24 @@
       "type" : "single-fact"
     },
     {
-      "correct" : true,
+      "correct" : false,
       "expandedFacts" : 1,
       "firstEvidenceRank" : 1,
       "id" : "sf-03",
-      "judgeReply" : "yes",
+      "judgeReply" : "no",
       "ranking" : [
         "co-018",
         "f-yc",
         "co-001",
         "co-044",
         "co-025",
-        "yc-039",
         "co-052",
+        "yc-039",
         "yc-001",
         "co-028",
         "co-030"
       ],
-      "response" : "I don't know; the only POS systems mentioned are Toast and Square, from a note dated September 1, 2026.",
+      "response" : "I don't know; the syncs from Toast and Square were mentioned on September 1, 2026.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -426,7 +426,7 @@
         "yc-008",
         "co-009",
         "co-056",
-        "cv-055"
+        "co-027"
       ],
       "response" : "The gross margin is about 81%, as mentioned in a conversation on September 11, 2026.",
       "retrieval" : {
@@ -524,8 +524,8 @@
         "yc-028",
         "co-019",
         "co-033",
-        "cv-042",
-        "yc-008"
+        "yc-008",
+        "cv-042"
       ],
       "response" : "The Pro plan costs $149 per location per month.",
       "retrieval" : {
@@ -545,30 +545,30 @@
     {
       "correct" : true,
       "expandedFacts" : 8,
-      "firstEvidenceRank" : 2,
+      "firstEvidenceRank" : 1,
       "id" : "sf-08",
       "judgeReply" : "yes",
       "ranking" : [
-        "cv-002",
         "cv-006",
+        "cv-002",
         "cv-001",
-        "cv-004",
         "n-013",
+        "cv-008",
         "pf-008",
-        "cv-003",
-        "f-dad-gift",
+        "cv-004",
         "f-dad-dinner",
-        "co-020"
+        "f-dad-gift",
+        "cv-003"
       ],
-      "response" : "The ryokan in Kyoto is in Higashiyama with the private bath, as mentioned in a conversation from early September.",
+      "response" : "The ryokan in Kyoto is in Higashiyama, with the private bath.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
         "count" : 1,
-        "hitAt1" : 0,
+        "hitAt1" : 1,
         "hitAt5" : 1,
-        "mrrAt10" : 0.5,
-        "ndcgAt10" : 0.6309297535714575,
+        "mrrAt10" : 1,
+        "ndcgAt10" : 1,
         "recallAt10" : 1,
         "recallAt5" : 1,
         "updateCount" : 0
@@ -577,21 +577,21 @@
     },
     {
       "correct" : true,
-      "expandedFacts" : 5,
+      "expandedFacts" : 1,
       "firstEvidenceRank" : 1,
       "id" : "sf-09",
       "judgeReply" : "yes",
       "ranking" : [
         "cv-007",
-        "cv-008",
         "pf-034",
-        "cv-001",
         "cv-071",
+        "cv-001",
         "yc-004",
-        "cv-043",
-        "co-046",
         "n-009",
-        "yc-032"
+        "co-046",
+        "yc-032",
+        "cv-043",
+        "yc-016"
       ],
       "response" : "On September 14, 2026, I said 20 GB each is plenty for two weeks of maps.",
       "retrieval" : {
@@ -617,16 +617,16 @@
       "ranking" : [
         "cv-014",
         "n-011",
-        "cv-045",
         "cv-015",
+        "cv-045",
         "n-001",
+        "pf-037",
         "cv-012",
         "cv-016",
-        "pf-037",
         "n-007",
-        "cv-046"
+        "pf-012"
       ],
-      "response" : "On September 21, 2026, I suggested a bagel with peanut butter and a banana, eaten two to three hours before the start.",
+      "response" : "On September 21, 2026, I suggested a bagel with peanut butter and a banana, eaten two to three hours before the start. That was about a month before the race.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -709,7 +709,7 @@
     },
     {
       "correct" : true,
-      "expandedFacts" : 2,
+      "expandedFacts" : 1,
       "firstEvidenceRank" : 2,
       "id" : "sf-13",
       "judgeReply" : "yes",
@@ -721,11 +721,11 @@
         "yc-006",
         "co-029",
         "co-036",
+        "cv-042",
         "cv-056",
-        "yc-032",
-        "cv-042"
+        "yc-032"
       ],
-      "response" : "The accuracy is 97.4% on a labelled set of 2,000 invoices, as noted on September 1, 2026. This data is from a document and practice question from that day.",
+      "response" : "The accuracy is 97.4% on 2,000 labelled invoices, as noted on September 1, 2026. This information was shared in a document and later reinforced in a conversation on September 25, 2026.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -820,11 +820,11 @@
         "cv-036",
         "cv-076",
         "cv-075",
+        "cv-008",
         "cv-026",
-        "cv-001",
-        "yc-045"
+        "cv-001"
       ],
-      "response" : "The Remains of the Day by Kazuo Ishiguro was recommended after you finished Klara and the Sun. That was on August 29, 2026.",
+      "response" : "The Remains of the Day by Kazuo Ishiguro was recommended after you finished Klara and the Sun.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -855,7 +855,7 @@
         "yc-001",
         "cv-039",
         "co-047",
-        "co-045"
+        "cv-027"
       ],
       "response" : "A price alert fires when an ingredient's unit price rises more than 8% against its 30-day average. This was noted on September 1, 2026.",
       "retrieval" : {
@@ -919,11 +919,11 @@
         "cv-006",
         "cv-007",
         "cv-004",
-        "cv-002",
         "cv-003",
+        "cv-002",
         "cv-066"
       ],
-      "response" : "From September 1, 2026, you packed an allergy card in Japanese, eSIM QR codes printed, comfortable walking shoes, a small towel, cash for small shops, and noted that an eSIM is enough since you have unlocked iPhones. From September 14, 2026, you considered a market-tour class in Tsukiji and asked to swap shellfish dishes, and from September 1, 2026, you were reminded to send allergy details to the ryokan in advance.",
+      "response" : "From September 1, 2026, you packed an allergy card in Japanese, eSIM QR codes printed, comfortable walking shoes, a small towel, cash for small shops, and noted that an eSIM is enough since you have unlocked iPhones. From September 14, 2026, you considered a market-tour class in Tsukiji and asked to swap shellfish dishes, but no new items were added.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -946,8 +946,8 @@
       "judgeReply" : "yes",
       "ranking" : [
         "f-yc",
-        "co-001",
         "f-priya",
+        "co-001",
         "co-010",
         "co-002",
         "co-042",
@@ -985,11 +985,11 @@
         "co-033",
         "cv-042",
         "cv-041",
-        "co-032",
         "co-034",
+        "co-032",
         "f-bayline"
       ],
-      "response" : "The pre-seed round was on a post-money SAFE with an $8M cap, led by Northgate Ventures with $400,000, with the rest from six angels.",
+      "response" : "The pre-seed round was on a post-money SAFE with an $8M cap, led by Northgate Ventures with $400,000, with the rest from six angels. Jordan and Priya each own 42%, and Tomás has a 1.5% grant on a four-year vest.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -1020,7 +1020,7 @@
         "f-biscuit-weight-2",
         "f-biscuit-weight-1",
         "co-026",
-        "n-011"
+        "cv-020"
       ],
       "response" : "You wear US size 10 shoes, as mentioned on June 1, 2026.",
       "retrieval" : {
@@ -1052,8 +1052,8 @@
         "pf-024",
         "cv-013",
         "yc-002",
-        "yc-041",
-        "cv-031"
+        "cv-031",
+        "yc-041"
       ],
       "response" : "The brake repair cost $640, as mentioned in the conversation from July 29, 2026.",
       "retrieval" : {
@@ -1081,11 +1081,11 @@
         "cv-048",
         "pf-028",
         "cv-075",
+        "cv-008",
         "pf-004",
         "cv-005",
         "cv-047",
         "cv-061",
-        "cv-006",
         "co-047"
       ],
       "response" : "On September 27, 2026, I suggested miso-glazed salmon with rice and bok choy, which takes 25 minutes and contains no shellfish.",
@@ -1154,7 +1154,7 @@
         "f-rent-1",
         "yc-028"
       ],
-      "response" : "The Lawton Avenue place was listed at $3,900, but the renewed lease was $3,450.",
+      "response" : "The Lawton Avenue place is listed at $3,900, but the current rent is $3,450.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -1171,7 +1171,7 @@
     },
     {
       "correct" : true,
-      "expandedFacts" : 9,
+      "expandedFacts" : 10,
       "firstEvidenceRank" : 3,
       "id" : "sf-27",
       "judgeReply" : "yes",
@@ -1185,7 +1185,7 @@
         "cv-032",
         "f-dad-gift",
         "pf-019",
-        "cv-035"
+        "n-013"
       ],
       "response" : "Your birthday is on May 3, 2026.",
       "retrieval" : {
@@ -1215,8 +1215,8 @@
         "pf-002",
         "n-004",
         "n-003",
-        "pf-020",
         "pf-029",
+        "pf-020",
         "pf-003",
         "pf-008"
       ],
@@ -1278,15 +1278,15 @@
         "cv-051",
         "pf-011",
         "cv-015",
-        "n-001",
         "cv-009",
+        "n-001",
         "cv-016",
         "n-011",
         "yc-002",
         "pf-026",
         "cv-012"
       ],
-      "response" : "On September 18, 2026, I told Jordan that caffeine's half-life is five to six hours, so a 3 pm coffee is still half there at 9 pm. I suggested making the second one decaf.",
+      "response" : "On September 18, 2026, I told Jordan caffeine's half-life is five to six hours, so a 3 pm coffee is still half there at 9 pm. I suggested making the second one decaf.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -1311,13 +1311,13 @@
         "cv-015",
         "cv-016",
         "f-lucia-2",
-        "cv-026",
         "n-005",
+        "cv-026",
         "n-001",
         "n-012",
+        "cv-009",
         "f-sam-brasa",
-        "cv-056",
-        "cv-009"
+        "cv-056"
       ],
       "response" : "Last week, the tempo run on Monday, September 28, 2026, felt awful—you couldn't hold 8:50. I suggested taking an easy day and trying again Thursday.",
       "retrieval" : {
@@ -1337,7 +1337,7 @@
     },
     {
       "correct" : true,
-      "expandedFacts" : 4,
+      "expandedFacts" : 2,
       "firstEvidenceRank" : 1,
       "id" : "tr-02",
       "judgeReply" : "yes",
@@ -1346,14 +1346,14 @@
         "cv-031",
         "f-sam-brasa",
         "n-012",
-        "f-lucia-2",
-        "cv-026",
         "cv-029",
         "n-002",
+        "cv-026",
         "cv-016",
-        "n-005"
+        "n-005",
+        "cv-027"
       ],
-      "response" : "Last week, on September 30, we decided to renew the current place at $3,450 a month. That decision saved you the move and was $450 a month less than another option.",
+      "response" : "Last week, we decided to renew the current place at $3,450 a month. The renewal was confirmed on September 30, 2026.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -1377,17 +1377,17 @@
       "judgeReply" : "yes",
       "ranking" : [
         "f-saffron-2",
-        "f-saffron-1",
         "cv-074",
+        "f-saffron-1",
         "f-yc",
         "n-011",
         "cv-073",
         "n-012",
-        "co-020",
         "co-054",
-        "co-015"
+        "co-020",
+        "cv-072"
       ],
-      "response" : "Yesterday, Jordan told me the new chef at Saffron Lane scanned 14 invoices in a week, so they're staying.",
+      "response" : "Yesterday, Jordan told me the new chef at Saffron Lane scanned 14 invoices in a week and they're staying.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -1411,17 +1411,17 @@
       "judgeReply" : "yes",
       "ranking" : [
         "f-dana",
-        "f-lucia-2",
         "cv-016",
+        "n-007",
+        "f-lucia-2",
         "cv-026",
-        "n-012",
         "f-sam-brasa",
         "cv-044",
-        "n-007",
-        "n-005",
-        "n-009"
+        "n-012",
+        "co-012",
+        "yc-045"
       ],
-      "response" : "Dana suggested applying to YC before raising the seed, which was discussed on October 2, 2026. That was two weeks ago.",
+      "response" : "Dana suggested applying to YC before raising the seed, which was discussed on October 2, 2026.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 0,
@@ -1452,10 +1452,10 @@
         "n-007",
         "n-005",
         "cv-016",
-        "cv-015",
-        "cv-074"
+        "cv-074",
+        "cv-015"
       ],
-      "response" : "Saturday, October 3, 2026 · conversation: Ines redesigned the onboarding so owners scan their first invoice in the first minute.",
+      "response" : "Saturday, October 3, 2026 · conversation  \nInes redesigned the onboarding so owners scan their first invoice in the first minute.  \n\nThe most recent memory is from October 3, 2026, which is two weeks before today.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -1482,8 +1482,8 @@
         "n-011",
         "cv-045",
         "cv-015",
-        "yc-002",
         "n-007",
+        "yc-002",
         "pf-012",
         "pf-031",
         "cv-033",
@@ -1519,8 +1519,8 @@
         "co-056",
         "co-006",
         "f-casa-verde",
-        "co-019",
         "f-rent-2",
+        "co-019",
         "co-009"
       ],
       "response" : "You paid the Q3 estimated taxes on Thursday, September 10, 2026.",
@@ -1540,22 +1540,22 @@
     },
     {
       "correct" : false,
-      "expandedFacts" : 6,
+      "expandedFacts" : 3,
       "id" : "tr-08",
       "judgeReply" : "no",
       "ranking" : [
-        "f-mei-slideshow",
         "cv-037",
+        "f-bayline",
         "cv-038",
         "pf-036",
         "cv-036",
         "pf-008",
-        "f-dad-gift",
-        "f-bayline",
+        "cv-043",
+        "f-mei-slideshow",
         "cv-026",
-        "pf-009"
+        "cv-076"
       ],
-      "response" : "You mentioned The Overstory as one of the books listed on September 1, 2026.",
+      "response" : "You said you were reading The Overstory at the end of September.",
       "retrieval" : {
         "completeAt10" : 0,
         "completeAt5" : 0,
@@ -1572,32 +1572,32 @@
       "type" : "temporal"
     },
     {
-      "correct" : true,
+      "correct" : false,
       "expandedFacts" : 4,
-      "firstEvidenceRank" : 8,
+      "firstEvidenceRank" : 9,
       "id" : "tr-09",
-      "judgeReply" : "yes",
+      "judgeReply" : "no",
       "ranking" : [
         "pf-006",
         "pf-022",
         "f-biscuit-weight-1",
         "pf-005",
         "cv-066",
+        "n-007",
         "cv-065",
         "n-006",
         "cv-064",
-        "cv-063",
-        "f-biscuit-weight-2"
+        "cv-063"
       ],
-      "response" : "On July 15, 2026, we talked about Biscuit having a yeast ear infection and receiving drops twice a day for ten days.",
+      "response" : "In October 2, 2026, we talked about his ears after Dr. Okafor said they were clear, with advice to dry them after baths. There is no memory from July.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 0,
         "count" : 1,
         "hitAt1" : 0,
         "hitAt5" : 0,
-        "mrrAt10" : 0.125,
-        "ndcgAt10" : 0.31546487678572877,
+        "mrrAt10" : 0.1111111111111111,
+        "ndcgAt10" : 0.3010299956639812,
         "recallAt10" : 1,
         "recallAt5" : 0,
         "updateCount" : 0
@@ -1621,7 +1621,7 @@
         "pf-002",
         "pf-020",
         "f-mei-slideshow",
-        "pf-026"
+        "cv-037"
       ],
       "response" : "[2] July 25, 2026 · the car had a grinding noise when braking, indicating worn brake pads and rotors.  \n[3] July 29, 2026 · the front pads and rotors were replaced for $640.",
       "retrieval" : {
@@ -1648,16 +1648,16 @@
       "ranking" : [
         "n-011",
         "f-saffron-2",
+        "cv-074",
         "n-001",
         "cv-012",
-        "cv-015",
         "cv-009",
+        "cv-015",
         "cv-014",
         "pf-012",
-        "cv-025",
-        "cv-010"
+        "cv-025"
       ],
-      "response" : "Yesterday, your run on Tuesday, June 1, 2026, was on a morning at Lake Merritt. The memory doesn't specify the details of the run.",
+      "response" : "Yesterday's tempo run felt awful, Jordan, you couldn't hold 8:50. That was after a five-hour sleep on Saturday.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -1689,9 +1689,9 @@
         "cv-016",
         "co-056",
         "cv-045",
-        "cv-076"
+        "n-013"
       ],
-      "response" : "Last week, on Tuesday, September 29, 2026, you had lunch with Sam at his restaurant, Brasa on Valencia Street.",
+      "response" : "Last week, on Tuesday, September 29, 2026, you had lunch with Sam at Brasa on Valencia Street.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -1719,13 +1719,13 @@
         "f-keisha-2",
         "f-priya",
         "n-009",
-        "f-dana",
         "n-008",
-        "cv-044",
+        "f-dana",
+        "cv-016",
         "yc-019",
-        "cv-016"
+        "cv-044"
       ],
-      "response" : "Two days ago, Jordan decided to apply to YC for the winter batch, submitting by October 10 and holding off on the seed round until after demo day.",
+      "response" : "On October 5, 2026, you decided to apply to YC for the winter batch, submitting by October 10 and holding off on the seed round until after demo day. That was two days ago.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -1817,48 +1817,48 @@
         "cv-012",
         "cv-010",
         "n-011",
-        "pf-023",
         "n-001",
         "cv-011",
+        "pf-023",
         "cv-015",
         "pf-037",
         "yc-022",
-        "cv-025"
+        "cv-009"
       ],
-      "response" : "The physical therapist's diagnosis came first, on August 2, 2026, while the pain-free ten-mile run was on August 24, 2026.",
+      "response" : "The physical therapist's diagnosis came first, on August 2, 2026, while the pain-free ten-mile run occurred on August 24, 2026.",
       "retrieval" : {
         "completeAt10" : 1,
-        "completeAt5" : 0,
+        "completeAt5" : 1,
         "count" : 1,
         "hitAt1" : 1,
         "hitAt5" : 1,
         "mrrAt10" : 1,
-        "ndcgAt10" : 0.8315546295836225,
+        "ndcgAt10" : 0.8503449055347546,
         "recallAt10" : 1,
-        "recallAt5" : 0.5,
+        "recallAt5" : 1,
         "updateCount" : 0
       },
       "type" : "temporal"
     },
     {
-      "correct" : false,
+      "correct" : true,
       "expandedFacts" : 7,
       "firstEvidenceRank" : 1,
       "id" : "tr-17",
-      "judgeReply" : "no",
+      "judgeReply" : "yes",
       "ranking" : [
         "f-keisha-2",
         "f-saffron-2",
         "n-008",
         "f-keisha-1",
-        "n-009",
         "cv-074",
-        "f-dana",
         "f-yc",
+        "f-dana",
+        "n-009",
         "n-011",
         "cv-019"
       ],
-      "response" : "On October 5, 2026, you told me Keisha accepted the customer success lead offer, starting November 2, 2026. That was over a month ago, before the current week began.",
+      "response" : "On October 6, 2026, you told me Keisha accepted the offer and that she starts November 2.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -1890,7 +1890,7 @@
         "yc-017",
         "co-020",
         "yc-010",
-        "yc-037"
+        "cv-073"
       ],
       "response" : "On September 18, 2026, Jordan mentioned having two coffees after lunch on hard days.",
       "retrieval" : {
@@ -1911,32 +1911,32 @@
     {
       "correct" : false,
       "expandedFacts" : 5,
-      "firstEvidenceRank" : 6,
+      "firstEvidenceRank" : 3,
       "id" : "tr-19",
       "judgeReply" : "no",
       "ranking" : [
         "cv-001",
         "cv-002",
-        "cv-003",
-        "cv-004",
-        "pf-019",
         "cv-008",
-        "cv-066",
+        "cv-004",
         "cv-006",
+        "pf-019",
+        "cv-003",
+        "cv-066",
         "pf-034",
-        "cv-005"
+        "cv-035"
       ],
-      "response" : "In mid-September, we planned a cooking class in Tokyo at Tsukiji, with a small market tour, and arranged for Biscuit to be watched by Sofia and a sitter who stays overnight.",
+      "response" : "In September, we planned a cooking class in Tokyo at Tsukiji, with a small market tour and a request to swap shellfish dishes. Sofia offered to watch Biscuit, and we considered a mix of her help and an overnight sitter.",
       "retrieval" : {
         "completeAt10" : 1,
-        "completeAt5" : 0,
+        "completeAt5" : 1,
         "count" : 1,
         "hitAt1" : 0,
-        "hitAt5" : 0,
-        "mrrAt10" : 0.16666666666666666,
-        "ndcgAt10" : 0.3562071871080222,
+        "hitAt5" : 1,
+        "mrrAt10" : 0.3333333333333333,
+        "ndcgAt10" : 0.5,
         "recallAt10" : 1,
-        "recallAt5" : 0,
+        "recallAt5" : 1,
         "updateCount" : 0
       },
       "timeExpression" : "calendar 2026-09-01 00:00:00 +0000..<2026-10-01 00:00:00 +0000",
@@ -1976,24 +1976,24 @@
       "type" : "temporal"
     },
     {
-      "correct" : false,
+      "correct" : true,
       "expandedFacts" : 10,
       "firstEvidenceRank" : 1,
       "id" : "tr-21",
-      "judgeReply" : "no",
+      "judgeReply" : "yes",
       "ranking" : [
         "f-dad-dinner",
         "n-013",
         "f-bayline",
-        "cv-014",
         "f-dad-gift",
+        "cv-014",
         "pf-007",
         "cv-066",
+        "cv-043",
         "cv-032",
-        "f-mei-slideshow",
-        "cv-033"
+        "pf-008"
       ],
-      "response" : "Two weeks ago, I mentioned that your neighbor Sofia offered to watch Biscuit while you were in Japan, suggesting a mix of her and an overnight sitter might work better.",
+      "response" : "On September 22, 2026, you mentioned Mom says Dad's favorite restaurant in Sacramento is a Cantonese place called Golden Lotus, and you suggested booking the birthday dinner there.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -2017,15 +2017,15 @@
       "judgeReply" : "no",
       "ranking" : [
         "f-saffron-1",
-        "f-saffron-2",
-        "f-lucia-2",
-        "cv-062",
-        "cv-026",
-        "n-012",
-        "cv-031",
         "f-bayline",
-        "f-sam-brasa",
-        "f-yc"
+        "f-saffron-2",
+        "cv-062",
+        "f-lucia-2",
+        "cv-026",
+        "cv-043",
+        "n-012",
+        "f-yc",
+        "cv-031"
       ],
       "response" : "You asked about what to plant on the balcony for fall on September 29, 2026.",
       "retrieval" : {
@@ -2053,15 +2053,15 @@
         "cv-076",
         "cv-075",
         "n-013",
-        "pf-008",
         "f-dad-dinner",
+        "pf-008",
         "f-mei-slideshow",
         "pf-020",
         "cv-032",
         "co-006",
         "cv-035"
       ],
-      "response" : "The anniversary dinner in August was perfect, with a special scallop course with mushrooms made for you. That was five years ago.",
+      "response" : "The anniversary dinner at Ferment was perfect, with a special scallop course with mushrooms for you—this was on August 10, 2026.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -2087,15 +2087,15 @@
         "cv-055",
         "cv-054",
         "co-015",
-        "yc-022",
         "yc-017",
-        "co-037",
+        "yc-022",
         "co-020",
+        "co-037",
         "co-045",
-        "co-038",
+        "pf-026",
         "yc-045"
       ],
-      "response" : "The first weekly margin text went out on September 18, 2026. Hollow Pine replied, asking why their eggs went up so much.",
+      "response" : "The first weekly margin text went out on September 18, 2026, and Hollow Pine replied.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -2118,17 +2118,17 @@
       "judgeReply" : "yes",
       "ranking" : [
         "f-keisha-2",
-        "n-008",
-        "cv-019",
-        "f-keisha-1",
         "cv-020",
+        "cv-019",
+        "n-008",
+        "f-keisha-1",
         "yc-023",
-        "n-009",
-        "cv-018",
         "cv-017",
-        "yc-019"
+        "cv-018",
+        "cv-021",
+        "n-009"
       ],
-      "response" : "Keisha's mock onboarding went well on September 23, 2026, and she accepted the offer on October 5, 2026. That is 12 days after the mock onboarding.",
+      "response" : "Keisha accepted the offer on November 2, 2026, which is 12 days after her mock onboarding on September 23, 2026.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -2136,7 +2136,7 @@
         "hitAt1" : 1,
         "hitAt5" : 1,
         "mrrAt10" : 1,
-        "ndcgAt10" : 0.8503449055347546,
+        "ndcgAt10" : 1,
         "recallAt10" : 1,
         "recallAt5" : 1,
         "updateCount" : 0
@@ -2161,7 +2161,7 @@
         "cv-028",
         "co-014"
       ],
-      "response" : "The rent is now $3,450 a month, as of the renewal on September 30. It was previously $3,650 before the increase.",
+      "response" : "Your rent is now $3,450 a month, as of the renewal on September 30.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 0,
@@ -2185,8 +2185,8 @@
       "judgeReply" : "yes",
       "ranking" : [
         "f-alex-job-2",
-        "pf-028",
         "pf-019",
+        "pf-028",
         "pf-002",
         "n-003",
         "pf-003",
@@ -2195,7 +2195,7 @@
         "pf-020",
         "yc-011"
       ],
-      "response" : "Alex is a senior park designer for the City of Oakland's parks department, downtown at Frank Ogawa Plaza, and commutes by BART (September 15, 2026). They previously worked as a landscape architect in Emeryville, biking to work (June 1, 2026), but now work downtown.",
+      "response" : "Alex is a senior park designer for the City of Oakland's parks department, downtown at Frank Ogawa Plaza, and commutes by BART (September 15, 2026). They previously worked as a landscape architect in Emeryville, biking to work (June 1, 2026), but now hold the new position.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -2257,8 +2257,8 @@
         "cv-023",
         "pf-018",
         "cv-026",
-        "cv-022",
         "cv-025",
+        "cv-022",
         "cv-024",
         "pf-035",
         "pf-019"
@@ -2294,8 +2294,8 @@
         "cv-065",
         "cv-064",
         "cv-066",
-        "n-007",
-        "pf-022"
+        "pf-022",
+        "cv-030"
       ],
       "response" : "Biscuit weighs 35 pounds today.",
       "retrieval" : {
@@ -2383,23 +2383,23 @@
     },
     {
       "correct" : true,
-      "expandedFacts" : 4,
+      "expandedFacts" : 2,
       "firstEvidenceRank" : 1,
       "id" : "ku-08",
       "judgeReply" : "yes",
       "ranking" : [
         "f-saffron-2",
-        "cv-073",
-        "f-saffron-1",
         "cv-074",
-        "f-casa-verde",
+        "f-saffron-1",
+        "cv-073",
         "co-054",
         "co-020",
         "f-rosa",
-        "f-hollow-pine",
-        "yc-044"
+        "cv-072",
+        "yc-044",
+        "co-007"
       ],
-      "response" : "Yes, Saffron Lane is still a customer as of October 6, 2026, after the new chef scanned 14 invoices in a week.",
+      "response" : "Saffron Lane is still a customer, as they are staying with Larderly after the new chef scanned 14 invoices in a week (October 6, 2026).",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -2427,13 +2427,13 @@
         "f-dad-gift",
         "cv-032",
         "cv-033",
-        "cv-035",
         "pf-007",
         "n-013",
         "cv-034",
+        "cv-035",
         "pf-008"
       ],
-      "response" : "On September 19, Mei Hale is making a slideshow of old photos for Dad's 70th birthday dinner, and on September 22, we are booking a private room at Golden Lotus for December 12th.",
+      "response" : "A framed map of Lake Alpine with a family cabin trip in June, and a private dinner at Golden Lotus on December 12.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -2457,13 +2457,13 @@
       "judgeReply" : "yes",
       "ranking" : [
         "f-keisha-2",
+        "cv-020",
         "n-008",
         "f-keisha-1",
-        "cv-020",
         "cv-019",
+        "n-009",
         "co-019",
         "f-casa-verde",
-        "n-009",
         "f-rosa",
         "co-012"
       ],
@@ -2484,33 +2484,33 @@
       "type" : "knowledge-update"
     },
     {
-      "correct" : true,
+      "correct" : false,
       "expandedFacts" : 2,
-      "firstEvidenceRank" : 4,
+      "firstEvidenceRank" : 2,
       "id" : "ku-11",
-      "judgeReply" : "yes",
+      "judgeReply" : "no",
       "ranking" : [
         "cv-041",
+        "n-010",
         "co-033",
         "cv-044",
-        "n-010",
         "co-032",
         "co-013",
+        "cv-043",
         "f-yc",
         "yc-027",
-        "f-northgate",
-        "cv-043"
+        "f-northgate"
       ],
-      "response" : "We are holding off on the seed round until after the YC demo day, which is October 10, 2026. The plan is to raise in early 2027.",
+      "response" : "We are planning to raise the seed round in early 2027, as noted in a document from September 1, 2026. The current conversation on October 2, 2026, mentioned applying to YC before raising, but no new timeline was given.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
         "count" : 1,
-        "currentFirst" : 0,
+        "currentFirst" : 1,
         "hitAt1" : 0,
         "hitAt5" : 1,
-        "mrrAt10" : 0.25,
-        "ndcgAt10" : 0.43067655807339306,
+        "mrrAt10" : 0.5,
+        "ndcgAt10" : 0.6309297535714575,
         "recallAt10" : 1,
         "recallAt5" : 1,
         "updateCount" : 1
@@ -2533,7 +2533,7 @@
         "yc-036",
         "co-008",
         "yc-021",
-        "yc-016"
+        "yc-024"
       ],
       "response" : "Based on the most recent conversation from August 16, 2026, supplier price comparison comes first, with Android considered after the seed.",
       "retrieval" : {
@@ -2635,7 +2635,7 @@
         "cv-016",
         "cv-014",
         "pf-013",
-        "cv-013"
+        "pf-031"
       ],
       "response" : "[5] Tuesday, October 6, 2026 · conversation  \nThe tempo run wasn't mentioned, but the easy four miles felt fine with no knee pain.",
       "retrieval" : {
@@ -2654,24 +2654,24 @@
       "type" : "knowledge-update"
     },
     {
-      "correct" : true,
+      "correct" : false,
       "expandedFacts" : 3,
       "firstEvidenceRank" : 1,
       "id" : "ku-16",
-      "judgeReply" : "yes",
+      "judgeReply" : "no",
       "ranking" : [
         "f-keisha-2",
-        "cv-019",
         "cv-017",
         "co-032",
+        "cv-019",
         "cv-018",
         "cv-020",
-        "n-008",
         "yc-023",
         "cv-021",
-        "f-keisha-1"
+        "f-keisha-1",
+        "n-008"
       ],
-      "response" : "Yes, Keisha accepted the offer on October 5, 2026, and starts November 2, 2026.",
+      "response" : "No, we haven't hired a customer success lead yet. The offer was accepted on November 2, 2026, which is after today.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -2697,15 +2697,15 @@
         "n-009",
         "co-032",
         "cv-021",
-        "yc-016",
         "co-051",
+        "yc-016",
+        "cv-019",
+        "cv-020",
         "f-priya",
         "cv-017",
-        "yc-023",
-        "cv-019",
-        "yc-011"
+        "n-008"
       ],
-      "response" : "The most recent conversation on this topic was on September 23, 2026, where we discussed prioritizing the engineer based on growth bottlenecks. That was over two months ago, and no new timeline has been set since.",
+      "response" : "The most recent conversation on this topic was on September 23, 2026, where we discussed hiring the second iOS engineer based on growth bottlenecks. That was over six months ago, so the decision hasn't been finalized.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -2737,9 +2737,9 @@
         "cv-028",
         "cv-027",
         "f-rent-1",
-        "pf-033"
+        "n-004"
       ],
-      "response" : "We renewed the current apartment lease on September 30, 2026, after considering Lawton Avenue. The decision to stay was made before the August rent increase notice.",
+      "response" : "Yes, you renewed the current apartment lease at $3,450 a month on September 30, 2026. The decision to renew came after considering Lawton Avenue, but the current plan is to stay.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -2767,13 +2767,13 @@
         "co-006",
         "co-056",
         "co-004",
-        "co-005",
         "co-009",
+        "co-005",
         "cv-041",
-        "cv-021",
-        "co-036"
+        "co-036",
+        "co-014"
       ],
-      "response" : "The latest month-over-month revenue growth is 19%, from the end of September to October 1, 2026.",
+      "response" : "The latest month-over-month revenue growth is 19%, from the end of September 2026 to the end of October 2026.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -2801,13 +2801,13 @@
         "cv-026",
         "cv-025",
         "cv-022",
-        "cv-023",
         "pf-018",
+        "cv-023",
         "pf-019",
         "cv-024",
         "pf-040"
       ],
-      "response" : "The lessons moved to Thursdays at 6 pm starting this week, as Lucía took a teaching job on Tuesday nights (September 30, 2026). The change was confirmed in a conversation that same day.",
+      "response" : "The lessons moved to Thursdays at 6 pm starting this week, as Lucía took a teaching job on Tuesday nights (September 30, 2026).",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -2838,8 +2838,8 @@
         "co-015",
         "co-012",
         "cv-019",
-        "co-032",
-        "yc-011"
+        "yc-038",
+        "co-032"
       ],
       "response" : "Alex Moreno works as a senior park designer for the City of Oakland's parks department, downtown at Frank Ogawa Plaza, and commutes by BART (September 15, 2026).",
       "retrieval" : {
@@ -2869,8 +2869,8 @@
         "cv-064",
         "n-007",
         "pf-023",
-        "cv-010",
         "cv-030",
+        "cv-010",
         "cv-065",
         "n-012"
       ],
@@ -2891,23 +2891,23 @@
     },
     {
       "correct" : true,
-      "expandedFacts" : 8,
+      "expandedFacts" : 4,
       "firstEvidenceRank" : 1,
       "id" : "mh-03",
       "judgeReply" : "yes",
       "ranking" : [
         "pf-016",
         "n-012",
-        "pf-008",
         "f-hollow-pine",
-        "f-dad-dinner",
-        "n-013",
-        "yc-002",
-        "f-sam-brasa",
+        "cv-004",
         "pf-033",
-        "cv-004"
+        "f-sam-brasa",
+        "yc-002",
+        "n-013",
+        "co-050",
+        "co-019"
       ],
-      "response" : "Sam Okoye's restaurant is Brasa on Valencia Street in the Mission.",
+      "response" : "Sam Okoye runs the kitchen at Brasa on Valencia Street in the Mission (September 29, 2026).",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -2930,17 +2930,17 @@
       "judgeReply" : "yes",
       "ranking" : [
         "f-northgate",
-        "f-marcus",
         "yc-027",
         "co-013",
         "f-yc",
+        "f-marcus",
         "co-015",
         "co-032",
+        "cv-043",
         "cv-017",
-        "co-034",
-        "yc-010"
+        "co-034"
       ],
-      "response" : "Marcus Lee is the contact at Northgate Ventures, the fund that led the pre-seed round.",
+      "response" : "On September 1, 2026, Marcus Lee was listed as the contact at Northgate Ventures, the fund that led the pre-seed. The most recent mention of him was on that date.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -2948,7 +2948,7 @@
         "hitAt1" : 1,
         "hitAt5" : 1,
         "mrrAt10" : 1,
-        "ndcgAt10" : 1,
+        "ndcgAt10" : 0.8503449055347546,
         "recallAt10" : 1,
         "recallAt5" : 1,
         "updateCount" : 0
@@ -2970,8 +2970,8 @@
         "co-013",
         "yc-027",
         "cv-044",
-        "cv-041",
-        "yc-030"
+        "cv-043",
+        "cv-041"
       ],
       "response" : "On August 14, 2026, when Jordan asked about the seed deck, Blau said to lead with the cohort chart: restaurants open more than two years have had zero product churn, and net revenue retention is 128%.",
       "retrieval" : {
@@ -3000,13 +3000,13 @@
         "cv-043",
         "yc-010",
         "yc-019",
-        "yc-030",
         "yc-027",
+        "yc-030",
         "co-015",
         "pf-026",
         "co-032"
       ],
-      "response" : "Bayline Capital wants a second meeting with Priya to go deep on the tech. This was mentioned on September 25, 2026.",
+      "response" : "Bayline Capital wants to meet Priya to go deep on the tech. This was mentioned on September 25, 2026.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -3023,7 +3023,7 @@
     },
     {
       "correct" : true,
-      "expandedFacts" : 4,
+      "expandedFacts" : 3,
       "firstEvidenceRank" : 1,
       "id" : "mh-07",
       "judgeReply" : "yes",
@@ -3034,12 +3034,12 @@
         "co-020",
         "co-032",
         "yc-044",
-        "n-009",
+        "f-keisha-2",
+        "n-008",
         "cv-021",
-        "cv-019",
         "yc-018"
       ],
-      "response" : "The first customer, Little Fern, is opening its second location in Piedmont.",
+      "response" : "The first customer's second location is in Piedmont.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -3064,15 +3064,15 @@
         "f-mei-slideshow",
         "f-dad-dinner",
         "pf-009",
-        "cv-035",
-        "cv-032",
-        "f-dad-gift",
-        "cv-033",
-        "pf-008",
         "n-013",
-        "cv-076"
+        "cv-035",
+        "pf-008",
+        "f-dad-gift",
+        "cv-032",
+        "cv-033",
+        "cv-034"
       ],
-      "response" : "On September 19, 2026, Mei Hale is making a slideshow of old photos for Dad's 70th birthday dinner. The plan included asking relatives to send scans by mid-November, giving her two weeks to put it together.",
+      "response" : "Mei Hale is making a slideshow of old photos for Dad's 70th birthday dinner (September 19, 2026).",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -3101,11 +3101,11 @@
         "cv-031",
         "f-rent-2",
         "pf-006",
-        "n-012",
         "cv-027",
+        "n-012",
         "f-saffron-1"
       ],
-      "response" : "Biscuit is 32 pounds, which fits the 40-pound limit mentioned on September 16, 2026. The conversation from that date is the most recent.",
+      "response" : "Biscuit is 32 pounds, which fits the 40-pound limit the landlord on Lawton allows. The lease must be in writing, and the policy should be confirmed.",
       "retrieval" : {
         "completeAt10" : 0,
         "completeAt5" : 0,
@@ -3155,23 +3155,23 @@
     },
     {
       "correct" : true,
-      "expandedFacts" : 4,
+      "expandedFacts" : 5,
       "firstEvidenceRank" : 1,
       "id" : "mh-11",
       "judgeReply" : "yes",
       "ranking" : [
         "f-ines",
         "cv-056",
-        "n-009",
-        "co-051",
-        "yc-037",
-        "yc-022",
+        "cv-021",
+        "cv-020",
         "cv-019",
-        "yc-023",
+        "yc-037",
+        "co-051",
+        "yc-022",
         "cv-074",
-        "f-priya"
+        "yc-023"
       ],
-      "response" : "Ines redesigned the onboarding so owners scan their first invoice in the first minute (October 3, 2026). I measured time to first scan and the share of trials reaching ten invoices before and after the change.",
+      "response" : "Ines redesigned the onboarding so owners scan their first invoice in the first minute, as discussed on October 3, 2026.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -3254,33 +3254,33 @@
     },
     {
       "correct" : true,
-      "expandedFacts" : 3,
-      "firstEvidenceRank" : 1,
+      "expandedFacts" : 2,
+      "firstEvidenceRank" : 2,
       "id" : "mh-14",
       "judgeReply" : "yes",
       "ranking" : [
-        "cv-044",
         "n-010",
-        "yc-027",
+        "cv-044",
         "yc-019",
-        "f-dana",
+        "yc-027",
         "yc",
+        "f-dana",
+        "yc-016",
         "yc-002",
         "yc-030",
-        "yc-016",
-        "yc-010"
+        "f-yc"
       ],
-      "response" : "Dana suggested applying to YC before raising the seed, with a demo day and higher valuation at a cost of 7% plus the standard deal. That advice came in a conversation on October 2, 2026.",
+      "response" : "Dana Whitfield suggested applying to YC for the winter batch, which Jordan confirmed on October 5, 2026. The advice followed a meeting every other Thursday.",
       "retrieval" : {
         "completeAt10" : 1,
-        "completeAt5" : 1,
+        "completeAt5" : 0,
         "count" : 1,
-        "hitAt1" : 1,
+        "hitAt1" : 0,
         "hitAt5" : 1,
-        "mrrAt10" : 1,
-        "ndcgAt10" : 0.8503449055347546,
+        "mrrAt10" : 0.5,
+        "ndcgAt10" : 0.6052602440527057,
         "recallAt10" : 1,
-        "recallAt5" : 1,
+        "recallAt5" : 0.5,
         "updateCount" : 0
       },
       "type" : "multi-hop"
@@ -3294,16 +3294,16 @@
       "ranking" : [
         "cv-006",
         "cv-005",
-        "cv-075",
         "pf-034",
+        "cv-075",
         "pf-004",
         "cv-001",
-        "cv-064",
         "n-007",
-        "cv-063",
+        "cv-008",
+        "cv-064",
         "cv-004"
       ],
-      "response" : "On September 1, 2026, I told Jordan to send their allergy information in advance for the ryokan in Kyoto, specifically regarding shellfish. The allergy involved shellfish like shrimp, crab, lobster, clams, mussels, and scallops.",
+      "response" : "On September 1, 2026, I told Jordan to send their allergy in advance for ryokan dinners in Kyoto. The allergy mentioned was shellfish, including shrimp, crab, lobster, clams, mussels, and scallops.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -3328,15 +3328,15 @@
         "pf-002",
         "pf-028",
         "cv-032",
-        "f-dad-dinner",
         "pf-027",
         "cv-033",
+        "f-dad-dinner",
         "f-dad-gift",
+        "cv-034",
         "pf-019",
-        "cv-035",
-        "cv-034"
+        "n-013"
       ],
-      "response" : "Your partner's birthday is on February 18, 2026, and they have been hinting about wanting a ceramics class.",
+      "response" : "Your partner's birthday is on February 18, 2026. They have been hinting about wanting a ceramics class.",
       "retrieval" : {
         "completeAt10" : 0,
         "completeAt5" : 0,
@@ -3359,17 +3359,17 @@
       "judgeReply" : "no",
       "ranking" : [
         "f-keisha-2",
-        "f-rosa",
         "cv-019",
-        "f-rosa-2",
+        "f-rosa",
         "cv-020",
-        "cv-018",
-        "yc-023",
+        "f-rosa-2",
         "f-keisha-1",
-        "n-009",
-        "n-008"
+        "yc-023",
+        "cv-018",
+        "n-008",
+        "co-020"
       ],
-      "response" : "The candidate Rosa liked in the mock onboarding did not take the job, as Keisha accepted the customer success lead offer on November 2, 2026. The mock onboarding took place on September 23, 2026, and the offer was made later.",
+      "response" : "The candidate Rosa liked in the mock onboarding did not take the job, as Keisha accepted the customer success lead offer starting November 2, 2026.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -3377,7 +3377,7 @@
         "hitAt1" : 1,
         "hitAt5" : 1,
         "mrrAt10" : 1,
-        "ndcgAt10" : 0.8503449055347546,
+        "ndcgAt10" : 0.8772153153380493,
         "recallAt10" : 1,
         "recallAt5" : 1,
         "updateCount" : 0
@@ -3399,8 +3399,8 @@
         "yc-023",
         "f-priya",
         "f-ines",
-        "yc-015",
-        "cv-018"
+        "cv-020",
+        "yc-015"
       ],
       "response" : "The team will have five people once the new hire starts, as Ines Kowal is already on three days a week and the new hire is joining.",
       "retrieval" : {
@@ -3431,11 +3431,11 @@
         "n-013",
         "pf-008",
         "cv-032",
-        "cv-035",
         "cv-033",
+        "cv-035",
         "cv-034"
       ],
-      "response" : "December 12, 2026 — the dinner will be at Golden Lotus, a Cantonese restaurant in Sacramento.",
+      "response" : "The dinner will be at Golden Lotus, a Cantonese restaurant in Sacramento, as mentioned in the September 22 conversation.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -3451,11 +3451,11 @@
       "type" : "multi-hop"
     },
     {
-      "correct" : false,
+      "correct" : true,
       "expandedFacts" : 4,
       "firstEvidenceRank" : 1,
       "id" : "mh-20",
-      "judgeReply" : "no",
+      "judgeReply" : "yes",
       "ranking" : [
         "pf-008",
         "f-saffron-2",
@@ -3463,12 +3463,12 @@
         "co-002",
         "f-priya",
         "f-yc",
-        "yc-001",
         "f-saffron-1",
-        "co-041",
-        "f-casa-verde"
+        "yc-001",
+        "f-casa-verde",
+        "co-041"
       ],
-      "response" : "Linda Hale ran Hale's Kitchen for 22 years before selling it in 2023, but Larderly was founded in March 2025 by Jordan Hale and Priya Raman. There is no direct link between the old restaurant and the app.",
+      "response" : "Linda Hale ran the family restaurant, Hale's Kitchen, for 22 years before selling it in 2023. Larderly was founded in March 2025 by Jordan Hale and Priya Raman.",
       "retrieval" : {
         "completeAt10" : 1,
         "completeAt5" : 1,
@@ -3485,7 +3485,7 @@
     },
     {
       "correct" : true,
-      "expandedFacts" : 10,
+      "expandedFacts" : 7,
       "id" : "ab-01",
       "judgeReply" : "yes",
       "ranking" : [
@@ -3493,12 +3493,12 @@
         "pf-016",
         "f-lucia-2",
         "f-sam-brasa",
-        "f-rosa",
         "pf-006",
         "n-012",
         "cv-023",
         "cv-019",
-        "cv-026"
+        "cv-026",
+        "cv-030"
       ],
       "response" : "I don't know. The user's dog is Biscuit, not a cat.",
       "type" : "abstention"
@@ -3510,57 +3510,57 @@
       "judgeReply" : "yes",
       "ranking" : [
         "pf-016",
-        "cv-019",
         "f-sam-brasa",
         "cv-033",
         "pf-007",
         "f-priya",
-        "yc-010",
         "n-012",
-        "pf-009",
-        "co-015"
+        "yc-010",
+        "cv-019",
+        "n-013",
+        "pf-009"
       ],
-      "response" : "I don't know.",
+      "response" : "I don't know. The memories don't mention a brother.",
       "type" : "abstention"
     },
     {
       "correct" : true,
       "expandedFacts" : 4,
       "id" : "ab-03",
-      "judgeReply" : "Yes",
+      "judgeReply" : "yes",
       "ranking" : [
-        "cv-002",
-        "cv-004",
         "cv-006",
+        "cv-002",
         "cv-003",
         "yc-028",
         "cv-001",
+        "cv-004",
         "yc-007",
-        "yc-018",
         "cv-028",
+        "yc-018",
         "co-023"
       ],
-      "response" : "The ryokan in Higashiyama with the private bath was booked on September 1, 2026, and the memory doesn't specify the nightly cost. I don't know the price.",
+      "response" : "I don't know; the memory from September 1, 2026, only mentions booking the ryokan in Higashiyama with the private bath, but no cost per night.",
       "type" : "abstention"
     },
     {
-      "correct" : false,
-      "expandedFacts" : 5,
+      "correct" : true,
+      "expandedFacts" : 2,
       "id" : "ab-04",
-      "judgeReply" : "no",
+      "judgeReply" : "yes",
       "ranking" : [
         "f-bayline",
-        "f-keisha-2",
-        "cv-042",
         "cv-043",
+        "cv-042",
         "cv-020",
-        "n-008",
+        "f-keisha-2",
+        "co-014",
         "yc-027",
         "co-013",
-        "co-014",
-        "yc-044"
+        "yc-044",
+        "co-034"
       ],
-      "response" : "I don't know. The memory from September 1, 2026, mentions a $750,000 pre-seed on an $8M post-money SAFE, but no valuation offered by Bayline Capital.",
+      "response" : "I don't know. The memory from early September 2026 mentions Bayline Capital asking about gross margin and invoice costs, but no valuation was provided.",
       "type" : "abstention"
     },
     {
@@ -3587,20 +3587,20 @@
       "correct" : true,
       "expandedFacts" : 5,
       "id" : "ab-06",
-      "judgeReply" : "yes",
+      "judgeReply" : "Yes",
       "ranking" : [
         "pf-023",
         "pf-006",
-        "n-007",
         "cv-026",
+        "n-007",
         "cv-036",
-        "cv-064",
+        "n-013",
         "f-lucia-2",
+        "cv-064",
         "cv-065",
-        "yc-002",
-        "yc-044"
+        "yc-002"
       ],
-      "response" : "[1] Monday, June 1, 2026 · fact  \nDr. Patel at the Rockridge medical office; the last physical was in March 2026  \n\n[3] Friday, October 2, 2026 · conversation  \nDr. Okafor said Biscuit's ears look completely clear now.  \n\nThe dentist did not mention you specifically in the last checkup.",
+      "response" : "The last physical was in March 2026, and Dr. Patel was seen on June 1, 2026. I don't know what the dentist said at your last checkup.",
       "type" : "abstention"
     },
     {
@@ -3611,16 +3611,16 @@
       "ranking" : [
         "cv-001",
         "cv-003",
-        "pf-019",
-        "cv-004",
         "cv-008",
-        "cv-002",
+        "pf-019",
         "f-alex-job-2",
+        "cv-002",
+        "cv-004",
         "cv-009",
         "f-half-marathon",
         "pf-001"
       ],
-      "response" : "The flight to Tokyo leaves on April 2nd, which was two weeks ago from today. I don't know the exact departure time.",
+      "response" : "The flight to Tokyo leaves on April 2nd, 2026, but the exact departure time isn't specified in the memory. The only detail is that the booking was made on August 3rd, 2026.",
       "type" : "abstention"
     },
     {
@@ -3637,8 +3637,8 @@
         "pf-020",
         "pf-029",
         "n-003",
-        "n-004",
-        "f-mei-slideshow"
+        "f-mei-slideshow",
+        "n-004"
       ],
       "response" : "Mei Hale is Alex's sister, a nurse in Portland with two kids.",
       "type" : "abstention"
@@ -3658,7 +3658,7 @@
         "n-011",
         "cv-015",
         "cv-014",
-        "cv-016"
+        "pf-035"
       ],
       "response" : "I don't know. The memories don't contain information about your time in the Boston Marathon.",
       "type" : "abstention"
@@ -3669,8 +3669,8 @@
       "id" : "ab-10",
       "judgeReply" : "Yes",
       "ranking" : [
-        "f-priya",
         "f-yc",
+        "f-priya",
         "co-001",
         "co-002",
         "co-042",
@@ -3680,24 +3680,24 @@
         "co-041",
         "f-saffron-2"
       ],
-      "response" : "I don't know. None of the memories mention Larderly having employees in London.",
+      "response" : "I don't know. The memories do not mention any employees in London.",
       "type" : "abstention"
     },
     {
       "correct" : true,
-      "expandedFacts" : 3,
+      "expandedFacts" : 2,
       "id" : "ab-11",
       "judgeReply" : "yes",
       "ranking" : [
         "f-bayline",
         "f-priya",
+        "cv-043",
         "cv-071",
         "yc-030",
-        "f-yc",
         "co-046",
         "cv-070",
-        "cv-043",
         "yc-010",
+        "co-051",
         "co-017"
       ],
       "response" : "I don't know. The Android app is planned after the seed, but no specific launch date was set.",
@@ -3715,12 +3715,12 @@
         "co-015",
         "yc-019",
         "yc-010",
-        "yc-043",
         "yc",
+        "yc-043",
         "f-priya",
-        "yc-003"
+        "yc-030"
       ],
-      "response" : "Jordan asked about the YC partner who interviewed them on September 1, 2026, and the memory from that day only mentions practice answers for the interview, not the interviewer's name. I don't know who the YC partner was.",
+      "response" : "Blau doesn't know which YC partner interviewed them, as the memory from September 1, 2026, only mentions practice questions and notes without naming a specific interviewer.",
       "type" : "abstention"
     },
     {
@@ -3734,53 +3734,53 @@
         "pf-006",
         "cv-066",
         "cv-063",
-        "cv-030",
         "f-biscuit-weight-2",
-        "f-sam-brasa",
-        "pf-016",
-        "n-012"
-      ],
-      "response" : "Biscuit is Sofia's dog.",
-      "type" : "abstention"
-    },
-    {
-      "correct" : false,
-      "expandedFacts" : 3,
-      "id" : "ab-14",
-      "judgeReply" : "no",
-      "ranking" : [
-        "cv-004",
-        "cv-006",
-        "cv-005",
-        "co-020",
-        "f-rosa",
-        "pf-033",
+        "cv-030",
         "n-012",
-        "yc-002",
-        "cv-076",
-        "yc-029"
+        "f-sam-brasa",
+        "pf-016"
       ],
-      "response" : "You ordered the ramen with yuzu shio broth at Menya Kotori on August 17, 2026.",
+      "response" : "Sofia's dog is Biscuit.",
       "type" : "abstention"
     },
     {
       "correct" : true,
-      "expandedFacts" : 5,
+      "expandedFacts" : 6,
+      "id" : "ab-14",
+      "judgeReply" : "yes",
+      "ranking" : [
+        "cv-004",
+        "cv-006",
+        "cv-005",
+        "cv-008",
+        "co-020",
+        "f-rosa",
+        "pf-033",
+        "n-013",
+        "n-012",
+        "pf-028"
+      ],
+      "response" : "I don't know what you ordered at Menya Kotori. The memory only mentions the place and its hours.",
+      "type" : "abstention"
+    },
+    {
+      "correct" : true,
+      "expandedFacts" : 6,
       "id" : "ab-15",
       "judgeReply" : "yes",
       "ranking" : [
         "pf-008",
         "co-045",
-        "f-lucia-2",
         "f-rosa-2",
+        "n-013",
         "pf-023",
-        "yc-010",
-        "cv-026",
-        "cv-049",
+        "n-005",
         "cv-023",
-        "yc-042"
+        "yc-010",
+        "cv-049",
+        "f-lucia-2"
       ],
-      "response" : "I don't know. The memory about Linda Hale running the restaurant doesn't include a phone number.",
+      "response" : "I don't know. The only phone number mentioned is from a tutor meeting, which wasn't for your mother.",
       "type" : "abstention"
     },
     {
@@ -3791,34 +3791,34 @@
       "ranking" : [
         "pf-028",
         "pf-029",
+        "cv-008",
         "f-rosa",
         "co-020",
         "n-003",
         "yc-002",
         "f-alex-job-2",
         "pf-019",
-        "pf-003",
         "pf-002"
       ],
-      "response" : "I don't know. The memory about the ceramics class doesn't mention a cost.",
+      "response" : "I don't know. The memory about the ceramics class was from June 2026, and no payment details were mentioned.",
       "type" : "abstention"
     },
     {
       "correct" : true,
-      "expandedFacts" : 6,
+      "expandedFacts" : 1,
       "id" : "ab-17",
       "judgeReply" : "yes",
       "ranking" : [
         "co-031",
         "f-priya",
         "co-017",
-        "cv-008",
-        "f-bayline",
         "cv-007",
         "cv-043",
-        "co-011",
         "n-012",
-        "yc-032"
+        "co-011",
+        "yc-032",
+        "f-sam-brasa",
+        "yc-042"
       ],
       "response" : "I don't know. The memories don't contain the Wi-Fi password at the studio.",
       "type" : "abstention"
@@ -3836,7 +3836,7 @@
         "pf-018",
         "pf-021",
         "pf-007",
-        "cv-023",
+        "n-005",
         "cv-012",
         "yc-038"
       ],
@@ -3856,31 +3856,31 @@
         "pf-031",
         "co-038",
         "cv-040",
+        "cv-043",
         "f-bayline",
-        "yc-043",
-        "cv-036"
+        "yc-043"
       ],
-      "response" : "The most recent board meeting was on September 1, 2026, where Marcus Lee had observer rights but no direct comments from him. He previously suggested a short written update on the first Monday of each month.",
+      "response" : "The last board meeting was on September 1, 2026. Marcus said the team should lead with the cohort chart, highlighting zero product churn and 128% net revenue retention for restaurants over two years.",
       "type" : "abstention"
     },
     {
-      "correct" : true,
+      "correct" : false,
       "expandedFacts" : 4,
       "id" : "ab-20",
-      "judgeReply" : "yes",
+      "judgeReply" : "no",
       "ranking" : [
         "pf-019",
-        "f-alex-job-2",
         "pf-002",
+        "f-alex-job-2",
         "pf-028",
         "n-004",
-        "n-003",
         "pf-029",
         "pf-024",
+        "pf-003",
         "cv-057",
-        "pf-003"
+        "pf-020"
       ],
-      "response" : "I don't know. The user drives a 2017 hatchback, but there's no mention of Alex driving a car.",
+      "response" : "Alex drives a 2017 hatchback, as mentioned on June 1, 2026. This information is no longer true since September 15, 2026, when Alex started using BART.",
       "type" : "abstention"
     }
   ],
@@ -3891,178 +3891,25 @@
           "completeAt10" : 1,
           "completeAt5" : 0.85,
           "count" : 20,
-          "currentFirst" : 0.65,
+          "currentFirst" : 0.7,
           "hitAt1" : 0.5,
           "hitAt5" : 0.85,
-          "mrrAt10" : 0.6541666666666667,
-          "ndcgAt10" : 0.7376720248129309,
+          "mrrAt10" : 0.6666666666666667,
+          "ndcgAt10" : 0.7476846845878342,
           "recallAt10" : 1,
           "recallAt5" : 0.85,
           "updateCount" : 20
         },
         "multi-hop" : {
           "completeAt10" : 0.9,
-          "completeAt5" : 0.85,
-          "count" : 20,
-          "hitAt1" : 0.85,
-          "hitAt5" : 1,
-          "mrrAt10" : 0.925,
-          "ndcgAt10" : 0.8564992822042701,
-          "recallAt10" : 0.95,
-          "recallAt5" : 0.925,
-          "updateCount" : 0
-        },
-        "single-fact" : {
-          "completeAt10" : 1,
-          "completeAt5" : 1,
-          "count" : 30,
-          "hitAt1" : 0.6,
-          "hitAt5" : 1,
-          "mrrAt10" : 0.7722222222222221,
-          "ndcgAt10" : 0.8302930381572816,
-          "recallAt10" : 1,
-          "recallAt5" : 1,
-          "updateCount" : 0
-        },
-        "temporal" : {
-          "completeAt10" : 0.96,
-          "completeAt5" : 0.76,
-          "count" : 25,
-          "hitAt1" : 0.72,
-          "hitAt5" : 0.84,
-          "mrrAt10" : 0.7773809523809524,
-          "ndcgAt10" : 0.799868695696706,
-          "recallAt10" : 0.96,
-          "recallAt5" : 0.8,
-          "updateCount" : 0
-        }
-      },
-      "id" : "hybrid",
-      "misses" : [
-        "tr-04",
-        "tr-08",
-        "tr-09",
-        "tr-19",
-        "ku-01",
-        "ku-07",
-        "ku-14"
-      ],
-      "overall" : {
-        "completeAt10" : 0.968421052631579,
-        "completeAt5" : 0.8736842105263158,
-        "count" : 95,
-        "currentFirst" : 0.65,
-        "hitAt1" : 0.6631578947368421,
-        "hitAt5" : 0.9263157894736842,
-        "mrrAt10" : 0.7808897243107767,
-        "ndcgAt10" : 0.8083045755524223,
-        "recallAt10" : 0.9789473684210527,
-        "recallAt5" : 0.9,
-        "updateCount" : 20
-      },
-      "summary" : "MemorySearch defaults: BM25 + vectors (weighted RRF), time boost, entity expansion"
-    },
-    {
-      "byType" : {
-        "knowledge-update" : {
-          "completeAt10" : 1,
           "completeAt5" : 0.8,
           "count" : 20,
-          "currentFirst" : 0.45,
-          "hitAt1" : 0.4,
-          "hitAt5" : 0.8,
-          "mrrAt10" : 0.5833333333333333,
-          "ndcgAt10" : 0.6835626997505747,
-          "recallAt10" : 1,
-          "recallAt5" : 0.8,
-          "updateCount" : 20
-        },
-        "multi-hop" : {
-          "completeAt10" : 0.8,
-          "completeAt5" : 0.6,
-          "count" : 20,
-          "hitAt1" : 0.7,
+          "hitAt1" : 0.8,
           "hitAt5" : 1,
-          "mrrAt10" : 0.8266666666666665,
-          "ndcgAt10" : 0.76527590070066,
-          "recallAt10" : 0.9,
-          "recallAt5" : 0.8,
-          "updateCount" : 0
-        },
-        "single-fact" : {
-          "completeAt10" : 1,
-          "completeAt5" : 1,
-          "count" : 30,
-          "hitAt1" : 0.7666666666666667,
-          "hitAt5" : 1,
-          "mrrAt10" : 0.8833333333333333,
-          "ndcgAt10" : 0.9138836091666734,
-          "recallAt10" : 1,
-          "recallAt5" : 1,
-          "updateCount" : 0
-        },
-        "temporal" : {
-          "completeAt10" : 0.96,
-          "completeAt5" : 0.84,
-          "count" : 25,
-          "hitAt1" : 0.84,
-          "hitAt5" : 0.92,
-          "mrrAt10" : 0.8646666666666667,
-          "ndcgAt10" : 0.8669266271155311,
-          "recallAt10" : 0.96,
-          "recallAt5" : 0.88,
-          "updateCount" : 0
-        }
-      },
-      "id" : "hybrid-no-entities",
-      "misses" : [
-        "tr-08",
-        "tr-09",
-        "ku-01",
-        "ku-07",
-        "ku-09",
-        "ku-16"
-      ],
-      "overall" : {
-        "completeAt10" : 0.9473684210526315,
-        "completeAt5" : 0.8315789473684211,
-        "count" : 95,
-        "currentFirst" : 0.45,
-        "hitAt1" : 0.6947368421052632,
-        "hitAt5" : 0.9368421052631579,
-        "mrrAt10" : 0.8033333333333333,
-        "ndcgAt10" : 0.8217520627569805,
-        "recallAt10" : 0.968421052631579,
-        "recallAt5" : 0.8842105263157894,
-        "updateCount" : 20
-      },
-      "summary" : "MemorySearch without the entity graph"
-    },
-    {
-      "byType" : {
-        "knowledge-update" : {
-          "completeAt10" : 0.95,
-          "completeAt5" : 0.85,
-          "count" : 20,
-          "currentFirst" : 0.75,
-          "hitAt1" : 0.45,
-          "hitAt5" : 0.85,
-          "mrrAt10" : 0.6270833333333333,
-          "ndcgAt10" : 0.7063033818126488,
+          "mrrAt10" : 0.9,
+          "ndcgAt10" : 0.83810581489707,
           "recallAt10" : 0.95,
-          "recallAt5" : 0.85,
-          "updateCount" : 20
-        },
-        "multi-hop" : {
-          "completeAt10" : 0.85,
-          "completeAt5" : 0.65,
-          "count" : 20,
-          "hitAt1" : 0.75,
-          "hitAt5" : 1,
-          "mrrAt10" : 0.8391666666666666,
-          "ndcgAt10" : 0.798628463509176,
-          "recallAt10" : 0.925,
-          "recallAt5" : 0.825,
+          "recallAt5" : 0.9,
           "updateCount" : 0
         },
         "single-fact" : {
@@ -4071,45 +3918,48 @@
           "count" : 30,
           "hitAt1" : 0.6333333333333333,
           "hitAt5" : 1,
-          "mrrAt10" : 0.7722222222222223,
-          "ndcgAt10" : 0.8292451666716955,
+          "mrrAt10" : 0.7888888888888889,
+          "ndcgAt10" : 0.8425953797048997,
           "recallAt10" : 1,
           "recallAt5" : 1,
           "updateCount" : 0
         },
         "temporal" : {
-          "completeAt10" : 1,
-          "completeAt5" : 1,
+          "completeAt10" : 0.96,
+          "completeAt5" : 0.84,
           "count" : 25,
           "hitAt1" : 0.72,
-          "hitAt5" : 1,
-          "mrrAt10" : 0.8246666666666667,
-          "ndcgAt10" : 0.8617152388300425,
-          "recallAt10" : 1,
-          "recallAt5" : 1,
+          "hitAt5" : 0.88,
+          "mrrAt10" : 0.7834920634920636,
+          "ndcgAt10" : 0.8117808277841704,
+          "recallAt10" : 0.96,
+          "recallAt5" : 0.86,
           "updateCount" : 0
         }
       },
-      "id" : "bm25-fallback",
+      "id" : "hybrid",
       "misses" : [
+        "tr-04",
+        "tr-08",
+        "tr-09",
         "ku-01",
-        "ku-06",
+        "ku-07",
         "ku-14"
       ],
       "overall" : {
-        "completeAt10" : 0.9578947368421052,
-        "completeAt5" : 0.8947368421052632,
+        "completeAt10" : 0.968421052631579,
+        "completeAt5" : 0.8842105263157894,
         "count" : 95,
-        "currentFirst" : 0.75,
-        "hitAt1" : 0.6421052631578947,
-        "hitAt5" : 0.968421052631579,
-        "mrrAt10" : 0.7695614035087721,
-        "ndcgAt10" : 0.8054618197614571,
-        "recallAt10" : 0.9736842105263158,
-        "recallAt5" : 0.9315789473684211,
+        "currentFirst" : 0.7,
+        "hitAt1" : 0.6631578947368421,
+        "hitAt5" : 0.9368421052631579,
+        "mrrAt10" : 0.7851294903926482,
+        "ndcgAt10" : 0.8135599165836772,
+        "recallAt10" : 0.9789473684210527,
+        "recallAt5" : 0.9105263157894737,
         "updateCount" : 20
       },
-      "summary" : "MemorySearch without an embedding model"
+      "summary" : "MemorySearch defaults: BM25 + vectors (weighted RRF), time boost, entity expansion"
     },
     {
       "byType" : {
@@ -4120,20 +3970,169 @@
           "currentFirst" : 0.55,
           "hitAt1" : 0.45,
           "hitAt5" : 0.85,
-          "mrrAt10" : 0.6175595238095238,
-          "ndcgAt10" : 0.7094912166080819,
+          "mrrAt10" : 0.6204166666666667,
+          "ndcgAt10" : 0.7115240373371163,
+          "recallAt10" : 1,
+          "recallAt5" : 0.85,
+          "updateCount" : 20
+        },
+        "multi-hop" : {
+          "completeAt10" : 0.8,
+          "completeAt5" : 0.55,
+          "count" : 20,
+          "hitAt1" : 0.6,
+          "hitAt5" : 1,
+          "mrrAt10" : 0.7766666666666666,
+          "ndcgAt10" : 0.7407166133095657,
+          "recallAt10" : 0.9,
+          "recallAt5" : 0.775,
+          "updateCount" : 0
+        },
+        "single-fact" : {
+          "completeAt10" : 1,
+          "completeAt5" : 1,
+          "count" : 30,
+          "hitAt1" : 0.8,
+          "hitAt5" : 1,
+          "mrrAt10" : 0.9,
+          "ndcgAt10" : 0.9261859507142916,
+          "recallAt10" : 1,
+          "recallAt5" : 1,
+          "updateCount" : 0
+        },
+        "temporal" : {
+          "completeAt10" : 0.96,
+          "completeAt5" : 0.88,
+          "count" : 25,
+          "hitAt1" : 0.84,
+          "hitAt5" : 0.92,
+          "mrrAt10" : 0.87,
+          "ndcgAt10" : 0.874979161208732,
+          "recallAt10" : 0.96,
+          "recallAt5" : 0.9,
+          "updateCount" : 0
+        }
+      },
+      "id" : "hybrid-no-entities",
+      "misses" : [
+        "tr-08",
+        "tr-09",
+        "ku-01",
+        "ku-07",
+        "ku-16"
+      ],
+      "overall" : {
+        "completeAt10" : 0.9473684210526315,
+        "completeAt5" : 0.8421052631578947,
+        "count" : 95,
+        "currentFirst" : 0.55,
+        "hitAt1" : 0.6947368421052632,
+        "hitAt5" : 0.9473684210526315,
+        "mrrAt10" : 0.807280701754386,
+        "ndcgAt10" : 0.828472321732428,
+        "recallAt10" : 0.968421052631579,
+        "recallAt5" : 0.8947368421052632,
+        "updateCount" : 20
+      },
+      "summary" : "MemorySearch without the entity graph"
+    },
+    {
+      "byType" : {
+        "knowledge-update" : {
+          "completeAt10" : 0.95,
+          "completeAt5" : 0.8,
+          "count" : 20,
+          "currentFirst" : 0.7,
+          "hitAt1" : 0.45,
+          "hitAt5" : 0.8,
+          "mrrAt10" : 0.6020833333333333,
+          "ndcgAt10" : 0.6860207658109042,
+          "recallAt10" : 0.95,
+          "recallAt5" : 0.8,
+          "updateCount" : 20
+        },
+        "multi-hop" : {
+          "completeAt10" : 0.85,
+          "completeAt5" : 0.65,
+          "count" : 20,
+          "hitAt1" : 0.75,
+          "hitAt5" : 1,
+          "mrrAt10" : 0.8391666666666666,
+          "ndcgAt10" : 0.7990709988510611,
+          "recallAt10" : 0.925,
+          "recallAt5" : 0.825,
+          "updateCount" : 0
+        },
+        "single-fact" : {
+          "completeAt10" : 1,
+          "completeAt5" : 1,
+          "count" : 30,
+          "hitAt1" : 0.6333333333333333,
+          "hitAt5" : 1,
+          "mrrAt10" : 0.7666666666666667,
+          "ndcgAt10" : 0.8248808415526468,
+          "recallAt10" : 1,
+          "recallAt5" : 1,
+          "updateCount" : 0
+        },
+        "temporal" : {
+          "completeAt10" : 1,
+          "completeAt5" : 1,
+          "count" : 25,
+          "hitAt1" : 0.72,
+          "hitAt5" : 1,
+          "mrrAt10" : 0.8266666666666667,
+          "ndcgAt10" : 0.8677541736898009,
+          "recallAt10" : 1,
+          "recallAt5" : 1,
+          "updateCount" : 0
+        }
+      },
+      "id" : "bm25-fallback",
+      "misses" : [
+        "ku-01",
+        "ku-06",
+        "ku-14",
+        "ku-16"
+      ],
+      "overall" : {
+        "completeAt10" : 0.9578947368421052,
+        "completeAt5" : 0.8842105263157894,
+        "count" : 95,
+        "currentFirst" : 0.7,
+        "hitAt1" : 0.6421052631578947,
+        "hitAt5" : 0.9578947368421052,
+        "mrrAt10" : 0.7630701754385966,
+        "ndcgAt10" : 0.8014959461269867,
+        "recallAt10" : 0.9736842105263158,
+        "recallAt5" : 0.9210526315789473,
+        "updateCount" : 20
+      },
+      "summary" : "MemorySearch without an embedding model"
+    },
+    {
+      "byType" : {
+        "knowledge-update" : {
+          "completeAt10" : 1,
+          "completeAt5" : 0.85,
+          "count" : 20,
+          "currentFirst" : 0.6,
+          "hitAt1" : 0.45,
+          "hitAt5" : 0.85,
+          "mrrAt10" : 0.635,
+          "ndcgAt10" : 0.7229657536922351,
           "recallAt10" : 1,
           "recallAt5" : 0.85,
           "updateCount" : 20
         },
         "multi-hop" : {
           "completeAt10" : 0.6,
-          "completeAt5" : 0.4,
+          "completeAt5" : 0.45,
           "count" : 20,
-          "hitAt1" : 0.6,
-          "hitAt5" : 1,
-          "mrrAt10" : 0.735,
-          "ndcgAt10" : 0.6565885016150339,
+          "hitAt1" : 0.45,
+          "hitAt5" : 0.95,
+          "mrrAt10" : 0.6708333333333334,
+          "ndcgAt10" : 0.6282357783199332,
           "recallAt10" : 0.8,
           "recallAt5" : 0.7,
           "updateCount" : 0
@@ -4142,24 +4141,24 @@
           "completeAt10" : 1,
           "completeAt5" : 0.9666666666666667,
           "count" : 30,
-          "hitAt1" : 0.8,
+          "hitAt1" : 0.8333333333333334,
           "hitAt5" : 0.9666666666666667,
-          "mrrAt10" : 0.888095238095238,
-          "ndcgAt10" : 0.9162660700396874,
+          "mrrAt10" : 0.9047619047619048,
+          "ndcgAt10" : 0.9285684115873054,
           "recallAt10" : 1,
           "recallAt5" : 0.9666666666666667,
           "updateCount" : 0
         },
         "temporal" : {
           "completeAt10" : 0.88,
-          "completeAt5" : 0.6,
+          "completeAt5" : 0.72,
           "count" : 25,
           "hitAt1" : 0.4,
-          "hitAt5" : 0.72,
-          "mrrAt10" : 0.5773809523809523,
-          "ndcgAt10" : 0.6297733867850729,
+          "hitAt5" : 0.8,
+          "mrrAt10" : 0.5863333333333334,
+          "ndcgAt10" : 0.6469035590752878,
           "recallAt10" : 0.88,
-          "recallAt5" : 0.66,
+          "recallAt5" : 0.76,
           "updateCount" : 0
         }
       },
@@ -4170,24 +4169,23 @@
         "tr-05",
         "tr-08",
         "tr-09",
-        "tr-19",
-        "tr-21",
         "tr-22",
         "ku-07",
         "ku-09",
-        "ku-16"
+        "ku-16",
+        "mh-01"
       ],
       "overall" : {
         "completeAt10" : 0.8842105263157894,
-        "completeAt5" : 0.7263157894736842,
+        "completeAt5" : 0.7684210526315789,
         "count" : 95,
-        "currentFirst" : 0.55,
-        "hitAt1" : 0.5789473684210527,
-        "hitAt5" : 0.8842105263157894,
-        "mrrAt10" : 0.7171428571428572,
-        "ndcgAt10" : 0.7426727487924181,
+        "currentFirst" : 0.6,
+        "hitAt1" : 0.5578947368421052,
+        "hitAt5" : 0.8947368421052632,
+        "mrrAt10" : 0.7149248120300752,
+        "ndcgAt10" : 0.7479333891025759,
         "recallAt10" : 0.9263157894736842,
-        "recallAt5" : 0.8052631578947368,
+        "recallAt5" : 0.8315789473684211,
         "updateCount" : 20
       },
       "summary" : "Vector search alone (int8 cosine)"

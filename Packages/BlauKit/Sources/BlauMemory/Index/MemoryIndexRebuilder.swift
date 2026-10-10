@@ -146,10 +146,15 @@ public struct MemoryIndexRebuilder: Sendable {
         var factsByUtterance: [UUID: [String]] = [:]
         var factIDsByUtterance: [UUID: [UUID]] = [:]
         for fact in facts {
-            if let utteranceID = fact.sourceUtteranceID {
+            guard let utteranceID = fact.sourceUtteranceID else { continue }
+            // An invalidated fact stays linked (so un-invalidating or editing
+            // it re-chunks the exchange) but leaves the `facts:` prefix: a
+            // superseded statement would keep boosting the exchange for the
+            // old value. Its own chunk keeps `(until …)`.
+            if fact.invalidatedAt == nil {
                 factsByUtterance[utteranceID, default: []].append(fact.statement)
-                factIDsByUtterance[utteranceID, default: []].append(fact.id)
             }
+            factIDsByUtterance[utteranceID, default: []].append(fact.id)
         }
 
         let conversationIDs = try await sources.conversationIDs()

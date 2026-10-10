@@ -197,10 +197,27 @@ struct MemoryIndexRebuilderTests {
         _ = try await Self.rebuilder(index: index, sources: sources, embedder: nil).rebuild()
 
         let key = try #require(try await index.chunks(ofSource: trip.id, kind: .conversation).first).chunk.keyText
-        #expect(key.contains("User lives in Lisbon"))
-        withKnownIssue("Invalidated facts are still in the exchange's facts: prefix (#173)") {
-            #expect(!key.contains("User lives in Berlin"))
-        }
+        #expect(key.contains("facts: User lives in Lisbon\n"))
+        #expect(!key.contains("Berlin"))
+        // Still linked, so un-invalidating or editing it re-chunks the
+        // exchange, and still searchable as its own chunk.
+        #expect(try await index.conversations(linkedToFacts: [superseded.id]) == [trip.id])
+        let fact = try #require(try await index.chunks(ofSource: superseded.id, kind: .fact).first).chunk
+        #expect(fact.keyText.contains("User lives in Berlin (until "))
+    }
+
+    @Test func anExchangeWhoseOnlyFactIsInvalidatedHasNoFactsPrefix() async throws {
+        let index = try MemoryIndex.inMemory()
+        let trip = Support.conversation([(.user, "I moved to Lisbon last month."), (.agent, "How is the new place?")])
+        let superseded = FactSnapshot(
+            id: UUID(), statement: "User lives in Berlin", validFrom: Support.t0.addingTimeInterval(-86_400),
+            invalidatedAt: Support.t0, sourceUtteranceID: trip.utterances[0].id)
+        let sources = Support.FakeSources(conversations: [trip], facts: [superseded])
+        _ = try await Self.rebuilder(index: index, sources: sources, embedder: nil).rebuild()
+
+        let key = try #require(try await index.chunks(ofSource: trip.id, kind: .conversation).first).chunk.keyText
+        #expect(!key.contains("facts:"))
+        #expect(try await index.conversations(linkedToFacts: [superseded.id]) == [trip.id])
     }
 
     @Test func cancellationKeepsTheWorkDoneAndLeavesTheIndexMarkedForRebuild() async throws {

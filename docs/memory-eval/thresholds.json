@@ -1,5 +1,5 @@
 {
-  "description": "Regression gate for the memory evaluation (docs/memory-eval.md): swift test checks the retrieval limits on every run, make eval-memory and the nightly memory-eval job check them and the answer limits. Retrieval is deterministic (recorded vectors, fixed now), so its limits are the 2026-10-08 baseline less about one or two questions per type; answer accuracy depends on the on-device model, which changes with OS updates, so its limits leave five to ten points. Answer limits apply only to the reader and judge they are keyed by.",
+  "description": "Regression gate for the memory evaluation (docs/memory-eval.md): swift test checks the retrieval limits on every run, make eval-memory and the nightly memory-eval job check them and the answer limits. Retrieval is deterministic (recorded vectors, fixed now), so its limits are the 2026-10-10 baseline (#173) less about one or two questions per type; answer accuracy depends on the on-device model, which changes with OS updates, so its limits leave five to ten points. Answer limits apply only to the reader and judge they are keyed by.",
   "retrieval": {
     "hybrid": {
       "overall": {
@@ -14,7 +14,7 @@
         "single-fact": { "Recall@5": 0.96, "MRR@10": 0.72 },
         "temporal": { "Recall@5": 0.74, "Complete@5": 0.7, "MRR@10": 0.72 },
         "knowledge-update": { "Recall@5": 0.8, "MRR@10": 0.6, "Current first": 0.55 },
-        "multi-hop": { "Recall@5": 0.87, "Complete@5": 0.8, "MRR@10": 0.87 }
+        "multi-hop": { "Recall@5": 0.85, "Complete@5": 0.75, "MRR@10": 0.85 }
       }
     },
     "hybrid-no-entities": {
