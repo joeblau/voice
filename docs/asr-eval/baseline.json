@@ -1,5 +1,5 @@
 {
-  "commit" : "f4ad36f",
+  "commit" : "e15ab9c",
   "dataset" : {
     "audioSeconds" : 165.39,
     "categories" : [
@@ -26,7 +26,7 @@
         {
           "metrics" : {
             "audioSeconds" : 39.6,
-            "computeSeconds" : 2.0674389069999997,
+            "computeSeconds" : 1.6945450530000001,
             "counts" : {
               "deletions" : 1,
               "insertions" : 0,
@@ -35,14 +35,14 @@
             },
             "endOfUtterance" : {
               "count" : 8,
-              "maximum" : 972.987167,
-              "mean" : 938.019057375,
-              "minimum" : 930.102875,
-              "p50" : 930.2108125,
-              "p90" : 950.0855582,
-              "p95" : 961.5363626,
-              "p99" : 970.69700612,
-              "standardDeviation" : 13.88187033469992
+              "maximum" : 961.033,
+              "mean" : 936.5357603750001,
+              "minimum" : 930.142875,
+              "p50" : 930.1821665,
+              "p90" : 946.5163419,
+              "p95" : 953.77467095,
+              "p99" : 959.58133419,
+              "standardDeviation" : 10.185639648419658
             },
             "endOfUtteranceAudio" : {
               "count" : 8,
@@ -58,14 +58,14 @@
             "failures" : 0,
             "firstPartial" : {
               "count" : 8,
-              "maximum" : 975.668167,
-              "mean" : 871.911317625,
-              "minimum" : 620.714042,
-              "p50" : 942.3572495000001,
-              "p90" : 964.9458295000001,
-              "p95" : 970.30699825,
-              "p99" : 974.59593325,
-              "standardDeviation" : 139.69944969364704
+              "maximum" : 959.256125,
+              "mean" : 865.942322875,
+              "minimum" : 619.056958,
+              "p50" : 943.450021,
+              "p90" : 948.7510206,
+              "p95" : 954.0035728,
+              "p99" : 958.20561456,
+              "standardDeviation" : 138.82623633649558
             },
             "firstPartialAudio" : {
               "count" : 8,
@@ -80,7 +80,7 @@
             },
             "fixtures" : 6,
             "missedUtterances" : 0,
-            "realTimeFactor" : 0.0522080532070707,
+            "realTimeFactor" : 0.04279154174242424,
             "splitUtterances" : 0,
             "unendedUtterances" : 0,
             "utterances" : 8,
@@ -91,7 +91,7 @@
         {
           "metrics" : {
             "audioSeconds" : 39.83,
-            "computeSeconds" : 2.912971909,
+            "computeSeconds" : 2.5391829140000004,
             "counts" : {
               "deletions" : 0,
               "insertions" : 1,
@@ -99,38 +99,38 @@
               "substitutions" : 1
             },
             "endOfUtterance" : {
-              "count" : 5,
-              "maximum" : 5101.697167,
-              "mean" : 2573.3430334,
-              "minimum" : 1780.119708,
-              "p50" : 1958.465458,
-              "p90" : 3933.6971670000003,
-              "p95" : 4517.697167,
-              "p99" : 4984.897167,
-              "standardDeviation" : 1271.5429588198092
+              "count" : 8,
+              "maximum" : 1558.875542,
+              "mean" : 1280.6276615,
+              "minimum" : 749.900792,
+              "p50" : 1289.306417,
+              "p90" : 1544.9438501,
+              "p95" : 1551.90969605,
+              "p99" : 1557.48237281,
+              "standardDeviation" : 237.86219761076998
             },
             "endOfUtteranceAudio" : {
-              "count" : 5,
-              "maximum" : 5080,
-              "mean" : 2556,
-              "minimum" : 1780,
-              "p50" : 1940,
-              "p90" : 3912,
-              "p95" : 4496,
-              "p99" : 4963.2,
-              "standardDeviation" : 1268.9144967254492
+              "count" : 8,
+              "maximum" : 1540,
+              "mean" : 1261.25,
+              "minimum" : 730,
+              "p50" : 1270,
+              "p90" : 1526,
+              "p95" : 1533,
+              "p99" : 1538.6,
+              "standardDeviation" : 238.03558032361465
             },
             "failures" : 0,
             "firstPartial" : {
               "count" : 8,
-              "maximum" : 1139.170958,
-              "mean" : 811.8737240000002,
-              "minimum" : 562.954917,
-              "p50" : 821.309875,
-              "p90" : 1073.1983499,
-              "p95" : 1106.18465395,
-              "p99" : 1132.5736971899998,
-              "standardDeviation" : 188.06847100555174
+              "maximum" : 1139.85475,
+              "mean" : 809.9394636249999,
+              "minimum" : 560.447667,
+              "p50" : 820.0496255,
+              "p90" : 1069.3297794,
+              "p95" : 1104.5922647,
+              "p99" : 1132.80225294,
+              "standardDeviation" : 188.05774103676922
             },
             "firstPartialAudio" : {
               "count" : 8,
@@ -145,9 +145,9 @@
             },
             "fixtures" : 6,
             "missedUtterances" : 0,
-            "realTimeFactor" : 0.07313512199347226,
+            "realTimeFactor" : 0.06375051252824505,
             "splitUtterances" : 0,
-            "unendedUtterances" : 3,
+            "unendedUtterances" : 0,
             "utterances" : 8,
             "wordErrorRate" : 0.02857142857142857
           },
@@ -156,24 +156,46 @@
         {
           "metrics" : {
             "audioSeconds" : 35.82,
-            "computeSeconds" : 4.461353407,
+            "computeSeconds" : 2.3576637899999997,
             "counts" : {
               "deletions" : 0,
               "insertions" : 18,
               "referenceWords" : 68,
               "substitutions" : 1
             },
+            "endOfUtterance" : {
+              "count" : 6,
+              "maximum" : 1489.265125,
+              "mean" : 1305.8319931666667,
+              "minimum" : 1169.76525,
+              "p50" : 1288.8251460000001,
+              "p90" : 1424.1765209999999,
+              "p95" : 1456.7208229999999,
+              "p99" : 1482.7562646,
+              "standardDeviation" : 100.68805241078806
+            },
+            "endOfUtteranceAudio" : {
+              "count" : 6,
+              "maximum" : 1470,
+              "mean" : 1286.6666666666667,
+              "minimum" : 1150,
+              "p50" : 1270,
+              "p90" : 1405,
+              "p95" : 1437.5,
+              "p99" : 1463.5,
+              "standardDeviation" : 100.77477638553982
+            },
             "failures" : 0,
             "firstPartial" : {
               "count" : 7,
-              "maximum" : 898.254125,
-              "mean" : 657.7651964285715,
-              "minimum" : 500.809041,
-              "p50" : 516.600917,
-              "p90" : 869.4944252,
-              "p95" : 883.8742751,
-              "p99" : 895.37815502,
-              "standardDeviation" : 173.50730609226858
+              "maximum" : 849.955333,
+              "mean" : 640.7521727142857,
+              "minimum" : 498.546625,
+              "p50" : 500.271292,
+              "p90" : 831.2842582,
+              "p95" : 840.6197956,
+              "p99" : 848.0882255199999,
+              "standardDeviation" : 163.4484582518896
             },
             "firstPartialAudio" : {
               "count" : 7,
@@ -188,9 +210,9 @@
             },
             "fixtures" : 6,
             "missedUtterances" : 0,
-            "realTimeFactor" : 0.12454922967615857,
+            "realTimeFactor" : 0.06581975963149078,
             "splitUtterances" : 0,
-            "unendedUtterances" : 7,
+            "unendedUtterances" : 1,
             "utterances" : 7,
             "wordErrorRate" : 0.27941176470588236
           },
@@ -199,7 +221,7 @@
         {
           "metrics" : {
             "audioSeconds" : 50.14,
-            "computeSeconds" : 3.1818698789999997,
+            "computeSeconds" : 1.9687616210000003,
             "counts" : {
               "deletions" : 3,
               "insertions" : 0,
@@ -208,14 +230,14 @@
             },
             "endOfUtterance" : {
               "count" : 9,
-              "maximum" : 950.180041,
-              "mean" : 930.1618563333335,
-              "minimum" : 920.117208,
-              "p50" : 930.156416,
-              "p90" : 934.1930082,
-              "p95" : 942.1865246,
-              "p99" : 948.58133772,
-              "standardDeviation" : 8.176361438458548
+              "maximum" : 950.144208,
+              "mean" : 930.1374674444445,
+              "minimum" : 920.111916,
+              "p50" : 930.136,
+              "p90" : 934.1544416,
+              "p95" : 942.1493248,
+              "p99" : 948.54523136,
+              "standardDeviation" : 8.171187456656945
             },
             "endOfUtteranceAudio" : {
               "count" : 9,
@@ -231,14 +253,14 @@
             "failures" : 0,
             "firstPartial" : {
               "count" : 9,
-              "maximum" : 1276.850667,
-              "mean" : 1022.0712732222223,
-              "minimum" : 626.322167,
-              "p50" : 961.311375,
-              "p90" : 1273.6673334,
-              "p95" : 1275.2590002,
-              "p99" : 1276.53233364,
-              "standardDeviation" : 248.58345595063827
+              "maximum" : 1261.255125,
+              "mean" : 1012.7557129999999,
+              "minimum" : 619.674042,
+              "p50" : 950.472083,
+              "p90" : 1260.9309586,
+              "p95" : 1261.0930418,
+              "p99" : 1261.2227083599998,
+              "standardDeviation" : 251.1703317977082
             },
             "firstPartialAudio" : {
               "count" : 9,
@@ -253,7 +275,7 @@
             },
             "fixtures" : 8,
             "missedUtterances" : 0,
-            "realTimeFactor" : 0.06345971039090546,
+            "realTimeFactor" : 0.03926528960909454,
             "splitUtterances" : 0,
             "unendedUtterances" : 0,
             "utterances" : 9,
@@ -277,7 +299,7 @@
         {
           "audioSeconds" : 5.52,
           "category" : "clean",
-          "computeSeconds" : 0.298448824,
+          "computeSeconds" : 0.279463003,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -290,18 +312,18 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 940,
-              "endOfUtteranceMilliseconds" : 940.270583,
+              "endOfUtteranceMilliseconds" : 940.294917,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 920,
-              "firstPartialMilliseconds" : 940.744083
+              "firstPartialMilliseconds" : 943.016
             }
           ]
         },
         {
           "audioSeconds" : 8.75,
           "category" : "clean",
-          "computeSeconds" : 0.392290883,
+          "computeSeconds" : 0.333317331,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -314,26 +336,26 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 940,
-              "endOfUtteranceMilliseconds" : 940.127792,
+              "endOfUtteranceMilliseconds" : 940.125959,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 600,
-              "firstPartialMilliseconds" : 620.714042
+              "firstPartialMilliseconds" : 619.056958
             },
             {
               "endOfUtteranceAudioMilliseconds" : 930,
-              "endOfUtteranceMilliseconds" : 930.102875,
+              "endOfUtteranceMilliseconds" : 930.142875,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 940,
-              "firstPartialMilliseconds" : 960.350542
+              "firstPartialMilliseconds" : 959.256125
             }
           ]
         },
         {
           "audioSeconds" : 5.6899999999999995,
           "category" : "clean",
-          "computeSeconds" : 0.273610957,
+          "computeSeconds" : 0.236846879,
           "counts" : {
             "deletions" : 1,
             "insertions" : 0,
@@ -346,18 +368,18 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 930,
-              "endOfUtteranceMilliseconds" : 930.282208,
+              "endOfUtteranceMilliseconds" : 930.174833,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 920,
-              "firstPartialMilliseconds" : 975.668167
+              "firstPartialMilliseconds" : 943.884042
             }
           ]
         },
         {
           "audioSeconds" : 8.57,
           "category" : "clean",
-          "computeSeconds" : 0.485778541,
+          "computeSeconds" : 0.395504043,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -370,26 +392,26 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 930,
-              "endOfUtteranceMilliseconds" : 930.110625,
+              "endOfUtteranceMilliseconds" : 930.181875,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 920,
-              "firstPartialMilliseconds" : 939.751292
+              "firstPartialMilliseconds" : 944.248833
             },
             {
               "endOfUtteranceAudioMilliseconds" : 930,
-              "endOfUtteranceMilliseconds" : 930.139417,
+              "endOfUtteranceMilliseconds" : 930.182458,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 610,
-              "firstPartialMilliseconds" : 641.004208
+              "firstPartialMilliseconds" : 632.394958
             }
           ]
         },
         {
           "audioSeconds" : 5.21,
           "category" : "clean",
-          "computeSeconds" : 0.220662835,
+          "computeSeconds" : 0.196389834,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -402,18 +424,18 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 930,
-              "endOfUtteranceMilliseconds" : 930.131792,
+              "endOfUtteranceMilliseconds" : 930.150166,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 920,
-              "firstPartialMilliseconds" : 953.087791
+              "firstPartialMilliseconds" : 944.189125
             }
           ]
         },
         {
           "audioSeconds" : 5.86,
           "category" : "clean",
-          "computeSeconds" : 0.396646867,
+          "computeSeconds" : 0.253023963,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -426,18 +448,18 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 940,
-              "endOfUtteranceMilliseconds" : 972.987167,
+              "endOfUtteranceMilliseconds" : 961.033,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 920,
-              "firstPartialMilliseconds" : 943.970416
+              "firstPartialMilliseconds" : 941.492542
             }
           ]
         },
         {
           "audioSeconds" : 6.26,
           "category" : "cafe",
-          "computeSeconds" : 0.47101025,
+          "computeSeconds" : 0.44076025,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -449,19 +471,19 @@
           "reference" : "Tell me again why the investors were worried about the timeline",
           "utterances" : [
             {
-              "endOfUtteranceAudioMilliseconds" : 2200,
-              "endOfUtteranceMilliseconds" : 2236.101417,
-              "endedByStreamEnd" : true,
+              "endOfUtteranceAudioMilliseconds" : 1380,
+              "endOfUtteranceMilliseconds" : 1400.555416,
+              "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 800,
-              "firstPartialMilliseconds" : 822.582667
+              "firstPartialMilliseconds" : 821.327208
             }
           ]
         },
         {
           "audioSeconds" : 8.04,
           "category" : "cafe",
-          "computeSeconds" : 0.58885875,
+          "computeSeconds" : 0.542932958,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -473,27 +495,27 @@
           "reference" : "I just ordered a coffee so give me a second Okay go ahead with the summary",
           "utterances" : [
             {
-              "endOfUtteranceAudioMilliseconds" : 5080,
-              "endOfUtteranceMilliseconds" : 5101.697167,
+              "endOfUtteranceAudioMilliseconds" : 1240,
+              "endOfUtteranceMilliseconds" : 1259.395584,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 800,
-              "firstPartialMilliseconds" : 820.037083
+              "firstPartialMilliseconds" : 821.321917
             },
             {
-              "endOfUtteranceAudioMilliseconds" : 2160,
-              "endOfUtteranceMilliseconds" : 2181.697167,
+              "endOfUtteranceAudioMilliseconds" : 1520,
+              "endOfUtteranceMilliseconds" : 1538.973125,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 600,
-              "firstPartialMilliseconds" : 620.782458
+              "firstPartialMilliseconds" : 619.672458
             }
           ]
         },
         {
           "audioSeconds" : 5.96,
           "category" : "cafe",
-          "computeSeconds" : 0.311399382,
+          "computeSeconds" : 0.293092492,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -505,19 +527,19 @@
           "reference" : "Remember that my sister is visiting next weekend",
           "utterances" : [
             {
-              "endOfUtteranceAudioMilliseconds" : 1780,
-              "endOfUtteranceMilliseconds" : 1780.119708,
+              "endOfUtteranceAudioMilliseconds" : 1200,
+              "endOfUtteranceMilliseconds" : 1219.618125,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 640,
-              "firstPartialMilliseconds" : 661.107042
+              "firstPartialMilliseconds" : 659.009583
             }
           ]
         },
         {
           "audioSeconds" : 6.02,
           "category" : "cafe",
-          "computeSeconds" : 0.391404871,
+          "computeSeconds" : 0.393126794,
           "counts" : {
             "deletions" : 0,
             "insertions" : 1,
@@ -529,19 +551,19 @@
           "reference" : "What were the three things I wanted to finish before Friday",
           "utterances" : [
             {
-              "endOfUtteranceAudioMilliseconds" : 1940,
-              "endOfUtteranceMilliseconds" : 1958.465458,
+              "endOfUtteranceAudioMilliseconds" : 1300,
+              "endOfUtteranceMilliseconds" : 1319.21725,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 1120,
-              "firstPartialMilliseconds" : 1139.170958
+              "firstPartialMilliseconds" : 1139.85475
             }
           ]
         },
         {
           "audioSeconds" : 7.38,
           "category" : "cafe",
-          "computeSeconds" : 0.703295782,
+          "computeSeconds" : 0.488709044,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -553,27 +575,27 @@
           "reference" : "Can you read me the notes from this morning Only the parts about hiring",
           "utterances" : [
             {
-              "endOfUtteranceAudioMilliseconds" : 1820,
-              "endOfUtteranceMilliseconds" : 1844.735667,
+              "endOfUtteranceAudioMilliseconds" : 1180,
+              "endOfUtteranceMilliseconds" : 1198.485458,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 800,
-              "firstPartialMilliseconds" : 823.430292
+              "firstPartialMilliseconds" : 818.777334
             },
             {
-              "endOfUtteranceAudioMilliseconds" : 2200,
-              "endOfUtteranceMilliseconds" : 2252.612083,
-              "endedByStreamEnd" : true,
+              "endOfUtteranceAudioMilliseconds" : 1540,
+              "endOfUtteranceMilliseconds" : 1558.875542,
+              "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 540,
-              "firstPartialMilliseconds" : 562.954917
+              "firstPartialMilliseconds" : 560.447667
             }
           ]
         },
         {
           "audioSeconds" : 6.17,
           "category" : "cafe",
-          "computeSeconds" : 0.447002874,
+          "computeSeconds" : 0.380561376,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -585,19 +607,19 @@
           "reference" : "I think the second design was much easier to understand",
           "utterances" : [
             {
-              "endOfUtteranceAudioMilliseconds" : 2200,
-              "endOfUtteranceMilliseconds" : 2240.246166,
-              "endedByStreamEnd" : true,
+              "endOfUtteranceAudioMilliseconds" : 730,
+              "endOfUtteranceMilliseconds" : 749.900792,
+              "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 1020,
-              "firstPartialMilliseconds" : 1044.924375
+              "firstPartialMilliseconds" : 1039.104792
             }
           ]
         },
         {
           "audioSeconds" : 5.34,
           "category" : "tv",
-          "computeSeconds" : 0.380722278,
+          "computeSeconds" : 0.34321717,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -609,19 +631,19 @@
           "reference" : "Turn this into a short list of action items",
           "utterances" : [
             {
-              "endOfUtteranceAudioMilliseconds" : 2200,
-              "endOfUtteranceMilliseconds" : 2239.519083,
-              "endedByStreamEnd" : true,
+              "endOfUtteranceAudioMilliseconds" : 1340,
+              "endOfUtteranceMilliseconds" : 1359.087917,
+              "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 800,
-              "firstPartialMilliseconds" : 821.179625
+              "firstPartialMilliseconds" : 818.836875
             }
           ]
         },
         {
           "audioSeconds" : 7.7,
           "category" : "tv",
-          "computeSeconds" : 0.706714087,
+          "computeSeconds" : 0.521993543,
           "counts" : {
             "deletions" : 0,
             "insertions" : 3,
@@ -633,27 +655,27 @@
           "reference" : "How long have we been talking about the pricing page Let us wrap that up",
           "utterances" : [
             {
-              "endOfUtteranceAudioMilliseconds" : 4690,
-              "endOfUtteranceMilliseconds" : 4816.843167,
-              "endedByStreamEnd" : true,
+              "endOfUtteranceAudioMilliseconds" : 1470,
+              "endOfUtteranceMilliseconds" : 1489.265125,
+              "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 480,
-              "firstPartialMilliseconds" : 500.809041
+              "firstPartialMilliseconds" : 499.653417
             },
             {
-              "endOfUtteranceAudioMilliseconds" : 2200,
-              "endOfUtteranceMilliseconds" : 2326.843167,
-              "endedByStreamEnd" : true,
+              "endOfUtteranceAudioMilliseconds" : 1220,
+              "endOfUtteranceMilliseconds" : 1239.223375,
+              "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 830,
-              "firstPartialMilliseconds" : 850.321292
+              "firstPartialMilliseconds" : 849.955333
             }
           ]
         },
         {
           "audioSeconds" : 6.03,
           "category" : "tv",
-          "computeSeconds" : 0.573468455,
+          "computeSeconds" : 0.383988958,
           "counts" : {
             "deletions" : 0,
             "insertions" : 3,
@@ -665,19 +687,19 @@
           "reference" : "Please remember that the dentist appointment is on Tuesday morning",
           "utterances" : [
             {
-              "endOfUtteranceAudioMilliseconds" : 2200,
-              "endOfUtteranceMilliseconds" : 2306.980042,
-              "endedByStreamEnd" : true,
+              "endOfUtteranceAudioMilliseconds" : 1290,
+              "endOfUtteranceMilliseconds" : 1309.015042,
+              "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 480,
-              "firstPartialMilliseconds" : 503.557166
+              "firstPartialMilliseconds" : 498.546625
             }
           ]
         },
         {
           "audioSeconds" : 5.75,
           "category" : "tv",
-          "computeSeconds" : 1.592022203,
+          "computeSeconds" : 0.359324657,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -689,19 +711,19 @@
           "reference" : "What is a good way to explain this to a new customer",
           "utterances" : [
             {
-              "endOfUtteranceAudioMilliseconds" : 2200,
-              "endOfUtteranceMilliseconds" : 2251.459375,
-              "endedByStreamEnd" : true,
+              "endOfUtteranceAudioMilliseconds" : 1250,
+              "endOfUtteranceMilliseconds" : 1268.63525,
+              "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 800,
-              "firstPartialMilliseconds" : 898.254125
+              "firstPartialMilliseconds" : 818.680958
             }
           ]
         },
         {
           "audioSeconds" : 5.15,
           "category" : "tv",
-          "computeSeconds" : 0.566668712,
+          "computeSeconds" : 0.356506705,
           "counts" : {
             "deletions" : 0,
             "insertions" : 10,
@@ -714,18 +736,18 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 2200,
-              "endOfUtteranceMilliseconds" : 2256.717042,
+              "endOfUtteranceMilliseconds" : 2239.397042,
               "endedByStreamEnd" : true,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 480,
-              "firstPartialMilliseconds" : 516.600917
+              "firstPartialMilliseconds" : 500.271292
             }
           ]
         },
         {
           "audioSeconds" : 5.85,
           "category" : "tv",
-          "computeSeconds" : 0.641757672,
+          "computeSeconds" : 0.392632757,
           "counts" : {
             "deletions" : 0,
             "insertions" : 2,
@@ -737,19 +759,19 @@
           "reference" : "I need a better answer for why now is the right time",
           "utterances" : [
             {
-              "endOfUtteranceAudioMilliseconds" : 2200,
-              "endOfUtteranceMilliseconds" : 2267.152042,
-              "endedByStreamEnd" : true,
+              "endOfUtteranceAudioMilliseconds" : 1150,
+              "endOfUtteranceMilliseconds" : 1169.76525,
+              "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 480,
-              "firstPartialMilliseconds" : 513.634209
+              "firstPartialMilliseconds" : 499.320709
             }
           ]
         },
         {
           "audioSeconds" : 6.03,
           "category" : "accented",
-          "computeSeconds" : 0.593436177,
+          "computeSeconds" : 0.243474496,
           "counts" : {
             "deletions" : 1,
             "insertions" : 0,
@@ -762,18 +784,18 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 950,
-              "endOfUtteranceMilliseconds" : 950.180041,
+              "endOfUtteranceMilliseconds" : 950.144208,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 1240,
-              "firstPartialMilliseconds" : 1272.8715
+              "firstPartialMilliseconds" : 1260.226666
             }
           ]
         },
         {
           "audioSeconds" : 8.42,
           "category" : "accented",
-          "computeSeconds" : 0.668694321,
+          "computeSeconds" : 0.315864828,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -786,26 +808,26 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 930,
-              "endOfUtteranceMilliseconds" : 930.175417,
+              "endOfUtteranceMilliseconds" : 930.134583,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 600,
-              "firstPartialMilliseconds" : 645.0895840000001
+              "firstPartialMilliseconds" : 619.674042
             },
             {
               "endOfUtteranceAudioMilliseconds" : 920,
-              "endOfUtteranceMilliseconds" : 920.159292,
+              "endOfUtteranceMilliseconds" : 920.111916,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 930,
-              "firstPartialMilliseconds" : 961.311375
+              "firstPartialMilliseconds" : 950.472083
             }
           ]
         },
         {
           "audioSeconds" : 5.85,
           "category" : "accented",
-          "computeSeconds" : 0.442677083,
+          "computeSeconds" : 0.22302087,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -818,18 +840,18 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 930,
-              "endOfUtteranceMilliseconds" : 930.19625,
+              "endOfUtteranceMilliseconds" : 930.136,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 920,
-              "firstPartialMilliseconds" : 948.309833
+              "firstPartialMilliseconds" : 940.524875
             }
           ]
         },
         {
           "audioSeconds" : 5.77,
           "category" : "accented",
-          "computeSeconds" : 0.287673377,
+          "computeSeconds" : 0.226637007,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -842,18 +864,18 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 930,
-              "endOfUtteranceMilliseconds" : 930.156416,
+              "endOfUtteranceMilliseconds" : 930.13625,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 920,
-              "firstPartialMilliseconds" : 945.115208
+              "firstPartialMilliseconds" : 940.371833
             }
           ]
         },
         {
           "audioSeconds" : 6.43,
           "category" : "accented",
-          "computeSeconds" : 0.423005083,
+          "computeSeconds" : 0.267404841,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -866,18 +888,18 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 930,
-              "endOfUtteranceMilliseconds" : 930.176208,
+              "endOfUtteranceMilliseconds" : 930.13325,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 1240,
-              "firstPartialMilliseconds" : 1276.850667
+              "firstPartialMilliseconds" : 1261.255125
             }
           ]
         },
         {
           "audioSeconds" : 5.85,
           "category" : "accented",
-          "computeSeconds" : 0.281070212,
+          "computeSeconds" : 0.23027159,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -890,18 +912,18 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 930,
-              "endOfUtteranceMilliseconds" : 930.150833,
+              "endOfUtteranceMilliseconds" : 930.157,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 600,
-              "firstPartialMilliseconds" : 626.322167
+              "firstPartialMilliseconds" : 621.335209
             }
           ]
         },
         {
           "audioSeconds" : 5.93,
           "category" : "accented",
-          "computeSeconds" : 0.251703461,
+          "computeSeconds" : 0.241868125,
           "counts" : {
             "deletions" : 1,
             "insertions" : 0,
@@ -914,18 +936,18 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 930,
-              "endOfUtteranceMilliseconds" : 930.145042,
+              "endOfUtteranceMilliseconds" : 930.153167,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 1240,
-              "firstPartialMilliseconds" : 1261.8095
+              "firstPartialMilliseconds" : 1260.091667
             }
           ]
         },
         {
           "audioSeconds" : 5.86,
           "category" : "accented",
-          "computeSeconds" : 0.233610165,
+          "computeSeconds" : 0.220219864,
           "counts" : {
             "deletions" : 1,
             "insertions" : 0,
@@ -938,18 +960,18 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 920,
-              "endOfUtteranceMilliseconds" : 920.117208,
+              "endOfUtteranceMilliseconds" : 920.130833,
               "endedByStreamEnd" : false,
               "finals" : 1,
               "firstPartialAudioMilliseconds" : 1240,
-              "firstPartialMilliseconds" : 1260.961625
+              "firstPartialMilliseconds" : 1260.849917
             }
           ]
         }
       ],
       "overall" : {
         "audioSeconds" : 165.39000000000001,
-        "computeSeconds" : 12.623634102,
+        "computeSeconds" : 8.560153378,
         "counts" : {
           "deletions" : 4,
           "insertions" : 19,
@@ -957,38 +979,38 @@
           "substitutions" : 6
         },
         "endOfUtterance" : {
-          "count" : 22,
-          "maximum" : 5101.697167,
-          "mean" : 1306.4692878636363,
-          "minimum" : 920.117208,
-          "p50" : 930.1862289999999,
-          "p90" : 1947.0924789,
-          "p95" : 2170.5355815499997,
-          "p99" : 4488.497166999998,
-          "standardDeviation" : 916.3069743873193
+          "count" : 31,
+          "maximum" : 1558.875542,
+          "mean" : 1094.9527916451614,
+          "minimum" : 749.900792,
+          "p50" : 940.294917,
+          "p90" : 1400.555416,
+          "p95" : 1514.119125,
+          "p99" : 1552.9048169,
+          "standardDeviation" : 220.1724212134651
         },
         "endOfUtteranceAudio" : {
-          "count" : 22,
-          "maximum" : 5080,
-          "mean" : 1300.909090909091,
-          "minimum" : 920,
-          "p50" : 930,
-          "p90" : 1928.0000000000002,
-          "p95" : 2149,
-          "p99" : 4466.799999999997,
-          "standardDeviation" : 910.6536568007775
+          "count" : 31,
+          "maximum" : 1540,
+          "mean" : 1085.483870967742,
+          "minimum" : 730,
+          "p50" : 940,
+          "p90" : 1380,
+          "p95" : 1495,
+          "p99" : 1534,
+          "standardDeviation" : 213.0248919224324
         },
         "failures" : 0,
         "firstPartial" : {
           "count" : 32,
-          "maximum" : 1276.850667,
-          "mean" : 852.2899427187499,
-          "minimum" : 500.809041,
-          "p50" : 874.2877085,
-          "p90" : 1248.7825583000001,
-          "p95" : 1266.7874,
-          "p99" : 1275.61712523,
-          "standardDeviation" : 233.61431818170345
+          "maximum" : 1261.255125,
+          "mean" : 843.9725286874998,
+          "minimum" : 498.546625,
+          "p50" : 835.6412705,
+          "p90" : 1248.0679753000002,
+          "p95" : 1260.50712895,
+          "p99" : 1261.12951052,
+          "standardDeviation" : 233.8870550683284
         },
         "firstPartialAudio" : {
           "count" : 32,
@@ -1003,9 +1025,9 @@
         },
         "fixtures" : 26,
         "missedUtterances" : 0,
-        "realTimeFactor" : 0.07632646533647741,
+        "realTimeFactor" : 0.05175738181268517,
         "splitUtterances" : 0,
-        "unendedUtterances" : 10,
+        "unendedUtterances" : 1,
         "utterances" : 32,
         "wordErrorRate" : 0.09797297297297297
       }
@@ -1015,7 +1037,7 @@
         {
           "metrics" : {
             "audioSeconds" : 39.6,
-            "computeSeconds" : 0.469993584,
+            "computeSeconds" : 0.39626066699999996,
             "counts" : {
               "deletions" : 0,
               "insertions" : 0,
@@ -1024,14 +1046,14 @@
             },
             "endOfUtterance" : {
               "count" : 8,
-              "maximum" : 183.902834,
-              "mean" : 178.749198,
-              "minimum" : 170.774959,
-              "p50" : 179.52125,
-              "p90" : 183.66075020000002,
-              "p95" : 183.78179210000002,
-              "p99" : 183.87862562,
-              "standardDeviation" : 4.532552835352065
+              "maximum" : 178.726666,
+              "mean" : 169.532583375,
+              "minimum" : 159.743834,
+              "p50" : 170.6202295,
+              "p90" : 174.4844329,
+              "p95" : 176.60554944999998,
+              "p99" : 178.30244269,
+              "standardDeviation" : 5.3382333983982475
             },
             "endOfUtteranceAudio" : {
               "count" : 8,
@@ -1047,7 +1069,7 @@
             "failures" : 0,
             "fixtures" : 6,
             "missedUtterances" : 0,
-            "realTimeFactor" : 0.011868524848484848,
+            "realTimeFactor" : 0.010006582499999998,
             "splitUtterances" : 0,
             "unendedUtterances" : 0,
             "utterances" : 8,
@@ -1058,7 +1080,7 @@
         {
           "metrics" : {
             "audioSeconds" : 39.83,
-            "computeSeconds" : 0.470345794,
+            "computeSeconds" : 0.378524791,
             "counts" : {
               "deletions" : 0,
               "insertions" : 0,
@@ -1067,14 +1089,14 @@
             },
             "endOfUtterance" : {
               "count" : 8,
-              "maximum" : 186.78108400000002,
-              "mean" : 178.79322424999998,
-              "minimum" : 168.56,
-              "p50" : 178.65300050000002,
-              "p90" : 186.7289627,
-              "p95" : 186.75502335000002,
-              "p99" : 186.77587187000003,
-              "standardDeviation" : 5.930486181320379
+              "maximum" : 174.752083,
+              "mean" : 167.315598875,
+              "minimum" : 160.370292,
+              "p50" : 168.5050205,
+              "p90" : 172.1375837,
+              "p95" : 173.44483335,
+              "p99" : 174.49063307,
+              "standardDeviation" : 4.782702746092694
             },
             "endOfUtteranceAudio" : {
               "count" : 8,
@@ -1090,7 +1112,7 @@
             "failures" : 0,
             "fixtures" : 6,
             "missedUtterances" : 0,
-            "realTimeFactor" : 0.011808832387647503,
+            "realTimeFactor" : 0.009503509691187548,
             "splitUtterances" : 0,
             "unendedUtterances" : 0,
             "utterances" : 8,
@@ -1101,7 +1123,7 @@
         {
           "metrics" : {
             "audioSeconds" : 35.82,
-            "computeSeconds" : 0.520410917,
+            "computeSeconds" : 0.35488125,
             "counts" : {
               "deletions" : 0,
               "insertions" : 2,
@@ -1110,14 +1132,14 @@
             },
             "endOfUtterance" : {
               "count" : 7,
-              "maximum" : 216.950083,
-              "mean" : 194.3444167142857,
-              "minimum" : 185.952291,
-              "p50" : 189.434,
-              "p90" : 210.05713360000001,
-              "p95" : 213.5036083,
-              "p99" : 216.26078806,
-              "standardDeviation" : 11.179545375668162
+              "maximum" : 175.701208,
+              "mean" : 170.69732142857143,
+              "minimum" : 161.335416,
+              "p50" : 171.882834,
+              "p90" : 174.7638832,
+              "p95" : 175.2325456,
+              "p99" : 175.60747552,
+              "standardDeviation" : 4.438999181810304
             },
             "endOfUtteranceAudio" : {
               "count" : 7,
@@ -1133,7 +1155,7 @@
             "failures" : 0,
             "fixtures" : 6,
             "missedUtterances" : 0,
-            "realTimeFactor" : 0.014528501312116136,
+            "realTimeFactor" : 0.009907349246231155,
             "splitUtterances" : 0,
             "unendedUtterances" : 0,
             "utterances" : 7,
@@ -1144,7 +1166,7 @@
         {
           "metrics" : {
             "audioSeconds" : 50.14,
-            "computeSeconds" : 0.5464430840000001,
+            "computeSeconds" : 0.442202501,
             "counts" : {
               "deletions" : 2,
               "insertions" : 0,
@@ -1153,14 +1175,14 @@
             },
             "endOfUtterance" : {
               "count" : 9,
-              "maximum" : 186.576667,
-              "mean" : 180.71589822222222,
-              "minimum" : 169.061667,
-              "p50" : 180.417417,
-              "p90" : 185.7206334,
-              "p95" : 186.1486502,
-              "p99" : 186.49106364,
-              "standardDeviation" : 4.95139338573516
+              "maximum" : 172.931667,
+              "mean" : 169.13361122222224,
+              "minimum" : 156.916583,
+              "p50" : 170.262542,
+              "p90" : 172.6633334,
+              "p95" : 172.7975002,
+              "p99" : 172.90483364,
+              "standardDeviation" : 4.541775516336455
             },
             "endOfUtteranceAudio" : {
               "count" : 9,
@@ -1176,7 +1198,7 @@
             "failures" : 0,
             "fixtures" : 8,
             "missedUtterances" : 0,
-            "realTimeFactor" : 0.010898346310331075,
+            "realTimeFactor" : 0.008819355823693658,
             "splitUtterances" : 0,
             "unendedUtterances" : 0,
             "utterances" : 9,
@@ -1200,7 +1222,7 @@
         {
           "audioSeconds" : 5.52,
           "category" : "clean",
-          "computeSeconds" : 0.052475125,
+          "computeSeconds" : 0.052149208,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1213,7 +1235,7 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 172.475125,
+              "endOfUtteranceMilliseconds" : 172.149208,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1222,7 +1244,7 @@
         {
           "audioSeconds" : 8.75,
           "category" : "clean",
-          "computeSeconds" : 0.114331959,
+          "computeSeconds" : 0.092410167,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1235,13 +1257,13 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 183.55700000000002,
+              "endOfUtteranceMilliseconds" : 172.666333,
               "endedByStreamEnd" : false,
               "finals" : 1
             },
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 170.774959,
+              "endOfUtteranceMilliseconds" : 159.743834,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1250,7 +1272,7 @@
         {
           "audioSeconds" : 5.6899999999999995,
           "category" : "clean",
-          "computeSeconds" : 0.059766958,
+          "computeSeconds" : 0.058726666,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1263,7 +1285,7 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 179.766958,
+              "endOfUtteranceMilliseconds" : 178.726666,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1272,7 +1294,7 @@
         {
           "audioSeconds" : 8.57,
           "category" : "clean",
-          "computeSeconds" : 0.117572583,
+          "computeSeconds" : 0.091734167,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1285,13 +1307,13 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 179.275542,
+              "endOfUtteranceMilliseconds" : 166.0955,
               "endedByStreamEnd" : false,
               "finals" : 1
             },
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 178.297041,
+              "endOfUtteranceMilliseconds" : 165.638667,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1300,7 +1322,7 @@
         {
           "audioSeconds" : 5.21,
           "category" : "clean",
-          "computeSeconds" : 0.061944125,
+          "computeSeconds" : 0.049721917,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1313,7 +1335,7 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 181.94412499999999,
+              "endOfUtteranceMilliseconds" : 169.721917,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1322,7 +1344,7 @@
         {
           "audioSeconds" : 5.86,
           "category" : "clean",
-          "computeSeconds" : 0.063902834,
+          "computeSeconds" : 0.051518542,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1335,7 +1357,7 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 183.902834,
+              "endOfUtteranceMilliseconds" : 171.518542,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1344,7 +1366,7 @@
         {
           "audioSeconds" : 6.26,
           "category" : "cafe",
-          "computeSeconds" : 0.061938084,
+          "computeSeconds" : 0.051017084,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1357,7 +1379,7 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 181.938084,
+              "endOfUtteranceMilliseconds" : 171.017084,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1366,7 +1388,7 @@
         {
           "audioSeconds" : 8.04,
           "category" : "cafe",
-          "computeSeconds" : 0.108364459,
+          "computeSeconds" : 0.088726583,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1379,13 +1401,13 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 179.804459,
+              "endOfUtteranceMilliseconds" : 168.356291,
               "endedByStreamEnd" : false,
               "finals" : 1
             },
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 168.56,
+              "endOfUtteranceMilliseconds" : 160.370292,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1394,7 +1416,7 @@
         {
           "audioSeconds" : 5.96,
           "category" : "cafe",
-          "computeSeconds" : 0.055313167,
+          "computeSeconds" : 0.04865375,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1407,7 +1429,7 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 175.313167,
+              "endOfUtteranceMilliseconds" : 168.65375,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1416,7 +1438,7 @@
         {
           "audioSeconds" : 6.02,
           "category" : "cafe",
-          "computeSeconds" : 0.066706625,
+          "computeSeconds" : 0.054752083,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1429,7 +1451,7 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 186.706625,
+              "endOfUtteranceMilliseconds" : 174.752083,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1438,7 +1460,7 @@
         {
           "audioSeconds" : 7.38,
           "category" : "cafe",
-          "computeSeconds" : 0.111242375,
+          "computeSeconds" : 0.084572875,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1451,13 +1473,13 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 177.501542,
+              "endOfUtteranceMilliseconds" : 162.549,
               "endedByStreamEnd" : false,
               "finals" : 1
             },
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 173.740833,
+              "endOfUtteranceMilliseconds" : 162.023875,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1466,7 +1488,7 @@
         {
           "audioSeconds" : 6.17,
           "category" : "cafe",
-          "computeSeconds" : 0.066781084,
+          "computeSeconds" : 0.050802416,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1479,7 +1501,7 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 186.78108400000002,
+              "endOfUtteranceMilliseconds" : 170.802416,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1488,7 +1510,7 @@
         {
           "audioSeconds" : 5.34,
           "category" : "tv",
-          "computeSeconds" : 0.066251834,
+          "computeSeconds" : 0.054139,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1501,7 +1523,7 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 186.251834,
+              "endOfUtteranceMilliseconds" : 174.139,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1510,7 +1532,7 @@
         {
           "audioSeconds" : 7.7,
           "category" : "tv",
-          "computeSeconds" : 0.163673917,
+          "computeSeconds" : 0.09321825,
           "counts" : {
             "deletions" : 0,
             "insertions" : 2,
@@ -1523,13 +1545,13 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 186.723834,
+              "endOfUtteranceMilliseconds" : 171.882834,
               "endedByStreamEnd" : false,
               "finals" : 1
             },
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 216.950083,
+              "endOfUtteranceMilliseconds" : 161.335416,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1538,7 +1560,7 @@
         {
           "audioSeconds" : 6.03,
           "category" : "tv",
-          "computeSeconds" : 0.085461834,
+          "computeSeconds" : 0.055701208,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1551,7 +1573,7 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 205.461834,
+              "endOfUtteranceMilliseconds" : 175.701208,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1560,7 +1582,7 @@
         {
           "audioSeconds" : 5.75,
           "category" : "tv",
-          "computeSeconds" : 0.069637041,
+          "computeSeconds" : 0.053170291,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1573,7 +1595,7 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 189.637041,
+              "endOfUtteranceMilliseconds" : 173.170291,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1582,7 +1604,7 @@
         {
           "audioSeconds" : 5.15,
           "category" : "tv",
-          "computeSeconds" : 0.069434,
+          "computeSeconds" : 0.048295959,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1595,7 +1617,7 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 189.434,
+              "endOfUtteranceMilliseconds" : 168.29595899999998,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1604,7 +1626,7 @@
         {
           "audioSeconds" : 5.85,
           "category" : "tv",
-          "computeSeconds" : 0.065952291,
+          "computeSeconds" : 0.050356542,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1617,7 +1639,7 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 185.952291,
+              "endOfUtteranceMilliseconds" : 170.356542,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1626,7 +1648,7 @@
         {
           "audioSeconds" : 6.03,
           "category" : "accented",
-          "computeSeconds" : 0.063085833,
+          "computeSeconds" : 0.05065975,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1639,7 +1661,7 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 183.08583299999998,
+              "endOfUtteranceMilliseconds" : 170.65975,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1648,7 +1670,7 @@
         {
           "audioSeconds" : 8.42,
           "category" : "accented",
-          "computeSeconds" : 0.113325001,
+          "computeSeconds" : 0.085642958,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1661,13 +1683,13 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 184.263334,
+              "endOfUtteranceMilliseconds" : 168.72637500000002,
               "endedByStreamEnd" : false,
               "finals" : 1
             },
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 169.061667,
+              "endOfUtteranceMilliseconds" : 156.916583,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1676,7 +1698,7 @@
         {
           "audioSeconds" : 5.85,
           "category" : "accented",
-          "computeSeconds" : 0.058849208,
+          "computeSeconds" : 0.051616,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1689,7 +1711,7 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 178.849208,
+              "endOfUtteranceMilliseconds" : 171.61599999999999,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1698,7 +1720,7 @@
         {
           "audioSeconds" : 5.77,
           "category" : "accented",
-          "computeSeconds" : 0.058348292,
+          "computeSeconds" : 0.049143209,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1711,7 +1733,7 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 178.34829200000001,
+              "endOfUtteranceMilliseconds" : 169.143209,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1720,7 +1742,7 @@
         {
           "audioSeconds" : 6.43,
           "category" : "accented",
-          "computeSeconds" : 0.060334041,
+          "computeSeconds" : 0.049350125,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1733,7 +1755,7 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 180.334041,
+              "endOfUtteranceMilliseconds" : 169.350125,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1742,7 +1764,7 @@
         {
           "audioSeconds" : 5.85,
           "category" : "accented",
-          "computeSeconds" : 0.060417417,
+          "computeSeconds" : 0.050262542,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1755,7 +1777,7 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 180.417417,
+              "endOfUtteranceMilliseconds" : 170.262542,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1764,7 +1786,7 @@
         {
           "audioSeconds" : 5.93,
           "category" : "accented",
-          "computeSeconds" : 0.065506625,
+          "computeSeconds" : 0.05259625,
           "counts" : {
             "deletions" : 2,
             "insertions" : 0,
@@ -1777,7 +1799,7 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 185.50662499999999,
+              "endOfUtteranceMilliseconds" : 172.59625,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1786,7 +1808,7 @@
         {
           "audioSeconds" : 5.86,
           "category" : "accented",
-          "computeSeconds" : 0.066576667,
+          "computeSeconds" : 0.052931667,
           "counts" : {
             "deletions" : 0,
             "insertions" : 0,
@@ -1799,7 +1821,7 @@
           "utterances" : [
             {
               "endOfUtteranceAudioMilliseconds" : 120,
-              "endOfUtteranceMilliseconds" : 186.576667,
+              "endOfUtteranceMilliseconds" : 172.931667,
               "endedByStreamEnd" : false,
               "finals" : 1
             }
@@ -1808,7 +1830,7 @@
       ],
       "overall" : {
         "audioSeconds" : 165.39000000000001,
-        "computeSeconds" : 2.007193379,
+        "computeSeconds" : 1.571869209,
         "counts" : {
           "deletions" : 2,
           "insertions" : 2,
@@ -1817,14 +1839,14 @@
         },
         "endOfUtterance" : {
           "count" : 32,
-          "maximum" : 216.950083,
-          "mean" : 182.72479309374998,
-          "minimum" : 168.56,
-          "p50" : 181.9411045,
-          "p90" : 189.1687084,
-          "p95" : 196.75819785,
-          "p99" : 213.38872581,
-          "standardDeviation" : 9.308549737020323
+          "maximum" : 178.726666,
+          "mean" : 169.12091278124998,
+          "minimum" : 156.916583,
+          "p50" : 170.309542,
+          "p90" : 174.0421291,
+          "p95" : 175.17918925,
+          "p99" : 177.78877402,
+          "standardDeviation" : 4.9351301887143935
         },
         "endOfUtteranceAudio" : {
           "count" : 32,
@@ -1840,7 +1862,7 @@
         "failures" : 0,
         "fixtures" : 26,
         "missedUtterances" : 0,
-        "realTimeFactor" : 0.012136122975996129,
+        "realTimeFactor" : 0.009504016016687827,
         "splitUtterances" : 0,
         "unendedUtterances" : 0,
         "utterances" : 32,
@@ -1896,7 +1918,7 @@
         "metric" : "first partial p95",
         "passed" : true,
         "unit" : "milliseconds",
-        "value" : 1266.7874
+        "value" : 1260.50712895
       },
       {
         "engine" : "parakeet-eou-320ms",
@@ -1912,7 +1934,7 @@
         "metric" : "end of utterance p95",
         "passed" : true,
         "unit" : "milliseconds",
-        "value" : 2170.5355815499997
+        "value" : 1514.119125
       },
       {
         "engine" : "parakeet-eou-320ms",
@@ -1920,7 +1942,7 @@
         "metric" : "end of utterance p95 (audio)",
         "passed" : true,
         "unit" : "milliseconds",
-        "value" : 2149
+        "value" : 1495
       },
       {
         "engine" : "parakeet-eou-320ms",
@@ -1928,7 +1950,7 @@
         "metric" : "RTF",
         "passed" : true,
         "unit" : "factor",
-        "value" : 0.07632646533647741
+        "value" : 0.05175738181268517
       },
       {
         "engine" : "parakeet-eou-320ms",
@@ -1952,7 +1974,7 @@
         "metric" : "unended utterances",
         "passed" : true,
         "unit" : "count",
-        "value" : 10
+        "value" : 1
       },
       {
         "engine" : "parakeet-eou-320ms",
@@ -2008,7 +2030,7 @@
         "metric" : "end of utterance p95",
         "passed" : true,
         "unit" : "milliseconds",
-        "value" : 196.75819785
+        "value" : 175.17918925
       },
       {
         "engine" : "parakeet-tdt-v3",
@@ -2024,7 +2046,7 @@
         "metric" : "RTF",
         "passed" : true,
         "unit" : "factor",
-        "value" : 0.012136122975996129
+        "value" : 0.009504016016687827
       },
       {
         "engine" : "parakeet-tdt-v3",
@@ -2052,6 +2074,6 @@
       }
     ]
   },
-  "generatedAt" : "2026-10-07T12:37:29Z",
+  "generatedAt" : "2026-10-10T03:03:17Z",
   "schemaVersion" : 1
 }

@@ -23,12 +23,13 @@ an M3 Max. The fixtures are in Git LFS, so run `git lfs install && git lfs
 pull` once after cloning. A nightly CI job runs the same target and fails on
 a regression ([below](#nightly-ci)).
 
-## Results (2026-10-07)
+## Results (2026-10-10)
 
 Mac host (Apple M3 Max, macOS 27.2), Core ML on the Neural Engine, debug
-build, on the bundled fixtures. The full generated report, with every
-fixture an engine got wrong, is [asr-eval/report.md](asr-eval/report.md);
-its JSON is the committed baseline, [asr-eval/baseline.json](asr-eval/baseline.json).
+build, on the bundled fixtures, at `e15ab9c` (the word-timing fallback,
+#178). The full generated report, with every fixture an engine got wrong,
+is [asr-eval/report.md](asr-eval/report.md); its JSON is the committed
+baseline, [asr-eval/baseline.json](asr-eval/baseline.json).
 
 `parakeet-eou-320ms`: Parakeet realtime EOU 120M at 320 ms chunks behind
 Silero VAD, the production streaming path (`ParakeetStreamingTranscriber`,
@@ -36,11 +37,15 @@ Silero VAD, the production streaming path (`ParakeetStreamingTranscriber`,
 
 | Condition | WER | First partial p50 / p95 | End of utterance p50 / p95 | Unended | RTF |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| clean | 4.1% | 942 / 970 ms | 930 / 962 ms | 0 of 8 | 0.052 |
-| cafe | 2.9% | 821 / 1106 ms | 1958 / 4518 ms | 3 of 8 | 0.073 |
-| tv | 27.9% | 517 / 884 ms | – | 7 of 7 | 0.125 |
-| accented | 6.0% | 961 / 1275 ms | 930 / 942 ms | 0 of 9 | 0.063 |
-| **all** | **9.8%** | **874 / 1267 ms** | **930 / 2171 ms** | **10 of 32** | **0.076** |
+| clean | 4.1% | 943 / 954 ms | 930 / 954 ms | 0 of 8 | 0.043 |
+| cafe | 2.9% | 820 / 1105 ms | 1289 / 1552 ms | 0 of 8 | 0.064 |
+| tv | 27.9% | 500 / 841 ms | 1289 / 1457 ms | 1 of 7 | 0.066 |
+| accented | 6.0% | 950 / 1261 ms | 930 / 942 ms | 0 of 9 | 0.039 |
+| **all** | **9.8%** | **836 / 1261 ms** | **940 / 1514 ms** | **1 of 32** | **0.052** |
+
+The same run on the CPU only (`ASR_EVAL_COMPUTE_UNITS=cpu`, what the CI
+runners do) gives the same WER and the same audio-time latencies to the
+millisecond (end of utterance p95 1495 ms, 1 unended).
 
 `parakeet-tdt-v3`: Parakeet TDT 0.6B v3 on each utterance, the second pass
 (#30) as it ships (`ParakeetTdtRecognizer` on the audio
@@ -51,35 +56,45 @@ endpointing or TV robustness:
 
 | Condition | WER | End of utterance p50 / p95 | RTF |
 | --- | ---: | ---: | ---: |
-| clean | 0.0% | 180 / 184 ms | 0.012 |
-| cafe | 0.0% | 179 / 187 ms | 0.012 |
-| tv (label-segmented) | 2.9% | 189 / 214 ms | 0.015 |
-| accented | 3.6% | 180 / 186 ms | 0.011 |
-| **all** | **1.7%** | **182 / 197 ms** (120 ms of it padding) | **0.012** |
-
-The host was running other builds during this run, so compute-inclusive
-latency and RTF are higher than on an idle Mac (an earlier run of the same
-commit: streaming RTF 0.051, second pass 176 / 182 ms and RTF 0.011, with
-identical WER).
+| clean | 0.0% | 171 / 177 ms | 0.010 |
+| cafe | 0.0% | 169 / 173 ms | 0.010 |
+| tv (label-segmented) | 2.9% | 172 / 175 ms | 0.010 |
+| accented | 3.6% | 170 / 173 ms | 0.009 |
+| **all** | **1.7%** | **170 / 175 ms** (120 ms of it padding) | **0.010** |
 
 ### Findings
 
-- **A TV in the room keeps the turn open.** Silero VAD hears the presenter
-  as speech, so VAD's segment never closes, and Parakeet's end-of-utterance
-  token doesn't fire while someone keeps talking. All 7 TV utterances and
-  3 of 8 cafe utterances were only finalized when the audio ran out
-  ("unended"); live, they would have waited for the 30 s maximum. The TV's
-  words also end up in the user's turn (18 of the 19 insertions). This is
-  what the voice ID gate (#47) and noise suppression (#51) have to fix; the
-  `unended` count is the number to watch.
+- **Noise that keeps VAD open no longer keeps the turn open** (#178).
+  Silero VAD hears a TV presenter or cafe babble as speech, so its segment
+  never closes and the VAD fallback never starts. Until #178 only
+  Parakeet's end-of-utterance token could then end the turn, and it rarely
+  fired: all 7 TV utterances and 3 of 8 cafe ones were only finalized when
+  the audio ran out ("unended"; live, the 30 s maximum), and in `cafe-02`
+  the user's two sentences came out as one final, the first 5.1 s after it
+  ended. The word-timing fallback ([asr.md](asr.md#noise-that-keeps-vad-open-the-word-timing-fallback-178))
+  now ends them 0.9 s of decoded audio after the last word: 1 unended
+  (`tv-05`, whose presenter keeps the model decoding words), and the cafe
+  and TV utterances end 0.7–1.55 s after the speech.
+- **The TV's words still end up in the user's turn** (18 of the 19
+  insertions). That is what the voice ID gate (#47) and noise suppression
+  (#51) have to fix.
 - **First partials take about 0.94 s, not < 400 ms.** In quiet conditions
   the transcriber starts only once VAD confirms speech (about 0.5 s in, at
   256 ms VAD chunks), then needs a 630 ms window for its first chunk. Where
   VAD was already open (the TV fixtures) the first partial comes after
   0.5 s. Speculative transcription before VAD confirms, or the 160 ms
   export, would close most of the gap (#29's on-device check).
-- **End of utterance is 0.93 s when something ends it**: VAD's end of
-  speech plus the 0.9 s fallback, as designed in [asr.md](asr.md).
+- **End of utterance is 0.93 s in quiet rooms**: VAD's end of speech plus
+  the 0.9 s fallback, as designed in [asr.md](asr.md). Where noise keeps
+  VAD open it is 1.2–1.5 s, from the word timing.
+- **The backend changes where the model hears an end of utterance.** On
+  the CPU (the CI runners) Parakeet's numbers differ slightly from the
+  Neural Engine's: before #178 the model missed the pause in `cafe-05` on
+  the CPU but not on the Neural Engine, so the CI runs had two 5 s turns
+  where the Mac had one, and the end-of-utterance p95 (over 22 values, set
+  by the top two) went from 2149 to 4736 ms. Audio-time latency depends on
+  the backend, not on the runner's speed; `ASR_EVAL_COMPUTE_UNITS=cpu`
+  reproduces CI on a Mac.
 - **The second pass is much more accurate.** Parakeet TDT v3 gets 1.7%
   (5 words of 296) given the utterance boundaries, against 9.8% for the
   streaming model (which also has to find the boundaries and decodes in
@@ -231,6 +246,7 @@ LFS pointer files (with the `git lfs pull` hint).
 | `ASR_EVAL_GATE` | `1` | `0` reports a failed gate without failing |
 | `ASR_EVAL_BASELINE` | `docs/asr-eval/baseline.json` | Prints the change against it; empty disables it |
 | `ASR_EVAL_CONFIGURATION` | `debug` | The `swift test` configuration |
+| `ASR_EVAL_COMPUTE_UNITS` | `default` | `cpu` runs the streaming engine's models (Parakeet, Silero) on the CPU only, as on the CI runners |
 
 `make eval-asr` runs `scripts/eval-asr.sh`, which runs
 `ASREvaluationRunTests` with `BLAU_ASR_EVAL=1` (the test is skipped
@@ -269,10 +285,14 @@ uploads `report.json`, `report.md` and `summary.txt` as the
 latency, night by night. The job fails when the regression gate fails.
 
 The CI runners are virtual machines without the Neural Engine, so Core ML
-runs on the CPU there: WER and the audio-time latencies should match the
-Mac, compute-inclusive latency and RTF will be higher. Those two are
-ceilings for now; tighten them once a few nightly runs show what the runner
-does.
+runs on the CPU there. Compute-inclusive latency and RTF are higher (those
+two are ceilings for now; tighten them once a few nightly runs show what
+the runner does). WER and the audio-time latencies don't depend on the
+runner's speed, but they can depend on the backend: the CPU's numbers
+differ slightly from the Neural Engine's, which can move where Parakeet
+hears an end of utterance. Before #178 that put `cafe-05`'s first turn at
+5 s on CI but not on the Mac, and failed every nightly run. To reproduce a
+CI result on a Mac, run `make eval-asr ASR_EVAL_COMPUTE_UNITS=cpu`.
 
 ## On a device
 
@@ -282,7 +302,7 @@ These need a physical iPhone and are recorded here when run.
 | --- | --- | --- |
 | Latency and RTF on iPhone (A17 Pro or later) | Run the fixtures through the app's pipeline in a Release build (the `Blau-Benchmarks` scheme hosts model benchmarks, [benchmarks.md](benchmarks.md)) | Pending |
 | The owner's voice | Record [Datasets/asr](../Datasets/asr/README.md), then `make eval-asr ASR_EVAL_MANIFEST=...` | Pending |
-| First nightly run on CI | The `asr-eval` job's first artifacts: WER should match the baseline; set the compute-inclusive ceilings from them | Pending |
+| First nightly run on CI | The `asr-eval` job's first artifacts: WER should match the baseline; set the compute-inclusive ceilings from them | WER matched; every run from the first (0c49dff, 2026-10-07) to ad4298a failed the end-of-utterance gate (audio p95 4736 ms), fixed by #178. Compute-inclusive ceilings still to set |
 
 ## History
 
@@ -292,3 +312,7 @@ These need a physical iPhone and are recorded here when run.
 | 2026-10-07 | 26 synthetic | `parakeet-tdt-v3` (`7dd20fe6`), 200 ms padding both sides | 0.0% | – | 266 ms | – | 0.010 | M3 Max, debug |
 | 2026-10-07 | 26 synthetic | `parakeet-eou-320ms` (`40a23f4c`), rebased on #115 | 9.8% | 1267 ms | 2171 ms | 10 of 32 | 0.076 | M3 Max, debug, loaded host |
 | 2026-10-07 | 26 synthetic | `parakeet-tdt-v3` (`7dd20fe6`), the shipped second pass (`ParakeetTdtRecognizer`, 100 / 120 ms padding) | 1.7% | – | 197 ms | – | 0.012 | M3 Max, debug, loaded host |
+| 2026-10-10 | 26 synthetic | `parakeet-eou-320ms` (`40a23f4c`) at 6c9d3f0, before #178 | 9.8% | 1262 ms | 4749 ms | 9 of 32 | 0.080 | M3 Max, debug, CPU only (as CI: 4751 ms) |
+| 2026-10-10 | 26 synthetic | `parakeet-eou-320ms` (`40a23f4c`), word-timing fallback (#178) | 9.8% | 1261 ms | 1514 ms | 1 of 32 | 0.052 | M3 Max, debug |
+| 2026-10-10 | 26 synthetic | `parakeet-eou-320ms` (`40a23f4c`), word-timing fallback (#178) | 9.8% | 1250 ms | 1504 ms | 1 of 32 | 0.029 | M3 Max, debug, CPU only |
+| 2026-10-10 | 26 synthetic | `parakeet-tdt-v3` (`7dd20fe6`) | 1.7% | – | 175 ms | – | 0.010 | M3 Max, debug |

@@ -2,7 +2,7 @@
 
 - Dataset: `blau-asr-fixtures`, 26 fixtures, 32 utterances, 165.4 s of audio (clean, cafe, tv, accented)
 - Device: Mac15,8 (Apple M3 Max), macOS 27.2 (Build 26B5101f)
-- Generated: 2026-10-07T12:37:29Z at `f4ad36f`
+- Generated: 2026-10-10T03:03:17Z at `e15ab9c`
 - Regression gate: **passed**
 
 ## `parakeet-eou-320ms`: Parakeet realtime EOU 120M, 320 ms chunks + Silero VAD (streaming)
@@ -11,11 +11,11 @@ streaming · model parakeetRealtimeEOU@40a23f4c · eouDebounce 640 ms · maximum
 
 | Category | Files | Words | WER | Sub | Del | Ins | First partial p50 / p95 | End of utterance p50 / p95 | EOU audio p95 | RTF | Missed | Split | Unended |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| clean | 6 | 74 | 4.1% | 2 | 1 | 0 | 942 / 970 ms | 930 / 962 ms | 940 ms | 0.052 | 0 | 0 | 0 |
-| cafe | 6 | 70 | 2.9% | 1 | 0 | 1 | 821 / 1106 ms | 1958 / 4518 ms | 4496 ms | 0.073 | 0 | 0 | 3 |
-| tv | 6 | 68 | 27.9% | 1 | 0 | 18 | 517 / 884 ms | – | – | 0.125 | 0 | 0 | 7 |
-| accented | 8 | 84 | 6.0% | 2 | 3 | 0 | 961 / 1275 ms | 930 / 942 ms | 942 ms | 0.063 | 0 | 0 | 0 |
-| all | 26 | 296 | 9.8% | 6 | 4 | 19 | 874 / 1267 ms | 930 / 2171 ms | 2149 ms | 0.076 | 0 | 0 | 10 |
+| clean | 6 | 74 | 4.1% | 2 | 1 | 0 | 943 / 954 ms | 930 / 954 ms | 940 ms | 0.043 | 0 | 0 | 0 |
+| cafe | 6 | 70 | 2.9% | 1 | 0 | 1 | 820 / 1105 ms | 1289 / 1552 ms | 1533 ms | 0.064 | 0 | 0 | 0 |
+| tv | 6 | 68 | 27.9% | 1 | 0 | 18 | 500 / 841 ms | 1289 / 1457 ms | 1438 ms | 0.066 | 0 | 0 | 1 |
+| accented | 8 | 84 | 6.0% | 2 | 3 | 0 | 950 / 1261 ms | 930 / 942 ms | 942 ms | 0.039 | 0 | 0 | 0 |
+| all | 26 | 296 | 9.8% | 6 | 4 | 19 | 836 / 1261 ms | 940 / 1514 ms | 1495 ms | 0.052 | 0 | 0 | 1 |
 
 <details><summary>10 fixtures with errors</summary>
 
@@ -40,11 +40,11 @@ offline · model parakeetTDTv3@7dd20fe6 · leadingPadding 100 ms · segmentation
 
 | Category | Files | Words | WER | Sub | Del | Ins | First partial p50 / p95 | End of utterance p50 / p95 | EOU audio p95 | RTF | Missed | Split | Unended |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| clean | 6 | 74 | 0.0% | 0 | 0 | 0 | – | 180 / 184 ms | 120 ms | 0.012 | 0 | 0 | 0 |
-| cafe | 6 | 70 | 0.0% | 0 | 0 | 0 | – | 179 / 187 ms | 120 ms | 0.012 | 0 | 0 | 0 |
-| tv | 6 | 68 | 2.9% | 0 | 0 | 2 | – | 189 / 214 ms | 120 ms | 0.015 | 0 | 0 | 0 |
-| accented | 8 | 84 | 3.6% | 1 | 2 | 0 | – | 180 / 186 ms | 120 ms | 0.011 | 0 | 0 | 0 |
-| all | 26 | 296 | 1.7% | 1 | 2 | 2 | – | 182 / 197 ms | 120 ms | 0.012 | 0 | 0 | 0 |
+| clean | 6 | 74 | 0.0% | 0 | 0 | 0 | – | 171 / 177 ms | 120 ms | 0.010 | 0 | 0 | 0 |
+| cafe | 6 | 70 | 0.0% | 0 | 0 | 0 | – | 169 / 173 ms | 120 ms | 0.010 | 0 | 0 | 0 |
+| tv | 6 | 68 | 2.9% | 0 | 0 | 2 | – | 172 / 175 ms | 120 ms | 0.010 | 0 | 0 | 0 |
+| accented | 8 | 84 | 3.6% | 1 | 2 | 0 | – | 170 / 173 ms | 120 ms | 0.009 | 0 | 0 | 0 |
+| all | 26 | 296 | 1.7% | 1 | 2 | 2 | – | 170 / 175 ms | 120 ms | 0.010 | 0 | 0 | 0 |
 
 <details><summary>2 fixtures with errors</summary>
 
@@ -66,30 +66,30 @@ WER: corpus word error rate after normalization (sub/del/ins: substituted, delet
 | `parakeet-eou-320ms` | WER cafe | 2.9% | 7.0% | pass |
 | `parakeet-eou-320ms` | WER clean | 4.1% | 8.0% | pass |
 | `parakeet-eou-320ms` | WER tv | 27.9% | 33.0% | pass |
-| `parakeet-eou-320ms` | first partial p95 | 1267 ms | 2000 ms | pass |
+| `parakeet-eou-320ms` | first partial p95 | 1261 ms | 2000 ms | pass |
 | `parakeet-eou-320ms` | first partial p95 (audio) | 1240 ms | 1400 ms | pass |
-| `parakeet-eou-320ms` | end of utterance p95 | 2171 ms | 3500 ms | pass |
-| `parakeet-eou-320ms` | end of utterance p95 (audio) | 2149 ms | 2600 ms | pass |
-| `parakeet-eou-320ms` | RTF | 0.076 | 0.500 | pass |
+| `parakeet-eou-320ms` | end of utterance p95 | 1514 ms | 3500 ms | pass |
+| `parakeet-eou-320ms` | end of utterance p95 (audio) | 1495 ms | 2600 ms | pass |
+| `parakeet-eou-320ms` | RTF | 0.052 | 0.500 | pass |
 | `parakeet-eou-320ms` | missed utterances | 0 | 1 | pass |
 | `parakeet-eou-320ms` | split utterances | 0 | 1 | pass |
-| `parakeet-eou-320ms` | unended utterances | 10 | 12 | pass |
+| `parakeet-eou-320ms` | unended utterances | 1 | 12 | pass |
 | `parakeet-eou-320ms` | failures | 0 | 0 | pass |
 | `parakeet-tdt-v3` | WER | 1.7% | 3.0% | pass |
 | `parakeet-tdt-v3` | WER accented | 3.6% | 8.0% | pass |
 | `parakeet-tdt-v3` | WER cafe | 0.0% | 5.0% | pass |
 | `parakeet-tdt-v3` | WER clean | 0.0% | 5.0% | pass |
 | `parakeet-tdt-v3` | WER tv | 2.9% | 8.0% | pass |
-| `parakeet-tdt-v3` | end of utterance p95 | 197 ms | 5000 ms | pass |
+| `parakeet-tdt-v3` | end of utterance p95 | 175 ms | 5000 ms | pass |
 | `parakeet-tdt-v3` | end of utterance p95 (audio) | 120 ms | 180 ms | pass |
-| `parakeet-tdt-v3` | RTF | 0.012 | 1.000 | pass |
+| `parakeet-tdt-v3` | RTF | 0.010 | 1.000 | pass |
 | `parakeet-tdt-v3` | missed utterances | 0 | 0 | pass |
 | `parakeet-tdt-v3` | split utterances | 0 | 0 | pass |
 | `parakeet-tdt-v3` | failures | 0 | 0 | pass |
 
 ## Against the baseline
 
-Against the baseline of 2026-10-07 (11b2890) on Mac15,8 (Apple M3 Max):
+Against the baseline of 2026-10-07 (f4ad36f) on Mac15,8 (Apple M3 Max):
 
 | Engine | Metric | Baseline | Now | Change |
 | --- | --- | ---: | ---: | ---: |
@@ -98,17 +98,17 @@ Against the baseline of 2026-10-07 (11b2890) on Mac15,8 (Apple M3 Max):
 | parakeet-eou-320ms | WER cafe | 2.9% | 2.9% | ±0.0% |
 | parakeet-eou-320ms | WER tv | 27.9% | 27.9% | ±0.0% |
 | parakeet-eou-320ms | WER accented | 6.0% | 6.0% | ±0.0% |
-| parakeet-eou-320ms | first partial p95 | 1260 ms | 1267 ms | +7 ms |
-| parakeet-eou-320ms | end of utterance p95 | 2168 ms | 2171 ms | +3 ms |
-| parakeet-eou-320ms | end of utterance p95 (audio) | 2149 ms | 2149 ms | ±0 ms |
-| parakeet-eou-320ms | RTF | 0.052 | 0.076 | +0.024 |
-| parakeet-eou-320ms | unended utterances | 10 | 10 | ±0 |
-| parakeet-tdt-v3 | WER | 0.0% | 1.7% | +1.7% |
+| parakeet-eou-320ms | first partial p95 | 1267 ms | 1261 ms | -6 ms |
+| parakeet-eou-320ms | end of utterance p95 | 2171 ms | 1514 ms | -656 ms |
+| parakeet-eou-320ms | end of utterance p95 (audio) | 2149 ms | 1495 ms | -654 ms |
+| parakeet-eou-320ms | RTF | 0.076 | 0.052 | -0.025 |
+| parakeet-eou-320ms | unended utterances | 10 | 1 | -9 |
+| parakeet-tdt-v3 | WER | 1.7% | 1.7% | ±0.0% |
 | parakeet-tdt-v3 | WER clean | 0.0% | 0.0% | ±0.0% |
 | parakeet-tdt-v3 | WER cafe | 0.0% | 0.0% | ±0.0% |
-| parakeet-tdt-v3 | WER tv | 0.0% | 2.9% | +2.9% |
-| parakeet-tdt-v3 | WER accented | 0.0% | 3.6% | +3.6% |
-| parakeet-tdt-v3 | end of utterance p95 | 266 ms | 197 ms | -69 ms |
-| parakeet-tdt-v3 | end of utterance p95 (audio) | 200 ms | 120 ms | -80 ms |
-| parakeet-tdt-v3 | RTF | 0.010 | 0.012 | +0.002 |
+| parakeet-tdt-v3 | WER tv | 2.9% | 2.9% | ±0.0% |
+| parakeet-tdt-v3 | WER accented | 3.6% | 3.6% | ±0.0% |
+| parakeet-tdt-v3 | end of utterance p95 | 197 ms | 175 ms | -22 ms |
+| parakeet-tdt-v3 | end of utterance p95 (audio) | 120 ms | 120 ms | ±0 ms |
+| parakeet-tdt-v3 | RTF | 0.012 | 0.010 | -0.003 |
 | parakeet-tdt-v3 | unended utterances | 0 | 0 | ±0 |
