@@ -87,6 +87,35 @@ public struct ProcessMemoryProbe: MemoryProbe {
     }
 }
 
+/// The malloc heap at one moment, summed over every zone
+/// (`malloc_zone_statistics`), in bytes.
+///
+/// Next to the footprint it tells live memory from memory the allocator
+/// keeps: a footprint that climbs while `inUse` stays flat is freed memory
+/// the allocator hasn't given back (fragmentation), not something the app
+/// still holds.
+public struct HeapUsage: Codable, Hashable, Sendable {
+    /// Bytes in live allocations.
+    public let inUse: UInt64
+    /// Bytes the zones have reserved from the system (address space, not
+    /// all of it resident).
+    public let reserved: UInt64
+
+    public init(inUse: UInt64, reserved: UInt64) {
+        self.inUse = inUse
+        self.reserved = reserved
+    }
+
+    /// This process's heap now.
+    public static func current() -> HeapUsage {
+        var statistics = malloc_statistics_t()
+        // A nil zone sums every registered zone.
+        malloc_zone_statistics(nil, &statistics)
+        // (`max_size_in_use` isn't kept by the default zones: it reads 0.)
+        return HeapUsage(inUse: UInt64(statistics.size_in_use), reserved: UInt64(statistics.size_allocated))
+    }
+}
+
 /// Tracks the baseline and highest footprint seen while a benchmark runs.
 ///
 /// Call `sample()` at points where memory is likely to peak (after loading,

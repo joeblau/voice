@@ -550,7 +550,8 @@
                 reseeds: snapshot.session.reseeds,
                 firstAudioCount: recent.count,
                 firstAudioMilliseconds: recent.isEmpty
-                    ? nil : recent.reduce(0) { $0 + $1.timeInterval * 1_000 } / Double(recent.count))
+                    ? nil : recent.reduce(0) { $0 + $1.timeInterval * 1_000 } / Double(recent.count),
+                heapInUseBytes: HeapUsage.current().inUse)
             samples.append(sample)
             return sample
         }
