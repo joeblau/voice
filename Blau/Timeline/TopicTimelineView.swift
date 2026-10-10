@@ -549,13 +549,12 @@ private struct TopicTimelineScrollView: View {
             toggleExpansion(of: topic.id)
             return
         }
-        // Anchor to the top first, so the tapped bullet stays where it is and
-        // its transcript opens below it, even at the latest line. The anchor
-        // must be in place before the content grows: in the same update the
-        // bottom anchor would still push the bullet up. It holds until the
-        // animation and the lazy rows' measuring are done, then the geometry
-        // decides again: collapsing at the latest line stays there (and keeps
-        // following new lines), expanding scrolls it out of view.
+        // Hold the tapped bullet while its transcript opens below it, even
+        // at the latest line. The top anchor and rendered-position hold are
+        // installed in the same transaction as the detail; deferring the
+        // expansion to another main-actor task adds a layout/scheduling turn
+        // to tap latency. Once the lazy rows settle, the geometry decides
+        // again whether to follow the latest line.
         holdBullet(topic.id, whileToggling: topic.id)
     }
 
@@ -565,16 +564,16 @@ private struct TopicTimelineScrollView: View {
         // topic changes height; its rendered bullet supplies the anchor.
         position = ScrollPosition(idType: TopicTimeline.ItemID.self)
         if let y = tracker.bulletPositions[anchor] { tracker.expandingBullet = (anchor, y) }
+        toggleExpansion(of: topic)
         Task { @MainActor in
-            toggleExpansion(of: topic)
             try? await Task.sleep(for: Self.topAnchorHold)
             topAnchorHolds -= 1
             if topAnchorHolds == 0 { tracker.expandingBullet = nil }
         }
     }
 
-    /// How long a tap at the latest line keeps the top anchor: the
-    /// expansion's animation and a little more.
+    /// How long a tap at the latest line holds its bullet while lazy rows
+    /// settle.
     private static let topAnchorHold = Duration.milliseconds(400)
 
     private func toggleExpansion(of id: UUID) {

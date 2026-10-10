@@ -105,7 +105,12 @@ calls in the transaction that lays it out: the `timeline.expand` signpost
 is over 100 ms, and the latest value for UI tests (`ui-test` launches only,
 as the value of `blau.timeline.expandLatency`). Expanding builds only the
 detail and the rows on screen (the lazy stack), and the transcript query
-fetches that one conversation's utterances.
+fetches that one conversation's utterances. The tap installs its scroll
+hold and toggles expansion in the same transaction; a second main-actor
+task only releases the hold. Deferring the toggle to that task added a
+layout/scheduling turn and pushed a cold CI expansion to 171 ms. With the
+synchronous toggle, both anchoring checks pass and three fresh-launch
+latency runs under eight CPU workers keep all 15 expansions under 100 ms.
 
 ## Scrolling
 
