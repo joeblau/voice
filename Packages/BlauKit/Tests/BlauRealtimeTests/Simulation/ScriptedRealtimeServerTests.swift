@@ -43,7 +43,13 @@ import Testing
         try await harness.orchestrator.start()
         for (index, final) in script.finals.enumerated() {
             await harness.orchestrator.handle(.final(final))
-            try await waitUntil("reply \(index + 1)") { harness.agentUtterances().count == index + 1 }
+            // The transcript can be written before response.done arrives.
+            // Finish the response before feeding another final or stopping,
+            // so this test never interrupts its own last measured reply.
+            try await waitUntil("reply \(index + 1)") {
+                let completed = await harness.orchestrator.snapshot.completedTurns
+                return completed == index + 1 && harness.agentUtterances().count == index + 1
+            }
         }
         await harness.orchestrator.stop()
 
