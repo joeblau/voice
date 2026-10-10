@@ -1133,6 +1133,20 @@ in every three (`frameRateDutyCycle`) and keeps the last reading on screen
 in between; a hitch while the link sleeps doesn't show in the FPS row (it
 does show in Instruments' Hangs and in MetricKit).
 
+The other half is SwiftUI updating the panel, so the controller only writes
+what the panel reads when it changed (#182): the compact rows and the
+border's level separately from the full readout the expanded panel shows.
+Observation reports every write to SwiftUI, equal or not, so without the
+comparison each sample re-rendered the panel; now a sample that changes
+nothing on screen, or only an expanded-only row such as "HUD cost", costs
+just the sample. `PerformanceHUDTests.onlySamplesThatChangeTheCompactRowsUpdateThem`
+covers it.
+
+A 10 s measurement window holds three or four of the display link's
+measured seconds, depending on where it starts in the three-second cycle,
+so the HUD-shown CPU time of one iteration moves by about a quarter for
+that reason alone, even in instructions retired.
+
 The "HUD cost" row shows the sampler's and the display link's CPU time live.
 `PerformanceHUDOverheadTests` (`make perf`) measures the whole app's CPU time
 over 10 s idle spans with the HUD hidden and shown (`XCTCPUMetric`, three
