@@ -59,7 +59,7 @@ jobs:
         env:
           DESTINATION: ${{ steps.simulator.outputs.destination }}
         run: |
-          xcodebuild test-without-building -project Blau.xcodeproj -scheme Blau -testPlan Blau -destination "$DESTINATION" -derivedDataPath .build/DerivedData -resultBundlePath .build/results/large-actions.xcresult -only-testing:BlauUITests/TopicDetailUITests/testActionsStackAtTheLargestTextSize -parallel-testing-enabled NO -collect-test-diagnostics never CODE_SIGNING_ALLOWED=NO XAI_DEV_API_KEY=
+          xcodebuild test-without-building -project Blau.xcodeproj -scheme Blau -testPlan Blau -destination "$DESTINATION" -derivedDataPath .build/DerivedData -resultBundlePath .build/results/large-actions.xcresult -only-testing:BlauUITests/TopicDetailUITests/testActionsRemainReachableAtTheLargestTextSize -parallel-testing-enabled NO -collect-test-diagnostics never CODE_SIGNING_ALLOWED=NO XAI_DEV_API_KEY=
           xcrun xcresulttool get test-results summary --path .build/results/large-actions.xcresult --format json > .build/results/large-actions-summary.json
           python3 -c 'import json; r=json.load(open(".build/results/large-actions-summary.json")); print(r); assert r["totalTestCount"] == 1 and r["failedTests"] == 0'
       - name: Upload results
