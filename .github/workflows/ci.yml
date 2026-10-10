@@ -1,4 +1,5 @@
-# Trace-only diagnostic: a successful workflow confirms capture, not the benchmark assertion.
+# Sampling diagnostic: success confirms capture, not the benchmark assertion.
+# The diagnostic branch pauses the test before its first tap to attach the sampler.
 name: CI
 on:
   workflow_dispatch:
@@ -49,42 +50,36 @@ jobs:
         env:
           UDID: ${{ steps.simulator.outputs.udid }}
         run: scripts/ci/warm-simulator.sh "$UDID" .build/DerivedData/Build/Products/Debug-iphonesimulator/Blau.app
-      - name: Capture expansion trace
-        timeout-minutes: 10
+      - name: Sample the cold expansion
+        timeout-minutes: 8
         env:
           DESTINATION: ${{ steps.simulator.outputs.destination }}
-          UDID: ${{ steps.simulator.outputs.udid }}
         run: |
           mkdir -p .build/results
-          app=.build/DerivedData/Build/Products/Debug-iphonesimulator/Blau.app
-          binary="$app/Blau"
-          if [ -f "$app/Blau.debug.dylib" ]; then binary="$app/Blau.debug.dylib"; fi
-          xcrun dsymutil "$binary" -o .build/results/Blau.dSYM
-          xcrun xctrace record --template 'Time Profiler' --instrument os_signpost --show-recording-options > .build/results/recording-options.json
-          python3 -c 'import json; p=".build/results/recording-options.json"; x=json.load(open(p)); x["Time Profiler"].update(contextSwitchSampling=True, highFrequencySampling=True, recordWaitingThreads=True); x["os_signpost"]["dynamicTracingEnabledSubsystems"]=["com.joeblau.blau"]; json.dump(x, open(p,"w"))'
           (
-            for i in $(seq 1 600); do
-              pid=$(pgrep -x Blau | head -1 || true)
-              if [ -n "$pid" ]; then
-                xcrun xctrace record --template 'Time Profiler' --instrument os_signpost --device "$UDID" --attach "$pid" --time-limit 60s --no-prompt --recording-options .build/results/recording-options.json --output .build/results/expansion.trace > .build/results/profile.log 2>&1
-                exit $?
+            for i in $(seq 1 900); do
+              if grep -q BLAU_SAMPLE_READY .build/results/profiled-expansion.log 2>/dev/null; then
+                pid=$(pgrep -x Blau | head -1 || true)
+                if [ -n "$pid" ]; then
+                  sleep 4
+                  date -u > .build/results/sample-start.txt
+                  sample "$pid" 12 1 -mayDie -file .build/results/expansion.sample.txt > .build/results/sample.log 2>&1
+                  exit $?
+                fi
               fi
               sleep 0.2
             done
             exit 1
           ) &
-          profile_pid=$!
+          sample_pid=$!
           set +e
           xcodebuild test-without-building -project Blau.xcodeproj -scheme Blau -testPlan Blau -destination "$DESTINATION" -derivedDataPath .build/DerivedData -resultBundlePath .build/results/profiled-expansion.xcresult -only-testing:BlauUITests/TopicDetailUITests/testTappingExpandsWithinAHundredMilliseconds -parallel-testing-enabled NO -collect-test-diagnostics never SWIFT_OPTIMIZATION_LEVEL=-O SWIFT_COMPILATION_MODE=wholemodule -enableCodeCoverage NO CODE_SIGNING_ALLOWED=NO XAI_DEV_API_KEY= > .build/results/profiled-expansion.log 2>&1
           test_status=$?
-          wait "$profile_pid"
-          profile_status=$?
+          wait "$sample_pid"
+          sample_status=$?
           set -e
-          echo "Profiled test status: $test_status; trace status: $profile_status"
-          if [ "$profile_status" -eq 0 ]; then
-            xcrun xctrace symbolicate --input .build/results/expansion.trace --dsym .build/results/Blau.dSYM || true
-            xcrun xctrace export --input .build/results/expansion.trace --toc --output .build/results/trace-toc.xml
-          fi
+          echo "Diagnostic test status: $test_status; sampler status: $sample_status"
+          test -s .build/results/expansion.sample.txt
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

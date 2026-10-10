@@ -193,6 +193,9 @@ final class TopicDetailUITests: XCTestCase {
         let app = launch()
         let previous = bullet(Self.previousTitle, in: app)
         XCTAssertTrue(previous.waitForExistence(timeout: 10))
+        // Diagnostic branch only: allow the stack sampler to attach before the first tap.
+        print("BLAU_SAMPLE_READY")
+        RunLoop.current.run(until: Date().addingTimeInterval(5))
         var samples: [Double] = []
         var last: String?
         for _ in 0..<5 {
