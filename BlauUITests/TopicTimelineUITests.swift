@@ -39,7 +39,7 @@ final class TopicTimelineUITests: XCTestCase {
     private func launch(arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["BLAU_APP_ENVIRONMENT"] = "ui-test"
-        app.launchArguments += ["-BlauTimelineFixture", "\(Self.topicCount)"] + arguments
+        app.launchArguments += ["-BlauTimelineFixture", "\(Self.topicCount)", "-BlauChatGeometry"] + arguments
         app.launch()
         XCTAssertTrue(
             app.descendants(matching: .any)[Identifier.timeline].waitForExistence(timeout: 30),

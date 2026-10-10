@@ -250,9 +250,12 @@ their names include the shard count.
 
 Selectable transcript text can report an accessibility frame at the screen
 edge even when its rendered SwiftUI frame keeps the 16-point margin. Debug
-builds launched in the `ui-test` environment expose each row's actual frame
+builds launched in the `ui-test` environment with `-BlauChatGeometry` expose
+each row's actual frame
 through a one-point accessibility probe (`<row identifier>.geometry`).
-Alignment, width, and header-overlap assertions read these frames, retaining
+Only the geometry suites opt in; accessibility audits and long-history
+paging run without diagnostic elements. Alignment, width, and header-overlap
+assertions read these frames, retaining
 the original bounds. The probe is absent from production builds and other
 launch environments.
 

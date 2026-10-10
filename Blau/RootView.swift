@@ -45,7 +45,9 @@ struct RootView: View {
         }
         .animation(reduceMotion ? nil : .default, value: isOnboarding)
         #if DEBUG
-            .environment(\.reportsChatRowFrames, environment.kind == .uiTest)
+            .environment(
+                \.reportsChatRowFrames,
+                environment.kind == .uiTest && ProcessInfo.processInfo.arguments.contains("-BlauChatGeometry"))
         #endif
     }
 }

@@ -25,7 +25,7 @@ final class ChatTranscriptUITests: XCTestCase {
     private func launch(rows: Int, arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["BLAU_APP_ENVIRONMENT"] = "ui-test"
-        app.launchArguments += ["-BlauChatFixture", "\(rows)"] + arguments
+        app.launchArguments += ["-BlauChatFixture", "\(rows)", "-BlauChatGeometry"] + arguments
         app.launch()
         XCTAssertTrue(
             app.descendants(matching: .any)[Identifier.transcript].waitForExistence(timeout: 30),
