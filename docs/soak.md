@@ -219,6 +219,19 @@ passed all eight checks: footprint slope +0.80 MB/hour, live heap slope
 covers the scripted pipeline; the real-model device run remains pending
 in the table below.
 
+A separate 20-minute run also passed (+1.70 MB/hour footprint, +1.89
+MB/hour live heap) while Allocations recorded 45 seconds on the running
+app. Attach to the simulator explicitly, rather than the host process
+namespace:
+
+```sh
+xcrun xctrace record --template Allocations --device <simulator-udid> \
+  --attach <Blau-pid> --time-limit 45s --output .build/traces/gate-allocations.trace
+```
+
+The unprofiled two-hour report above is the memory gate evidence; tracing
+changes allocation overhead and its footprint is kept separate.
+
 ## Results
 
 | Date | Where | Run | Wall time | Result | Memory slope | Renewals | Leaks |
