@@ -65,13 +65,10 @@ struct TopicDetailHeader: View {
 
     /// Side by side when they fit, stacked at large text sizes (#81).
     private var actions: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) { actionButtons }
-            VStack(alignment: .leading, spacing: 8) { actionButtons }
-        }
-        .controlSize(.small)
-        .buttonBorderShape(.capsule)
-        .font(.subheadline.weight(.medium))
+        TopicActionsLayout { actionButtons }
+            .controlSize(.small)
+            .buttonBorderShape(.capsule)
+            .font(.subheadline.weight(.medium))
     }
 
     @ViewBuilder

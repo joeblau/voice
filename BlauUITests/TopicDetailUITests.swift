@@ -37,10 +37,15 @@ final class TopicDetailUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
-    private func launch() -> XCUIApplication {
+    private func launch(largestText: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["BLAU_APP_ENVIRONMENT"] = "ui-test"
         app.launchArguments += ["-BlauTimelineFixture", "\(Self.topicCount)"]
+        if largestText {
+            app.launchArguments += [
+                "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
+            ]
+        }
         app.launch()
         XCTAssertTrue(
             app.descendants(matching: .any)[Identifier.timeline].waitForExistence(timeout: 30),
@@ -143,6 +148,35 @@ final class TopicDetailUITests: XCTestCase {
             guard let element = issue.element else { return true }
             return !element.identifier.hasPrefix("blau.timeline.topic")
         }
+    }
+
+    /// At large text sizes the same controls stack, stay on screen and
+    /// remain tappable; the horizontal candidate must not clip a label.
+    func testActionsStackAtTheLargestTextSize() {
+        let app = launch(largestText: true)
+        let previous = bullet(Self.previousTitle, in: app)
+        let timeline = element(Identifier.timeline, in: app)
+        for _ in 0..<8 where !previous.isHittable { timeline.swipeDown() }
+        XCTAssertTrue(previous.isHittable, "The older bullet isn't reachable")
+        expandPrevious(app)
+        let controls = [
+            app.buttons[Identifier.continueTopic].firstMatch,
+            app.buttons[Identifier.share].firstMatch,
+            app.buttons[Identifier.more].firstMatch,
+        ]
+        for control in controls {
+            XCTAssertTrue(control.waitForExistence(timeout: 5), "Missing action \(control)")
+        }
+        for _ in 0..<8 where !controls.allSatisfy(\.isHittable) { timeline.swipeUp() }
+        let window = app.windows.firstMatch.frame
+        for control in controls {
+            XCTAssertTrue(control.isHittable, "An action isn't tappable at the largest text size")
+            XCTAssertGreaterThanOrEqual(control.frame.minX, window.minX - 1)
+            XCTAssertLessThanOrEqual(control.frame.maxX, window.maxX + 1, "An action extends past the screen")
+        }
+        XCTAssertLessThanOrEqual(controls[0].frame.maxY, controls[1].frame.minY + 1, "Actions didn't stack")
+        XCTAssertLessThanOrEqual(controls[1].frame.maxY, controls[2].frame.minY + 1, "Actions overlap")
+        attachScreenshot(app, "Topic actions at the largest text size")
     }
 
     /// Tap → expanded under 100 ms (#58), as the app measured it
