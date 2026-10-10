@@ -90,13 +90,17 @@ final class TopicDetailUITests: XCTestCase {
     }
 
     /// The latency the app measured for the latest expansion, in ms.
-    private func measuredLatency(_ app: XCUIApplication, after previous: String?) -> Double? {
+    private func measuredLatency(_ app: XCUIApplication, after previous: String?)
+        -> (value: String, milliseconds: Double)?
+    {
         let probe = element(Identifier.expandLatency, in: app)
         guard probe.waitForExistence(timeout: 5) else { return nil }
         let deadline = Date().addingTimeInterval(5)
         while Date() < deadline {
-            if let value = probe.value as? String, !value.isEmpty, value != previous {
-                return Double(value)
+            if let value = probe.value as? String, value != previous,
+                let milliseconds = value.split(separator: ":").last.flatMap({ Double($0) })
+            {
+                return (value, milliseconds)
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         }
@@ -153,12 +157,12 @@ final class TopicDetailUITests: XCTestCase {
         for _ in 0..<5 {
             previous.tap()
             XCTAssertTrue(element(Identifier.detail, in: app).waitForExistence(timeout: 5), "Didn't expand")
-            guard let latency = measuredLatency(app, after: last) else {
+            guard let sample = measuredLatency(app, after: last) else {
                 XCTFail("No expansion latency was measured")
                 return
             }
-            samples.append(latency)
-            last = String(format: "%.1f", latency)
+            samples.append(sample.milliseconds)
+            last = sample.value
             previous.tap()
             XCTAssertTrue(element(Identifier.detail, in: app).waitForNonExistence(timeout: 5), "Didn't compress")
             waitUntilStill(previous, timeout: 5)

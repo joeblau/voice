@@ -103,7 +103,10 @@ every expansion from the tap to the detail's `onAppear`, which SwiftUI
 calls in the transaction that lays it out: the `timeline.expand` signpost
 ([performance.md](performance.md#canonical-intervals)), a log line when it
 is over 100 ms, and the latest value for UI tests (`ui-test` launches only,
-as the value of `blau.timeline.expandLatency`). Expanding builds only the
+as `sequence:milliseconds` in the value of `blau.timeline.expandLatency`).
+The sequence increases for every completed measurement, including equal
+latencies and after the bounded history fills, so tests wait for a new
+sample without depending on rounded timing values. Expanding builds only the
 detail and the rows on screen (the lazy stack), and the transcript query
 fetches that one conversation's utterances. The tap installs its scroll
 hold and toggles expansion in the same transaction; a second main-actor

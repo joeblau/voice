@@ -35,6 +35,9 @@ public final class TopicExpansionTimer {
     public private(set) var last: Sample?
     /// The recent expansions, oldest first, at most ``capacity``.
     public private(set) var recent: [Duration] = []
+    /// Completed measurements, including equal latencies and samples that
+    /// have left the bounded history. Consumers can identify a fresh sample.
+    public private(set) var measurementCount = 0
 
     public let capacity: Int
     /// The target the issue sets: under 100 ms.
@@ -93,6 +96,7 @@ public final class TopicExpansionTimer {
         let latency = clock.uptime - entry.startedAt
         entry.interval.end(message: "expanded")
         last = Sample(topicID: topicID, latency: latency)
+        measurementCount += 1
         recent.append(latency)
         if recent.count > capacity {
             recent.removeFirst(recent.count - capacity)

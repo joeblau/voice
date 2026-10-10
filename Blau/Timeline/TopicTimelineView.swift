@@ -683,7 +683,11 @@ private struct ExpandLatencyProbe: View {
             .frame(width: 1, height: 1)
             .accessibilityElement()
             .accessibilityLabel("Expand latency")
-            .accessibilityValue(timer.last.map { String(format: "%.1f", $0.latency / .milliseconds(1)) } ?? "")
+            .accessibilityValue(
+                timer.last.map {
+                    "\(timer.measurementCount):" + String(format: "%.1f", $0.latency / .milliseconds(1))
+                } ?? ""
+            )
             .accessibilityIdentifier(TopicDetailAccessibility.expandLatency)
             .allowsHitTesting(false)
     }
