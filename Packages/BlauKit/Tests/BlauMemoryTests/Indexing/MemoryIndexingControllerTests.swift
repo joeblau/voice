@@ -57,8 +57,11 @@ struct MemoryIndexingControllerTests {
         // A save to the store reaches the index without a call.
         context.insert(MemoryDocument(kind: .note, title: "Travel", body: "Osaka in April.", createdAt: Support.t0))
         try context.save()
-        let deadline = ContinuousClock.now + .seconds(20)
-        while try await indexer.index.keywordSearch("Osaka", limit: 5).isEmpty, ContinuousClock.now < deadline {
+        // Up to 20 s worth of polls; counting polls rather than wall time
+        // means a loaded runner can't run the wait out (#180).
+        var polls = 1_000
+        while try await indexer.index.keywordSearch("Osaka", limit: 5).isEmpty, polls > 0 {
+            polls -= 1
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(try await indexer.index.keywordSearch("Osaka", limit: 5).count == 1)
@@ -113,8 +116,9 @@ struct MemoryIndexingControllerTests {
         try await Task.sleep(for: .milliseconds(5))
         controller.rebuild()
         let indexer = try #require(controller.indexer)
-        let deadline = ContinuousClock.now + .seconds(20)
-        while try await indexer.index.lastRebuild() == rebuilt, ContinuousClock.now < deadline {
+        var polls = 2_000  // 20 s worth, counted in polls (#180)
+        while try await indexer.index.lastRebuild() == rebuilt, polls > 0 {
+            polls -= 1
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(try await indexer.index.lastRebuild() != rebuilt)

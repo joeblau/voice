@@ -87,6 +87,24 @@ struct TopicExpansionTimerTests {
         #expect(timer.slowest == .milliseconds(90))
     }
 
+    @Test func equalLatenciesHaveDistinctMeasurementsAfterTheHistoryIsFull() {
+        let timer = makeTimer(capacity: 1)
+        let topic = UUID()
+        #expect(timer.measurementCount == 0)
+        for count in 1...3 {
+            timer.began(topic)
+            clock.advance(by: .milliseconds(42))
+            timer.appeared(topic)
+            #expect(timer.measurementCount == count)
+            #expect(timer.last?.latency == .milliseconds(42))
+            #expect(timer.recent == [.milliseconds(42)])
+        }
+        timer.began(topic)
+        timer.cancelled(topic)
+        #expect(timer.appeared(topic) == nil)
+        #expect(timer.measurementCount == 3)
+    }
+
     @Test func topicsThatGoAwayStopBeingMeasured() {
         let timer = makeTimer()
         let kept = UUID()

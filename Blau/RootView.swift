@@ -44,6 +44,11 @@ struct RootView: View {
             }
         }
         .animation(reduceMotion ? nil : .default, value: isOnboarding)
+        #if DEBUG
+            .environment(
+                \.reportsChatRowFrames,
+                environment.kind == .uiTest && ProcessInfo.processInfo.arguments.contains("-BlauChatGeometry"))
+        #endif
     }
 }
 
@@ -95,6 +100,14 @@ struct MainScreenScaffold: View {
                 }
                 .toolbar {
                     #if DEBUG
+                        if TopicTimelineFixture.offersRelabelControl(in: environment) {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button("Refine fixture titles") {
+                                    TopicTimelineFixture.refineTitles(in: environment.persistence)
+                                }
+                                .accessibilityIdentifier(TopicTimelineFixture.relabelButtonIdentifier)
+                            }
+                        }
                         ToolbarItem(placement: .topBarTrailing) {
                             DebugMenuButton { isShowingDebugMenu = true }
                         }
@@ -129,14 +142,11 @@ struct MainScreenScaffold: View {
                 // above the bottom bar instead of drawn over Settings and
                 // Record while the speech models download.
                 .safeAreaInset(edge: .bottom) {
-                    // Hidden while checking, so an offline launch with every
-                    // model installed doesn't flash the card.
-                    if !models.isReady && models.setupStatus.phase != .checking {
-                        SpeechModelSetupView()
-                            .padding()
-                            .transition(Motion.slide(from: .bottom, reduceMotion: reduceMotion))
-                    }
+                    SpeechModelSetupInset()
                 }
+                // `isReady` changes once, not with every progress report, so
+                // reading it here doesn't evaluate the scaffold again while
+                // the models download (#182).
                 .animation(.default, value: models.isReady)
         }
         // The timeline's Continue This Topic (#58) starts or seeds the
@@ -267,6 +277,28 @@ extension MainScreenScaffold {
             if record.startFailureMessage == nil {
                 continueFailure = String(localized: "The conversation couldn't pick up the topic. Try again.")
             }
+        }
+    }
+}
+
+/// The speech model setup card at the bottom of the main screen, while the
+/// models aren't ready.
+///
+/// Its own view, so only it follows the download's progress (`setupStatus`
+/// reads every model's state, which changes many times a second): the
+/// scaffold around it, with its toolbar, sheets and alerts, isn't evaluated
+/// again for each progress report (#182).
+private struct SpeechModelSetupInset: View {
+    @Environment(ModelManager.self) private var models
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        // Hidden while checking, so an offline launch with every model
+        // installed doesn't flash the card.
+        if !models.isReady && models.setupStatus.phase != .checking {
+            SpeechModelSetupView()
+                .padding()
+                .transition(Motion.slide(from: .bottom, reduceMotion: reduceMotion))
         }
     }
 }

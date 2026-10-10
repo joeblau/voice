@@ -50,13 +50,24 @@ struct URLSessionRealtimeSocketTests {
         let server = try LoopbackWebSocketServer()
         defer { server.stop() }
         let url = try await server.start()
+        // The keepalive's timers run on a manual clock, so a slow machine
+        // can't run out the pong timeout while the real pong is on its way
+        // (#180); the pings and pongs go over the real socket.
+        let clock = ManualClock()
+        let interval = Duration.milliseconds(100)
         let client = RealtimeClient(
-            endpoint: url, tokenProvider: FakeTokenProvider(),
-            configuration: .init(keepAliveInterval: .milliseconds(100), pongTimeout: .seconds(2)))
+            endpoint: url, tokenProvider: FakeTokenProvider(), clock: clock,
+            configuration: .init(connectTimeout: nil, keepAliveInterval: interval, pongTimeout: .seconds(2)))
         defer { Task { await client.shutdown() } }
 
         try await client.connect()
-        try await Task.sleep(for: .milliseconds(800))
+        for _ in 0..<5 {
+            // Only the next interval asleep: the last ping's pong came back
+            // (the client stops its pong timeout, then sleeps again).
+            try await waitUntil("next ping scheduled") { clock.sleeperDeadlines == [clock.uptime + interval] }
+            clock.advance(by: interval)
+        }
+        try await waitUntil("last pong") { clock.sleeperDeadlines == [clock.uptime + interval] }
 
         #expect(server.connectionCount == 1)
         #expect(await client.state == .connected)
@@ -112,7 +123,7 @@ struct URLSessionRealtimeSocketTests {
         let server = try LoopbackWebSocketServer()
         let url = try await server.start()
         server.stop()
-        try await Task.sleep(for: .milliseconds(50))
+        try await waitUntil("listener closed") { server.isCancelled }
 
         await #expect {
             _ = try await URLSessionRealtimeSocketConnector().connect(to: url, subprotocols: [])

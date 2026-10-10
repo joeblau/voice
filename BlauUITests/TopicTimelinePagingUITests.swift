@@ -32,7 +32,7 @@ final class TopicTimelinePagingUITests: XCTestCase {
     private static let memoryBudgetMB = 60.0
 
     override func setUp() async throws {
-        // About 25 minutes for both tests: longer than CI's app-tests job
+        // About 25 minutes for both tests: longer than a CI UI-test shard
         // allows. `TEST_RUNNER_BLAU_LONG_UI_TESTS=1 xcodebuild test …` (or
         // the scheme's environment) runs them.
         try XCTSkipUnless(

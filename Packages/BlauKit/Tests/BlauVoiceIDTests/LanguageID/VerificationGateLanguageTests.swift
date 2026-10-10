@@ -240,10 +240,13 @@ struct VerificationGateLanguageTests {
         // 1.5 s of speech: under the window, so its end starts the check.
         await gate.feed([.started(SpeechScript.onset(0, at: 0))] + SpeechScript.audio(from: 0, to: 1.8))
         let ending = Task { await gate.feed([.ended(SpeechScript.ended(0, from: 0, to: 1.5))]) }
-        try await Self.waitUntil { identifier.identifiedAudio.count == 1 && clock.sleeperCount == 1 }
+        // The identifier records the audio, then sleeps out its delay.
+        await clock.waitForSleepers()
+        #expect(identifier.identifiedAudio.count == 1)
 
         let deciding = Task { await gate.decide(finalUtterance("Hola", from: 0, to: 1.5)) }
-        try await Self.waitUntil { clock.sleeperCount == 2 }
+        // The final's wait for the check is the second sleeper.
+        await clock.waitForSleepers(count: 2)
         clock.advance(by: .milliseconds(300))
         let gated = await deciding.value
 
@@ -276,14 +279,6 @@ struct VerificationGateLanguageTests {
         #expect(backend.completedIntervals == ["voiceid.gate", "voiceid.gate"])
         #expect(backend.endMessages(of: "voiceid.gate") == ["otherLanguage", "accepted"])
         #expect(backend.openIntervals.isEmpty)
-    }
-
-    /// Polls `condition` in real time (other tasks move meanwhile).
-    static func waitUntil(_ condition: () -> Bool) async throws {
-        for _ in 0..<2_000 where !condition() {
-            try await Task.sleep(for: .milliseconds(1))
-        }
-        try #require(condition())
     }
 }
 
@@ -356,9 +351,9 @@ struct VerificationGateLanguageAdaptationTests {
             [.started(SpeechScript.onset(0, at: 0))] + SpeechScript.audio(from: 0, to: 1.5, samples: samples))
         // The transcriber is ahead of VAD: its final starts the check.
         let deciding = Task { await gate.decide(finalUtterance("Hola", from: 0, to: 1.5)) }
-        try await VerificationGateLanguageTests.waitUntil {
-            identifier.identifiedAudio.count == 1 && clock.sleeperCount == 1
-        }
+        // The identifier records the audio, then sleeps out its delay.
+        await clock.waitForSleepers()
+        #expect(identifier.identifiedAudio.count == 1)
         // The rest of the segment arrives and it ends, accepted.
         await gate.feed(SpeechScript.audio(from: 1.5, to: 4.8, samples: samples))
         await gate.feed([.ended(SpeechScript.ended(0, from: 0, to: 4.5))])

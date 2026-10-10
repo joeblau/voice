@@ -1,6 +1,7 @@
 import BlauCore
 import BlauTelemetry
 import Foundation
+import Synchronization
 import Testing
 
 @testable import Blau
@@ -97,6 +98,57 @@ struct PerformanceHUDTests {
         always.stop()
     }
 
+    /// #182: SwiftUI is told about a sample only when it changed what the
+    /// panel shows. Observation reports every write, equal or not, and an
+    /// update of the panel costs far more than the sample, so an idle app's
+    /// compact HUD (whose rows rarely change) shouldn't be rendered again
+    /// every second, nor for rows only the expanded panel shows.
+    @Test func onlySamplesThatChangeTheCompactRowsUpdateThem() {
+        let pipeline = ScriptedPipeline()
+        let hud = PerformanceHUDController(
+            flags: .inMemory(), preferences: .inMemory(),
+            sampler: PerformanceHUDSampler(
+                memory: FixedMemory(), cpu: StillCPU(), thermal: { .nominal }, tap: SignpostLatencyTap(),
+                gauges: PerformanceGauges())
+        ) { pipeline.readings }
+        hud.start()
+        defer { hud.stop() }
+
+        // Counted in `onChange`, which runs in the property's `willSet`.
+        let compactWrites = Mutex(0)
+        func trackCompact() {
+            withObservationTracking {
+                _ = hud.compactRows
+                _ = hud.level
+            } onChange: {
+                compactWrites.withLock { $0 += 1 }
+            }
+        }
+
+        // Nothing changed: no writes at all.
+        trackCompact()
+        let updates = hud.compactUpdates
+        for _ in 0..<3 { hud.sample() }
+        #expect(compactWrites.withLock { $0 } == 0)
+        #expect(hud.compactUpdates == updates)
+
+        // An expanded-only row changed: the readout follows, the compact
+        // panel isn't told.
+        pipeline.readings.turnState = "thinking"
+        hud.sample()
+        #expect(hud.readout.row("Turn")?.value == "thinking")
+        #expect(compactWrites.withLock { $0 } == 0)
+        #expect(hud.compactUpdates == updates)
+
+        // A compact row changed.
+        pipeline.readings.firstAudio = LatencyStats(
+            last: 640, p50: 640, p95: 640, mean: 640, maximum: 640, windowCount: 1, totalCount: 1)
+        hud.sample()
+        #expect(compactWrites.withLock { $0 } == 1)
+        #expect(hud.compactUpdates == updates + 1)
+        #expect(hud.compactRows.contains { $0.label == "EOU → audio" && $0.value != PerformanceHUDReadout.placeholder })
+    }
+
     @Test func preferencesOutliveTheController() throws {
         let suite = "blau.tests.performanceHUD.\(UUID().uuidString)"
         defer { UserDefaults().removePersistentDomain(forName: suite) }
@@ -133,13 +185,37 @@ struct PerformanceHUDTests {
         #expect(!AppEnvironment.preview().performanceHUD.isVisible)
     }
 
+    /// What the voice pipeline reports, changed by the test between samples.
+    @MainActor
+    private final class ScriptedPipeline {
+        var readings = PipelineReadings(turnState: "listening")
+    }
+
+    /// A process that uses no CPU time, so the CPU row stays the same.
+    private struct StillCPU: CPUTimeSource {
+        func processCPUTime() -> UInt64 { 0 }
+        func threadCPUTime() -> UInt64 { 0 }
+        func wallTime() -> UInt64 { 0 }
+    }
+
+    /// A footprint that never moves, so the memory row stays the same.
+    private struct FixedMemory: MemoryProbe {
+        func snapshot() -> MemorySnapshot? {
+            MemorySnapshot(physicalFootprint: 100 * 1_048_576, peakPhysicalFootprint: nil, neural: nil, available: nil)
+        }
+    }
+
+    /// Polls `condition` until it holds, failing after 10 s worth of polls.
+    /// The limit counts polls, not wall time, so a loaded runner that keeps
+    /// the whole process off the CPU can't run it out (#180).
     private func waitUntil(_ condition: @MainActor () -> Bool) async throws {
-        let deadline = ContinuousClock.now + .seconds(10)
+        var polls = 1_000
         while !condition() {
-            guard ContinuousClock.now < deadline else {
+            guard polls > 0 else {
                 Issue.record("Timed out")
                 return
             }
+            polls -= 1
             try await Task.sleep(for: .milliseconds(10))
         }
     }

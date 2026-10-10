@@ -310,24 +310,32 @@ struct TimedOut: Error, CustomStringConvertible {
 }
 
 /// Polls `condition` (yielding in between) until it holds, failing after
-/// `timeout` of real time. Everything under test runs in process, so this
-/// normally returns within a few yields; the timeout only stops a broken
-/// test from hanging.
+/// `timeout` worth of polls. Everything under test runs in process, so this
+/// normally returns within a few yields; the limit only stops a broken test
+/// from hanging.
+///
+/// The limit counts this wait's own polls, not wall time: when a loaded
+/// runner keeps the whole test process off the CPU (CI has stalled one for
+/// over a minute), the work being waited for and this wait stall alike, so
+/// a stall can't run the wait out (#180). On an idle machine it still gives
+/// up after at least `timeout`.
 func waitUntil(
     _ what: @autoclosure () -> String,
     timeout: Duration = .seconds(10),
     sourceLocation: SourceLocation = #_sourceLocation,
     _ condition: () async -> Bool
 ) async throws {
-    let deadline = ContinuousClock.now + timeout
+    let interval = Duration.microseconds(200)
+    var polls = Int(timeout / interval)
     while !(await condition()) {
-        if ContinuousClock.now >= deadline {
+        guard polls > 0 else {
             let message = "Timed out waiting for \(what())"
             Issue.record(Comment(rawValue: message), sourceLocation: sourceLocation)
             throw TimedOut(description: message)
         }
+        polls -= 1
         await Task.yield()
-        try await Task.sleep(for: .microseconds(200))
+        try await Task.sleep(for: interval)
     }
 }
 

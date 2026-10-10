@@ -15,6 +15,10 @@ public struct SoakSample: Codable, Hashable, Sendable {
     /// The process's physical footprint (`task_vm_info.phys_footprint`),
     /// when the kernel reported it.
     public var footprintBytes: UInt64?
+    /// Bytes in live malloc allocations (`HeapUsage.inUse`). A footprint
+    /// that climbs while this stays flat is memory the allocator kept, not
+    /// memory the app holds (#183).
+    public var heapInUseBytes: UInt64?
     /// Speech-recognizer chunks run so far.
     public var asrChunks: Int64
     /// Time spent in the recognizer so far, in seconds.
@@ -62,11 +66,13 @@ public struct SoakSample: Codable, Hashable, Sendable {
         rollovers: Int = 0,
         reseeds: Int = 0,
         firstAudioCount: Int = 0,
-        firstAudioMilliseconds: Double? = nil
+        firstAudioMilliseconds: Double? = nil,
+        heapInUseBytes: UInt64? = nil
     ) {
         self.audioSeconds = audioSeconds
         self.wallSeconds = wallSeconds
         self.footprintBytes = footprintBytes
+        self.heapInUseBytes = heapInUseBytes
         self.asrChunks = asrChunks
         self.asrSeconds = asrSeconds
         self.framesDelivered = framesDelivered

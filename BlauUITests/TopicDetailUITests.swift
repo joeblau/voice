@@ -37,10 +37,15 @@ final class TopicDetailUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
-    private func launch() -> XCUIApplication {
+    private func launch(largestText: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["BLAU_APP_ENVIRONMENT"] = "ui-test"
         app.launchArguments += ["-BlauTimelineFixture", "\(Self.topicCount)"]
+        if largestText {
+            app.launchArguments += [
+                "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
+            ]
+        }
         app.launch()
         XCTAssertTrue(
             app.descendants(matching: .any)[Identifier.timeline].waitForExistence(timeout: 30),
@@ -90,13 +95,17 @@ final class TopicDetailUITests: XCTestCase {
     }
 
     /// The latency the app measured for the latest expansion, in ms.
-    private func measuredLatency(_ app: XCUIApplication, after previous: String?) -> Double? {
+    private func measuredLatency(_ app: XCUIApplication, after previous: String?)
+        -> (value: String, milliseconds: Double)?
+    {
         let probe = element(Identifier.expandLatency, in: app)
         guard probe.waitForExistence(timeout: 5) else { return nil }
         let deadline = Date().addingTimeInterval(5)
         while Date() < deadline {
-            if let value = probe.value as? String, !value.isEmpty, value != previous {
-                return Double(value)
+            if let value = probe.value as? String, value != previous,
+                let milliseconds = value.split(separator: ":").last.flatMap({ Double($0) })
+            {
+                return (value, milliseconds)
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         }
@@ -141,6 +150,42 @@ final class TopicDetailUITests: XCTestCase {
         }
     }
 
+    /// At large text sizes each action remains reachable by scrolling and
+    /// fits the screen, even when all controls cannot fit in one viewport.
+    func testActionsRemainReachableAtTheLargestTextSize() {
+        let app = launch(largestText: true)
+        let previous = bullet(Self.previousTitle, in: app)
+        let timeline = element(Identifier.timeline, in: app)
+        for _ in 0..<8 where !previous.isHittable { timeline.swipeDown() }
+        XCTAssertTrue(previous.isHittable, "The older bullet isn't reachable")
+        expandPrevious(app)
+        let controls = [
+            app.buttons[Identifier.continueTopic].firstMatch,
+            app.buttons[Identifier.share].firstMatch,
+            app.buttons[Identifier.more].firstMatch,
+        ]
+        for control in controls {
+            XCTAssertTrue(control.waitForExistence(timeout: 5), "Missing action \(control)")
+        }
+        let window = app.windows.firstMatch.frame
+        for control in controls {
+            for _ in 0..<8 where !control.isHittable {
+                // A full-viewport swipe can pass a whole action when the
+                // pinned large-text bullet leaves a short visible area.
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
+                    .press(
+                        forDuration: 0.05,
+                        thenDragTo: app.coordinate(
+                            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)))
+            }
+            if !control.isHittable { attachScreenshot(app, "Unreachable large-text action") }
+            XCTAssertTrue(control.isHittable, "An action isn't tappable at the largest text size")
+            XCTAssertGreaterThanOrEqual(control.frame.minX, window.minX - 1)
+            XCTAssertLessThanOrEqual(control.frame.maxX, window.maxX + 1, "An action extends past the screen")
+        }
+        attachScreenshot(app, "Topic actions at the largest text size")
+    }
+
     /// Tap → expanded under 100 ms (#58), as the app measured it
     /// (`TopicExpansionTimer`, the `timeline.expand` signpost), over
     /// several expansions.
@@ -153,12 +198,12 @@ final class TopicDetailUITests: XCTestCase {
         for _ in 0..<5 {
             previous.tap()
             XCTAssertTrue(element(Identifier.detail, in: app).waitForExistence(timeout: 5), "Didn't expand")
-            guard let latency = measuredLatency(app, after: last) else {
+            guard let sample = measuredLatency(app, after: last) else {
                 XCTFail("No expansion latency was measured")
                 return
             }
-            samples.append(latency)
-            last = String(format: "%.1f", latency)
+            samples.append(sample.milliseconds)
+            last = sample.value
             previous.tap()
             XCTAssertTrue(element(Identifier.detail, in: app).waitForNonExistence(timeout: 5), "Didn't compress")
             waitUntilStill(previous, timeout: 5)

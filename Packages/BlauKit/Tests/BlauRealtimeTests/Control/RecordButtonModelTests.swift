@@ -21,24 +21,31 @@ struct RecordButtonModelTests {
             session: session, clock: clock, signposter: Signposter(category: .ui, backend: signposts))
     }
 
-    /// Runs `model.run()` for the duration of `body`.
-    private func whileRunning(_ model: RecordButtonModel, _ body: () async throws -> Void) async rethrows {
+    /// Runs `model.run()` for the duration of `body`, once it follows
+    /// `session`: muted-speech activity sent before it subscribes is never
+    /// seen, however long a loaded runner takes to start it (#180).
+    private func whileRunning(
+        _ model: RecordButtonModel, on session: FakeConversationSession, _ body: () async throws -> Void
+    ) async throws {
         let task = Task { await model.run() }
         defer { task.cancel() }
-        // Let `run()` subscribe before the test pushes anything.
-        for _ in 0..<10 { await Task.yield() }
+        try await until("run() to subscribe") { session.mutedSpeechSubscriberCount > 0 }
         try await body()
     }
 
     /// Polls `condition` on the main actor until it holds, failing after
-    /// 10 s of real time (everything runs in process, so it normally holds
-    /// within a few yields).
+    /// 10 s worth of polls (everything runs in process, so it normally holds
+    /// within a few yields). The limit counts polls, not wall time, so a
+    /// loaded runner that keeps the process off the CPU can't run it out
+    /// (#180).
     private func until(
         _ what: String, sourceLocation: SourceLocation = #_sourceLocation, _ condition: () -> Bool
     ) async throws {
-        let deadline = ContinuousClock.now + .seconds(10)
+        let interval = Duration.microseconds(200)
+        var polls = Int(Duration.seconds(10) / interval)
         while !condition() {
-            if ContinuousClock.now >= deadline {
+            polls -= 1
+            if polls < 0 {
                 Issue.record("Timed out waiting for \(what)", sourceLocation: sourceLocation)
                 throw TimedOut(description: what)
             }
@@ -124,7 +131,7 @@ struct RecordButtonModelTests {
         session.statusAfterStart = coming
         let model = makeModel(session)
 
-        try await whileRunning(model) {
+        try await whileRunning(model, on: session) {
             await model.tap()
             // Running (a tap would end it), the microphone still coming up.
             #expect(model.state == .reconnecting)
@@ -182,7 +189,7 @@ struct RecordButtonModelTests {
         let audio = FakeAudioService()
         let session = FakeConversationSession(audio: audio)
         let model = makeModel(session)
-        try await whileRunning(model) {
+        try await whileRunning(model, on: session) {
             await model.tap()
             #expect(model.state == .listening)
 
@@ -202,7 +209,7 @@ struct RecordButtonModelTests {
         }
     }
 
-    @Test func aFailedStartShowsTheErrorAndATapRetries() async {
+    @Test func aFailedStartShowsTheErrorAndATapRetries() async throws {
         let session = FakeConversationSession()
         session.startError = MicDenied()
         let model = makeModel(session)
@@ -232,7 +239,7 @@ struct RecordButtonModelTests {
         let session = FakeConversationSession(audio: audio, clock: clock, startDelay: .milliseconds(400))
         let model = makeModel(session)
 
-        await whileRunning(model) {
+        try await whileRunning(model, on: session) {
             let start = Task { await model.tap() }
             await clock.waitForSleepers()
             #expect(model.phase == .starting)
@@ -319,7 +326,7 @@ struct RecordButtonModelTests {
     @Test func talkingWhilePausedShowsTheHintUntilAfterTheyStop() async throws {
         let session = FakeConversationSession()
         let model = makeModel(session)
-        try await whileRunning(model) {
+        try await whileRunning(model, on: session) {
             await model.tap()
             await model.pauseListening()
 
@@ -337,7 +344,7 @@ struct RecordButtonModelTests {
     @Test func speakingAgainKeepsTheHintUp() async throws {
         let session = FakeConversationSession()
         let model = makeModel(session)
-        try await whileRunning(model) {
+        try await whileRunning(model, on: session) {
             await model.tap()
             await model.pauseListening()
             session.sendMutedSpeech(.started)
@@ -356,7 +363,7 @@ struct RecordButtonModelTests {
     @Test func resumingHidesTheHintAtOnce() async throws {
         let session = FakeConversationSession()
         let model = makeModel(session)
-        try await whileRunning(model) {
+        try await whileRunning(model, on: session) {
             await model.tap()
             await model.pauseListening()
             session.sendMutedSpeech(.started)
@@ -367,10 +374,10 @@ struct RecordButtonModelTests {
         }
     }
 
-    @Test func speechWhileListeningIsNotAHint() async {
+    @Test func speechWhileListeningIsNotAHint() async throws {
         let session = FakeConversationSession()
         let model = makeModel(session)
-        await whileRunning(model) {
+        try await whileRunning(model, on: session) {
             await model.tap()
             session.sendMutedSpeech(.started)
             for _ in 0..<20 { await Task.yield() }
@@ -383,7 +390,7 @@ struct RecordButtonModelTests {
     @Test func followsTheConversationsStates() async throws {
         let session = FakeConversationSession()
         let model = makeModel(session)
-        try await whileRunning(model) {
+        try await whileRunning(model, on: session) {
             await model.tap()
 
             session.update { $0.turn = .agentSpeaking }
@@ -419,7 +426,7 @@ struct RecordButtonModelTests {
     @Test func aConversationEndedElsewhereGoesIdle() async throws {
         let session = FakeConversationSession()
         let model = makeModel(session)
-        try await whileRunning(model) {
+        try await whileRunning(model, on: session) {
             await model.tap()
             session.update(.idle)
             try await until("idle") { model.phase == .idle }
@@ -431,7 +438,7 @@ struct RecordButtonModelTests {
     @Test func aConversationStartedElsewhereShowsAsRunning() async throws {
         let session = FakeConversationSession()
         let model = makeModel(session)
-        try await whileRunning(model) {
+        try await whileRunning(model, on: session) {
             session.update(.listening)
             try await until("running") { model.phase == .running }
             #expect(model.state == .listening)
@@ -455,7 +462,7 @@ struct RecordButtonModelTests {
     @Test func metersTheMicrophoneWhileListening() async throws {
         let session = FakeConversationSession()
         let model = makeModel(session)
-        try await whileRunning(model) {
+        try await whileRunning(model, on: session) {
             #expect(session.levelSubscriberCount == 0, "nothing to meter while idle")
             await model.tap()
             try await until("level subscriptions") { session.levelSubscriberCount == 2 }
@@ -477,7 +484,7 @@ struct RecordButtonModelTests {
     @Test func metersTheReplyWhileGrokSpeaks() async throws {
         let session = FakeConversationSession()
         let model = makeModel(session)
-        try await whileRunning(model) {
+        try await whileRunning(model, on: session) {
             await model.tap()
             try await until("level subscriptions") { session.levelSubscriberCount == 2 }
 
@@ -499,7 +506,7 @@ struct RecordButtonModelTests {
     @Test func aPausedMicrophoneReadsSilence() async throws {
         let session = FakeConversationSession()
         let model = makeModel(session)
-        try await whileRunning(model) {
+        try await whileRunning(model, on: session) {
             await model.tap()
             await model.pauseListening()
             try await until("level subscriptions") { session.levelSubscriberCount == 2 }
@@ -515,7 +522,7 @@ struct RecordButtonModelTests {
     @Test func stopsMeteringOffScreen() async throws {
         let session = FakeConversationSession()
         let model = makeModel(session)
-        try await whileRunning(model) {
+        try await whileRunning(model, on: session) {
             await model.tap()
             try await until("level subscriptions") { session.levelSubscriberCount == 2 }
 

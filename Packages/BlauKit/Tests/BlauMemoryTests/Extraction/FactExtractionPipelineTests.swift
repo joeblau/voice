@@ -377,7 +377,8 @@ struct FactExtractionPipelineTests {
             fixture, generator: generator, gate: IndexingGate(performance: level, clock: ManualClock()))
         let topic = try await fixture.recordTopic([(.user, "I live in Lisbon.", 1)])
         await pipeline.topicClosed(topic.topicID)
-        try await Task.sleep(for: .milliseconds(50))
+        // Held at the gate: it follows the level until the device cools.
+        try await eventually { level.subscriberCount == 1 }
         #expect(generator.requests.isEmpty)
         level.set(.normal)
         await pipeline.waitUntilIdle()

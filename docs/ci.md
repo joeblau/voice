@@ -12,18 +12,22 @@ evaluation.
 | --------------- | ---------------------------------------------------------- | ------------------- | ------- |
 | `lint`          | swift-format (`make lint`), then the shell-script tests    | `make lint test-scripts` | nothing |
 | `package-tests` | `swift build --build-tests` and `swift test` in `Packages/BlauKit` on the macOS host | `make test-kit` | Swift Testing xUnit report |
-| `app-tests`     | XcodeGen, then the `Blau` scheme's `Blau` test plan (`BlauTests` + `BlauUITests`) on an iOS Simulator | `make test` | `app-tests.xcresult` |
+| `app-unit-tests` | XcodeGen, then the `Blau` test plan's unit tests (`BlauTests`) on an iOS Simulator | `make test-unit` | `app-unit-tests-xcresult` |
+| `app-ui-tests (K/4)` | Four functional UI shards with Debug coverage, simulator warm-up, and an executed-count check ([UI-test shards](#ui-test-shards)) | `make test-ui UI_TEST_SUITE=functional UI_SHARD=K/4` | `app-ui-tests-K-xcresult` |
+| `app-ui-performance` | The existing five-sample expansion benchmark, with optimized Swift and no coverage instrumentation; the 100 ms limit is unchanged | `make test-ui UI_TEST_SUITE=performance` with the flags below | `app-ui-performance-xcresult` |
+| `app-tests`     | Requires the unit job, every functional UI shard, and the UI performance job to pass (ubuntu, seconds) | `make test` runs the same tests in one go | nothing |
 | `perf-kit`      | The BlauKit micro-benchmarks (package-benchmark) on the macOS host; fails when an allocation count (and, on a machine with performance counters, an instruction count) is more than 10% above `Packages/BlauKitBenchmarks/Thresholds` ([performance.md](performance.md#micro-benchmarks)) | `make microbench-check` | `perf-kit-results` (the check's output), 30 days; the output on the summary page |
 | `perf`          | Nightly (and on demand) only: `Blau-Perf` scheme, `BlauPerf` test plan, Release with the scripted session, then the regression gate against `BlauPerfTests/Baselines/ci-simulator.json`: 10% on memory, tolerances calibrated to the runner's run-to-run spread on time ([performance.md](performance.md#the-regression-gate)) | `make perf perf-check` | `perf-results` (`perf.xcresult`, `perf-report.md`, `perf-results.json`), 90 days; the report on the summary page |
 | `soak`          | Nightly (and on demand) only: the long-session soak test at reduced length, 20 minutes of mixed audio at 10x through the app's pipeline on the simulator against a local fake realtime server, plus the app's leaks read during and after the run; fails on any soak check or on leak growth ([soak.md](soak.md)) | `make soak SOAK_MINUTES=20` | `soak-results` (`report.json`, `report.md`, `leaks.*`, `summary.md`, `soak.xcresult`), 90 days; `summary.md` on the summary page |
 | `asr-eval`      | Nightly (and on demand) only: every ASR engine on the LFS fixtures with the real models; fails on the regression gate ([asr-eval.md](asr-eval.md#nightly-ci)) | `make eval-asr` | `asr-eval-report` (`report.json`, `report.md`, `summary.txt`), 90 days; `report.md` on the summary page |
 | `memory-eval`   | Nightly (and on demand) only: memory retrieval (and, where Apple's on-device model can run, LLM-judged answers) on the memory eval set; fails on the regression gate ([memory-eval.md](memory-eval.md#nightly-ci)) | `make eval-memory` | `memory-eval-report` (`report.json`, `report.md`, `summary.txt`), 90 days; `report.md` on the summary page |
 
-The four PR checks run in parallel, each on its own runner, so a lint failure
-does not hide a test failure. Artifacts are on the run's summary page for 14
+The PR jobs run in parallel, each on its own runner, so a lint failure does
+not hide a test failure, and a failing UI shard does not cancel the other
+shards. Artifacts are on the run's summary page for 14
 days (30 for perf), named `<job>-…-<attempt>` so a re-run never collides with
 the first attempt. Open an `.xcresult` with Xcode, or run
-`xcrun xcresulttool get test-results summary --path app-tests.xcresult`.
+`xcrun xcresulttool get test-results summary --path app-ui-tests.xcresult`.
 
 Run the perf job on demand from **Actions > CI > Run workflow** and tick
 **Also run the performance suite**; run it on a pull request's branch to check
@@ -39,8 +43,8 @@ machine; device numbers are a separate, manual table.
 ## Triggers and cancellation
 
 - `pull_request`, `push` to `main`, `merge_group` (GitHub merge queue) and
-  `workflow_dispatch` run `lint`, `package-tests`, `app-tests` and
-  `perf-kit`.
+  `workflow_dispatch` run `lint`, `package-tests`, `app-unit-tests`, the
+  four `app-ui-tests` shards, `app-ui-performance`, `app-tests` and `perf-kit`.
 - `schedule` (08:23 UTC daily, `main`) runs those plus `perf`, `soak`,
   `asr-eval` and `memory-eval`. **Run workflow** has a checkbox for each of
   the four (and a length for the soak).
@@ -74,7 +78,8 @@ leaves xcodebuild with no destination. If the model is missing, the job fails
 and lists the iPhones that are available.
 
 The simulator is **not** booted ahead of the build: xcodebuild boots it when
-testing starts, and a later step shuts it down. Booting it first starved the
+testing starts (the UI shards boot it right after the build, to warm it up;
+see [UI-test shards](#ui-test-shards)), and a later step shuts it down. Booting it first starved the
 runner; with the freshly booted simulator's background work competing,
 xcodebuild took about four minutes just to start and the job took 14 minutes
 instead of 6 to 7.5.
@@ -100,7 +105,7 @@ When GitHub promotes Xcode 27 to a general-availability `macos-27` image, set
 | Job             | Cached                                | Key                                       |
 | --------------- | ------------------------------------- | ----------------------------------------- |
 | `package-tests` | `Packages/BlauKit/.build`: clones, FluidAudio's binary artifacts and build products | Xcode build + `Package.swift` + `Package.resolved` |
-| `app-tests`, `perf`, `soak` | `.build/DerivedData/SourcePackages`: package clones and binary artifacts | Xcode build + `Package.swift` + `Package.resolved` |
+| `app-unit-tests`, `app-ui-tests`, `perf`, `soak` | `.build/DerivedData/SourcePackages`: package clones and binary artifacts | Xcode build + `Package.swift` + `Package.resolved` |
 | `perf-kit`      | `Packages/BlauKitBenchmarks/.build`: clones and build products | Xcode build + the benchmark package's `Package.swift` and `Package.resolved` + BlauKit's `Package.swift` |
 | `asr-eval`      | `Packages/BlauKit/.build` (shared with `package-tests`) and `.build/models`: the pinned Core ML models, about 700 MB | The same as `package-tests`; the models by `PinnedModelManifest.swift` |
 | `memory-eval`   | `Packages/BlauKit/.build` (shared with `package-tests`); the vectors are recorded fixtures, so nothing is downloaded | The same as `package-tests` |
@@ -119,26 +124,113 @@ is a classic source of flaky CI.
 Note that only `Packages/BlauKit/Package.resolved` is committed. The app
 target resolves the same `from:` ranges independently (the generated
 `Blau.xcodeproj` and its resolved file are never committed), so a new
-FluidAudio release inside the allowed range reaches `app-tests` before
+FluidAudio release inside the allowed range reaches the app's test jobs before
 `package-tests`. Bump the package's `Package.resolved` when that happens.
+
+## UI-test shards
+
+UI tests are most of CI's time: each one launches the app on the simulator,
+and the accessibility audits take about twice as long as the rest. In one job
+the suite outgrew its 40-minute limit (#179; push run
+[38013389852](https://github.com/joeblau/voice/actions/runs/38013389852) was
+cancelled in `SettingsUITests` after about 30 minutes of UI tests, with 38 of
+the 93 still to run). So `app-unit-tests` runs `BlauTests` alone and the
+`app-ui-tests` matrix splits the functional UI tests over four jobs, and
+`app-ui-performance` runs the existing expansion benchmark separately.
+
+[`scripts/ci/ui-test-shard.sh`](../scripts/ci/ui-test-shard.sh) lists every
+XCTest method in `BlauUITests` from the sources, sorts them by
+`Class/testMethod` and deals them out like cards: shard K of N gets every
+N-th test starting at the K-th. Dealing single tests rather than whole
+classes spreads the slow audits evenly, and a new test lands in a shard
+without anyone editing a list. `make test-ui UI_SHARD=K/N` turns the shard
+into `-only-testing:BlauUITests/<Class>/<testMethod>` arguments, so a shard's
+failure reproduces locally with the command in the job's log:
+
+```sh
+make test-ui UI_TEST_SUITE=functional UI_SHARD=2/4 DESTINATION='id=<simulator udid>'
+UI_TEST_SUITE=functional scripts/ci/ui-test-shard.sh --list 2/4
+```
+
+Nothing is dropped:
+
+- The script fails, naming the file and line, on a `func testX()` it can't
+  place in a top-level class or an extension of one, and on Swift Testing in
+  `BlauUITests` (`-only-testing` by class and method would not select it).
+- `make test-scripts` (the `lint` job) checks that the functional shards
+  plus the performance job cover every UI test, each exactly once. Selecting
+  either suite fails if the named benchmark is missing or renamed.
+- After testing, each shard runs `ui-test-shard.sh --check`, which fails
+  unless the result bundle ran exactly as many tests as the shard selected
+  (skipped and failed ones count), so a selection that matched nothing
+  cannot pass. It runs after failing tests too.
+
+To change the number of shards, edit the matrix (`shard: [1, 2, 3, 4]`); the
+jobs pass `strategy.job-total` as N. `make test` and `make test-ui` without
+`UI_SHARD` still run everything in one go.
+
+Functional UI and unit jobs retain their normal Debug builds and coverage.
+The timing benchmark uses `SWIFT_OPTIMIZATION_LEVEL=-O`, whole-module
+compilation, and `-enableCodeCoverage NO` for both prebuild and testing.
+It keeps Debug fixture hooks so the same hermetic XCTest runs; its five
+samples and 100 ms assertion are unchanged. This follows Apple's guidance
+to measure optimized code with coverage disabled, since instrumentation
+does not represent shipping performance:
+[Writing and running performance tests](https://developer.apple.com/documentation/xcode/writing-and-running-performance-tests).
+To reproduce the benchmark locally:
+
+```sh
+make test-ui UI_TEST_SUITE=performance DESTINATION='id=<simulator udid>' \
+  XCODEBUILD_FLAGS='SWIFT_OPTIMIZATION_LEVEL=-O SWIFT_COMPILATION_MODE=wholemodule -enableCodeCoverage NO -collect-test-diagnostics never'
+```
+
+There are 93 functional UI tests and one timing benchmark. Functional
+expansion, sharing, editing, large-text and anchoring tests retain coverage
+of those paths; the benchmark measures them without adding instrumentation.
+The required `app-tests` gate also requires `app-ui-performance`, so moving
+the benchmark cannot let a failed or unexecuted timing test pass the gate.
+
+Two things the single job got for free need doing in each shard:
+
+- **A warm simulator.** On a cold runner simulator the app's first launch
+  outlasted XCUITest's launch timeout ("Timed out while launching
+  application"), failing the first test of two of the three shards of the
+  first sharded run (38018073024). In one job the app-hosted unit tests had absorbed that.
+  So each shard builds first (`make build-tests`), then
+  [`scripts/ci/warm-simulator.sh`](../scripts/ci/warm-simulator.sh) boots the
+  device, waits for it, and installs and launches the app once with the UI
+  tests' fake services before `make test-ui` (whose build is then a no-op).
+  Booting only after the build keeps the boot from starving the build (see
+  [Runner and Xcode](#runner-and-xcode)).
+- **No test diagnostics.** The app test jobs pass
+  `-collect-test-diagnostics never`. Otherwise, at the end of a session with
+  a failure (or even without one, after the unit tests), xcodebuild ran
+  `simctl diagnose` for its full 600-second timeout and collected nothing:
+  ten minutes of every job. Failures, logs and screenshots are in the
+  `.xcresult` either way.
 
 ## Runtime
 
-The budget is under 15 minutes per run with a warm cache. The jobs run in
-parallel, so a run takes as long as `app-tests`. Measured on the pull request
-that added CI (#15), `xcode-27` image, Xcode 27.1, warm cache:
+The jobs run in parallel, so a run takes as long as its slowest job when
+enough runners are free; when they aren't, jobs queue, which can take longer
+than the jobs. Measured on the pull request for #179 (runs 38018073024 and
+38021860678), `xcode-27` image, Xcode 27.1, warm cache:
 
 | Job             | Duration | Where the time goes |
 | --------------- | -------- | ------------------- |
-| `lint`          | ~15 s    | swift-format, script tests |
-| `package-tests` | 1 to 1.7 min | cache restore (~580 MB), build, about 5 s of tests |
-| `app-tests`     | 6 to 7.5 min | ~40 s build; then 4.5 to 6 min of testing, mostly booting the simulator and launching the UI-test runner |
+| `lint`          | ~1 min   | swift-format, script tests |
+| `package-tests` | 6 to 8 min | cache restore (~580 MB), build (up to 4.5 min), up to 2 min of tests |
+| `app-unit-tests` | about 9 min | 2.5 min build; booting the simulator, then 306 unit tests in about 4 min |
+| `app-ui-tests` (each, three shards) | 24 to 36 min | 4 to 8 min build, 3 to 8 min booting and warming the simulator, then 14 to 21 min of UI tests |
 
-Booting the simulator and UI testing dominate. They grow with the number of UI
-tests, not with the code. If `app-tests` approaches the budget, move UI tests
-into their own job before reaching for a larger runner. Each job's
-`timeout-minutes` (15 to 40, 60 for `asr-eval`, 75 for `soak`, 90 for `perf`) is a safety
-net for a hung simulator, not the budget.
+The UI tests take 45 to 55 minutes in a row on the runner, and grow with the
+number of UI tests, not with the code. Four shards bring each job to about
+half its limit. When the shards approach their limit, add a shard before
+reaching for a larger runner. Each job's `timeout-minutes` (15 to 60, 75 for
+`soak`, 90 for `perf`) is a safety net for a hung simulator, not the budget:
+`app-unit-tests` and `app-ui-performance` have 30 minutes; each functional
+`app-ui-tests` shard has 60, about twice what
+they take on a busy runner.
 
 ## Secrets
 
@@ -163,6 +255,13 @@ To block merging on red CI, add `lint`, `package-tests`, `app-tests` and
 `perf-kit` as required status checks for `main` under **Settings > Branches**
 (or a ruleset). That is a repository setting, not part of the workflow.
 
+`app-tests` stands for all of the app's tests: it needs `app-unit-tests`,
+every `app-ui-tests` shard, and `app-ui-performance`, and fails unless all passed, so the
+required checks don't change when the number of shards does. It runs even
+when they fail or are cancelled (`if: always()`), because GitHub counts a
+skipped required check as passing. Don't require the shards' own checks:
+their names include the shard count.
+
 ## Changing the workflow
 
 - Pin every action to a full commit SHA with the version in a comment
@@ -171,3 +270,28 @@ To block merging on red CI, add `lint`, `package-tests`, `app-tests` and
   (`brew install actionlint`) and the scripts with `shellcheck`.
 - Keep the jobs calling `make` targets so a failure reproduces locally with
   the same command.
+
+## UI assertions on iOS 27
+
+Selectable transcript text can report an accessibility frame at the screen
+edge even when its rendered SwiftUI frame keeps the 16-point margin. Debug
+builds launched in the `ui-test` environment with `-BlauChatGeometry` expose
+each row's actual frame
+through a one-point accessibility probe (`<row identifier>.geometry`).
+Only the geometry suites opt in; accessibility audits and long-history
+paging run without diagnostic elements. Alignment, width, and header-overlap
+assertions read these frames, retaining
+the original bounds. The probe is absent from production builds and other
+launch environments.
+
+Asynchronous state changes are awaited before assertions: debug-menu toggle
+values, the model setup inset leaving, and onboarding's next visible step.
+Resuming permissions can proceed directly to iCloud when models are already
+ready. Timeline title refinement is triggered after reaching history rather
+than by a timer measured from launch.
+
+Performance and soak jobs use the same cold-launch mitigation: build their
+Release test bundles with `make build-perf-tests`, warm that app on the
+selected simulator, then run the existing suites with test diagnostics
+disabled. A failed soak launch is a harness failure, not memory-growth
+evidence. No performance or soak checks are removed.

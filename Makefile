@@ -8,12 +8,17 @@
 #   DERIVED_DATA       DerivedData location (kept inside the repo)
 #   XCODEBUILD_FLAGS   Extra xcodebuild arguments, e.g. CI's
 #                      XCODEBUILD_FLAGS='-resultBundlePath .build/results/app.xcresult'
+#   UI_SHARD           K/N: `make test-ui` runs only the K-th of N slices of
+#                      the UI tests (scripts/ci/ui-test-shard.sh), as CI does
+#   UI_TEST_SUITE      all (default), functional, or performance
 
 PROJECT           := Blau.xcodeproj
 DERIVED_DATA      ?= .build/DerivedData
 DESTINATION       ?= platform=iOS Simulator,name=iPhone 17,OS=latest
 BUILD_DESTINATION ?= generic/platform=iOS Simulator
 XCODEBUILD_FLAGS  ?=
+UI_SHARD          ?=
+UI_TEST_SUITE     ?= all
 
 XCODEGEN   ?= xcodegen
 XCODEBUILD := xcodebuild -project $(PROJECT) -derivedDataPath $(DERIVED_DATA) $(XCODEBUILD_FLAGS)
@@ -43,13 +48,28 @@ build: generate ## Build the app for the iOS Simulator (Debug)
 test: generate ## Run unit + UI tests (Blau scheme, Blau test plan, coverage on)
 	$(XCODEBUILD) test -scheme Blau -testPlan Blau -destination '$(DESTINATION)' $(SIM_FLAGS)
 
+.PHONY: build-tests
+build-tests: generate ## Build the app and the Blau test plan's test bundles for DESTINATION without testing
+	$(XCODEBUILD) build-for-testing -scheme Blau -testPlan Blau -destination '$(DESTINATION)' $(SIM_FLAGS)
+
 .PHONY: test-unit
 test-unit: generate ## Run only the unit tests
 	$(XCODEBUILD) test -scheme Blau -testPlan Blau -only-testing:BlauTests -destination '$(DESTINATION)' $(SIM_FLAGS)
 
+# With UI_SHARD=K/N, only the K-th of N slices of BlauUITests: CI runs the N
+# slices as parallel jobs (docs/ci.md). The selection is computed first so a
+# failure stops here instead of running the whole test plan.
 .PHONY: test-ui
-test-ui: generate ## Run only the UI tests
-	$(XCODEBUILD) test -scheme Blau -testPlan Blau -only-testing:BlauUITests -destination '$(DESTINATION)' $(SIM_FLAGS)
+test-ui: generate ## Run only the UI tests (UI_SHARD=K/N: one of N slices, as CI)
+	@set -e; \
+	if [ -n '$(UI_SHARD)' ] || [ '$(UI_TEST_SUITE)' != all ]; then \
+		selection=$$(UI_TEST_SUITE='$(UI_TEST_SUITE)' scripts/ci/ui-test-shard.sh '$(or $(UI_SHARD),1/1)'); \
+		echo "UI tests ($(UI_TEST_SUITE)), shard $(or $(UI_SHARD),1/1): $$(echo "$$selection" | wc -l | tr -d ' ') tests"; \
+	else \
+		selection=-only-testing:BlauUITests; \
+	fi; \
+	set -x; \
+	$(XCODEBUILD) test -scheme Blau -testPlan Blau $$selection -destination '$(DESTINATION)' $(SIM_FLAGS)
 
 .PHONY: test-kit
 test-kit: ## Run the BlauKit package tests on the macOS host
@@ -66,6 +86,11 @@ PERF_BASELINE ?= ci-simulator
 PERF_REPORT   ?= .build/results/perf-report.md
 PERF_RESULTS  ?= .build/results/perf-results.json
 PERF_FLAGS    := 'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$$(inherited) BLAU_PERF' ONLY_ACTIVE_ARCH=YES
+
+.PHONY: build-perf-tests
+build-perf-tests: generate ## Build the Release app and performance/soak test bundles before booting a simulator
+	$(XCODEBUILD) build-for-testing -scheme Blau-Perf -testPlan BlauPerf -destination '$(DESTINATION)' \
+		$(SIM_FLAGS) $(PERF_FLAGS) XAI_DEV_API_KEY=
 
 .PHONY: perf
 perf: generate ## Run performance tests (Blau-Perf scheme, Release + BLAU_PERF) into PERF_RESULT

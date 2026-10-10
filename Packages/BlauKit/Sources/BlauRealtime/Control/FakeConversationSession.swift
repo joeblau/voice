@@ -106,6 +106,10 @@ public final class FakeConversationSession: ConversationSession {
     /// model only meters while it should.
     public var levelSubscriberCount: Int { inputSubscribers.count + outputSubscribers.count }
 
+    /// Live muted-speech subscriptions, for tests that push activity only
+    /// once something follows it.
+    public var mutedSpeechSubscriberCount: Int { mutedSpeechSubscribers.count }
+
     // MARK: ConversationSession
 
     public func statusUpdates() -> AsyncStream<ConversationStatus> {

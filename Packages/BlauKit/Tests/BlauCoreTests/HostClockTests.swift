@@ -6,14 +6,24 @@ import Testing
 @Suite("Host clock")
 struct HostClockTests {
     @Test func ticksConvertAtTheMachineTimebase() {
-        // A second of ContinuousClock time is a second of host time.
+        // A second of ContinuousClock time is a second of host time. The
+        // host readings are bracketed by ContinuousClock readings on both
+        // sides, so the comparison holds however long the thread is
+        // preempted between two reads (#180).
+        let outerStart = ContinuousClock.now
         let start = HostClock.now
-        let wall = ContinuousClock.now
-        while ContinuousClock.now - wall < .milliseconds(30) {}
-        let measured = HostClock.elapsed(since: start)
-        let reference = ContinuousClock.now - wall
+        let innerStart = ContinuousClock.now
+        while ContinuousClock.now - innerStart < .milliseconds(30) {}
+        let innerEnd = ContinuousClock.now
+        let end = HostClock.now
+        let outerEnd = ContinuousClock.now
+
+        let measured = HostClock.elapsed(since: start, now: end)
+        // Tick conversion rounds down to whole nanoseconds.
+        let rounding = Duration.microseconds(1)
         #expect(measured >= .milliseconds(30))
-        #expect(abs((measured - reference).milliseconds) < 5)
+        #expect(measured + rounding >= innerEnd - innerStart)
+        #expect(measured <= outerEnd - outerStart + rounding)
     }
 
     @Test func aHostTimeInTheFutureIsZeroAgo() {

@@ -458,13 +458,33 @@ final class FixtureAudioSource: CaptureFrameSource {
 
 /// VAD events from a list, for `start()` tests.
 final class ScriptedVoiceActivity: VoiceActivitySource {
-    private let state = Mutex<[AsyncStream<VoiceActivityEvent>.Continuation]>([])
+    private struct State {
+        var subscribers: [AsyncStream<VoiceActivityEvent>.Continuation] = []
+        var delivered = 0
+    }
+
+    /// Lets the `@Sendable` unfolding closure own a stream iterator.
+    private final class Iterator: @unchecked Sendable {
+        var base: AsyncStream<VoiceActivityEvent>.Iterator
+        init(_ base: AsyncStream<VoiceActivityEvent>.Iterator) { self.base = base }
+    }
+
+    private let state = Mutex(State())
 
     func events() -> AsyncStream<VoiceActivityEvent> {
         let (stream, continuation) = AsyncStream.makeStream(of: VoiceActivityEvent.self)
-        state.withLock { $0.append(continuation) }
-        return stream
+        state.withLock { $0.subscribers.append(continuation) }
+        let iterator = Iterator(stream.makeAsyncIterator())
+        return AsyncStream { [self] in
+            let event = await iterator.base.next()
+            if event != nil { state.withLock { $0.delivered += 1 } }
+            return event
+        }
     }
+
+    /// How many events subscribers have taken off their streams: a test
+    /// waits for it instead of hoping a pause was long enough (#180).
+    var deliveredCount: Int { state.withLock { $0.delivered } }
 
     func speechAudio() -> AsyncStream<SpeechAudioEvent> {
         AsyncStream { $0.finish() }
@@ -472,10 +492,10 @@ final class ScriptedVoiceActivity: VoiceActivitySource {
 
     var isSpeechActive: Bool { false }
 
-    var subscriberCount: Int { state.withLock { $0.count } }
+    var subscriberCount: Int { state.withLock { $0.subscribers.count } }
 
     func send(_ event: VoiceActivityEvent) {
-        for continuation in state.withLock({ $0 }) {
+        for continuation in state.withLock({ $0.subscribers }) {
             continuation.yield(event)
         }
     }

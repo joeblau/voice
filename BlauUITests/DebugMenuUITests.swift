@@ -45,6 +45,12 @@ final class DebugMenuUITests: XCTestCase {
         toggle.value as? String
     }
 
+    private func waitForValue(_ expected: String, of toggle: XCUIElement) {
+        let changed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", expected), object: toggle)
+        XCTAssertEqual(XCTWaiter().wait(for: [changed], timeout: 10), .completed)
+    }
+
     func testEveryFlagIsListedAtItsDefault() {
         let app = launch()
         openDebugMenu(app)
@@ -65,11 +71,11 @@ final class DebugMenuUITests: XCTestCase {
         let perfHUD = flagSwitch(app, "perfHUD")
         XCTAssertEqual(value(perfHUD), "0")
         flip(perfHUD)
-        XCTAssertEqual(value(perfHUD), "1")
+        waitForValue("1", of: perfHUD)
 
         let memoryTools = flagSwitch(app, "memoryTools")
         flip(memoryTools)
-        XCTAssertEqual(value(memoryTools), "0")
+        waitForValue("0", of: memoryTools)
 
         // Overrides outlive the sheet.
         app.buttons["blau.debugMenu.done"].tap()
@@ -80,8 +86,8 @@ final class DebugMenuUITests: XCTestCase {
         let reset = app.buttons["blau.debugMenu.resetFlags"]
         if !reset.isHittable { app.swipeUp() }
         reset.tap()
-        XCTAssertEqual(value(flagSwitch(app, "perfHUD")), "0")
-        XCTAssertEqual(value(flagSwitch(app, "memoryTools")), "1")
+        waitForValue("0", of: flagSwitch(app, "perfHUD"))
+        waitForValue("1", of: flagSwitch(app, "memoryTools"))
     }
 
     func testLaunchArgumentOverridesAFlag() {

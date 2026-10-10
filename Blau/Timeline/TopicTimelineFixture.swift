@@ -22,6 +22,17 @@ enum TopicTimelineFixture {
     static let launchArgument = "BlauTimelineFixture"
     /// The launch argument holding the delay before titles are refined.
     static let relabelArgument = "BlauTimelineRelabelAfter"
+    /// A UI test can refine titles after it has reached and measured the
+    /// history, rather than racing a timer counted from app launch.
+    static let relabelOnDemandArgument = "BlauTimelineRelabelOnDemand"
+    static let relabelButtonIdentifier = "blau.timeline.fixture.refineTitles"
+
+    @MainActor
+    static func offersRelabelControl(in environment: AppEnvironment, defaults: UserDefaults = .standard) -> Bool {
+        guard environment.kind == .uiTest else { return false }
+        let arguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
+        return (arguments[relabelOnDemandArgument] as? String) == "YES"
+    }
     /// The launch argument holding the topic count of a long history.
     static let historyArgument = "BlauTimelineHistory"
     /// Topics per conversation in a long history.

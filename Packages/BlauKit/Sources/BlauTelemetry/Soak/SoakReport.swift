@@ -131,9 +131,10 @@ public struct SoakReport: Codable, Hashable, Sendable {
         lines.append("<details><summary>Samples</summary>")
         lines.append("")
         lines.append(
-            "| Audio | Wall | Footprint | ASR chunks | ms/chunk | First audio | Dropped | Utterances | Replies | Topics | Renewed |"
+            "| Audio | Wall | Footprint | Heap | ASR chunks | ms/chunk | First audio | Dropped | Utterances | Replies "
+                + "| Topics | Renewed |"
         )
-        lines.append("| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+        lines.append("| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
         var previous: SoakSample?
         for sample in samples {
             let chunks = sample.asrChunks - (previous?.asrChunks ?? 0)
@@ -143,8 +144,9 @@ public struct SoakReport: Codable, Hashable, Sendable {
                 : "–"
             let firstAudio = sample.firstAudioMilliseconds.map { SoakAnalysis.milliseconds($0) } ?? "–"
             let footprint = sample.footprintBytes.map { SoakAnalysis.megabytes($0) } ?? "–"
+            let heap = sample.heapInUseBytes.map { SoakAnalysis.megabytes($0) } ?? "–"
             lines.append(
-                "| \(Self.minutes(sample.audioSeconds)) | \(Self.minutes(sample.wallSeconds)) | \(footprint) | "
+                "| \(Self.minutes(sample.audioSeconds)) | \(Self.minutes(sample.wallSeconds)) | \(footprint) | \(heap) | "
                     + "\(sample.asrChunks) | \(perChunk) | \(firstAudio) | \(sample.framesDropped) | "
                     + "\(sample.userUtterances) | \(sample.agentReplies) | \(sample.topicBoundaries) | \(sample.rollovers) |"
             )

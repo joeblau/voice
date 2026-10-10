@@ -448,10 +448,12 @@ struct RealtimeClientKeepAliveTests {
         let socket = try await harness.connector.socket(0)
 
         for expected in 1...3 {
-            // Let the previous ping's pong-timeout race finish, so the only
-            // sleeper left is the keepalive interval.
-            try await harness.settle()
-            await harness.clock.waitForSleepers()
+            // Wait until the only timer is the next keepalive interval: the
+            // previous ping's 10 s pong timeout is gone (the client waits for
+            // it to stop before sleeping again). Moving the clock while that
+            // timeout is still the sleeper would skip the interval.
+            let clock = harness.clock
+            try await waitUntil("next ping scheduled") { clock.sleeperDeadlines == [clock.uptime + .seconds(15)] }
             harness.clock.advance(by: .seconds(15))
             try await waitUntil("ping \(expected)") { socket.pings == expected }
         }

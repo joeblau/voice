@@ -134,8 +134,24 @@ public enum SoakAnalysis {
     /// pair of samples), which a few transient spikes don't move. `nil`
     /// with fewer than three readings.
     public static func memorySlope(_ samples: [SoakSample], warmUpFraction: Double) -> Double? {
+        slope(of: \.footprintBytes, in: samples, warmUpFraction: warmUpFraction)
+    }
+
+    /// The same estimate for the live malloc heap (`heapInUseBytes`): flat
+    /// while the footprint climbs means the allocator kept freed memory
+    /// rather than the app holding more (#183). `nil` with fewer than three
+    /// readings.
+    public static func heapSlope(_ samples: [SoakSample], warmUpFraction: Double) -> Double? {
+        slope(of: \.heapInUseBytes, in: samples, warmUpFraction: warmUpFraction)
+    }
+
+    /// The Theil–Sen growth of a byte count in MB per hour of audio after
+    /// the warm-up.
+    private static func slope(
+        of bytes: KeyPath<SoakSample, UInt64?>, in samples: [SoakSample], warmUpFraction: Double
+    ) -> Double? {
         let points = steadyState(samples, warmUpFraction: warmUpFraction).compactMap { sample in
-            sample.footprintBytes.map { (hours: sample.audioSeconds / 3_600, megabytes: Double($0) / 1_048_576) }
+            sample[keyPath: bytes].map { (hours: sample.audioSeconds / 3_600, megabytes: Double($0) / 1_048_576) }
         }
         guard points.count >= 3 else { return nil }
         var slopes: [Double] = []
@@ -192,9 +208,19 @@ public enum SoakAnalysis {
         let span = readings.first.flatMap { first in
             readings.last.map { "\(megabytes(first)) → \(megabytes($0)), peak \(megabytes(readings.max() ?? $0))" }
         }
+        // The live heap beside it, for telling memory the app holds from
+        // memory the allocator kept. Informational: only the footprint is
+        // judged.
+        let heap = samples.compactMap(\.heapInUseBytes)
+        let heapSpan = heapSlope(samples, warmUpFraction: thresholds.warmUpFraction).flatMap { heapSlope in
+            heap.first.flatMap { first in
+                heap.last.map { "live heap \(signed(heapSlope)) MB/h, \(megabytes(first)) → \(megabytes($0))" }
+            }
+        }
+        let detail = [span, heapSpan].compactMap { $0 }.joined(separator: "; ")
         return SoakCheck(
             name: "memory.slope", passed: slope <= thresholds.maximumMemorySlopeMegabytesPerHour,
-            measured: "\(signed(slope)) MB/h", limit: limit, detail: span)
+            measured: "\(signed(slope)) MB/h", limit: limit, detail: detail.isEmpty ? nil : detail)
     }
 
     static func asrLatencyCheck(_ samples: [SoakSample], _ thresholds: SoakThresholds) -> SoakCheck {

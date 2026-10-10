@@ -69,11 +69,18 @@ struct SignpostLatencyTapTests {
         let base = RecordingSignpostBackend()
         let signposter = Signposter(category: .asr, backend: TappedSignpostBackend(base: base, tap: tap))
 
+        // Each interval is bracketed on the tap's own clock: what it records
+        // can't exceed the bracket, however long a loaded machine keeps the
+        // test off the CPU (#180).
+        var started = SignpostLatencyTap.now()
         signposter.withInterval(.asrChunk) { busyWait(milliseconds: 4) }
+        let chunkSpan = Self.milliseconds(since: started)
         try await signposter.withInterval(.vadChunk) { try await Task.sleep(for: .milliseconds(3)) }
+        started = SignpostLatencyTap.now()
         let manual = signposter.beginInterval(.asrEndOfUtterance)
         busyWait(milliseconds: 2)
         manual.end(message: "eou")
+        let eouSpan = Self.milliseconds(since: started)
         // Ad-hoc names reach Instruments but not the HUD.
         signposter.withInterval("asr.debugThing") { busyWait(milliseconds: 1) }
 
@@ -83,11 +90,16 @@ struct SignpostLatencyTapTests {
 
         let chunk = try #require(tap.stats(for: .asrChunk))
         #expect(chunk.totalCount == 1)
-        #expect(chunk.last >= 4 && chunk.last < 50)
+        #expect(chunk.last >= 4 && chunk.last <= chunkSpan)
         let vad = try #require(tap.stats(for: .vadChunk))
         #expect(vad.last >= 3)
         let eou = try #require(tap.stats(for: .asrEndOfUtterance))
-        #expect(eou.last >= 2 && eou.last < 50)
+        #expect(eou.last >= 2 && eou.last <= eouSpan)
+    }
+
+    /// Milliseconds on the tap's clock since `start`.
+    private static func milliseconds(since start: UInt64) -> Double {
+        Double(SignpostLatencyTap.now() - start) / 1_000_000
     }
 
     @Test func overlappingIntervalsAreTimedSeparately() throws {

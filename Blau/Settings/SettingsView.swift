@@ -189,9 +189,9 @@ private struct SettingsPaneRow: View {
         LabeledContent {
             if let summary {
                 Text(summary)
-                    // The list's own gray is under 4.5:1 on the grouped
-                    // cells (#81).
-                    .foregroundStyle(Color.brand(.secondaryText))
+                    // LabeledContent can further dim its value in grouped
+                    // cells. Keep summaries legible at accessibility sizes.
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
             }
         } label: {

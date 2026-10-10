@@ -1,6 +1,7 @@
 import BlauCore
 import Foundation
 import Synchronization
+import Testing
 
 @testable import BlauVoiceID
 
@@ -146,5 +147,32 @@ extension VerificationGate {
         for event in events {
             await handle(event)
         }
+    }
+}
+
+struct WaitTimedOut: Error {}
+
+/// Polls `condition` every millisecond until it holds. The work under test
+/// runs in process on a `ManualClock`, so this normally returns within a
+/// few polls. The limit, `timeout` worth of polls, only stops a broken test
+/// from hanging: it counts this wait's own polls rather than wall time, so
+/// a runner that keeps the test process off the CPU can't run it out
+/// (#180). On timeout it records an issue at the caller and throws
+/// `WaitTimedOut`.
+func waitUntil(
+    timeout: Duration = .seconds(10),
+    sourceLocation: SourceLocation = #_sourceLocation,
+    _ condition: () async -> Bool
+) async throws {
+    let interval = Duration.milliseconds(1)
+    var polls = Int(timeout / interval)
+    while !(await condition()) {
+        guard polls > 0 else {
+            Issue.record("Timed out", sourceLocation: sourceLocation)
+            throw WaitTimedOut()
+        }
+        polls -= 1
+        await Task.yield()
+        try await Task.sleep(for: interval)
     }
 }

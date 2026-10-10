@@ -706,6 +706,41 @@ commit plus docs) landed on a slow host and passed every metric: launch
 7.54 s (+62%) and 7.15 s (+48%), session CPU time 4.47 s (+40%), clock time
 +0.2%, the scroll +0.0%, and memory 30.9 MB (-19%, the host's lower mode).
 
+### Regression investigation (#182, 2026-10-10)
+
+The local comparison uses baseline code `3ff7ca7` (the commit that checked
+in the pooled CI baseline) and the optimized main-based branch at
+`5644348`, on the same iPhone 17 / iOS 27.0 simulator and Xcode 27.2 beta.
+The launch, HUD, and replay test implementations at `3ff7ca7` match the
+baseline-recording commit `c7f2472`; only the scroll test changed between
+those commits. Both worktrees were clean for these measurements. The
+numbers below are XCTest iteration means, not new CI baseline values.
+
+| Paired measurement | Baseline code | Optimized code | Interpretation |
+| --- | ---: | ---: | --- |
+| Replay-only CPU | 2.530 s | 2.492 s | −1.5% |
+| Replay-only retired instructions | 10.882 billion | 10.563 billion | −2.9% |
+| Full-suite replay CPU | 3.516 s | 3.710 s | +5.5%, within the existing tolerance |
+| Full-suite replay retired instructions | 10.762 billion | 10.800 billion | +0.4%, comparable work despite CPU-time variation |
+| Full-suite HUD-shown CPU, 10 s | 0.072 s | 0.027 s | Less work after suppressing unchanged compact-row writes |
+| Full-suite HUD-shown retired instructions | 63.084 million | 41.297 million | −34.5% |
+| Fixture cold launch, paired run | 2.526 s | 2.560 s | +1.3% |
+
+The fixes avoid rebuilding the main screen for every model-download tick
+and avoid publishing equal compact HUD rows on each sample. Unit tests
+check that only changed setup phases and compact rows publish updates.
+The separate head HUD runs before the compact-row optimization measured
+0.067–0.084 s and 61.650–74.655 million instructions, showing the original
+10-second sampling window's phase variation as well as the optimization.
+
+CI run 38028426127 had no cold-launch metric because that test failed to
+terminate the app, not because the metric identifier changed. Its HUD CPU
+(+57.3%) and replay CPU (+64.7%) failed the existing limits. Local paired
+runs show an actual HUD improvement and no comparable replay-work
+increase; they do not prove a CI host is fast enough to meet its CPU gate.
+The baseline and tolerances remain unchanged. A new workflow dispatch in
+check mode is required to verify CI performance after startup warm-up.
+
 **On device: pending.** The session on an iPhone with Parakeet needs a
 physical device with the models downloaded and a development-signed build
 (`make perf` builds unsigned for the simulator; run the same `xcodebuild
@@ -1132,6 +1167,20 @@ a core on its own. The HUD therefore measures the frame rate for one second
 in every three (`frameRateDutyCycle`) and keeps the last reading on screen
 in between; a hitch while the link sleeps doesn't show in the FPS row (it
 does show in Instruments' Hangs and in MetricKit).
+
+The other half is SwiftUI updating the panel, so the controller only writes
+what the panel reads when it changed (#182): the compact rows and the
+border's level separately from the full readout the expanded panel shows.
+Observation reports every write to SwiftUI, equal or not, so without the
+comparison each sample re-rendered the panel; now a sample that changes
+nothing on screen, or only an expanded-only row such as "HUD cost", costs
+just the sample. `PerformanceHUDTests.onlySamplesThatChangeTheCompactRowsUpdateThem`
+covers it.
+
+A 10 s measurement window holds three or four of the display link's
+measured seconds, depending on where it starts in the three-second cycle,
+so the HUD-shown CPU time of one iteration moves by about a quarter for
+that reason alone, even in instructions retired.
 
 The "HUD cost" row shows the sampler's and the display link's CPU time live.
 `PerformanceHUDOverheadTests` (`make perf`) measures the whole app's CPU time

@@ -573,6 +573,10 @@ extension TurnOrchestrator {
     /// Starts the clocks of a new server session: a client secret just
     /// before ``SessionContinuityConfiguration/rolloverAfter``, the renewal
     /// at it, and the deadline.
+    ///
+    /// Each timer sleeps until its moment counted from ``sessionStartedAt``
+    /// (`sleep(until:)`), not for a duration measured when its task gets to
+    /// run, so a task that starts late still fires on time.
     private func scheduleSessionTimers() {
         rolloverTask?.cancel()
         rolloverDeadlineTask?.cancel()
@@ -583,14 +587,14 @@ extension TurnOrchestrator {
         let continuity = configuration.continuity
         guard let after = continuity.rolloverAfter, let start = sessionStartedAt else { return }
         let clock = clock
-        let now = clock.uptime
         let client = client
         let refreshAt = start + max(.zero, after - continuity.tokenRefreshLead)
+        let dueAt = start + after
         let deadlineAt = start + max(after, continuity.rolloverDeadline)
 
         tokenRefreshTask = Task {
             do {
-                try await clock.sleep(for: max(.zero, refreshAt - now))
+                try await clock.sleep(until: refreshAt)
             } catch {
                 return
             }
@@ -599,7 +603,7 @@ extension TurnOrchestrator {
         }
         rolloverTask = Task { [weak self] in
             do {
-                try await clock.sleep(for: max(.zero, start + after - now))
+                try await clock.sleep(until: dueAt)
             } catch {
                 return
             }
@@ -607,7 +611,7 @@ extension TurnOrchestrator {
         }
         rolloverDeadlineTask = Task { [weak self] in
             do {
-                try await clock.sleep(for: max(.zero, deadlineAt - now))
+                try await clock.sleep(until: deadlineAt)
             } catch {
                 return
             }
