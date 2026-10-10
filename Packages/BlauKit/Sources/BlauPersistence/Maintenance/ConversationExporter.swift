@@ -34,12 +34,17 @@ public struct ConversationExporter: Sendable {
             public var startedAt: Date
             /// The topic's title, when the utterance has a topic.
             public var topic: String?
+            /// A reply the user cut short (#160): `text` is what was heard.
+            public var isInterrupted: Bool
 
-            public init(role: UtteranceRole, text: String, startedAt: Date, topic: String? = nil) {
+            public init(
+                role: UtteranceRole, text: String, startedAt: Date, topic: String? = nil, isInterrupted: Bool = false
+            ) {
                 self.role = role
                 self.text = text
                 self.startedAt = startedAt
                 self.topic = topic
+                self.isInterrupted = isInterrupted
             }
         }
 
@@ -78,7 +83,8 @@ public struct ConversationExporter: Sendable {
                         role: UtteranceRole(rawValue: utterance.roleRaw) ?? .system,
                         text: utterance.text,
                         startedAt: utterance.startedAt,
-                        topic: utterance.topic?.title)
+                        topic: utterance.topic?.title,
+                        isInterrupted: utterance.isInterrupted)
                 })
         }
     }
@@ -99,7 +105,8 @@ public struct ConversationExporter: Sendable {
                     output += "\n### \(Self.escapeHeading(topic))\n"
                     currentTopic = topic
                 }
-                output += "\n**\(Self.speaker(line.role)):** \(text)\n"
+                let marker = line.isInterrupted ? ConversationMarkdownRenderer.interruptedMarker : ""
+                output += "\n**\(Self.speaker(line.role)):** \(text)\(marker)\n"
             }
         }
         return output

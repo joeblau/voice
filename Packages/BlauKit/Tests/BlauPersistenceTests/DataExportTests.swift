@@ -74,7 +74,8 @@ struct DataExportTests {
         let export = try DataExport.snapshot(in: context, exportedAt: exportedAt, app: "Blau 1.0 (1)")
 
         #expect(export.format == DataExport.formatIdentifier)
-        #expect(export.schemaVersion == "2.0.0")
+        #expect(export.schemaVersion == "3.0.0")
+        #expect(export.conversations.first?.utterances.allSatisfy { $0.endReason == nil } == true)
         #expect(export.app == "Blau 1.0 (1)")
         let conversation = try #require(export.conversations.first)
         #expect(conversation.title == "Interview prep")
@@ -168,6 +169,33 @@ struct DataExportTests {
         #expect(markdown.contains("\n### Fundraising\n"))
         #expect(markdown.contains("\n**Grok:** Start bottom-up.\n"))
         #expect(!markdown.contains("still talk"))
+    }
+
+    /// A reply the user cut short (#160) keeps its stored reason in the JSON
+    /// and its marker in the Markdown; a store without one leaves the key
+    /// out, so older readers see no change.
+    @Test func anInterruptedReplyIsExportedWithItsEndReason() throws {
+        try seed()
+        let reply = try #require(
+            try context.fetch(FetchDescriptor<StoredUtterance>()).first { $0.text == "Start bottom-up." })
+        reply.endReason = .bargedIn
+        try context.save()
+
+        let export = try DataExport.snapshot(in: context, exportedAt: exportedAt)
+        let utterances = try #require(export.conversations.first?.utterances)
+        #expect(utterances.map(\.endReason) == [nil, "bargedin", nil])
+        let data = try exporter.json(export)
+        #expect(try DataExporter.decode(data) == export)
+        let text = String(decoding: data, as: UTF8.self)
+        #expect(text.components(separatedBy: "\"endReason\"").count == 2)
+        #expect(text.contains("\"endReason\" : \"bargedin\""))
+
+        let markdown = exporter.conversationsMarkdown(export)
+        #expect(markdown.contains("\n**Grok:** Start bottom-up. — *interrupted*\n"))
+        #expect(markdown.contains("\n**You:** How big is the market?\n"))
+        let direct = ConversationExporter(locale: exporter.locale, timeZone: exporter.timeZone)
+            .markdown(for: try ConversationExporter.snapshots(in: context), exportedAt: exportedAt)
+        #expect(markdown == direct)
     }
 
     @Test func knowledgeMarkdownHasPagesProfileAndFacts() throws {

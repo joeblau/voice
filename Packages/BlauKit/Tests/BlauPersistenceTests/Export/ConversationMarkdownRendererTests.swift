@@ -149,6 +149,20 @@ struct ConversationMarkdownRendererTests {
         #expect(markdown.contains(#"# The "big" \<plan> \\ \`now\`\_"#))
     }
 
+    /// A reply the user cut short (#160) ends in the marker, after the
+    /// escaped text; nothing else changes.
+    @Test func marksAnInterruptedReply() {
+        var snapshot = sample
+        snapshot.utterances[1].text = "Why a *designer* before"
+        snapshot.utterances[1].isInterrupted = true
+        let renderer = ConversationMarkdownRenderer(timeZone: losAngeles)
+        let markdown = renderer.render(snapshot)
+        #expect(markdown.contains("\n**14:03:20 · Grok:** Why a \\*designer\\* before — *interrupted*\n"))
+        #expect(markdown.components(separatedBy: "*interrupted*").count == 2)
+        snapshot.utterances[1].isInterrupted = false
+        #expect(!renderer.render(snapshot).contains("interrupted"))
+    }
+
     @Test func labelsEverySpeaker() {
         #expect(ConversationMarkdownRenderer.speaker(for: .user) == "You")
         #expect(ConversationMarkdownRenderer.speaker(for: .agent) == "Grok")

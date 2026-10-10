@@ -9,16 +9,18 @@ rebuilt from these models (issue #7).
 
 The models live in `Packages/BlauKit/Sources/BlauPersistence/Schema`.
 
-The current schema is **v2** (`SchemaV2`, version `2.0.0`): the five v1
-models below, unchanged, plus five memory models ([Schema v2](#schema-v2-memory)).
-Code outside BlauPersistence uses the aliases in `CurrentSchema.swift`, which
-always point at the newest version.
+The current schema is **v3** (`SchemaV3`, version `3.0.0`): the five v1
+models below, five memory models added in v2 ([Schema v2](#schema-v2-memory)),
+and one optional field added to `Utterance` in v3, the interrupted mark
+([Schema v3](#schema-v3-interrupted-mark)). Code outside BlauPersistence uses
+the aliases in `CurrentSchema.swift`, which always point at the newest
+version.
 
 ## Schema v1
 
 `SchemaV1` (version `1.0.0`) defines five flat models. `SchemaV2` carries them
-over unchanged (`SchemaV2.Conversation` and so on), and the aliases point
-there:
+over unchanged and `SchemaV3` carries them over with one field added to
+`Utterance` (`SchemaV3.Conversation` and so on). The aliases point at v3:
 
 | Model (CloudKit record type)  | Swift alias          |
 | ----------------------------- | -------------------- |
@@ -68,6 +70,7 @@ erDiagram
         Double voiceScore "optional"
         Bool isFinal
         String sourceRaw "parakeet, speechanalyzer, grok"
+        String endReasonRaw "optional, v3: interrupted, bargedin, stopped"
     }
     VoiceProfile {
         UUID id
@@ -106,8 +109,10 @@ optional and uses `.nullify`.
   duplicate only appears if the same logical record is created twice (for
   example on two devices); code that needs uniqueness de-duplicates on read.
 - **Enums as strings.** `roleRaw` and `sourceRaw` store `UtteranceRole` and
-  `TranscriptSource` raw values. Read them through `role` and `source`, which
-  return `nil` for a value written by a newer app version instead of failing.
+  `TranscriptSource` raw values (and, since v3, `endReasonRaw` an
+  `UtteranceEndReason`). Read them through `role`, `source` and `endReason`,
+  which return `nil` for a value written by a newer app version instead of
+  failing.
 - **Ordering.** CloudKit doesn't support ordered relationships, so
   relationship arrays come back in no particular order. Use
   `Conversation.orderedTopics` (by `ordinal`, then `startedAt`) and
@@ -267,6 +272,49 @@ like every to-one side in v1.
 - **Unknown raw values** (`kindRaw`, `typeRaw`, `originRaw`) read as `nil`
   through `kind`, `type` and `origin`, like the v1 enums.
 
+## Schema v3: interrupted mark
+
+`SchemaV3` (version `3.0.0`, issue #160) adds one optional attribute and
+changes nothing else:
+
+| Model       | New field                | Holds |
+| ----------- | ------------------------ | ----- |
+| `Utterance` | `endReasonRaw: String?`  | An `UtteranceEndReason` raw value when an agent reply was cut short; `nil` when it ended on its own, and on every row stored before v3 |
+
+| `UtteranceEndReason` | Raw value     | The reply was cut short because |
+| -------------------- | ------------- | ------------------------------- |
+| `.interrupted`       | `interrupted` | the user said something new, or continued what they were saying, before it finished |
+| `.bargedIn`          | `bargedin`    | the user started talking over it (barge-in, #37) |
+| `.stopped`           | `stopped`     | the conversation was stopped while it played |
+
+Before v3 the mark lived only in the turn orchestrator's memory
+(`TurnSnapshot.interruptedAgentUtterances`), so after a relaunch, in exports
+and on other devices a cut reply looked complete. The stored row already held
+only what was heard (its text and `endedAt`); now it also says that it was
+cut.
+
+- **Written by the turn orchestrator.** `TurnOrchestrator.abandon` marks each
+  reply it adds to `interruptedAgentUtterances` through
+  `TurnTranscriptRecording.markInterrupted(_:reason:)`, queued after the write
+  that stored the reply's heard part, and again after the server's corrected
+  transcript (`conversation.item.truncated`) is stored, since that can be the
+  first write of a reply too little of which was heard to keep a word.
+  `ConversationStore.markEnded(utteranceID:reason:)` does the write (batched
+  like a commit). Re-committing the row keeps the mark. See
+  [realtime.md](realtime.md#barge-in).
+- **Read through `endReason` and `isInterrupted`.** An unknown raw value
+  (written by a newer version) reads as `nil`, like the other enums.
+- **Who reads it.** The chat transcript and the timeline history
+  (`ChatLine.isInterrupted`, [chat.md](chat.md#interrupted-replies)), the
+  Markdown exports (a ` — *interrupted*` marker, [export.md](export.md)), and
+  Export All Data (`endReason` in the JSON, [privacy.md](privacy.md)).
+- **Synced, not encrypted.** It syncs with the row, so a second device shows
+  the reply as interrupted too. Like the rest of the utterance it is not
+  `.allowsCloudEncryption`.
+- **Rows from before v3** keep `nil`. The chat still marks those with the
+  time-based rule (`ChatTranscript.isInterrupted(_:before:)`); the exports
+  don't mark them.
+
 ## CloudKit rules
 
 CloudKit mirroring rejects a schema that breaks any of these rules, but
@@ -317,6 +365,7 @@ The live pipeline writes through one actor, `ConversationStore`
 | `appendPartial(utteranceID:text:)`        | Keeps the latest streaming ASR hypothesis **in memory only**                                 | never                 |
 | `discardPartial(utteranceID:)`            | Forgets a partial (for example speech the voice ID gate rejected)                            | never                 |
 | `commitUtterance(_:source:asrConfidence:voiceScore:)` | Stores a final `BlauCore.Utterance` in its conversation and the topic covering its `startedAt` (the open topic, or for a late commit the topic current then, including the last topic of a conversation that has ended); re-committing the same id (second pass) updates it, even after the conversation ended or the app relaunched; blank text is skipped | batched |
+| `markEnded(utteranceID:reason:)`          | Records why a stored utterance was cut short (`endReason`, v3); a later commit of the same id keeps it; returns `false` and changes nothing for an id that isn't stored | batched |
 | `openTopic(at:title:)`                    | Opens the next topic; closes the previous one at `at` and moves its utterances from `at` on, plus topicless ones (before the first topic or after `closeTopic`) from `at` on | batched |
 | `closeTopic(_:title:summary:at:)`         | Closes a topic with the labeler's final title (non-provisional) and summary                  | batched               |
 | `retitle(_:to:isProvisional:)`            | Renames a topic (provisional guess or manual edit)                                           | batched               |
@@ -374,17 +423,17 @@ Once a schema version is deployed to the CloudKit production environment, the
 CloudKit schema is **additive only**: you can add record types and fields, but
 never rename, retype or delete them. To change the model:
 
-1. Copy the models into a new `SchemaV3` with `versionIdentifier` `3.0.0`
-   (replace `SchemaV2` with `SchemaV3` in copies of the `SchemaV2+*.swift`
+1. Copy the models into a new `SchemaV4` with `versionIdentifier` `4.0.0`
+   (replace `SchemaV3` with `SchemaV4` in copies of the `SchemaV3+*.swift`
    files). Never edit a version that has shipped.
 2. Make only additive changes (new models, new optional or defaulted
    properties, new optional relationships with inverses).
-3. Append `SchemaV3.self` to `BlauMigrationPlan.schemas` and add a
-   `.lightweight(fromVersion: SchemaV2.self, toVersion: SchemaV3.self)` stage.
-4. Point `CurrentSchema` at `SchemaV3`.
+3. Append `SchemaV4.self` to `BlauMigrationPlan.schemas` and add a
+   `.lightweight(fromVersion: SchemaV3.self, toVersion: SchemaV4.self)` stage.
+4. Point `CurrentSchema` at `SchemaV4`.
 5. Check in a store written by the previous version (see
    `Tests/BlauPersistenceTests/Fixtures/README.md`) and add a migration test
-   like `MigrationV1toV2Tests`.
+   like `MigrationV2toV3Tests`.
 6. Run `swift test` in `Packages/BlauKit`: the CloudKit compatibility tests
    check every version in the plan and that each step is additive.
 7. Deploy the new schema to production in the CloudKit console before
@@ -396,24 +445,42 @@ never rename, retype or delete them. To change the model:
 | ------- | ----- | ------ | ------------------------------- |
 | 1.0.0 | #19 | `Conversation`, `Topic`, `Utterance`, `VoiceProfile`, `VoiceEnrollmentSet` | (first version) |
 | 2.0.0 | #61 | Adds `Document`, `CollectionItem`, `MemoryEntity`, `Fact`, `ProfileBlock`; v1 models unchanged | `BlauMigrationPlan.migrateV1toV2`, lightweight |
+| 3.0.0 | #160 | Adds `Utterance.endReasonRaw` (optional); everything else unchanged | `BlauMigrationPlan.migrateV2toV3`, lightweight |
 
 ### Migration tests
 
-`MigrationV1toV2Tests` start from `Fixtures/SchemaV1/Blau.store`, a store
-written by `SchemaV1` through SwiftData exactly as a v1 build writes it
-(configuration `Blau`, persistent history on), and checked in. They copy it to
-a temporary directory and open it with the current schema and plan, through
+There is one checked-in store per shipped version before the current one,
+each written through SwiftData exactly as a build of that version writes it
+(configuration `Blau`, persistent history on). The tests copy it to a
+temporary directory and open it with the current schema and plan, through
 `BlauModelContainer` and through `PersistenceBootstrap` (the app's launch
-path), then check:
+path).
+
+`MigrationV1toV2Tests` start from `Fixtures/SchemaV1/Blau.store` (migrated
+through every stage to the current schema) and check:
 
 - every conversation, topic, utterance, voiceprint and enrollment set, every
-  field and every relationship survived;
-- the store's recorded entity hashes moved from v1's to v2's, and the memory
-  tables start empty;
+  field and every relationship survived, and no utterance carries an
+  interrupted mark;
+- the store's recorded entity hashes moved from v1's to the current
+  schema's, and the memory tables start empty;
 - memory models can be written to the migrated store, and it reopens without
   migrating again;
 - the bootstrap stays on disk (no fallback to an in-memory store).
 
-The same checks run on a v1 store written during the test.
-`SchemaV1FixtureTests` fails if the checked-in store's hashes no longer match
-`SchemaV1`, which means `SchemaV1` was edited in place.
+`MigrationV2toV3Tests` start from `Fixtures/SchemaV2/Blau.store` (the same
+conversations and voiceprint, plus one of each memory model with every
+optional field set) and check:
+
+- every row of every model, every field and every relationship survived,
+  with `endReasonRaw` `nil` on every utterance;
+- the store's recorded entity hashes moved from v2's to v3's;
+- the interrupted mark can be written to the migrated store and is still
+  there after it is reopened, with nothing else changed;
+- the bootstrap stays on disk.
+
+The same checks run on a store written during the test.
+`SchemaV1FixtureTests` and `SchemaV2FixtureTests` fail if a checked-in
+store's hashes no longer match its schema, which means that version was
+edited in place; `SchemaV2FixtureTests` also checks that v3 only adds
+`Utterance.endReasonRaw`.

@@ -38,3 +38,20 @@ public enum TranscriptSource: String, CaseIterable, Codable, Hashable, Sendable 
     /// Grok's output transcript (agent speech).
     case grok
 }
+
+/// Why a stored utterance was cut short. Persisted as
+/// `Utterance.endReasonRaw` (schema v3, #160); `nil` there means the speech
+/// ended on its own, or the row was written before v3.
+///
+/// Only agent replies are cut short today: the turn orchestrator writes the
+/// reason for each reply it stops before the user heard all of it, and the
+/// row then holds only the heard part of the text.
+public enum UtteranceEndReason: String, CaseIterable, Codable, Hashable, Sendable {
+    /// The user said something new (or continued what they were saying)
+    /// before the reply finished.
+    case interrupted
+    /// The user started talking over the reply (barge-in, #37).
+    case bargedIn = "bargedin"
+    /// The conversation was stopped while the reply played.
+    case stopped
+}

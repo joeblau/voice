@@ -1,5 +1,6 @@
 import BlauCore
 import BlauMemory
+import BlauPersistence
 import BlauRealtime
 import BlauTopics
 import Foundation
@@ -52,6 +53,10 @@ struct TopicTrackingTranscript: TurnTranscriptRecording {
     func record(_ utterance: Utterance) async throws {
         try await base.record(utterance)
         await topics.ingest(utterance)
+    }
+
+    func markInterrupted(_ utteranceID: UUID, reason: UtteranceEndReason) async throws {
+        try await base.markInterrupted(utteranceID, reason: reason)
     }
 
     func finishConversation(_ id: ConversationID, at date: Date) async throws {

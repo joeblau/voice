@@ -43,13 +43,20 @@ public struct ConversationExportSnapshot: Sendable, Equatable, Identifiable {
         public var role: UtteranceRole?
         public var text: String
         public var startedAt: Date
+        /// A reply the user cut short (`StoredUtterance.isInterrupted`,
+        /// #160): `text` is only what was heard.
+        public var isInterrupted: Bool
 
-        public init(id: UUID, topicID: UUID? = nil, role: UtteranceRole?, text: String, startedAt: Date) {
+        public init(
+            id: UUID, topicID: UUID? = nil, role: UtteranceRole?, text: String, startedAt: Date,
+            isInterrupted: Bool = false
+        ) {
             self.id = id
             self.topicID = topicID
             self.role = role
             self.text = text
             self.startedAt = startedAt
+            self.isInterrupted = isInterrupted
         }
     }
 
@@ -108,7 +115,8 @@ extension ConversationExportSnapshot {
                     topicID: utterance.topic?.id,
                     role: utterance.role,
                     text: utterance.text,
-                    startedAt: utterance.startedAt
+                    startedAt: utterance.startedAt,
+                    isInterrupted: utterance.isInterrupted
                 )
             }
             // By time, then id, so two utterances with the same start time

@@ -9,11 +9,11 @@ import SwiftData
 /// later stages are expected to be `.lightweight`. See docs/data-model.md.
 public enum BlauMigrationPlan: SchemaMigrationPlan {
     public static var schemas: [any VersionedSchema.Type] {
-        [SchemaV1.self, SchemaV2.self]
+        [SchemaV1.self, SchemaV2.self, SchemaV3.self]
     }
 
     public static var stages: [MigrationStage] {
-        [migrateV1toV2]
+        [migrateV1toV2, migrateV2toV3]
     }
 
     /// v1 → v2 adds the memory models (`Document`, `CollectionItem`,
@@ -22,6 +22,13 @@ public enum BlauMigrationPlan: SchemaMigrationPlan {
     /// the new tables start empty.
     public static var migrateV1toV2: MigrationStage {
         .lightweight(fromVersion: SchemaV1.self, toVersion: SchemaV2.self)
+    }
+
+    /// v2 → v3 adds one optional attribute, `Utterance.endReasonRaw` (#160),
+    /// and changes nothing else, so Core Data infers the mapping: existing
+    /// rows are kept as they are and the new column starts `nil`.
+    public static var migrateV2toV3: MigrationStage {
+        .lightweight(fromVersion: SchemaV2.self, toVersion: SchemaV3.self)
     }
 }
 

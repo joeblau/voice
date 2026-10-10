@@ -10,8 +10,8 @@ struct CloudKitCompatibilityTests {
     /// tests.
     private let schema = Schema(versionedSchema: CurrentSchema.self)
 
-    @Test func theCurrentSchemaIsV2() {
-        #expect(CurrentSchema.versionIdentifier == SchemaV2.versionIdentifier)
+    @Test func theCurrentSchemaIsV3() {
+        #expect(CurrentSchema.versionIdentifier == SchemaV3.versionIdentifier)
     }
 
     @Test func schemaV1HasNoViolations() {
@@ -21,6 +21,11 @@ struct CloudKitCompatibilityTests {
 
     @Test func schemaV2HasNoViolations() {
         let violations = CloudKitCompatibility.violations(in: SchemaV2.self)
+        #expect(violations.isEmpty, "\(violations)")
+    }
+
+    @Test func schemaV3HasNoViolations() {
+        let violations = CloudKitCompatibility.violations(in: SchemaV3.self)
         #expect(violations.isEmpty, "\(violations)")
     }
 
@@ -37,6 +42,21 @@ struct CloudKitCompatibilityTests {
         let changes = CloudKitCompatibility.breakingChanges(in: BlauMigrationPlan.self)
         #expect(changes.isEmpty, "\(changes)")
         #expect(CloudKitCompatibility.breakingChanges(from: SchemaV1.self, to: SchemaV2.self).isEmpty)
+        #expect(CloudKitCompatibility.breakingChanges(from: SchemaV2.self, to: SchemaV3.self).isEmpty)
+    }
+
+    /// v3 (#160) keeps v2's entities and adds one optional, unencrypted
+    /// string to `Utterance`.
+    @Test func schemaV3AddsTheUtteranceEndReason() throws {
+        #expect(
+            Set(Schema(versionedSchema: SchemaV3.self).entities.map(\.name))
+                == Set(Schema(versionedSchema: SchemaV2.self).entities.map(\.name)))
+        let model = try #require(NSManagedObjectModel.makeManagedObjectModel(for: schema))
+        let endReason = try #require(model.entitiesByName["Utterance"]?.attributesByName["endReasonRaw"])
+        #expect(endReason.isOptional)
+        #expect(endReason.defaultValue == nil)
+        #expect(endReason.type == .string)
+        #expect(!endReason.allowsCloudEncryption)
     }
 
     @Test func schemaV1HasTheExpectedEntities() {

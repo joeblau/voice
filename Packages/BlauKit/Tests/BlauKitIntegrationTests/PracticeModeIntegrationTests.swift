@@ -39,6 +39,10 @@ struct PracticeModeIntegrationTests {
             await topics.ingest(utterance)
         }
 
+        func markInterrupted(_ utteranceID: UUID, reason: UtteranceEndReason) async throws {
+            try await base.markInterrupted(utteranceID, reason: reason)
+        }
+
         func finishConversation(_ id: ConversationID, at date: Date) async throws {
             try await base.finishConversation(id, at: date)
             await topics.finishConversation(id)

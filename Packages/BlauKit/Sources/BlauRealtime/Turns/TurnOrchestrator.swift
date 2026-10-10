@@ -1,5 +1,6 @@
 import BlauAudio
 import BlauCore
+import BlauPersistence
 import BlauTelemetry
 import Foundation
 import os
@@ -251,6 +252,8 @@ public actor TurnOrchestrator: RealtimeService {
     /// the transcript that was kept.
     private var truncatedItems: [String: AgentItem] = [:]
     /// Stored agent utterances cut short by the user, this conversation.
+    /// Each is also marked in the transcript (#160), which keeps the mark
+    /// after this set is cleared with the conversation.
     private var interruptedAgentUtterances: Set<UUID> = []
     /// User utterances discarded while waiting for the connection.
     var discardedUtterances: Set<UUID> = []
@@ -1737,6 +1740,12 @@ public actor TurnOrchestrator: RealtimeService {
         }
         let heard = Duration.milliseconds(truncated.audioEndMilliseconds ?? 0)
         persistAgent(item, text: text, duration: heard)
+        // The heard prefix stored at the cut can be blank (too little was
+        // heard to keep a whole word), so this may be the first time the
+        // reply is stored: mark it again.
+        if let reason = item.endReason {
+            markInterrupted(item, reason: reason)
+        }
     }
 
     // MARK: Cancelling
@@ -1753,6 +1762,15 @@ public actor TurnOrchestrator: RealtimeService {
         /// `response.created` didn't arrive within
         /// ``Configuration/responseTimeout``.
         case timedOut
+
+        /// What is stored on an agent utterance this cut short (#160).
+        var endReason: UtteranceEndReason {
+            switch self {
+            case .bargedIn: .bargedIn
+            case .stopped: .stopped
+            case .merged, .interrupted, .timedOut: .interrupted
+            }
+        }
     }
 
     /// What ``abandon(_:reason:)`` cut.
@@ -1769,7 +1787,8 @@ public actor TurnOrchestrator: RealtimeService {
     /// (`conversation.item.truncate`) or removes it when nothing was
     /// (`conversation.item.delete`). The heard part is written to the
     /// transcript, and stored agent utterances that were cut short are
-    /// marked interrupted in the snapshot.
+    /// marked interrupted, in the snapshot and in the transcript
+    /// (``TurnTranscriptRecording/markInterrupted(_:reason:)``, #160).
     @discardableResult
     private func abandon(_ turn: Turn, reason: AbandonReason) -> AbandonOutcome {
         // Silence first: everything else can wait a few microseconds.
@@ -1809,11 +1828,18 @@ public actor TurnOrchestrator: RealtimeService {
                         itemID: item.itemID, utteranceID: nil, heardMilliseconds: 0, receivedMilliseconds: received))
                 continue
             }
+            // Cut short: less was heard than arrived, or more of it was
+            // still coming. Not an item heard in full whose audio was
+            // complete (an earlier item of a reply still being generated,
+            // or what was said before a tool round).
+            let isCut = played < received || (cancelsResponse && !item.isSettled && !item.isAudioDone)
             if played < received {
                 events.append(
                     .conversationItemTruncate(
                         itemID: item.itemID, contentIndex: item.contentIndex, audioEndMilliseconds: played))
-                truncatedItems[item.itemID] = item
+                var pending = item
+                pending.endReason = reason.endReason
+                truncatedItems[item.itemID] = pending
                 // Until `conversation.item.truncated` brings the kept
                 // transcript, store the share of the text that was heard.
                 let heard = Self.heardPrefix(of: item.transcript, fraction: Double(played) / Double(received))
@@ -1821,12 +1847,12 @@ public actor TurnOrchestrator: RealtimeService {
             } else if !item.isPersisted {
                 persistAgent(item, text: item.transcript, duration: .milliseconds(played))
             }
-            // Cut short: less was heard than arrived, or more of it was
-            // still coming. Not an item heard in full whose audio was
-            // complete (an earlier item of a reply still being generated,
-            // or what was said before a tool round).
-            if played < received || (cancelsResponse && !item.isSettled && !item.isAudioDone) {
+            if isCut {
                 interruptedAgentUtterances.insert(item.utteranceID)
+                // Queued after the row's write, so the mark finds it. A
+                // later write of the row (the server's corrected
+                // transcript) keeps it.
+                markInterrupted(item, reason: reason.endReason)
                 cut.append(
                     .init(
                         itemID: item.itemID, utteranceID: item.utteranceID, heardMilliseconds: played,
@@ -1989,6 +2015,24 @@ public actor TurnOrchestrator: RealtimeService {
             } catch {
                 Log.realtime.error(
                     "Couldn't write utterance \(utterance.id, privacy: .public): \(String(describing: error), privacy: .public)"
+                )
+                await self?.persistenceFailed()
+            }
+        }
+    }
+
+    /// Stores that `item`'s utterance was cut short (#160), in order with
+    /// the transcript writes.
+    private func markInterrupted(_ item: AgentItem, reason: UtteranceEndReason) {
+        guard conversationID != nil else { return }
+        let transcript = transcript
+        let id = item.utteranceID
+        recorder.enqueue { [weak self] in
+            do {
+                try await transcript.markInterrupted(id, reason: reason)
+            } catch {
+                Log.realtime.error(
+                    "Couldn't mark utterance \(id, privacy: .public) interrupted: \(String(describing: error), privacy: .public)"
                 )
                 await self?.persistenceFailed()
             }
@@ -2247,6 +2291,9 @@ extension TurnOrchestrator {
         /// cancelling the rest of the response doesn't cut it once it has
         /// played in full.
         var isAudioDone = false
+        /// Why it was cut short, while it waits in ``truncatedItems`` for
+        /// `conversation.item.truncated`.
+        var endReason: UtteranceEndReason?
 
         init(itemID: String, contentIndex: Int, startedAt: Date?, startOffset: Duration?) {
             self.itemID = itemID

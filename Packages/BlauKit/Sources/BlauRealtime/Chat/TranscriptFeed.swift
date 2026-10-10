@@ -1,4 +1,5 @@
 import BlauCore
+import BlauPersistence
 import Foundation
 import Synchronization
 
@@ -85,6 +86,12 @@ public struct FeedingTranscriptRecorder: TurnTranscriptRecording {
     public func record(_ utterance: Utterance) async throws {
         feed.publish(.recorded(utterance))
         try await base.record(utterance)
+    }
+
+    /// Passed on only: the screen learns of cut replies from the turn
+    /// snapshot (`TurnSnapshot.interruptedAgentUtterances`).
+    public func markInterrupted(_ utteranceID: UUID, reason: UtteranceEndReason) async throws {
+        try await base.markInterrupted(utteranceID, reason: reason)
     }
 
     public func finishConversation(_ id: ConversationID, at date: Date) async throws {

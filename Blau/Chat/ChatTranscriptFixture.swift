@@ -46,7 +46,8 @@ enum ChatTranscriptFixture {
                 StoredUtterance(
                     id: line.id, conversation: conversation, role: line.role, text: line.text,
                     startedAt: line.startedAt, endedAt: line.endedAt, isFinal: true,
-                    source: line.role == .agent ? .grok : .parakeet))
+                    source: line.role == .agent ? .grok : .parakeet,
+                    endReason: line.isInterrupted ? .interrupted : nil))
         }
         do {
             try context.save()
@@ -75,7 +76,7 @@ enum ChatTranscriptFixture {
             let duration = isInterrupted ? spacing + 1 : spacing - 1
             return ChatLine(
                 id: UUID(), role: .agent, text: isInterrupted ? cut(text) : text, startedAt: startedAt,
-                endedAt: startedAt.addingTimeInterval(duration))
+                endedAt: startedAt.addingTimeInterval(duration), isInterrupted: isInterrupted)
         }
     }
 

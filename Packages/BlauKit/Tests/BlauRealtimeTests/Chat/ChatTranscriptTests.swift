@@ -103,6 +103,43 @@ struct ChatTranscriptTests {
         #expect(userRows.map(\.isInterrupted) == [false, false])
     }
 
+    /// The stored mark (schema v3, #160) marks the same barge-in after a
+    /// relaunch or on another device, with no live set.
+    @Test func aReplyTheStoreMarksIsInterruptedWithoutTheLiveSet() {
+        var cut = line(.agent, "The Golden Gate opened", at: 3, to: 4.6)
+        let bargeIn = line(.user, "Wait", at: 4.5, to: 5)
+        #expect(ChatTranscript.rows(stored: [cut, bargeIn]).map(\.isInterrupted) == [false, false])
+        cut.isInterrupted = true
+        #expect(ChatTranscript.rows(stored: [cut, bargeIn]).map(\.isInterrupted) == [true, false])
+        // A reply stopped with nothing after it.
+        #expect(ChatTranscript.rows(stored: [cut]).map(\.isInterrupted) == [true])
+        // A user line is never shown interrupted, whatever the store says.
+        var user = bargeIn
+        user.isInterrupted = true
+        #expect(ChatTranscript.rows(stored: [user]).map(\.isInterrupted) == [false])
+    }
+
+    /// A line the app just recorded replaces the stored one but carries no
+    /// mark of its own; the stored mark stays.
+    @Test func aJustRecordedLineKeepsTheStoredMark() {
+        let id = UUID()
+        var stored = line(.agent, "The Golden Gate Bridge", at: 3, to: 4, id: id)
+        stored.isInterrupted = true
+        let recorded = line(.agent, "The Golden Gate", at: 3, to: 3.8, id: id)
+        let rows = ChatTranscript.rows(stored: [stored], recorded: [id: recorded])
+        #expect(rows.map(\.text) == ["The Golden Gate"])
+        #expect(rows.map(\.isInterrupted) == [true])
+    }
+
+    @Test func aStoredUtteranceCarriesItsMarkIntoItsLine() throws {
+        let reply = StoredUtterance(
+            role: .agent, text: "Well", startedAt: t0, endedAt: t0 + 1, isFinal: true, source: .grok,
+            endReason: .bargedIn)
+        #expect(try #require(ChatLine(reply)).isInterrupted)
+        let plain = StoredUtterance(role: .agent, text: "Sure.", startedAt: t0, isFinal: true, source: .grok)
+        #expect(try #require(ChatLine(plain)).isInterrupted == false)
+    }
+
     @Test func onlyTheNextUserLineDecides() {
         // Two items of one reply, then the user: only the second overlaps.
         let first = line(.agent, "Let me check.", at: 3, to: 4)

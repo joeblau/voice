@@ -8,13 +8,29 @@ struct MigrationPlanTests {
     @Test func startsAtSchemaV1AndListsEveryVersion() {
         #expect(
             BlauMigrationPlan.schemas.map { $0.versionIdentifier }
-                == [Schema.Version(1, 0, 0), Schema.Version(2, 0, 0)])
+                == [Schema.Version(1, 0, 0), Schema.Version(2, 0, 0), Schema.Version(3, 0, 0)])
         #expect(SchemaV1.versionIdentifier == Schema.Version(1, 0, 0))
         #expect(SchemaV2.versionIdentifier == Schema.Version(2, 0, 0))
+        #expect(SchemaV3.versionIdentifier == Schema.Version(3, 0, 0))
     }
 
     @Test func thereIsOneStagePerConsecutivePairOfVersions() {
         #expect(BlauMigrationPlan.stages.count == BlauMigrationPlan.schemas.count - 1)
+    }
+
+    /// Stage `n` is a lightweight migration from schema `n` to schema
+    /// `n + 1`: CloudKit only allows additive changes, which Core Data can
+    /// always infer.
+    @Test func everyStageIsLightweightBetweenConsecutiveVersions() {
+        let schemas = BlauMigrationPlan.schemas.map { $0.versionIdentifier }
+        for (index, stage) in BlauMigrationPlan.stages.enumerated() {
+            guard case .lightweight(let from, let to) = stage else {
+                Issue.record("Stage \(index) must be lightweight, got \(stage)")
+                continue
+            }
+            #expect(from.versionIdentifier == schemas[index])
+            #expect(to.versionIdentifier == schemas[index + 1])
+        }
     }
 
     @Test func theCurrentSchemaIsTheNewestInThePlan() {

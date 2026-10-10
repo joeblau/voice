@@ -65,7 +65,9 @@ Blau Export 2026-10-08.zip
   version, ISO 8601 dates with milliseconds, and enumerations as their stored
   raw values, so values written by a newer app version on another device are
   exported as they are. Partial (uncommitted) utterances are in the JSON,
-  not in the Markdown. Ordering is deterministic: two exports of the same
+  not in the Markdown. A reply the user cut short has `endReason`
+  (`interrupted`, `bargedin` or `stopped`, schema v3, #160); the key is left
+  out otherwise, so the format version stays 1. Ordering is deterministic: two exports of the same
   data are the same file.
 - **The voiceprint is described, not exported.** Its model version,
   enrollment dates, devices and clip counts are in the JSON; the centroid

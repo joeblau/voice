@@ -1,5 +1,6 @@
 import BlauAudio
 import BlauCore
+import BlauPersistence
 import BlauRealtime
 import BlauTelemetry
 import BlauVoiceID
@@ -21,6 +22,7 @@ struct VoiceGateTranscriptIntegrationTests {
 
         func beginConversation(_ id: ConversationID, at date: Date) async throws {}
         func record(_ utterance: Utterance) async throws { stored.withLock { $0.append(utterance) } }
+        func markInterrupted(_ utteranceID: UUID, reason: UtteranceEndReason) async throws {}
         func finishConversation(_ id: ConversationID, at date: Date) async throws {}
         func flush() async throws {}
     }

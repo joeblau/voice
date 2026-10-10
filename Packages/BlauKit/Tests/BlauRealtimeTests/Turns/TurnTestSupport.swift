@@ -1,5 +1,6 @@
 import BlauAudio
 import BlauCore
+import BlauPersistence
 import BlauTelemetry
 import Foundation
 import Synchronization
@@ -113,6 +114,7 @@ final class RecordingTranscript: TurnTranscriptRecording {
     enum Call: Hashable {
         case begin(ConversationID)
         case record(Utterance)
+        case markInterrupted(UUID, UtteranceEndReason)
         case finish(ConversationID)
         case flush
         case repliesDeferred(Bool)
@@ -146,6 +148,19 @@ final class RecordingTranscript: TurnTranscriptRecording {
 
     func record(_ utterance: Utterance) async throws {
         state.withLock { $0.append(.record(utterance)) }
+    }
+
+    func markInterrupted(_ utteranceID: UUID, reason: UtteranceEndReason) async throws {
+        state.withLock { $0.append(.markInterrupted(utteranceID, reason)) }
+    }
+
+    /// The interrupted marks written (#160), latest per utterance.
+    var endReasons: [UUID: UtteranceEndReason] {
+        var reasons: [UUID: UtteranceEndReason] = [:]
+        for call in calls {
+            if case .markInterrupted(let id, let reason) = call { reasons[id] = reason }
+        }
+        return reasons
     }
 
     func finishConversation(_ id: ConversationID, at date: Date) async throws {

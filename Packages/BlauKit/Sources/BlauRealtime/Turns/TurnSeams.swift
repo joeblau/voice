@@ -53,6 +53,15 @@ public protocol TurnTranscriptRecording: Sendable {
     /// Stores or updates a final utterance.
     func record(_ utterance: Utterance) async throws
 
+    /// Marks the stored agent utterance `utteranceID` as cut short, and
+    /// why (#160). Called after the ``record(_:)`` that stored its heard
+    /// part, and again if a later ``record(_:)`` of the same id (the
+    /// server's corrected transcript) could be the first to store it. A
+    /// recording of an id that was never stored (none of the reply was
+    /// heard) is ignored. A wrapper must pass it on: the mark is what keeps
+    /// the reply interrupted after a relaunch and on other devices.
+    func markInterrupted(_ utteranceID: UUID, reason: UtteranceEndReason) async throws
+
     /// Ends conversation `id`.
     func finishConversation(_ id: ConversationID, at date: Date) async throws
 
@@ -80,6 +89,10 @@ extension ConversationStore: TurnTranscriptRecording {
 
     public func record(_ utterance: Utterance) async throws {
         try commitUtterance(utterance)
+    }
+
+    public func markInterrupted(_ utteranceID: UUID, reason: UtteranceEndReason) async throws {
+        try markEnded(utteranceID: utteranceID, reason: reason)
     }
 
     public func finishConversation(_ id: ConversationID, at date: Date) async throws {

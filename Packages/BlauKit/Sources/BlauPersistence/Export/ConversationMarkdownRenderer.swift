@@ -103,9 +103,7 @@ public struct ConversationMarkdownRenderer: Sendable {
             }
             for utterance in section.utterances {
                 lines.append("")
-                let time = format.time(utterance.startedAt, day: day)
-                let speaker = Self.speaker(for: utterance.role)
-                lines.append("**\(time) · \(speaker):** \(MarkdownText.inline(utterance.text))")
+                lines.append(Self.line(for: utterance, time: format.time(utterance.startedAt, day: day)))
             }
         }
         return lines.joined(separator: "\n") + "\n"
@@ -141,6 +139,17 @@ public struct ConversationMarkdownRenderer: Sendable {
             }
         }
         return "Conversation"
+    }
+
+    /// Follows the text of a reply the user cut short (#160), whose text is
+    /// only what was heard: `**14:03:20 · Grok:** Why a designer — *interrupted*`.
+    public static let interruptedMarker = " — *interrupted*"
+
+    /// One utterance's line: time, speaker, the escaped text, and the
+    /// marker when the reply was cut short.
+    static func line(for utterance: ConversationExportSnapshot.Utterance, time: String) -> String {
+        let marker = utterance.isInterrupted ? interruptedMarker : ""
+        return "**\(time) · \(speaker(for: utterance.role)):** \(MarkdownText.inline(utterance.text))\(marker)"
     }
 
     /// How a speaker is labelled.

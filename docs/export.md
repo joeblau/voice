@@ -86,6 +86,15 @@ generator: Blau Markdown export 1
   Speakers are You, Grok and Blau (system notes). Each utterance is one line:
   whitespace is folded and Markdown syntax characters are escaped, so a
   transcript never turns into formatting.
+- **Interrupted replies**: a reply the user cut short (barge-in, a new
+  utterance or stop; stored since schema v3, #160) holds only what was heard
+  and ends in ` — *interrupted*`, for example
+  `**14:03:20 · Grok:** Why a designer before — *interrupted*`. Replies
+  stored before v3 carry no mark, so they aren't marked here (the chat still
+  marks them by their times). The share sheet's Export Conversations and
+  Export All Data's `Conversations.md` use the same marker. The format
+  version stays 1: the marker only adds text to the lines it applies to, and
+  a file changes (and is rewritten) only when one of its replies is marked.
 - **Times** are shown in one time zone, recorded in the front matter. A time
   on a different day than the conversation's start shows its date.
 - **The front matter** is YAML, so tools like Obsidian read it. `generator`

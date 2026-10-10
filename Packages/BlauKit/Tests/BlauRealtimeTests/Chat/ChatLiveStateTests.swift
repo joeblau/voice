@@ -188,6 +188,7 @@ struct TranscriptFeedTests {
         struct FailingTranscript: TurnTranscriptRecording {
             func beginConversation(_ id: ConversationID, at date: Date) async throws { throw Unavailable() }
             func record(_ utterance: Utterance) async throws { throw Unavailable() }
+            func markInterrupted(_ utteranceID: UUID, reason: UtteranceEndReason) async throws { throw Unavailable() }
             func finishConversation(_ id: ConversationID, at date: Date) async throws { throw Unavailable() }
             func flush() async throws { throw Unavailable() }
         }

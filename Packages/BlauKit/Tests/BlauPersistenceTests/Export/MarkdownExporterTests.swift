@@ -257,6 +257,25 @@ struct ConversationExportSourceTests {
         #expect(snapshot.utterances.map(\.role) == [.user, .agent])
         #expect(snapshot.topics.map(\.title) == ["Hiring Plan"])
         #expect(snapshot.utterances.allSatisfy { $0.topicID == snapshot.topics[0].id })
+        #expect(snapshot.utterances.map(\.isInterrupted) == [false, false])
+    }
+
+    /// The stored interrupted mark (#160) reaches the snapshot, and the
+    /// rendered file.
+    @Test func snapshotsCarryTheInterruptedMark() throws {
+        let container = try BlauModelContainer.makeInMemory()
+        let context = ModelContext(container)
+        let conversation = try insertConversation(
+            into: context, utterances: [(0, 1, .user, "First"), (0, 3, .agent, "Well, the")])
+        let reply = try #require(conversation.utterances?.first { $0.role == .agent })
+        reply.endReason = .bargedIn
+        try context.save()
+
+        let snapshot = try #require(
+            try SwiftDataConversationExportSource(modelContainer: container).snapshot(of: conversation.id))
+        #expect(snapshot.utterances.map(\.isInterrupted) == [false, true])
+        let markdown = ConversationMarkdownRenderer(timeZone: losAngeles).render(snapshot)
+        #expect(markdown.contains("· Grok:** Well, the — *interrupted*\n"))
     }
 
     @Test func listsEachConversationOnceOldestFirst() throws {
