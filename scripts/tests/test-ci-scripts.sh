@@ -406,6 +406,46 @@ expect "ui-test-shard: --check fails without a result bundle" \
     1 "" \
     env UI_TESTS_DIR="$ui" XCRESULT_SUMMARY_JSON= "$shard" --check 1/3 "$work/missing.xcresult"
 
+# A performance build and the covered functional build must partition the
+# same target without dropping or duplicating a test.
+partitioned="$work/PartitionedUITests"
+mkdir -p "$partitioned"
+cat >"$partitioned/TopicDetailUITests.swift" <<'EOF'
+import XCTest
+final class TopicDetailUITests: XCTestCase {
+    func testTappingExpandsWithinAHundredMilliseconds() {}
+    func testShowsDetail() {}
+}
+final class OtherUITests: XCTestCase {
+    func testOther() {}
+}
+EOF
+expect "ui-test-shard: the functional suite excludes only the latency benchmark" \
+    0 "OtherUITests/testOther
+TopicDetailUITests/testShowsDetail" \
+    env UI_TESTS_DIR="$partitioned" UI_TEST_SUITE=functional "$shard" --list 1/1
+expect "ui-test-shard: the performance suite selects the existing benchmark" \
+    0 "-only-testing:BlauUITests/TopicDetailUITests/testTappingExpandsWithinAHundredMilliseconds" \
+    env UI_TESTS_DIR="$partitioned" UI_TEST_SUITE=performance "$shard" 1/1
+expect "ui-test-shard: a renamed performance test fails the partition" \
+    2 "" \
+    env UI_TESTS_DIR="$ui" UI_TEST_SUITE=performance "$shard" --list 1/1
+expect "ui-test-shard: functional selection also detects a missing performance test" \
+    2 "" \
+    env UI_TESTS_DIR="$ui" UI_TEST_SUITE=functional "$shard" --list 1/1
+expect "ui-test-shard: rejects an unknown suite" \
+    2 "" \
+    env UI_TESTS_DIR="$partitioned" UI_TEST_SUITE=unknown "$shard" --list 1/1
+printf '{ "totalTestCount" : 1, "passedTests" : 1 }\n' >"$work/summary-1.json"
+expect "ui-test-shard: checks the executed performance test count" \
+    0 "" \
+    env UI_TESTS_DIR="$partitioned" UI_TEST_SUITE=performance XCRESULT_SUMMARY_JSON="$work/summary-1.json" \
+    "$shard" --check 1/1 unused.xcresult
+expect "ui-test-shard: a performance selector that ran zero tests fails" \
+    1 "" \
+    env UI_TESTS_DIR="$partitioned" UI_TEST_SUITE=performance XCRESULT_SUMMARY_JSON="$work/summary-0.json" \
+    "$shard" --check 1/1 unused.xcresult
+
 # The real UI tests: every test-like method is placed (the script fails
 # otherwise), and the shards of ci.yml's app-ui-tests matrix (shard: [1, ..., N],
 # run as K/N) cover them all exactly once.
@@ -432,13 +472,14 @@ fi
 : >"$work/real-union"
 k=1
 while [ "$k" -le "$shards" ]; do
-    "$shard" --list "$k/$shards" >>"$work/real-union" 2>/dev/null
+    UI_TEST_SUITE=functional "$shard" --list "$k/$shards" >>"$work/real-union" 2>/dev/null
     k=$((k + 1))
 done
+UI_TEST_SUITE=performance "$shard" --list 1/1 >>"$work/real-union" 2>/dev/null
 if [ "$shards" -gt 0 ] && [ "$(LC_ALL=C sort "$work/real-union")" = "$(cat "$work/real-all")" ]; then
-    pass "ui-test-shard: CI's $shards shards cover the real BlauUITests exactly once"
+    pass "ui-test-shard: CI's $shards functional shards and performance job cover BlauUITests exactly once"
 else
-    fail "ui-test-shard: CI's $shards shards cover the real BlauUITests exactly once"
+    fail "ui-test-shard: CI's functional shards and performance job cover BlauUITests exactly once"
 fi
 
 # --- warm-simulator.sh ----------------------------------------------------------
@@ -534,7 +575,7 @@ else
     echo "$unpinned" | sed 's/^/       /'
 fi
 
-for job in lint package-tests app-unit-tests app-ui-tests app-tests perf-kit perf soak asr-eval memory-eval; do
+for job in lint package-tests app-unit-tests app-ui-tests app-ui-performance app-tests perf-kit perf soak asr-eval memory-eval; do
     if grep -Eq "^  $job:" "$workflow"; then
         pass "ci.yml defines the $job job"
     else
@@ -546,11 +587,27 @@ done
 # the unit-test job and every UI shard, and always runs, because a skipped
 # required check counts as passing.
 app_tests=$(awk '/^  app-tests:/{job=1; next} job && /^  [a-z]/{exit} job' "$workflow")
-if printf '%s\n' "$app_tests" | grep -Eq '^    needs: \[app-unit-tests, app-ui-tests\]$' &&
-    printf '%s\n' "$app_tests" | grep -Eq '^    if: \$\{\{ always\(\) \}\}$'; then
+if printf '%s\n' "$app_tests" | grep -Eq '^    needs: \[app-unit-tests, app-ui-tests, app-ui-performance\]$' &&
+    printf '%s\n' "$app_tests" | grep -Eq '^    if: \$\{\{ always\(\) \}\}$' &&
+    printf '%s\n' "$app_tests" | grep -Fq '[ "$PERFORMANCE_RESULT" != success ]'; then
     pass "ci.yml's app-tests needs every app test job and always runs"
 else
     fail "ci.yml's app-tests needs every app test job and always runs"
+fi
+
+functional_job=$(awk '/^  app-ui-tests:/{job=1; next} job && /^  [a-z]/{exit} job' "$workflow")
+performance_job=$(awk '/^  app-ui-performance:/{job=1; next} job && /^  [a-z]/{exit} job' "$workflow")
+if printf '%s\n' "$functional_job" | grep -q 'UI_TEST_SUITE: functional' &&
+    ! printf '%s\n' "$functional_job" | grep -q 'enableCodeCoverage NO'; then
+    pass "ci.yml's functional UI shards retain coverage and select the functional suite"
+else
+    fail "ci.yml's functional UI shards retain coverage and select the functional suite"
+fi
+performance_flags=$(printf '%s\n' "$performance_job" | grep -c 'SWIFT_OPTIMIZATION_LEVEL=-O SWIFT_COMPILATION_MODE=wholemodule -enableCodeCoverage NO' || true)
+if printf '%s\n' "$performance_job" | grep -q 'UI_TEST_SUITE: performance' && [ "$performance_flags" -eq 2 ]; then
+    pass "ci.yml's performance prebuild and test use identical optimized settings without coverage"
+else
+    fail "ci.yml's performance prebuild and test use identical optimized settings without coverage"
 fi
 # Each UI shard runs its slice as K/N, N being the size of the matrix.
 # shellcheck disable=SC2016 # the workflow's ${{ }} expressions, literally

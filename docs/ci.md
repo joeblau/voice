@@ -13,8 +13,9 @@ evaluation.
 | `lint`          | swift-format (`make lint`), then the shell-script tests    | `make lint test-scripts` | nothing |
 | `package-tests` | `swift build --build-tests` and `swift test` in `Packages/BlauKit` on the macOS host | `make test-kit` | Swift Testing xUnit report |
 | `app-unit-tests` | XcodeGen, then the `Blau` test plan's unit tests (`BlauTests`) on an iOS Simulator | `make test-unit` | `app-unit-tests-xcresult` |
-| `app-ui-tests (K/4)` | Four jobs, one per shard: XcodeGen, the build, a warm-up launch of the app on the simulator, then the K-th quarter of `BlauUITests`, then a check that the result bundle ran every test of the shard ([UI-test shards](#ui-test-shards)) | `make test-ui UI_SHARD=K/4` | `app-ui-tests-K-xcresult` |
-| `app-tests`     | Waits for `app-unit-tests` and every `app-ui-tests` shard and passes only if all of them passed: the one check for the app's tests (ubuntu, seconds) | `make test` runs the same tests in one go | nothing |
+| `app-ui-tests (K/4)` | Four functional UI shards with Debug coverage, simulator warm-up, and an executed-count check ([UI-test shards](#ui-test-shards)) | `make test-ui UI_TEST_SUITE=functional UI_SHARD=K/4` | `app-ui-tests-K-xcresult` |
+| `app-ui-performance` | The existing five-sample expansion benchmark, with optimized Swift and no coverage instrumentation; the 100 ms limit is unchanged | `make test-ui UI_TEST_SUITE=performance` with the flags below | `app-ui-performance-xcresult` |
+| `app-tests`     | Requires the unit job, every functional UI shard, and the UI performance job to pass (ubuntu, seconds) | `make test` runs the same tests in one go | nothing |
 | `perf-kit`      | The BlauKit micro-benchmarks (package-benchmark) on the macOS host; fails when an allocation count (and, on a machine with performance counters, an instruction count) is more than 10% above `Packages/BlauKitBenchmarks/Thresholds` ([performance.md](performance.md#micro-benchmarks)) | `make microbench-check` | `perf-kit-results` (the check's output), 30 days; the output on the summary page |
 | `perf`          | Nightly (and on demand) only: `Blau-Perf` scheme, `BlauPerf` test plan, Release with the scripted session, then the regression gate against `BlauPerfTests/Baselines/ci-simulator.json`: 10% on memory, tolerances calibrated to the runner's run-to-run spread on time ([performance.md](performance.md#the-regression-gate)) | `make perf perf-check` | `perf-results` (`perf.xcresult`, `perf-report.md`, `perf-results.json`), 90 days; the report on the summary page |
 | `soak`          | Nightly (and on demand) only: the long-session soak test at reduced length, 20 minutes of mixed audio at 10x through the app's pipeline on the simulator against a local fake realtime server, plus the app's leaks read during and after the run; fails on any soak check or on leak growth ([soak.md](soak.md)) | `make soak SOAK_MINUTES=20` | `soak-results` (`report.json`, `report.md`, `leaks.*`, `summary.md`, `soak.xcresult`), 90 days; `summary.md` on the summary page |
@@ -43,7 +44,7 @@ machine; device numbers are a separate, manual table.
 
 - `pull_request`, `push` to `main`, `merge_group` (GitHub merge queue) and
   `workflow_dispatch` run `lint`, `package-tests`, `app-unit-tests`, the
-  four `app-ui-tests` shards, `app-tests` and `perf-kit`.
+  four `app-ui-tests` shards, `app-ui-performance`, `app-tests` and `perf-kit`.
 - `schedule` (08:23 UTC daily, `main`) runs those plus `perf`, `soak`,
   `asr-eval` and `memory-eval`. **Run workflow** has a checkbox for each of
   the four (and a length for the soak).
@@ -134,7 +135,8 @@ the suite outgrew its 40-minute limit (#179; push run
 [38013389852](https://github.com/joeblau/voice/actions/runs/38013389852) was
 cancelled in `SettingsUITests` after about 30 minutes of UI tests, with 38 of
 the 93 still to run). So `app-unit-tests` runs `BlauTests` alone and the
-`app-ui-tests` matrix splits `BlauUITests` over four jobs.
+`app-ui-tests` matrix splits the functional UI tests over four jobs, and
+`app-ui-performance` runs the existing expansion benchmark separately.
 
 [`scripts/ci/ui-test-shard.sh`](../scripts/ci/ui-test-shard.sh) lists every
 XCTest method in `BlauUITests` from the sources, sorts them by
@@ -146,8 +148,8 @@ into `-only-testing:BlauUITests/<Class>/<testMethod>` arguments, so a shard's
 failure reproduces locally with the command in the job's log:
 
 ```sh
-make test-ui UI_SHARD=2/4 DESTINATION='id=<simulator udid>'
-scripts/ci/ui-test-shard.sh --list 2/4   # which tests that is
+make test-ui UI_TEST_SUITE=functional UI_SHARD=2/4 DESTINATION='id=<simulator udid>'
+UI_TEST_SUITE=functional scripts/ci/ui-test-shard.sh --list 2/4
 ```
 
 Nothing is dropped:
@@ -155,8 +157,9 @@ Nothing is dropped:
 - The script fails, naming the file and line, on a `func testX()` it can't
   place in a top-level class or an extension of one, and on Swift Testing in
   `BlauUITests` (`-only-testing` by class and method would not select it).
-- `make test-scripts` (the `lint` job) checks that the matrix's shards
-  together are every UI test, each exactly once.
+- `make test-scripts` (the `lint` job) checks that the functional shards
+  plus the performance job cover every UI test, each exactly once. Selecting
+  either suite fails if the named benchmark is missing or renamed.
 - After testing, each shard runs `ui-test-shard.sh --check`, which fails
   unless the result bundle ran exactly as many tests as the shard selected
   (skipped and failed ones count), so a selection that matched nothing
@@ -166,16 +169,26 @@ To change the number of shards, edit the matrix (`shard: [1, 2, 3, 4]`); the
 jobs pass `strategy.job-total` as N. `make test` and `make test-ui` without
 `UI_SHARD` still run everything in one go.
 
-The UI jobs pass `SWIFT_OPTIMIZATION_LEVEL=-O` to both the prebuild and
-the test command. They retain the Debug configuration's fixture hooks and
-the test plan's code coverage, while the tap-to-expand budget measures
-optimized Swift code. The unit job keeps its standard Debug build.
-To reproduce the UI jobs locally, include the same setting:
+Functional UI and unit jobs retain their normal Debug builds and coverage.
+The timing benchmark uses `SWIFT_OPTIMIZATION_LEVEL=-O`, whole-module
+compilation, and `-enableCodeCoverage NO` for both prebuild and testing.
+It keeps Debug fixture hooks so the same hermetic XCTest runs; its five
+samples and 100 ms assertion are unchanged. This follows Apple's guidance
+to measure optimized code with coverage disabled, since instrumentation
+does not represent shipping performance:
+[Writing and running performance tests](https://developer.apple.com/documentation/xcode/writing-and-running-performance-tests).
+To reproduce the benchmark locally:
 
 ```sh
-make test-ui UI_SHARD=2/4 DESTINATION='id=<simulator udid>' \
-  XCODEBUILD_FLAGS='SWIFT_OPTIMIZATION_LEVEL=-O -collect-test-diagnostics never'
+make test-ui UI_TEST_SUITE=performance DESTINATION='id=<simulator udid>' \
+  XCODEBUILD_FLAGS='SWIFT_OPTIMIZATION_LEVEL=-O SWIFT_COMPILATION_MODE=wholemodule -enableCodeCoverage NO -collect-test-diagnostics never'
 ```
+
+There are 93 functional UI tests and one timing benchmark. Functional
+expansion, sharing, editing, large-text and anchoring tests retain coverage
+of those paths; the benchmark measures them without adding instrumentation.
+The required `app-tests` gate also requires `app-ui-performance`, so moving
+the benchmark cannot let a failed or unexecuted timing test pass the gate.
 
 Two things the single job got for free need doing in each shard:
 
@@ -215,7 +228,8 @@ number of UI tests, not with the code. Four shards bring each job to about
 half its limit. When the shards approach their limit, add a shard before
 reaching for a larger runner. Each job's `timeout-minutes` (15 to 60, 75 for
 `soak`, 90 for `perf`) is a safety net for a hung simulator, not the budget:
-`app-unit-tests` has 30 and each `app-ui-tests` shard 60, about twice what
+`app-unit-tests` and `app-ui-performance` have 30 minutes; each functional
+`app-ui-tests` shard has 60, about twice what
 they take on a busy runner.
 
 ## Secrets
@@ -241,8 +255,8 @@ To block merging on red CI, add `lint`, `package-tests`, `app-tests` and
 `perf-kit` as required status checks for `main` under **Settings > Branches**
 (or a ruleset). That is a repository setting, not part of the workflow.
 
-`app-tests` stands for all of the app's tests: it needs `app-unit-tests` and
-every `app-ui-tests` shard and fails unless each of them passed, so the
+`app-tests` stands for all of the app's tests: it needs `app-unit-tests`,
+every `app-ui-tests` shard, and `app-ui-performance`, and fails unless all passed, so the
 required checks don't change when the number of shards does. It runs even
 when they fail or are cancelled (`if: always()`), because GitHub counts a
 skipped required check as passing. Don't require the shards' own checks:

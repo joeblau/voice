@@ -10,6 +10,7 @@
 #                      XCODEBUILD_FLAGS='-resultBundlePath .build/results/app.xcresult'
 #   UI_SHARD           K/N: `make test-ui` runs only the K-th of N slices of
 #                      the UI tests (scripts/ci/ui-test-shard.sh), as CI does
+#   UI_TEST_SUITE      all (default), functional, or performance
 
 PROJECT           := Blau.xcodeproj
 DERIVED_DATA      ?= .build/DerivedData
@@ -17,6 +18,7 @@ DESTINATION       ?= platform=iOS Simulator,name=iPhone 17,OS=latest
 BUILD_DESTINATION ?= generic/platform=iOS Simulator
 XCODEBUILD_FLAGS  ?=
 UI_SHARD          ?=
+UI_TEST_SUITE     ?= all
 
 XCODEGEN   ?= xcodegen
 XCODEBUILD := xcodebuild -project $(PROJECT) -derivedDataPath $(DERIVED_DATA) $(XCODEBUILD_FLAGS)
@@ -60,9 +62,9 @@ test-unit: generate ## Run only the unit tests
 .PHONY: test-ui
 test-ui: generate ## Run only the UI tests (UI_SHARD=K/N: one of N slices, as CI)
 	@set -e; \
-	if [ -n '$(UI_SHARD)' ]; then \
-		selection=$$(scripts/ci/ui-test-shard.sh '$(UI_SHARD)'); \
-		echo "UI tests, shard $(UI_SHARD): $$(echo "$$selection" | wc -l | tr -d ' ') tests"; \
+	if [ -n '$(UI_SHARD)' ] || [ '$(UI_TEST_SUITE)' != all ]; then \
+		selection=$$(UI_TEST_SUITE='$(UI_TEST_SUITE)' scripts/ci/ui-test-shard.sh '$(or $(UI_SHARD),1/1)'); \
+		echo "UI tests ($(UI_TEST_SUITE)), shard $(or $(UI_SHARD),1/1): $$(echo "$$selection" | wc -l | tr -d ' ') tests"; \
 	else \
 		selection=-only-testing:BlauUITests; \
 	fi; \

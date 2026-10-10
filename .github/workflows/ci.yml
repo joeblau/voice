@@ -150,7 +150,8 @@ jobs:
 
   # The app's tests on an iOS Simulator, split so each job stays well inside
   # its limit: the unit tests (BlauTests) in one job and the UI tests
-  # (BlauUITests) dealt out over the app-ui-tests matrix. Together they are
+  # (BlauUITests) dealt out over the functional matrix and performance job.
+  # Together they are
   # the Blau scheme's Blau test plan, `make test`. app-tests below is the one
   # check that needs them all.
   app-unit-tests:
@@ -236,6 +237,7 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4]
     env:
+      UI_TEST_SUITE: functional
       UI_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
     steps:
       - name: Check out
@@ -275,9 +277,6 @@ jobs:
       - name: Build
         env:
           DESTINATION: ${{ steps.simulator.outputs.destination }}
-          # Keep DEBUG fixtures and coverage, but measure UI latency with
-          # the Swift optimization level used by the shipping app.
-          XCODEBUILD_FLAGS: "SWIFT_OPTIMIZATION_LEVEL=-O"
         run: make build-tests
 
       # Three to eight minutes on the runner.
@@ -288,12 +287,11 @@ jobs:
           UDID: ${{ steps.simulator.outputs.udid }}
         run: scripts/ci/warm-simulator.sh "$UDID" .build/DerivedData/Build/Products/Debug-iphonesimulator/Blau.app
 
-      # Match the optimized prebuild; unit tests keep their Debug build.
       - name: Test
         id: test
         env:
           DESTINATION: ${{ steps.simulator.outputs.destination }}
-          XCODEBUILD_FLAGS: "-resultBundlePath .build/results/app-ui-tests.xcresult -parallel-testing-enabled NO -collect-test-diagnostics never SWIFT_OPTIMIZATION_LEVEL=-O"
+          XCODEBUILD_FLAGS: "-resultBundlePath .build/results/app-ui-tests.xcresult -parallel-testing-enabled NO -collect-test-diagnostics never"
         run: make test-ui UI_SHARD="$UI_SHARD"
 
       # A selection that matched no test would otherwise pass with nothing
@@ -318,13 +316,101 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # The latency benchmark runs with shipping Swift optimization and no
+  # coverage instrumentation. Functional UI and unit jobs retain Debug
+  # coverage; the partition check requires every UI test exactly once.
+  app-ui-performance:
+    name: app-ui-performance
+    runs-on: ${{ vars.BLAU_CI_RUNNER || 'xcode-27' }}
+    timeout-minutes: 30
+    env:
+      UI_TEST_SUITE: performance
+      UI_SHARD: 1/1
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode
+        id: xcode
+        run: scripts/ci/select-xcode.sh
+
+      - name: Install XcodeGen
+        run: |
+          command -v xcodegen >/dev/null || brew install xcodegen
+          xcodegen --version
+
+      - name: Generate project
+        run: make generate
+
+      - name: Cache Swift packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build/DerivedData/SourcePackages
+          key: spm-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/BlauKit/Package.swift', 'Packages/BlauKit/Package.resolved') }}
+          restore-keys: |
+            spm-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.build }}-
+
+      - name: Pick simulator
+        id: simulator
+        run: scripts/ci/simulator-destination.sh
+
+      # Build first, then boot the simulator and launch the app once. On a
+      # cold simulator the app's first launch outlasted XCUITest's launch
+      # timeout and failed each shard's first test; in one job the unit tests
+      # used to warm it up. Booting only after the build keeps the boot from
+      # starving the build.
+      - name: Build
+        env:
+          DESTINATION: ${{ steps.simulator.outputs.destination }}
+          XCODEBUILD_FLAGS: "SWIFT_OPTIMIZATION_LEVEL=-O SWIFT_COMPILATION_MODE=wholemodule -enableCodeCoverage NO"
+        run: make build-tests
+
+      # Three to eight minutes on the runner.
+      - name: Warm up simulator
+        timeout-minutes: 15
+        continue-on-error: true
+        env:
+          UDID: ${{ steps.simulator.outputs.udid }}
+        run: scripts/ci/warm-simulator.sh "$UDID" .build/DerivedData/Build/Products/Debug-iphonesimulator/Blau.app
+
+      - name: Test
+        id: test
+        env:
+          DESTINATION: ${{ steps.simulator.outputs.destination }}
+          XCODEBUILD_FLAGS: "-resultBundlePath .build/results/app-ui-performance.xcresult -parallel-testing-enabled NO -collect-test-diagnostics never SWIFT_OPTIMIZATION_LEVEL=-O SWIFT_COMPILATION_MODE=wholemodule -enableCodeCoverage NO"
+        run: make test-ui UI_SHARD="$UI_SHARD"
+
+      # A selection that matched no test would otherwise pass with nothing
+      # run. Also after failing tests, which count, so every run shows the
+      # shard ran its whole slice.
+      - name: Check the performance suite ran its test
+        if: ${{ !cancelled() && steps.test.outcome != 'skipped' }}
+        run: scripts/ci/ui-test-shard.sh --check "$UI_SHARD" .build/results/app-ui-performance.xcresult
+
+      - name: Shut down simulator
+        if: ${{ always() && steps.simulator.outputs.udid != '' }}
+        env:
+          UDID: ${{ steps.simulator.outputs.udid }}
+        run: xcrun simctl shutdown "$UDID" || true
+
+      - name: Upload xcresult
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: app-ui-performance-xcresult-${{ github.run_attempt }}
+          path: .build/results/app-ui-performance.xcresult
+          if-no-files-found: warn
+          retention-days: 14
+
   # The required check for the app's tests: green only when the unit tests
-  # and every UI shard passed. It always runs, because a required check that
+  # and every UI shard and the timing benchmark passed. It always runs, because a required check that
   # is skipped counts as passing; a failed or cancelled job fails it. It keeps
   # the name of the single job it replaced, so required checks still match.
   app-tests:
     name: app-tests
-    needs: [app-unit-tests, app-ui-tests]
+    needs: [app-unit-tests, app-ui-tests, app-ui-performance]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -333,10 +419,12 @@ jobs:
         env:
           UNIT_RESULT: ${{ needs.app-unit-tests.result }}
           UI_RESULT: ${{ needs.app-ui-tests.result }}
+          PERFORMANCE_RESULT: ${{ needs.app-ui-performance.result }}
         run: |
           echo "app-unit-tests: $UNIT_RESULT"
           echo "app-ui-tests:   $UI_RESULT"
-          if [ "$UNIT_RESULT" != success ] || [ "$UI_RESULT" != success ]; then
+          echo "app-ui-performance: $PERFORMANCE_RESULT"
+          if [ "$UNIT_RESULT" != success ] || [ "$UI_RESULT" != success ] || [ "$PERFORMANCE_RESULT" != success ]; then
             echo "::error::The app's tests did not all pass."
             exit 1
           fi
