@@ -41,6 +41,7 @@ jobs:
       - name: Build
         env:
           DESTINATION: ${{ steps.simulator.outputs.destination }}
+          XCODEBUILD_FLAGS: "SWIFT_OPTIMIZATION_LEVEL=-O"
         run: make build-tests
       - name: Warm up simulator
         timeout-minutes: 15
@@ -52,7 +53,8 @@ jobs:
         env:
           DESTINATION: ${{ steps.simulator.outputs.destination }}
         run: |
-          xcodebuild test-without-building -project Blau.xcodeproj -scheme Blau -testPlan Blau -destination "$DESTINATION" -derivedDataPath .build/DerivedData -resultBundlePath .build/results/expansion.xcresult -only-testing:BlauUITests/TopicDetailUITests/testTappingExpandsWithinAHundredMilliseconds -test-iterations 3 -parallel-testing-enabled NO -collect-test-diagnostics never CODE_SIGNING_ALLOWED=NO XAI_DEV_API_KEY= | tee .build/results/expansion.log
+          mkdir -p .build/results
+          xcodebuild test-without-building -project Blau.xcodeproj -scheme Blau -testPlan Blau -destination "$DESTINATION" -derivedDataPath .build/DerivedData -resultBundlePath .build/results/expansion.xcresult -only-testing:BlauUITests/TopicDetailUITests/testTappingExpandsWithinAHundredMilliseconds -test-iterations 3 -parallel-testing-enabled NO -collect-test-diagnostics never SWIFT_OPTIMIZATION_LEVEL=-O CODE_SIGNING_ALLOWED=NO XAI_DEV_API_KEY= | tee .build/results/expansion.log
           xcrun xcresulttool get test-results summary --path .build/results/expansion.xcresult --format json > .build/results/expansion-summary.json
           python3 -c 'import json; r=json.load(open(".build/results/expansion-summary.json")); print(r); assert r["totalTestCount"] == 1 and r["failedTests"] == 0'
           python3 -c 'import re; s=open(".build/results/expansion.log").read(); n=len(re.findall(r"Test Case .*testTappingExpandsWithinAHundredMilliseconds.* passed", s)); print("Passed iterations:",n); assert n == 3'
@@ -60,7 +62,8 @@ jobs:
         env:
           DESTINATION: ${{ steps.simulator.outputs.destination }}
         run: |
-          xcodebuild test-without-building -project Blau.xcodeproj -scheme Blau -testPlan Blau -destination "$DESTINATION" -derivedDataPath .build/DerivedData -resultBundlePath .build/results/large-actions.xcresult -only-testing:BlauUITests/TopicDetailUITests/testActionsRemainReachableAtTheLargestTextSize -parallel-testing-enabled NO -collect-test-diagnostics never CODE_SIGNING_ALLOWED=NO XAI_DEV_API_KEY=
+          mkdir -p .build/results
+          xcodebuild test-without-building -project Blau.xcodeproj -scheme Blau -testPlan Blau -destination "$DESTINATION" -derivedDataPath .build/DerivedData -resultBundlePath .build/results/large-actions.xcresult -only-testing:BlauUITests/TopicDetailUITests/testActionsRemainReachableAtTheLargestTextSize -parallel-testing-enabled NO -collect-test-diagnostics never SWIFT_OPTIMIZATION_LEVEL=-O CODE_SIGNING_ALLOWED=NO XAI_DEV_API_KEY=
           xcrun xcresulttool get test-results summary --path .build/results/large-actions.xcresult --format json > .build/results/large-actions-summary.json
           python3 -c 'import json; r=json.load(open(".build/results/large-actions-summary.json")); print(r); assert r["totalTestCount"] == 1 and r["failedTests"] == 0'
       - name: Upload results
