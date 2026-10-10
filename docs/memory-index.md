@@ -109,8 +109,13 @@ Earlier: …the end of the previous exchange
 - The topic is left out while it still has its placeholder title.
 - `facts:` lists the facts extracted from the exchange's utterances
   (`Fact.sourceUtteranceID`), at most five and at most half the budget.
-  Known gap: invalidated facts are listed too. Leaving them out is tracked
-  in #173, and it lands together with re-recorded memory-eval vectors.
+  Invalidated facts are left out (#173): a superseded statement ("User
+  lives in Berlin") would keep boosting the exchange for the old value and
+  take one of the five places. They stay in the exchange's fact links
+  (`fact_link`), so un-invalidating or editing one re-chunks the exchange,
+  and each stays searchable as its own chunk with `(until …)`. Writing
+  `<statement> (until <date>)` in the prefix instead was considered; it
+  boosts the exchange for the old value all the same.
 - The overlap comes **after** the exchange, so if anything is cut by the
   model's 128-token window it is the context, never the exchange itself.
   It is trimmed from the front (`…`) to fit.
@@ -144,13 +149,57 @@ margin covers the token estimate), capped at 400, with documents breaking at
 headings from half of that. For the shipped model that is **112 tokens**;
 a 512-token model would get the issue's 200–400.
 
-Tokens are counted with `ApproximateTokenCounter` (UTF-8 bytes / 4 plus
-the prompt), not the model's tokenizer, so chunk boundaries don't move when
-the model is installed or replaced: the FTS rows stay put and only vectors
-are (re)computed. A `TextEmbeddingModel` is also a `ChunkTokenCounting` if
-exact counts are ever wanted. Known gap: bytes / 4 can undercount
-digit-heavy and non-Latin text. A more conservative estimate is tracked in
-#173.
+Tokens are counted with `ApproximateTokenCounter`, not the model's
+tokenizer, so chunk boundaries don't move when the model is installed or
+replaced: the FTS rows stay put and only vectors are (re)computed. A
+`TextEmbeddingModel` is also a `ChunkTokenCounting` if exact counts are
+ever wanted.
+
+The estimate is meant never to fall below EmbeddingGemma's real count
+(#173), so a chunk that fits is never truncated when it is embedded. Per
+Unicode scalar, plus 9 for the prompt, `<bos>` and `<eos>`:
+
+| Text | Tokens |
+| --- | --- |
+| A run of ASCII letters | Its weight / 5, rounded up; a lowercase letter weighs 1, an uppercase one 3, and a letter next to a digit at least 4 |
+| An ASCII digit | 1: Gemma splits numbers into single digits |
+| A space | 0 before an ASCII letter (it becomes part of `▁word`), else 1 |
+| Other ASCII: punctuation, symbols, newlines | 1 |
+| U+0100–U+036F: Latin Extended, IPA, combining marks | 2: the rarer ones fall back to UTF-8 bytes |
+| Any other 2- or 3-byte scalar: accents, Cyrillic, CJK, Thai... | 1 |
+| A 4-byte scalar: emoji, CJK Extension B... | 4: one token per byte when it isn't in the vocabulary |
+
+It was checked against the model's own `tokenizer.json` (from
+`unsloth/embeddinggemma-300m@bfa3c846`, byte-identical to the gated
+`google/embeddinggemma-300m` file: same SHA-256, `6852f8d5…`) through
+`TextEmbeddingModel.tokenCount(of:as:)` on 55 samples: digit-heavy text
+(order numbers, phone numbers, dates, money, hex, UUIDs), Chinese, Japanese
+and Korean, emoji (including ones outside the vocabulary), fourteen
+samples of other scripts, symbols and code, and English. It is at or above the model's count
+on every one, exact on a run of digits, and also on all 265 memory-eval key
+texts. It overestimates English by about a quarter (1.23× on the eval key
+texts) and non-Latin scripts by two to three times, where a token covers
+several characters. `ApproximateTokenCounterTests` holds the measured
+counts; `BLAU_EMBEDDINGGEMMA_TOKENIZER=<dir with tokenizer.json> swift test
+--filter EmbeddingGemmaTokenCountTests` measures them again.
+
+The rule it replaced, UTF-8 bytes / 4, fell short by up to two thirds on
+digit-heavy text (28 for a 76-digit number the model reads as 85 tokens)
+and below the real count on 155 of the 259 eval key texts; 9 of them went
+past the 112-token budget (the largest 127). With the new rule the largest
+eval chunk is 98 tokens. The rule #173 started from (one token per digit
+and per scalar of 3 or more bytes, bytes / 4 for the rest) still fell short
+on 30 of the 55 samples: a space before a number, punctuation, mixed case
+and characters outside the vocabulary are tokens of their own.
+
+`ProfileBlock.approximateTokenCount` keeps bytes / 4. The profile is
+pinned to Grok's context, which has another tokenizer and room to spare,
+and its 1,500-token budget is a target for consolidation, not a window that
+cuts text off.
+
+A change to the chunking rules bumps `MemoryIndexer.chunkingVersion`, part
+of the chunking fingerprint (`v2` since #173), so every existing index gets
+one full pass ([memory-indexer.md](memory-indexer.md)).
 
 ## Writing
 
@@ -259,9 +308,10 @@ never logged. The fused search (`MemorySearch`, #64) is one
 | What | How |
 | --- | --- |
 | Chunking (`swift test`) | `ExchangeChunkingTests`, `DocumentChunkingTests`, `MemoryChunkIdentityTests`, `KeywordQueryTests` |
+| Token estimate (`swift test`) | `ApproximateTokenCounterTests`: at or above EmbeddingGemma's measured count on 55 samples, pinned values, the per-scalar rules. `EmbeddingGemmaTokenCountTests` (opt-in, `BLAU_EMBEDDINGGEMMA_TOKENIZER`) measures them again with the real tokenizer |
 | Matrix (`swift test`) | `VectorMatrixTests`: agrees with brute-force `cosineSimilarity` across Accelerate blocks, swap-remove, filters, zero and mismatched vectors, top-K |
 | Index (`swift test`) | `MemoryIndexTests`: round trip, BM25 with stemming, the common-word cutoff (with and without filters), FTS syntax in queries, filters, vector reuse, matrix updates on write, model-version isolation, persistence, corrupt and old-schema files recreated, an unreadable file kept, searching while writing |
-| Rebuild (`swift test`) | `MemoryIndexRebuilderTests` (reuse, changes, deletions, new model, keyword-only fallback, a wrong vector count, cancellation, and invalidated facts in exchange keys as a known issue for #173) and `SwiftDataRebuildTests` (the acceptance criterion, CloudKit duplicates) |
+| Rebuild (`swift test`) | `MemoryIndexRebuilderTests` (reuse, changes, deletions, new model, keyword-only fallback, a wrong vector count, cancellation, invalidated facts left out of exchange keys but still linked) and `SwiftDataRebuildTests` (the acceptance criterion, CloudKit duplicates) |
 | BM25 quality (`swift test`) | `KeywordRetrievalEvalTests`: BM25 alone on #59's eval set finds every keyword-style query in the top 5 |
 | 50k benchmark on the Mac (opt-in) | `BLAU_INDEX_BENCHMARK=1 swift test -Xswiftc -O --scratch-path .build/optimized --filter MemoryIndexSearchBenchmarkTests` |
 | 50k benchmark on an iPhone | `make bench` (`MemoryIndexBenchmarks.testSearch50k`) or the debug benchmark screen |

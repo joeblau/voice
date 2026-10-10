@@ -89,7 +89,8 @@ public struct MemoryChunker: Sendable {
     ///
     /// - Parameter factsByUtterance: Fact statements by the utterance they
     ///   were extracted from (`FactSnapshot.sourceUtteranceID`); they go in
-    ///   the `facts:` part of the exchange's key text.
+    ///   the `facts:` part of the exchange's key text. `MemoryIndexRebuilder`
+    ///   and `MemoryIndexer` pass current facts only (#173).
     public func chunks(for conversation: ConversationSnapshot, factsByUtterance: [UUID: [String]] = [:])
         -> [MemoryChunk]
     {

@@ -25,7 +25,7 @@ three and a half minutes on an M3 Max. Retrieval is also checked on every
 `swift test` (`MemoryEvalRetrievalTests`), and a nightly CI job runs the
 whole thing and fails on a regression ([below](#nightly-ci)).
 
-## Results (2026-10-08)
+## Results (2026-10-10)
 
 Mac host (M3 Max, macOS 27.2), debug build, recorded
 Qwen3-Embedding-0.6B vectors (256-d int8, the reference #64 was tuned on),
@@ -38,69 +38,88 @@ Retrieval over the 95 answerable questions (top 10):
 
 | System | Recall@5 | Complete@5 | Hit@1 | MRR@10 | nDCG@10 | Recall@10 | Current first |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **`hybrid`** (`MemorySearch` as the app runs it) | **0.900** | **0.874** | **0.663** | **0.781** | **0.808** | **0.979** | **0.650** |
-| `hybrid-no-entities` (no entity expansion) | 0.884 | 0.832 | 0.695 | 0.803 | 0.822 | 0.968 | 0.450 |
-| `bm25-fallback` (no embedding model) | 0.932 | 0.895 | 0.642 | 0.770 | 0.805 | 0.974 | 0.750 |
-| `dense` (vectors alone) | 0.805 | 0.726 | 0.579 | 0.717 | 0.743 | 0.926 | 0.550 |
+| **`hybrid`** (`MemorySearch` as the app runs it) | **0.911** | **0.884** | **0.663** | **0.785** | **0.814** | **0.979** | **0.700** |
+| `hybrid-no-entities` (no entity expansion) | 0.895 | 0.842 | 0.695 | 0.807 | 0.828 | 0.968 | 0.550 |
+| `bm25-fallback` (no embedding model) | 0.921 | 0.884 | 0.642 | 0.763 | 0.801 | 0.974 | 0.700 |
+| `dense` (vectors alone) | 0.832 | 0.768 | 0.558 | 0.715 | 0.748 | 0.926 | 0.600 |
 
 `hybrid` by question type, with answer accuracy:
 
 | Type | Questions | Recall@5 | Complete@5 | MRR@10 | Current first | Answer accuracy |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| single-fact | 30 | 1.000 | 1.000 | 0.772 | – | 93.3% (28/30) |
-| temporal | 25 | 0.800 | 0.760 | 0.777 | – | 64.0% (16/25) |
-| knowledge-update | 20 | 0.850 | 0.850 | 0.654 | 0.650 | 80.0% (16/20) |
-| multi-hop | 20 | 0.925 | 0.850 | 0.925 | – | 70.0% (14/20) |
-| abstention | 20 | – | – | – | – | 75.0% (15/20) |
-| **all** | **115** | **0.900** | **0.874** | **0.781** | **0.650** | **77.4% (89/115)** |
+| single-fact | 30 | 1.000 | 1.000 | 0.789 | – | 90.0% (27/30) |
+| temporal | 25 | 0.860 | 0.840 | 0.783 | – | 68.0% (17/25) |
+| knowledge-update | 20 | 0.850 | 0.850 | 0.667 | 0.700 | 70.0% (14/20) |
+| multi-hop | 20 | 0.900 | 0.800 | 0.900 | – | 75.0% (15/20) |
+| abstention | 20 | – | – | – | – | 80.0% (16/20) |
+| **all** | **115** | **0.911** | **0.884** | **0.785** | **0.700** | **77.4% (89/115)** |
 
 The answer stage is deterministic: two runs of the same build gave the same
-115 answers and verdicts (greedy decoding).
+115 answers and verdicts (greedy decoding) on 2026-10-08.
+
+**What #173 changed.** The index now has 265 chunks (259 before): the
+conservative token estimate cuts long exchanges and documents a little
+earlier, and invalidated facts no longer sit in exchange keys
+([memory-index.md](memory-index.md#chunk-size)). Against the 2026-10-08
+baseline, `hybrid` Recall@5 rose from 0.900 to 0.911, Complete@5 from 0.874
+to 0.884 and current first from 0.650 to 0.700 (one more update ranks the
+current record first); `dense` gained most (Recall@5 0.805 → 0.832,
+Complete@5 0.726 → 0.768); `bm25-fallback` lost one question (Recall@5
+0.932 → 0.921). Answer accuracy is unchanged overall (89 of 115) but
+shifted between types: knowledge updates fell from 16 to 14 of 20 although
+both questions that flipped kept their evidence in the top 2 (`ku-16`: the
+reader takes Keisha's November 2 start date for the day she accepted and
+answers "which is after today"; `ku-11`, accepted before though it repeated
+the superseded plan, is now rejected), and single-fact lost one, while
+temporal, multi-hop and abstention each gained one.
 
 ### Findings
 
-- **On this set BM25 alone beats hybrid** (Recall@5 0.932 against 0.900).
+- **On this set BM25 alone beats hybrid** (Recall@5 0.921 against 0.911).
   #59's set is mostly paraphrases, where the vector ranking wins and BM25
   weighs 0.4; this set's questions usually share a word with the memory
   that answers them, as spoken questions about one's own life tend to.
   The [sweep](#tuning) finds BM25 at weight 1.0 and k = 10 among the
-  best here (0.958 / MRR 0.817), but on #59's set that drops MRR@10 to
+  best here (0.942 / MRR 0.814), but on #59's set that drops MRR@10 to
   0.689, below the dense model alone, which #64's test forbids. The two
   sets pull in opposite directions, so the defaults stay; settle it on
   real queries once there are some, and with EmbeddingGemma's vectors
   (gated, not recorded yet).
 - **Knowledge updates are where retrieval is weakest**: the current
-  record ranks above the superseded one for only 13 of 20 updates.
+  record ranks above the superseded one for only 14 of 20 updates.
   Nothing in the ranking prefers newer records, so "what's our MRR" finds
   the June and July MRR documents and the August figure in a YC answer
   before September's (`ku-07`, rank 6), and an earlier tempo run outranks
-  the latest one (`ku-15`). Entity expansion helps (0.45 → 0.65), because
+  the latest one (`ku-15`). Entity expansion helps (0.55 → 0.70), because
   it adds an entity's currently valid facts. A recency tiebreak, or
   ranking an invalidated fact below its replacement, is the obvious next
   step.
-- **Relative times work; calendar ones don't boost.** "Last week",
-  "yesterday", "on Sunday" and "two days ago" put the evidence first in
-  12 of 14 questions (one of the 14 is "which POS systems does Larderly
-  sync today", where "today" is read as a time, harmlessly). "In July",
+- **Relative times work; calendar ones don't boost** (counted on the
+  2026-10-08 run). "Last week", "yesterday", "on Sunday" and "two days
+  ago" put the evidence first in 12 of 14 questions (one of the 14 is
+  "which POS systems does Larderly sync today", where "today" is read as
+  a time, harmlessly). "In July",
   "at the end of September" and "in mid-September" miss the top 5 in 3 of
   5, by design (#64 turned the calendar boost off because it hurt "MRR
   August 2026"-style questions).
 - **Entity expansion trades precision for coverage**: +1.6 points of
   Recall@5 and +4.2 of Complete@5, but Hit@1 falls from 0.695 to 0.663,
-  because expanded facts land above the direct hit (`tr-09`: four facts
-  that name Biscuit push July's ear-infection conversation to rank 8).
-- **The reader is the bottleneck on reasoning.** With Recall@5 at 0.90,
-  the on-device model gets 64% of temporal questions (date arithmetic:
-  "109 days" for 76) and 70% of multi-hop right, and answers 4 of 20
-  unanswerable questions from a near miss ("Biscuit is Sofia's dog"; a
-  fifth abstained, but the judge misread it). Grok, the model that answers
-  in the app, should do better; run it with `MEMORY_EVAL_READER=xai`
-  ([pending](#pending)).
+  because expanded facts land above the direct hit (`tr-09`: facts that
+  name Biscuit push July's ear-infection conversation to rank 9).
+- **The reader is the bottleneck on reasoning.** With Recall@5 at 0.91,
+  the on-device model gets 68% of temporal questions and 75% of multi-hop
+  right, and 4 of 20 unanswerable questions are graded wrong. On
+  2026-10-08 the misses were date arithmetic ("109 days" for 76) and
+  answers from a near miss ("Biscuit is Sofia's dog"). Grok, the model
+  that answers in the app, should do better; run it with
+  `MEMORY_EVAL_READER=xai` ([pending](#pending)).
 - **The on-device judge is good enough to gate on.** A manual read of all
-  115 verdicts disagreed with 5: three correct answers rejected (`sf-19`,
-  `mh-02`, `ab-04`) and two shaky ones accepted (`ku-11`, which also
-  repeats the superseded plan, and `ab-06`, which lists memories without
-  saying it doesn't know). About 96% agreement.
+  115 verdicts of the 2026-10-08 run disagreed with 5: three correct
+  answers rejected (`sf-19`, `mh-02`, `ab-04`) and two shaky ones accepted
+  (`ku-11`, which also repeats the superseded plan, and `ab-06`, which
+  lists memories without saying it doesn't know). About 96% agreement.
+  The 2026-10-10 verdicts weren't read by hand; `ab-04` is now accepted
+  and `ku-11` rejected.
 
 ## What it measures
 
@@ -345,22 +364,24 @@ current dataset.
 
 `BLAU_MEMORY_EVAL_TUNING=1 swift test --filter MemoryEvalTuningTests`
 sweeps `MemorySearch.Configuration` on this set (retrieval only), as #64
-swept #59's. On 2026-10-08 (Recall@5 / Complete@5 / MRR@10 / current first):
+swept #59's. On 2026-10-10, after #173 (Recall@5 / Complete@5 / MRR@10 /
+current first):
 
 | BM25 weight | k = 10 | k = 20 (default k) | k = 60 |
 | --- | --- | --- | --- |
-| 0.2 | 0.868 / 0.821 / 0.783 / 0.65 | 0.879 / 0.842 / 0.773 / 0.65 | 0.874 / 0.832 / 0.714 / 0.65 |
-| **0.4 (default)** | 0.911 / 0.884 / 0.787 / 0.65 | **0.900 / 0.874 / 0.781 / 0.65** | 0.879 / 0.842 / 0.736 / 0.65 |
-| 0.6 | 0.937 / 0.916 / 0.808 / 0.70 | 0.937 / 0.916 / 0.788 / 0.65 | 0.916 / 0.884 / 0.768 / 0.65 |
-| 0.8 | 0.937 / 0.916 / 0.816 / 0.70 | 0.932 / 0.905 / 0.802 / 0.70 | 0.932 / 0.905 / 0.778 / 0.65 |
-| 1.0 | 0.958 / 0.937 / 0.817 / 0.70 | 0.942 / 0.916 / 0.798 / 0.70 | 0.942 / 0.916 / 0.782 / 0.70 |
+| 0.2 | 0.879 / 0.832 / 0.783 / 0.70 | 0.889 / 0.853 / 0.772 / 0.70 | 0.874 / 0.832 / 0.713 / 0.70 |
+| **0.4 (default)** | 0.921 / 0.895 / 0.792 / 0.70 | **0.911 / 0.884 / 0.785 / 0.70** | 0.895 / 0.863 / 0.744 / 0.70 |
+| 0.6 | 0.937 / 0.916 / 0.794 / 0.60 | 0.926 / 0.905 / 0.780 / 0.60 | 0.905 / 0.874 / 0.767 / 0.60 |
+| 0.8 | 0.932 / 0.916 / 0.815 / 0.65 | 0.932 / 0.916 / 0.794 / 0.65 | 0.926 / 0.905 / 0.770 / 0.60 |
+| 1.0 | 0.942 / 0.926 / 0.814 / 0.65 | 0.926 / 0.905 / 0.794 / 0.65 | 0.926 / 0.905 / 0.776 / 0.65 |
 
-On #59's set (#64's sweep, same day), BM25 at 0.6–1.0 brings MRR@10 down
+On #59's set (#64's sweep, 2026-10-08), BM25 at 0.6–1.0 brings MRR@10 down
 to 0.674–0.712, below the dense model's 0.714, which
 `HybridRetrievalEvalTests` forbids; see the first finding. Expansion decay
-0.5 (the default) is best on Recall@5; 0 gives up 1.6 points of Recall@5 and
-0.20 of current first, 1.0 loses 4.2 points. The relative-time weight
-matters (0 → 1: MRR@10 0.739 → 0.781); 2 changes nothing.
+0.5 (the default) ties 0.25 on Recall@5 and is best on Complete@5 and
+current first; 0 gives up 1.6 points of Recall@5 and 0.15 of current first,
+1.0 loses 2.2 points. The relative-time weight matters (0 → 1: MRR@10
+0.743 → 0.785); 2 changes nothing.
 
 ## Nightly CI
 
@@ -396,3 +417,4 @@ overrides the reader (never `xai`: CI has no secrets,
 | Date | Dataset | Vectors | hybrid Recall@5 / Complete@5 / MRR@10 | Answers (reader / judge) | Accuracy | Machine |
 | --- | --- | --- | --- | --- | ---: | --- |
 | 2026-10-08 | v1, 115 questions | Qwen3-Embedding-0.6B 256-d int8 | 0.900 / 0.874 / 0.781 | Apple on-device / Apple on-device | 77.4% | M3 Max, macOS 27.2, debug |
+| 2026-10-10 | v1, 115 questions; #173 chunking (invalidated facts out of exchange keys, conservative token estimate): 265 chunks | Qwen3-Embedding-0.6B 256-d int8, re-recorded | 0.911 / 0.884 / 0.785 | Apple on-device / Apple on-device | 77.4% | M3 Max, macOS 27.2, debug |

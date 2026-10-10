@@ -259,6 +259,65 @@ struct MemoryIndexerTests {
         #expect(try await Fakes.fingerprint(index) == Fakes.referenceFingerprint(reader))
     }
 
+    @Test func anInvalidatedFactIsLinkedButLeftOutOfItsExchangeKey() async throws {
+        let index = try MemoryIndex.inMemory()
+        let reader = Self.reader()
+        let conversation = reader.contents.conversations[0]
+        let superseded = FactSnapshot(
+            id: UUID(), statement: "User reserved an aisle seat", validFrom: Support.t0.addingTimeInterval(-60),
+            invalidatedAt: Support.t0, sourceUtteranceID: conversation.utterances[0].id)
+        reader.update { $0.facts.append(superseded) }
+        let indexer = Fakes.indexer(index: index, reader: reader)
+        try await indexer.runUntilIdle()
+
+        let exchange = try await index.chunks(ofSource: conversation.id, kind: .conversation)[0].chunk
+        #expect(exchange.keyText.contains("facts: User reserved a window seat\n"))
+        #expect(!exchange.keyText.contains("aisle"))
+        #expect(try await index.conversations(linkedToFacts: [superseded.id]) == [conversation.id])
+        #expect(try await Fakes.fingerprint(index) == Fakes.referenceFingerprint(reader))
+    }
+
+    @Test func invalidatingAFactAndUndoingItRekeysItsExchange() async throws {
+        let index = try MemoryIndex.inMemory()
+        let reader = Self.reader()
+        let feed = Fakes.ScriptedFeed()
+        let indexer = Fakes.indexer(index: index, reader: reader, feed: feed)
+        try await indexer.runUntilIdle()
+        let conversation = reader.contents.conversations[0].id
+        let fact = reader.contents.facts[0].id
+        func exchangeKey() async throws -> String {
+            try await index.chunks(ofSource: conversation, kind: .conversation)[0].chunk.keyText
+        }
+        #expect(try await exchangeKey().contains("facts: User reserved a window seat"))
+
+        // Invalidated on another device: only the fact is reported; its
+        // exchange is found through the fact link.
+        reader.update { $0.facts[0].invalidatedAt = Support.t0.addingTimeInterval(86_400) }
+        feed.enqueue(MemorySourceChanges(facts: [fact]))
+        try await indexer.runUntilIdle()
+        #expect(try await !exchangeKey().contains("facts:"))
+        let factChunk = try await index.chunks(ofSource: fact, kind: .fact)[0].chunk
+        #expect(factChunk.keyText.contains("window seat (until "))
+        #expect(try await index.conversations(linkedToFacts: [fact]) == [conversation])
+        #expect(try await Fakes.fingerprint(index) == Fakes.referenceFingerprint(reader))
+
+        // The link kept means undoing it finds the exchange again.
+        reader.update { $0.facts[0].invalidatedAt = nil }
+        feed.enqueue(MemorySourceChanges(facts: [fact]))
+        try await indexer.runUntilIdle()
+        #expect(try await exchangeKey().contains("facts: User reserved a window seat"))
+        #expect(try await Fakes.fingerprint(index) == Fakes.referenceFingerprint(reader))
+    }
+
+    /// v2 (#173): invalidated facts left out of exchange keys, and the
+    /// conservative token estimate.
+    @Test func theChunkingFingerprintNamesTheChunkingVersion() async throws {
+        let indexer = Fakes.indexer(index: try MemoryIndex.inMemory(), reader: Self.reader())
+        #expect(MemoryIndexer.chunkingVersion == "v2")
+        let fingerprint = await indexer.chunkingFingerprint
+        #expect(fingerprint.hasPrefix("v2 max=112 min=56 overlap=1 facts=5 tz="), "\(fingerprint)")
+    }
+
     @Test func aRenamedCollectionRekeysItsItems() async throws {
         let index = try MemoryIndex.inMemory()
         let reader = Self.reader()
