@@ -34,7 +34,21 @@ public final class ModelManager {
     // MARK: Observable state
 
     /// Every model in the manifest and where it is.
-    public private(set) var states: [ModelID: ModelState]
+    public private(set) var states: [ModelID: ModelState] {
+        didSet {
+            let ready = Self.allRequiredReady(in: manifest, states: states)
+            if ready != isReady { isReady = ready }
+        }
+    }
+
+    /// Whether every required model is ready.
+    ///
+    /// Stored, and written only when it flips, rather than computed from
+    /// ``states``: a download updates ``states`` many times a second, and a
+    /// view that only asks whether the models are ready (the main screen's
+    /// layout around the setup card) shouldn't be evaluated again for each
+    /// progress report.
+    public private(set) var isReady = false
 
     /// Bytes each model occupies on disk, including partial downloads.
     /// Refreshed after installs and deletes, and by ``refreshDiskUsage()``.
@@ -137,7 +151,11 @@ public final class ModelManager {
         self.signposter = signposter
         self.preferences = preferencesStore.load()
         self.network = networkMonitor.current
-        self.states = Dictionary(uniqueKeysWithValues: manifest.models.map { ($0.id, .notDownloaded) })
+        let states = Dictionary(uniqueKeysWithValues: manifest.models.map { ($0.id, ModelState.notDownloaded) })
+        self.states = states
+        // `didSet` doesn't run in an initializer; a manifest with no required
+        // model is ready from the start.
+        self.isReady = Self.allRequiredReady(in: manifest, states: states)
     }
 
     // MARK: Queries
@@ -147,9 +165,8 @@ public final class ModelManager {
         states[id] ?? .notDownloaded
     }
 
-    /// Whether every required model is ready.
-    public var isReady: Bool {
-        manifest.required.allSatisfy { state(of: $0.id) == .ready }
+    private static func allRequiredReady(in manifest: ModelManifest, states: [ModelID: ModelState]) -> Bool {
+        manifest.required.allSatisfy { states[$0.id] == .ready }
     }
 
     /// Where `id` is installed, once it is. Load it from here with

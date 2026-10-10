@@ -624,6 +624,70 @@ struct ModelManagerTests {
         #expect(manager.isReady)
         #expect(manager.state(of: .parakeetTDTv3) == .ready)
     }
+
+    /// #182: a view that only reads `isReady` (the main screen around the
+    /// setup card) isn't invalidated by every progress report of a
+    /// download, only when the models become ready or stop being ready.
+    @Test func isReadyChangesOnlyWhenReadinessFlips() async throws {
+        let temp = try TemporaryDirectory()
+        let harness = Harness(root: temp.url)
+        let gate = Gate()
+        harness.transport.script(
+            "parakeetRealtimeEOU/parakeetRealtimeEOU.mlmodelc/weights/weight.bin", .pause(afterBytes: 8000, gate: gate))
+        let manager = harness.makeManager()
+        #expect(!manager.isReady)
+
+        let readinessChanges = ObservationCount { _ = manager.isReady }
+        let stateChanges = ObservationCount { _ = manager.states }
+        await manager.start()
+        await waitUntil("EOU model is part-way") {
+            if case .downloading(let bytes, _) = manager.state(of: .parakeetRealtimeEOU) { bytes > 0 } else { false }
+        }
+        #expect(manager.state(of: .sileroVAD) == .ready, "A whole model downloaded and warmed up meanwhile")
+        #expect(stateChanges.count > 5, "Progress was reported")
+        #expect(readinessChanges.count == 0, "Progress didn't touch isReady")
+
+        gate.open()
+        await manager.waitUntilIdle()
+        #expect(manager.isReady)
+        #expect(readinessChanges.count == 1)
+
+        // Deleting a required model makes it not ready again: one more change
+        // (once the observation has re-armed).
+        for _ in 0..<5 { await Task.yield() }
+        await manager.delete(.sileroVAD)
+        #expect(!manager.isReady)
+        #expect(readinessChanges.count == 2)
+    }
+}
+
+/// Counts the writes to whatever `read` reads, as SwiftUI would see them.
+///
+/// `withObservationTracking` fires once per registration, synchronously in
+/// the property's `willSet`, so each change is counted there and the
+/// observation re-armed right after the write. The observed objects are
+/// main-actor isolated, so their writes (and `onChange`) run on the main
+/// actor.
+@MainActor
+private final class ObservationCount {
+    private(set) var count = 0
+    private let read: @MainActor () -> Void
+
+    init(_ read: @escaping @MainActor () -> Void) {
+        self.read = read
+        track()
+    }
+
+    private func track() {
+        withObservationTracking {
+            read()
+        } onChange: { [weak self] in
+            MainActor.assumeIsolated {
+                self?.count += 1
+            }
+            Task { @MainActor in self?.track() }
+        }
+    }
 }
 
 /// Fails the first warm-up of one model.

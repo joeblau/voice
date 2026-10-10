@@ -31,10 +31,18 @@ final class PerformanceHUDController {
     var position: CGPoint {
         didSet { preferences.setPosition(position) }
     }
-    /// What the HUD shows now.
+    /// Everything the HUD can show now: what the expanded panel reads.
     private(set) var readout = PerformanceHUDReadout(PerformanceHUDSnapshot())
+    /// The compact panel's rows, kept apart from `readout` so the compact
+    /// panel (what shows most of the time) isn't rendered again for a sample
+    /// that only changed an expanded-only row such as "HUD cost".
+    private(set) var compactRows = PerformanceHUDReadout(PerformanceHUDSnapshot()).compact
+    /// The highest level of any row, for the panel's border.
+    private(set) var level = PerformanceHUDReadout.Level.normal
     /// Samples taken since the HUD appeared.
-    private(set) var sampleCount = 0
+    @ObservationIgnored private(set) var sampleCount = 0
+    /// Samples that changed what the compact panel shows, for tests.
+    @ObservationIgnored private(set) var compactUpdates = 0
 
     @ObservationIgnored let flags: FeatureFlags
     @ObservationIgnored private let preferences: PerformanceHUDPreferences
@@ -136,10 +144,24 @@ final class PerformanceHUDController {
 
     /// Takes one reading and refreshes the readout, then wakes or pauses the
     /// display link for the next interval.
+    ///
+    /// Each observable value is only written when it changed. Observation
+    /// tells SwiftUI about every write, equal or not, and the panel's update
+    /// (body, text layout, accessibility) costs far more than the sample
+    /// itself; an idle app's compact rows stay the same for most samples.
     func sample() {
         sampler.chargeExternal(nanoseconds: frameRate.takeCallbackCPUTime())
         let pipeline = pipeline
-        readout = sampler.sample(frameRate: frameRate.reading) { pipeline() }
+        let next = sampler.sample(frameRate: frameRate.reading) { pipeline() }
+        // Compared before writing, not with an `inout` helper: an `inout`
+        // access to an observed property always ends in its setter.
+        if readout != next { readout = next }
+        if compactRows != next.compact {
+            compactRows = next.compact
+            compactUpdates += 1
+        }
+        let level = next.level
+        if self.level != level { self.level = level }
         sampleCount += 1
         // The interval after the first sample (taken at start) is measured,
         // then one in every `frameRateDutyCycle`.
