@@ -1,6 +1,7 @@
 import BlauCore
 import CryptoKit
 import Foundation
+import Synchronization
 
 /// Tiny synthetic models with real checksums, served from memory.
 ///
@@ -40,7 +41,27 @@ public enum ModelFixtures {
         contents(path: "\(descriptor.id.rawValue)/\(file.path)", size: Int(file.size))
     }
 
+    /// Memoized: every fake `AppEnvironment` builds a fixture manager, which
+    /// asks for each file twice (its checksum, then the transport's copy).
+    /// Generating them again each time took the main actor for most of a
+    /// second per environment in Debug builds, which starved concurrently
+    /// running tests and made their deadlines flaky.
     static func contents(path: String, size: Int) -> Data {
+        let key = FileKey(path: path, size: size)
+        if let cached = cache.withLock({ $0[key] }) { return cached }
+        let data = generate(path: path, size: size)
+        cache.withLock { $0[key] = data }
+        return data
+    }
+
+    private struct FileKey: Hashable {
+        let path: String
+        let size: Int
+    }
+
+    private static let cache = Mutex<[FileKey: Data]>([:])
+
+    private static func generate(path: String, size: Int) -> Data {
         var seed = path.utf8.reduce(UInt32(2_166_136_261)) { ($0 ^ UInt32($1)) &* 16_777_619 }
         var data = Data(count: size)
         data.withUnsafeMutableBytes { buffer in

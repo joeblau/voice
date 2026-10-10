@@ -12,17 +12,18 @@
     }
 
     /// Opens the debug menu. DEBUG builds only.
+    ///
+    /// The button only asks for the menu; the screen that owns the toolbar
+    /// presents it (see `MainScreenScaffold`). Presented from the button
+    /// itself, inside its `ToolbarItem`, the sheet ignored taps for a few
+    /// seconds shortly after launch while the main screen behind it was
+    /// still updating, so a flag switch tapped then didn't flip.
     struct DebugMenuButton: View {
-        @State private var isPresented = false
+        let action: () -> Void
 
         var body: some View {
-            Button("Debug Menu", systemImage: "ladybug") {
-                isPresented = true
-            }
-            .accessibilityIdentifier(DebugMenuAccessibility.openButton)
-            .sheet(isPresented: $isPresented) {
-                DebugMenuView()
-            }
+            Button("Debug Menu", systemImage: "ladybug", action: action)
+                .accessibilityIdentifier(DebugMenuAccessibility.openButton)
         }
     }
 

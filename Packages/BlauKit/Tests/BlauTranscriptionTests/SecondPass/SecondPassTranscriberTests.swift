@@ -63,8 +63,10 @@ struct SecondPassTranscriberTests {
 
         harness.base.send(.partial(text: "can you", range: streaming.timeRange))
         harness.base.send(.final(streaming))
-        // The final is out while the second pass is still running.
-        try await waitUntil { await recognizer.callCount == 1 }
+        // The final is out while the second pass is still running. The log
+        // reads the output stream on its own task, so it can lag the
+        // recognizer call: wait for both.
+        try await waitUntil { await recognizer.callCount == 1 && harness.log.events.count == 2 }
         #expect(harness.log.events == [.partial(text: "can you", range: streaming.timeRange), .final(streaming)])
         #expect(await recognizer.completed == 0)
         #expect(harness.signposts.openIntervals == ["asr.secondPass"])

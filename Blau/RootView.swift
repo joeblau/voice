@@ -58,6 +58,9 @@ struct MainScreenScaffold: View {
     @State private var record: RecordButtonModel
     @State private var isShowingSettings = false
     @State private var isShowingKeyOnboarding = false
+    #if DEBUG
+        @State private var isShowingDebugMenu = false
+    #endif
     /// Why Continue This Topic (#58) couldn't read the topic.
     @State private var continueFailure: String?
     /// Settings zooms out of the bottom-left button.
@@ -93,7 +96,7 @@ struct MainScreenScaffold: View {
                 .toolbar {
                     #if DEBUG
                         ToolbarItem(placement: .topBarTrailing) {
-                            DebugMenuButton()
+                            DebugMenuButton { isShowingDebugMenu = true }
                         }
                     #endif
                     ToolbarItem(placement: .bottomBar) {
@@ -187,6 +190,11 @@ struct MainScreenScaffold: View {
                 isShowingKeyOnboarding = false
             }
         }
+        #if DEBUG
+            .sheet(isPresented: $isShowingDebugMenu) {
+                DebugMenuView()
+            }
+        #endif
         // #69: "Practice with Grok" on a collection closes Settings, starts
         // a conversation if needed and asks Grok to drill the collection.
         .onChange(of: environment.practice.request?.id) { _, id in
