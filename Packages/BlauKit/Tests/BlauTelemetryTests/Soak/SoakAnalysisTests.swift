@@ -75,6 +75,41 @@ import Testing
         #expect(try Self.check("memory.slope", SoakAnalysis.checks(samples: warming, outcome: Self.outcome)).passed)
     }
 
+    /// The live heap is reported beside the footprint, so a report tells
+    /// the allocator keeping freed memory (heap flat) from the app holding
+    /// more (heap climbing too), #183. Only the footprint is judged.
+    @Test func theLiveHeapIsReportedBesideTheFootprint() throws {
+        var climbing = Self.samples(memory: { 40 + Double($0) / 20 })
+        for index in climbing.indices {
+            climbing[index].heapInUseBytes = 20 << 20
+        }
+        let flatHeap = try #require(SoakAnalysis.heapSlope(climbing, warmUpFraction: 0.1))
+        #expect(abs(flatHeap) < 0.001)
+        let check = try Self.check("memory.slope", SoakAnalysis.checks(samples: climbing, outcome: Self.outcome))
+        #expect(!check.passed, "the footprint is what's judged")
+        #expect(check.detail?.contains("live heap +0.00 MB/h, 20.0 MB → 20.0 MB") == true, "\(check.detail ?? "")")
+
+        var holding = climbing
+        for index in holding.indices { holding[index].heapInUseBytes = UInt64((20 + Double(index) / 20) * 1_048_576) }
+        let growing = try #require(SoakAnalysis.heapSlope(holding, warmUpFraction: 0.1))
+        #expect(abs(growing - 3) < 0.001)
+
+        // Older reports have no heap readings: the detail is the footprint's.
+        let old = try Self.check("memory.slope", SoakAnalysis.checks(samples: Self.samples(), outcome: Self.outcome))
+        #expect(old.detail?.contains("live heap") == false)
+        #expect(SoakAnalysis.heapSlope(Self.samples(), warmUpFraction: 0.1) == nil)
+    }
+
+    @Test func theHeapIsReadFromEveryZone() {
+        // Other tests allocate and free alongside this one, so only what
+        // can't move backwards is checked.
+        let buffer = [UInt8](repeating: 1, count: 8 << 20)
+        let heap = HeapUsage.current()
+        #expect(heap.inUse >= UInt64(buffer.count), "a live 8 MB allocation counts")
+        #expect(heap.reserved >= heap.inUse)
+        #expect(buffer.count == 8 << 20)
+    }
+
     @Test func memoryWithoutReadingsFails() throws {
         var samples = Self.samples()
         for index in samples.indices { samples[index].footprintBytes = nil }
@@ -373,6 +408,12 @@ import Testing
             $0.hasPrefix("| ") && $0.dropFirst(2).first?.isNumber == true
         }
         #expect(rows.count == 121)
+        #expect(markdown.contains("| Footprint | Heap |"))
+
+        var withHeap = report
+        withHeap.samples[0].heapInUseBytes = 20 << 20
+        #expect(try SoakReport.decode(withHeap.jsonData()) == withHeap)
+        #expect(withHeap.markdown.contains("| 40.8 MB | 20.0 MB |"))
 
         var unrenewed = report.outcome
         unrenewed.rollovers = 0
