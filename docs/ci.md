@@ -166,6 +166,17 @@ To change the number of shards, edit the matrix (`shard: [1, 2, 3, 4]`); the
 jobs pass `strategy.job-total` as N. `make test` and `make test-ui` without
 `UI_SHARD` still run everything in one go.
 
+The UI jobs pass `SWIFT_OPTIMIZATION_LEVEL=-O` to both the prebuild and
+the test command. They retain the Debug configuration's fixture hooks and
+the test plan's code coverage, while the tap-to-expand budget measures
+optimized Swift code. The unit job keeps its standard Debug build.
+To reproduce the UI jobs locally, include the same setting:
+
+```sh
+make test-ui UI_SHARD=2/4 DESTINATION='id=<simulator udid>' \
+  XCODEBUILD_FLAGS='SWIFT_OPTIMIZATION_LEVEL=-O -collect-test-diagnostics never'
+```
+
 Two things the single job got for free need doing in each shard:
 
 - **A warm simulator.** On a cold runner simulator the app's first launch
